@@ -1,0 +1,433 @@
+//! gist bench/verify harness.
+//!
+//!   zig build -Doptimize=ReleaseFast bench  [-- <dirs…>]
+//!       Build the index over a real corpus and report load/build cost, index
+//!       footprint, and full-pipeline (filter + verify) query latency
+//!       percentiles (p50/p95/p99) for a fixed adversarial slate.
+//!
+//!   zig build -Doptimize=ReleaseFast verify [-- <battery_n> <seed>]
+//!       Build the index, then for a fixed slate + `battery_n` random literals
+//!       sampled from the corpus, write gist's verified matching-file set per
+//!       needle into .local/gist-verify/ plus the EXACT indexed file list. The
+//!       sibling `equality.sh` drives `rg` over that identical file set and
+//!       diffs — proving the trigram filter has zero false negatives vs rg.
+//!
+//! The corpus is every non-binary file under the roots (rg-style: NUL byte ⇒
+//! binary ⇒ skipped), minus the ignored build/VCS subtrees rg also skips. The
+//! run step sets cwd to the repo root so dir + output paths resolve there.
+
+const std = @import("std");
+const gist = @import("gist");
+const search = @import("search.zig");
+const simd = @import("simd.zig");
+const cli = @import("cli.zig");
+
+test {
+    // Pull sibling-module tests (notably simd's differential fuzz vs std) into
+    // `zig build test`, since the test runner only walks referenced files.
+    std.testing.refAllDecls(@This());
+    _ = simd;
+    _ = search;
+}
+const Index = gist.trigram.Index;
+const Regex = gist.regex.Regex;
+const Dir = std.Io.Dir;
+
+// Curated regex battery (ASCII / byte-oriented, == ripgrep `(?-u)`). Real
+// code-search shapes; `{0}` / `{1}` are filled with identifiers sampled live
+// from the corpus so each pattern actually exercises true matches.
+const fixed_regex = [_][]const u8{
+    "func\\s+\\w+\\(", "return\\s+nil",    "import\\s+\\(", "[A-Z][a-z]+Error",
+    "0x[0-9a-fA-F]+",  "ctx\\s+context",   "\\w+pb\\.\\w+", "//\\s*TODO",
+    "pgxpool\\.\\w+",  "err\\s*!=\\s*nil", "[a-z]+_[a-z]+", "func\\s*\\(",
+};
+const regex_templates = [_][]const u8{
+    "{0}",     "{0}\\s*\\(", "{0}\\.\\w+", "{0}[0-9]",
+    "\\w+{0}", "{0}.*;",     "({0}|{1})",  "{0}\\s*=\\s*\\w+",
+};
+
+const corpus_mod = @import("corpus.zig");
+const Corpus = corpus_mod.Corpus;
+const load = corpus_mod.load;
+const out_dir = corpus_mod.out_dir;
+const default_roots = corpus_mod.default_roots;
+
+// Fixed adversarial slate: rare symbol, dotted ident, trailing-space keyword,
+// 3-byte floor, punctuation grams, guaranteed-absent negatives, a 2-byte needle
+// (exercises the <3 full-scan fallback), and a repeated-char pathological case.
+const fixed_slate = [_][]const u8{
+    "pgxpool",    "context.Context", "func ",  "TODO", "queryLiteral",
+    "rate_limit", "zzqxv",           "ctx",    "://",  "func(",
+    "return nil", "SELECT",          "import", "})",   "AAAAAA",
+};
+
+/// gist's true matching docs for `needle`: trigram filter (len ≥ 3) then a
+/// parallel verify, or a parallel full scan fallback (len < 3). The candidate
+/// filter is single-threaded (already sub-ms); the verify is where the bytes
+/// are, so that is what we fan out.
+fn gistMatches(idx: *const Index, corpus: *const Corpus, gpa: std.mem.Allocator, needle: []const u8, out: *std.ArrayList(u32)) !void {
+    out.clearRetainingCapacity();
+    if (needle.len >= 3) {
+        if (idx.queryLiteral(gpa, needle)) |cand| {
+            defer gpa.free(cand);
+            try search.parallelVerify(gpa, corpus.docs, cand, needle, out);
+            return;
+        } else |e| switch (e) {
+            error.NeedleTooShort => {},
+            else => return e,
+        }
+    }
+    const all = try gpa.alloc(u32, corpus.docs.len);
+    defer gpa.free(all);
+    for (all, 0..) |*x, i| x.* = @intCast(i);
+    try search.parallelVerify(gpa, corpus.docs, all, needle, out);
+}
+
+/// gist's matching docs for a compiled regex: prefilter on the required literal
+/// (len ≥ 3) then verify with the NFA, or full scan when no literal is required.
+/// Sound: the required literal must appear in every match, so any matching doc
+/// passes the trigram filter.
+fn regexMatches(re: *const Regex, sim: *Regex.Sim, idx: *const Index, corpus: *const Corpus, gpa: std.mem.Allocator, out: *std.ArrayList(u32)) !void {
+    out.clearRetainingCapacity();
+    if (re.required.len >= 3) {
+        if (idx.queryLiteral(gpa, re.required)) |cand| {
+            defer gpa.free(cand);
+            for (cand) |d| if (re.docMatch(sim, corpus.docs[d])) try out.append(gpa, d);
+            return;
+        } else |_| {}
+    }
+    for (corpus.docs, 0..) |doc, d| if (re.docMatch(sim, doc)) try out.append(gpa, @intCast(d));
+}
+
+/// Sample a pure identifier ([A-Za-z_][A-Za-z0-9_]{3,11}) from the corpus, to
+/// splice into regex templates (no metachars ⇒ safe to embed raw in both engines).
+fn sampleIdent(rng: std.Random, corpus: *const Corpus) ?[]const u8 {
+    var tries: usize = 0;
+    while (tries < 200) : (tries += 1) {
+        const doc = corpus.docs[rng.uintLessThan(usize, corpus.docs.len)];
+        const len = 4 + rng.uintLessThan(usize, 8);
+        if (doc.len <= len) continue;
+        const off = rng.uintLessThan(usize, doc.len - len);
+        const s = doc[off .. off + len];
+        if (!(std.ascii.isAlphabetic(s[0]) or s[0] == '_')) continue;
+        var ok = true;
+        for (s) |c| if (!(std.ascii.isAlphanumeric(c) or c == '_')) {
+            ok = false;
+            break;
+        };
+        if (ok) return s;
+    }
+    return null;
+}
+
+fn nowNs(io: std.Io) i128 {
+    return std.Io.Clock.now(.awake, io).nanoseconds;
+}
+
+fn ms(ns: u64) f64 {
+    return @as(f64, @floatFromInt(ns)) / 1e6;
+}
+
+fn percentile(sorted: []const u64, p: f64) u64 {
+    if (sorted.len == 0) return 0;
+    const idx_f = p * @as(f64, @floatFromInt(sorted.len - 1));
+    return sorted[@intFromFloat(@round(idx_f))];
+}
+
+fn cmpStrings(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+fn printCorpusHeader(corpus: *const Corpus, load_ns: u64, idx: *const Index, build_ns: u64) void {
+    const idx_bytes = idx.postings.len * @sizeOf(@TypeOf(idx.postings[0]));
+    std.debug.print("corpus: {d} files · {d:.1} MiB · loaded {d:.0} ms\n", .{
+        corpus.docs.len, @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20), ms(load_ns),
+    });
+    std.debug.print("index:  {d} postings · {d:.1} MiB ({d:.2}x corpus) · built {d:.0} ms ({d:.1} MiB/s)\n\n", .{
+        idx.postings.len,
+        @as(f64, @floatFromInt(idx_bytes)) / (1 << 20),
+        @as(f64, @floatFromInt(idx_bytes)) / @as(f64, @floatFromInt(@max(corpus.bytes, 1))),
+        ms(build_ns),
+        (@as(f64, @floatFromInt(corpus.bytes)) / (1 << 20)) / (@as(f64, @floatFromInt(build_ns)) / 1e9),
+    });
+}
+
+fn runBench(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
+    std.debug.print("gist bench · abi v{d}\nroots:", .{gist.abi()});
+    for (roots) |r| std.debug.print(" {s}", .{r});
+    std.debug.print("\n\n", .{});
+
+    const load_t0 = nowNs(io);
+    var corpus = try load(gpa, io, roots);
+    defer corpus.deinit();
+    const load_ns: u64 = @intCast(nowNs(io) - load_t0);
+
+    const build_t0 = nowNs(io);
+    var idx = try Index.build(gpa, corpus.docs);
+    defer idx.deinit();
+    const build_ns: u64 = @intCast(nowNs(io) - build_t0);
+    printCorpusHeader(&corpus, load_ns, &idx, build_ns);
+
+    // ── persistence: a session pays build ONCE, then warm-starts from disk ──
+    try Dir.cwd().createDirPath(io, out_dir);
+    const blob = try gpa.alloc(u8, idx.serializedSize());
+    defer gpa.free(blob);
+    _ = idx.writeInto(blob);
+    const w0 = nowNs(io);
+    try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/index.gist", .data = blob });
+    const write_ns: u64 = @intCast(nowNs(io) - w0);
+    const r0 = nowNs(io);
+    const read_bytes = try Dir.cwd().readFileAlloc(io, out_dir ++ "/index.gist", gpa, .unlimited);
+    defer gpa.free(read_bytes);
+    var loaded = try Index.fromBytes(gpa, read_bytes);
+    defer loaded.deinit();
+    const load2_ns: u64 = @intCast(nowNs(io) - r0);
+    std.debug.print("persist: {d:.1} MiB · write {d:.0} ms · cold-load {d:.0} ms — warm start is {d:.0}x faster than rebuild ({d:.0} ms)\n\n", .{
+        @as(f64, @floatFromInt(blob.len)) / (1 << 20),
+        ms(write_ns),
+        ms(load2_ns),
+        ms(build_ns) / @max(ms(load2_ns), 0.001),
+        ms(build_ns),
+    });
+
+    std.debug.print("full-pipeline latency (filter + verify → matching files), {d} runs each:\n", .{200});
+    std.debug.print("{s:<18} {s:>8} {s:>10} {s:>10} {s:>10}\n", .{ "needle", "files", "p50", "p95", "p99" });
+    std.debug.print("{s:-<18} {s:->8} {s:->10} {s:->10} {s:->10}\n", .{ "", "", "", "", "" });
+
+    const runs = 200;
+    var samples: [runs]u64 = undefined;
+    var matchbuf: std.ArrayList(u32) = .empty;
+    defer matchbuf.deinit(gpa);
+    var csv: std.ArrayList(u8) = .empty;
+    defer csv.deinit(gpa);
+
+    for (fixed_slate) |needle| {
+        var files: usize = 0;
+        for (0..runs) |i| {
+            const q0 = nowNs(io);
+            try gistMatches(&idx, &corpus, gpa, needle, &matchbuf);
+            samples[i] = @intCast(nowNs(io) - q0);
+            files = matchbuf.items.len;
+        }
+        std.mem.sort(u64, &samples, {}, comptime std.sort.asc(u64));
+        const p50 = percentile(&samples, 0.50);
+        std.debug.print("{s:<18} {d:>8} {d:>7.1} us {d:>7.1} us {d:>7.1} us\n", .{
+            needle,                                                    files,
+            @as(f64, @floatFromInt(p50)) / 1e3,                        @as(f64, @floatFromInt(percentile(&samples, 0.95))) / 1e3,
+            @as(f64, @floatFromInt(percentile(&samples, 0.99))) / 1e3,
+        });
+        var line: [128]u8 = undefined;
+        try csv.appendSlice(gpa, try std.fmt.bufPrint(&line, "{s}\t{d}\t{d}\n", .{ needle, p50, files }));
+    }
+    try Dir.cwd().createDirPath(io, out_dir);
+    try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/bench.csv", .data = csv.items });
+}
+
+fn runVerify(gpa: std.mem.Allocator, io: std.Io, battery_n: usize, seed: u64) !void {
+    const roots: []const []const u8 = &default_roots;
+    std.debug.print("gist verify · abi v{d} · battery={d} seed={d}\n", .{ gist.abi(), battery_n, seed });
+
+    var corpus = try load(gpa, io, roots);
+    defer corpus.deinit();
+    var idx = try Index.build(gpa, corpus.docs);
+    defer idx.deinit();
+    std.debug.print("corpus: {d} files · {d:.1} MiB\n", .{ corpus.docs.len, @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20) });
+
+    const a = corpus.arena.allocator();
+    try Dir.cwd().createDirPath(io, out_dir);
+
+    // Race-free snapshot: corpus files are generated/edited live by coworker
+    // agents, so reading a file once for gist's index and again for rg can see
+    // two different versions. Dump the EXACT bytes gist indexed and point rg at
+    // the snapshot — then any diff is a real semantic disagreement, not a race.
+    try Dir.cwd().createDirPath(io, out_dir ++ "/snap");
+    const snap_paths = try a.alloc([]const u8, corpus.docs.len);
+    for (corpus.docs, 0..) |doc, i| {
+        snap_paths[i] = try std.fmt.allocPrint(a, "{s}/snap/{d}", .{ out_dir, i });
+        try Dir.cwd().writeFile(io, .{ .sub_path = snap_paths[i], .data = doc });
+    }
+
+    // Needle slate: fixed adversarial + random literals sampled from the corpus
+    // (each guaranteed to occur ≥ once, exercising the true-positive path).
+    var needles: std.ArrayList([]const u8) = .empty;
+    for (fixed_slate) |n| try needles.append(a, n);
+    var prng = std.Random.DefaultPrng.init(seed);
+    const rng = prng.random();
+    var made: usize = 0;
+    var attempts: usize = 0;
+    while (made < battery_n and attempts < battery_n * 100) : (attempts += 1) {
+        const d = rng.uintLessThan(usize, corpus.docs.len);
+        const doc = corpus.docs[d];
+        const len = 3 + rng.uintLessThan(usize, 14); // 3..16
+        if (doc.len <= len) continue;
+        const off = rng.uintLessThan(usize, doc.len - len);
+        const s = doc[off .. off + len];
+        if (std.mem.indexOfScalar(u8, s, '\n') != null) continue;
+        // Sample only valid-UTF-8 needles (whole codepoints). gist matches raw
+        // bytes; rg matches UTF-8-aware by default, so they coincide exactly on
+        // valid text — and a half-codepoint byte string is not a real query.
+        if (!std.unicode.utf8ValidateSlice(s)) continue;
+        var has_alnum = false;
+        for (s) |c| if (std.ascii.isAlphanumeric(c)) {
+            has_alnum = true;
+            break;
+        };
+        if (!has_alnum) continue;
+        try needles.append(a, try a.dupe(u8, s));
+        made += 1;
+    }
+
+    // Emit the snapshot file list (NUL-separated) for rg to mirror.
+    var list_buf: std.ArrayList(u8) = .empty;
+    for (snap_paths) |p| {
+        try list_buf.appendSlice(a, p);
+        try list_buf.append(a, 0);
+    }
+    try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/corpus.list", .data = list_buf.items });
+
+    // needles.txt (one per line) + per-needle sorted matching paths.
+    var needles_txt: std.ArrayList(u8) = .empty;
+    var matchbuf: std.ArrayList(u32) = .empty;
+    defer matchbuf.deinit(gpa);
+    var path_buf: std.ArrayList([]const u8) = .empty;
+
+    for (needles.items, 0..) |needle, i| {
+        try needles_txt.appendSlice(a, needle);
+        try needles_txt.append(a, '\n');
+
+        try gistMatches(&idx, &corpus, gpa, needle, &matchbuf);
+        path_buf.clearRetainingCapacity();
+        for (matchbuf.items) |d| try path_buf.append(a, snap_paths[d]);
+        std.mem.sort([]const u8, path_buf.items, {}, cmpStrings);
+
+        var nbuf: std.ArrayList(u8) = .empty;
+        for (path_buf.items) |p| {
+            try nbuf.appendSlice(a, p);
+            try nbuf.append(a, '\n');
+        }
+        const fname = try std.fmt.allocPrint(a, "{s}/n{d}.txt", .{ out_dir, i });
+        try Dir.cwd().writeFile(io, .{ .sub_path = fname, .data = nbuf.items });
+    }
+    try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/needles.txt", .data = needles_txt.items });
+
+    // ── regex battery: fixed shapes + templates filled with sampled idents ──
+    var regexes: std.ArrayList([]const u8) = .empty;
+    for (fixed_regex) |r| try regexes.append(a, r);
+    const re_target = @min(battery_n, 80);
+    var rmade: usize = 0;
+    var rattempts: usize = 0;
+    while (rmade < re_target and rattempts < re_target * 50) : (rattempts += 1) {
+        const tmpl = regex_templates[rng.uintLessThan(usize, regex_templates.len)];
+        const t0 = sampleIdent(rng, &corpus) orelse continue;
+        const t1 = sampleIdent(rng, &corpus) orelse continue;
+        var pat: std.ArrayList(u8) = .empty;
+        var k: usize = 0;
+        while (k < tmpl.len) : (k += 1) {
+            if (tmpl[k] == '{' and k + 2 < tmpl.len and tmpl[k + 2] == '}') {
+                try pat.appendSlice(a, if (tmpl[k + 1] == '0') t0 else t1);
+                k += 2;
+            } else try pat.append(a, tmpl[k]);
+        }
+        try regexes.append(a, pat.items);
+        rmade += 1;
+    }
+
+    var regexes_txt: std.ArrayList(u8) = .empty;
+    for (regexes.items, 0..) |pat, i| {
+        try regexes_txt.appendSlice(a, pat);
+        try regexes_txt.append(a, '\n');
+
+        var re = Regex.compile(gpa, pat) catch continue; // skip if our parser rejects
+        defer re.deinit();
+        var sim = try Regex.Sim.init(gpa, &re);
+        defer sim.deinit();
+        try regexMatches(&re, &sim, &idx, &corpus, gpa, &matchbuf);
+
+        path_buf.clearRetainingCapacity();
+        for (matchbuf.items) |d| try path_buf.append(a, snap_paths[d]);
+        std.mem.sort([]const u8, path_buf.items, {}, cmpStrings);
+        var rbuf: std.ArrayList(u8) = .empty;
+        for (path_buf.items) |p| {
+            try rbuf.appendSlice(a, p);
+            try rbuf.append(a, '\n');
+        }
+        const fname = try std.fmt.allocPrint(a, "{s}/r{d}.txt", .{ out_dir, i });
+        try Dir.cwd().writeFile(io, .{ .sub_path = fname, .data = rbuf.items });
+    }
+    try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/regexes.txt", .data = regexes_txt.items });
+
+    std.debug.print("wrote {d} literal needles + {d} regexes + corpus.list → {s}/\nrun bench/equality.sh to diff against rg.\n", .{ needles.items.len, regexes.items.len, out_dir });
+}
+
+/// Isolate the scan primitive: single-threaded full-corpus scan with
+/// `std.mem.indexOf` vs the SIMD `contains`, per needle length. Proves where
+/// (and how much) the SIMD path beats std's naive 2–4 byte `findPosLinear`.
+fn runScanBench(gpa: std.mem.Allocator, io: std.Io) !void {
+    var corpus = try load(gpa, io, &default_roots);
+    defer corpus.deinit();
+    const mib = @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20);
+    std.debug.print("scanbench · {d} files · {d:.1} MiB · single-thread full scan\n", .{ corpus.docs.len, mib });
+    std.debug.print("{s:<14} {s:>8} {s:>12} {s:>12} {s:>9}\n", .{ "needle", "len", "std MiB/s", "simd MiB/s", "speedup" });
+
+    const needles = [_][]const u8{ "})", "ctx", "func", "=> ", "import", "context.Context" };
+    for (needles) |ndl| {
+        var hits_std: usize = 0;
+        var t0 = nowNs(io);
+        for (corpus.docs) |d| {
+            if (std.mem.indexOf(u8, d, ndl) != null) hits_std += 1;
+        }
+        const std_ns: u64 = @intCast(nowNs(io) - t0);
+
+        var hits_simd: usize = 0;
+        t0 = nowNs(io);
+        for (corpus.docs) |d| {
+            if (simd.contains(d, ndl)) hits_simd += 1;
+        }
+        const simd_ns: u64 = @intCast(nowNs(io) - t0);
+        if (hits_std != hits_simd) std.debug.print("  !! disagree on '{s}': std={d} simd={d}\n", .{ ndl, hits_std, hits_simd });
+
+        const std_tp = mib / (ms(std_ns) / 1e3);
+        const simd_tp = mib / (ms(simd_ns) / 1e3);
+        std.debug.print("{s:<14} {d:>8} {d:>12.0} {d:>12.0} {d:>8.1}x\n", .{ ndl, ndl.len, std_tp, simd_tp, simd_tp / std_tp });
+    }
+}
+
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
+
+    var it = std.process.Args.Iterator.init(init.minimal.args);
+    _ = it.skip(); // argv[0]
+    const mode = it.next() orelse "bench";
+
+    if (std.mem.eql(u8, mode, "verify")) {
+        const battery_n: usize = if (it.next()) |s| std.fmt.parseInt(usize, s, 10) catch 120 else 120;
+        const seed: u64 = if (it.next()) |s| std.fmt.parseInt(u64, s, 10) catch 1 else 1;
+        try runVerify(gpa, io, battery_n, seed);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "scanbench")) {
+        try runScanBench(gpa, io);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "index")) {
+        try cli.runIndex(gpa, io, &default_roots);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "query")) {
+        const needle = it.next() orelse {
+            std.debug.print("usage: query <needle>\n", .{});
+            return;
+        };
+        try cli.runQuery(gpa, io, needle);
+        return;
+    }
+
+    // bench mode: remaining args (after the mode token) are roots, if any.
+    var roots_list: std.ArrayList([]const u8) = .empty;
+    defer roots_list.deinit(gpa);
+    if (!std.mem.eql(u8, mode, "bench")) try roots_list.append(gpa, mode); // first token was a root
+    while (it.next()) |arg| try roots_list.append(gpa, arg);
+    const roots: []const []const u8 = if (roots_list.items.len > 0) roots_list.items else &default_roots;
+    try runBench(gpa, io, roots);
+}
