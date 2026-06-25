@@ -43,11 +43,18 @@ const fixed_regex = [_][]const u8{
     // line anchors `^` / `$` — proven against `rg (?-u)` per-line semantics.
     "^package\\s+\\w+", "^import",          "^func\\s",      "^\\s*//",
     "\\)$",             "^}$",              ";$",            "^$",
+    // counted repetition `{n}` / `{n,}` / `{n,m}` + a literal-brace check.
+    "[0-9]{4}",         "[a-f0-9]{2,}",     "\\w{3,8}",      "x{2,4}",
+    "0x[0-9a-fA-F]{2,}", "interface\\{\\}",
+    // alternation multi-literal prefilter — UNION of each ≥3 branch's candidates
+    // (`foo|bar|baz`), and a mixed case where a < 3 branch forces a sound scan.
+    "return|continue|break", "func|struct|enum", "TODO|FIXME|XXX",
+    "import\\s+\\(|^package", "context|errors", "panic|0x",
 };
 const regex_templates = [_][]const u8{
     "{0}",     "{0}\\s*\\(", "{0}\\.\\w+", "{0}[0-9]",
     "\\w+{0}", "{0}.*;",     "({0}|{1})",  "{0}\\s*=\\s*\\w+",
-    "^{0}",    "{0}$",       "^\\s*{0}",
+    "^{0}",    "{0}$",       "^\\s*{0}",   "{0}\\w{2,4}",
 };
 
 const corpus_mod = @import("corpus.zig");
@@ -88,13 +95,16 @@ fn gistMatches(idx: *const Index, corpus: *const Corpus, gpa: std.mem.Allocator,
 }
 
 /// gist's matching docs for a compiled regex: prefilter on the required literal
-/// (len ≥ 3) then verify with the NFA, or full scan when no literal is required.
-/// Sound: the required literal must appear in every match, so any matching doc
-/// passes the trigram filter.
+/// (len ≥ 3) or, for an alternation, the UNION of its branches' cover literals
+/// (`foo|bar` ⇒ {foo, bar}); then verify with the NFA, else full scan. Sound:
+/// every match contains one of the filter literals, so any matching doc passes
+/// the (union of) trigram filter(s).
 fn regexMatches(re: *const Regex, sim: *Regex.Sim, idx: *const Index, corpus: *const Corpus, gpa: std.mem.Allocator, out: *std.ArrayList(u32)) !void {
     out.clearRetainingCapacity();
-    if (re.required.len >= 3) {
-        if (idx.queryLiteral(gpa, re.required)) |cand| {
+    var one = [_][]const u8{re.required};
+    const filters: []const []const u8 = if (re.required.len >= 3) one[0..] else re.alts;
+    if (filters.len > 0) {
+        if (idx.queryAny(gpa, filters)) |cand| {
             defer gpa.free(cand);
             for (cand) |d| if (re.docMatch(sim, corpus.docs[d])) try out.append(gpa, d);
             return;
