@@ -23,11 +23,13 @@ const simd = @import("simd.zig");
 const cli = @import("cli.zig");
 
 test {
-    // Pull sibling-module tests (notably simd's differential fuzz vs std) into
-    // `zig build test`, since the test runner only walks referenced files.
+    // The test runner only walks referenced files, so pull each sibling test in
+    // explicitly. Tests are split out of the kernel files into `*_test.zig`:
+    // simd's differential fuzz vs std, and fresh's `widen` set-algebra.
     std.testing.refAllDecls(@This());
-    _ = simd;
     _ = search;
+    _ = @import("simd_test.zig");
+    _ = @import("fresh_test.zig");
 }
 const Index = gist.trigram.Index;
 const Regex = gist.regex.Regex;
