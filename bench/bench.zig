@@ -37,19 +37,23 @@ const Dir = std.Io.Dir;
 // code-search shapes; `{0}` / `{1}` are filled with identifiers sampled live
 // from the corpus so each pattern actually exercises true matches.
 const fixed_regex = [_][]const u8{
-    "func\\s+\\w+\\(",  "return\\s+nil",    "import\\s+\\(", "[A-Z][a-z]+Error",
-    "0x[0-9a-fA-F]+",   "ctx\\s+context",   "\\w+pb\\.\\w+", "//\\s*TODO",
-    "pgxpool\\.\\w+",   "err\\s*!=\\s*nil", "[a-z]+_[a-z]+", "func\\s*\\(",
+    "func\\s+\\w+\\(",        "return\\s+nil",           "import\\s+\\(",         "[A-Z][a-z]+Error",
+    "0x[0-9a-fA-F]+",         "ctx\\s+context",          "\\w+pb\\.\\w+",         "//\\s*TODO",
+    "pgxpool\\.\\w+",         "err\\s*!=\\s*nil",        "[a-z]+_[a-z]+",         "func\\s*\\(",
     // line anchors `^` / `$` — proven against `rg (?-u)` per-line semantics.
-    "^package\\s+\\w+", "^import",          "^func\\s",      "^\\s*//",
-    "\\)$",             "^}$",              ";$",            "^$",
+    "^package\\s+\\w+",       "^import",                 "^func\\s",              "^\\s*//",
+    "\\)$",                   "^}$",                     ";$",                    "^$",
     // counted repetition `{n}` / `{n,}` / `{n,m}` + a literal-brace check.
-    "[0-9]{4}",         "[a-f0-9]{2,}",     "\\w{3,8}",      "x{2,4}",
-    "0x[0-9a-fA-F]{2,}", "interface\\{\\}",
+    "[0-9]{4}",               "[a-f0-9]{2,}",            "\\w{3,8}",              "x{2,4}",
+    "0x[0-9a-fA-F]{2,}",      "interface\\{\\}",
     // alternation multi-literal prefilter — UNION of each ≥3 branch's candidates
     // (`foo|bar|baz`), and a mixed case where a < 3 branch forces a sound scan.
-    "return|continue|break", "func|struct|enum", "TODO|FIXME|XXX",
-    "import\\s+\\(|^package", "context|errors", "panic|0x",
+            "return|continue|break", "func|struct|enum",
+    "TODO|FIXME|XXX",         "import\\s+\\(|^package",  "context|errors",        "panic|0x",
+    // dense / multi-class shapes — the no-prefilter tail the bit-parallel engine
+    // and first-byte skip drive, plus real code idioms across languages.
+    "if\\s+err\\s*!=\\s*nil", "const\\s+\\w+\\s*=",      "\\w+\\.\\w+\\(",        "[a-z]+_[a-z]+_[a-z]+",
+    "[a-z]+[A-Z]\\w+",        "[0-9a-f]{8}-[0-9a-f]{4}",
 };
 const regex_templates = [_][]const u8{
     "{0}",     "{0}\\s*\\(", "{0}\\.\\w+", "{0}[0-9]",
@@ -67,9 +71,10 @@ const default_roots = corpus_mod.default_roots;
 // 3-byte floor, punctuation grams, guaranteed-absent negatives, a 2-byte needle
 // (exercises the <3 full-scan fallback), and a repeated-char pathological case.
 const fixed_slate = [_][]const u8{
-    "pgxpool",    "context.Context", "func ",  "TODO", "queryLiteral",
-    "rate_limit", "zzqxv",           "ctx",    "://",  "func(",
-    "return nil", "SELECT",          "import", "})",   "AAAAAA",
+    "pgxpool",    "context.Context", "func ",   "TODO", "queryLiteral",
+    "rate_limit", "zzqxv",           "ctx",     "://",  "func(",
+    "return nil", "SELECT",          "import",  "})",   "AAAAAA",
+    "goroutine",  "panic(",          "Result<", "def ", ".unwrap()",
 };
 
 /// gist's true matching docs for `needle`: trigram filter (len ≥ 3) then a

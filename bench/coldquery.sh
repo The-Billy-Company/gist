@@ -1,38 +1,79 @@
 #!/usr/bin/env bash
-# gist vs ripgrep — the COLD / first query (the one rg used to win).
+# gist vs the field — the COLD / first query (the one unindexed greps used to
+# win), now raced against the *indexed* rivals too.
 #
-# Model: build the index ONCE (persist to disk), then every query is a fresh
-# process that cold-loads the index and reads only the CANDIDATE files. rg has
-# no index, so every invocation re-walks the whole tree and reads every byte.
+# Model: build every index ONCE, then each query is a fresh process. gist and
+# the two indexed tools (csearch, zoekt) cold-load their index and read only the
+# CANDIDATE files; the unindexed tools (rg, ugrep, ag, GNU grep, git grep) have
+# no index, so every invocation re-walks the whole tree and re-scans. The race
+# that matters most for an indexed kernel is gist vs csearch/zoekt — same model,
+# so it's pure engine + index-layout speed, not "indexed beats unindexed".
 #
-# Both measured fresh-process via hyperfine (process spawn included), warm page
-# cache. gist's edge is architectural: candidate-only IO vs rg's full walk.
+# All measured fresh-process via hyperfine (process spawn included), warm page
+# cache. See _compete.sh for the field, the fairness scoping, and install hints.
 # Usage: bench/coldquery.sh [needle...]
 set -uo pipefail
-
 HERE="$(cd "$(dirname "$0")" && pwd)"
-KERNEL="$(cd "$HERE/.." && pwd)"
-REPO="$(cd "$KERNEL/../../.." && pwd)"
-ROOTS=(services libs clients contracts scripts quality)
-EXE="$REPO/.local/gist-bin"
-command -v hyperfine >/dev/null || { echo "need hyperfine"; exit 1; }
+# shellcheck source=_compete.sh
+source "${HERE}/_compete.sh"
+need_hyperfine
 
 echo "building gist + persisting the index once…"
-( cd "$KERNEL" && zig build -Doptimize=ReleaseFast cli -- index ) || exit 1
-# Snapshot the freshly-built exe to a stable path for repeated fresh-process runs.
-cp "$(ls -t "$KERNEL"/.zig-cache/o/*/gist-bench | head -1)" "$EXE"
+( cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index ) || exit 1
+# shellcheck disable=SC2012 # newest build dir; names are zig cache hashes, safe to parse
+exe_src="$(ls -t "${KERNEL}"/.zig-cache/o/*/gist-bench | head -1)"
+cp "${exe_src}" "${GIST_BIN}"
+echo "building competitor indexes (over gist's exact corpus where possible)…"
+compete_build_csearch
+compete_build_zoekt
 
-cd "$REPO"
-needles=("$@"); [ ${#needles[@]} -eq 0 ] && needles=(pgxpool queryLiteral rate_limit context.Context func import)
-printf "%-18s %12s %12s %10s\n" "needle" "gist cold" "rg cold" "speedup"
-printf "%-18s %12s %12s %10s\n" "------------------" "------------" "------------" "----------"
-gj="$(mktemp)"; rj="$(mktemp)"
+cd "${REPO}" || exit 1
+# A spread: a guaranteed MISS (pure index win), very-selective symbols, medium,
+# common tokens that touch thousands of files, and a 2-byte punctuation needle.
+needles=("$@")
+[[ ${#needles[@]} -eq 0 ]] && needles=(zzqxvNOMATCH queryLiteral pgxpool rate_limit \
+    context.Context goroutine SELECT func import "func(" "})")
+
+tools_raw="$(compete_tools literal)"; mapfile -t tools <<< "${tools_raw}"
+echo
+echo "cold literal query — fresh process, warm cache (hyperfine mean, runs=8):"
+echo "fields: <tool> <ms> (<gist speedup>); idx=indexed rivals, unidx=unindexed scanners"
+echo
+
+# Per-tool accumulators (geomean of ratios + win count), parallel to ${tools[@]}.
+declare -A SUM CNT WINS
+for t in "${tools[@]}"; do SUM[${t}]=0; CNT[${t}]=0; WINS[${t}]=0; done
+csv="${COMPETE_DIR}/cold.csv"; echo "needle,tool,kind,ms,gist_ms,ratio" > "${csv}"
+
 for n in "${needles[@]}"; do
-    hyperfine --warmup 3 --runs 10 --export-json "$gj" "$EXE query $n"            >/dev/null 2>&1
-    hyperfine --warmup 3 --runs 10 --export-json "$rj" "rg -l -- $n ${ROOTS[*]}"  >/dev/null 2>&1
-    g=$(python3 -c "import json;print('%.1f'%(json.load(open('$gj'))['results'][0]['mean']*1000))")
-    r=$(python3 -c "import json;print('%.1f'%(json.load(open('$rj'))['results'][0]['mean']*1000))")
-    s=$(python3 -c "print('%.1fx'%($r/$g))")
-    printf "%-18s %9s ms %9s ms %10s\n" "$n" "$g" "$r" "$s"
+    gcmd="$(compete_lit_cmd gist "${n}")"
+    gist_ms="$(hf_mean 3 8 "${gcmd}")"
+    printf "%-16s gist %sms\n" "${n}" "${gist_ms}"
+    idx_line="    idx:  "; unidx_line="    unidx:"
+    for t in "${tools[@]}"; do
+        cmd="$(compete_lit_cmd "${t}" "${n}")"
+        ms="$(hf_mean 2 8 "${cmd}")"
+        spd="$(ratio "${ms}" "${gist_ms}")"
+        kind="$(compete_kind "${t}")"
+        echo "${n},${t},${kind},${ms},${gist_ms},${spd}" >> "${csv}"
+        if [[ "${ms}" != "?" && "${gist_ms}" != "?" ]]; then
+            SUM[${t}]="$(python3 -c "import math;print(${SUM[${t}]}+math.log(${ms}/${gist_ms}))")"
+            CNT[${t}]=$(( CNT[${t}] + 1 ))
+            python3 -c "import sys;sys.exit(0 if ${ms}>=${gist_ms} else 1)" && WINS[${t}]=$(( WINS[${t}] + 1 ))
+        fi
+        cell="$(printf "%s %s(%s)" "${t}" "${ms}" "${spd}")"
+        if [[ "${kind}" = indexed ]]; then idx_line+=" ${cell}"; else unidx_line+=" ${cell}"; fi
+    done
+    [[ "${idx_line}" != "    idx:  " ]] && echo "${idx_line}"
+    echo "${unidx_line}"
 done
-rm -f "$gj" "$rj"
+
+echo
+echo "── summary: geomean gist speedup · queries gist ≥ tool ──"
+for t in "${tools[@]}"; do
+    [[ "${CNT[${t}]}" -eq 0 ]] && continue
+    g="$(python3 -c "import math;print('%.1f'%math.exp(${SUM[${t}]}/${CNT[${t}]}))")"
+    kind="$(compete_kind "${t}")"
+    printf "  %-8s %-9s %sx geomean · won %d/%d\n" "${kind}" "${t}" "${g}" "${WINS[${t}]}" "${CNT[${t}]}"
+done
+echo "csv → ${csv}"

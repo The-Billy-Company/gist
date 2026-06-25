@@ -1,39 +1,44 @@
 #!/usr/bin/env bash
-# gist vs ripgrep — the REGEX cold head-to-head, rg given its fastest honest path.
+# gist vs the field — the REGEX cold head-to-head, every engine on its fastest
+# honest path.
 #
-# Model (mirrors coldquery.sh, the literal counterpart): build + persist the
-# index ONCE, then every query is a fresh process that cold-loads the index and
-# reads only the candidate files. The regex tier prefilters on the required
-# literal / alternation cover set when one exists, and for the no-literal case
-# the scanner skips dead spans via the compiled first-byte set (`;$`, `[0-9]{4}`)
-# or seeds only at line starts (`^…`).
+# Model mirrors coldquery.sh: build every index ONCE, then each query is a fresh
+# process. gist + the indexed rivals (csearch RE2, zoekt) cold-load and read
+# only candidates (prefiltered on the required literal / alternation cover set,
+# else the no-literal scan accelerated by the compiled first-byte set or anchor
+# seeding). The unindexed engines re-walk + re-scan: rg `(?-u)` (byte semantics,
+# == gist's NFA dialect), ugrep/GNU-grep/git-grep with `-P` (PCRE), ag (PCRE).
 #
-# rg's path: its native gitignore-respecting parallel walk (skips target/, caches
-# — its real speed), `(?-u)` byte semantics so the dialects coincide exactly,
-# `-l` (list files, early-out per file), warmed. NOT `--no-ignore`: that drags rg
-# through 99 GB of build artifacts gist never indexes — crippling it, not racing
-# it. Both fresh-process via hyperfine, warm page cache.
+# csearch (Google Code Search) is the apples-to-apples indexed RE2 rival — same
+# trigram-prefilter-then-verify lineage as gist. zoekt is Sourcegraph's indexed
+# search. Anchored/line semantics can differ slightly across the PCRE/RE2/zoekt
+# engines (zoekt is file- not strictly line-oriented), so the indexed columns
+# are a throughput reference; rg `(?-u)` remains gist's proven byte-exact oracle.
 #
-# Patterns are grouped by the feature each exercises. Usage: bench/regex_headtohead.sh
+# Patterns are grouped by the feature tier each exercises. See _compete.sh for
+# the field + fairness scoping. Usage: bench/regex_headtohead.sh
 set -uo pipefail
-
 HERE="$(cd "$(dirname "$0")" && pwd)"
-KERNEL="$(cd "$HERE/.." && pwd)"
-REPO="$(cd "$KERNEL/../../.." && pwd)"
-EXE="$REPO/.local/gist-bin"
-ROOTS=(services libs clients contracts scripts quality)
-command -v hyperfine >/dev/null || { echo "need hyperfine"; exit 1; }
-command -v rg >/dev/null || { echo "need ripgrep"; exit 1; }
+# shellcheck source=_compete.sh
+source "${HERE}/_compete.sh"
+need_hyperfine
 
 echo "building gist + persisting the index once…"
-( cd "$KERNEL" && zig build -Doptimize=ReleaseFast cli -- index ) || exit 1
-cp "$(ls -t "$KERNEL"/.zig-cache/o/*/gist-bench | head -1)" "$EXE"
+( cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index ) || exit 1
+# shellcheck disable=SC2012
+exe_src="$(ls -t "${KERNEL}"/.zig-cache/o/*/gist-bench | head -1)"
+cp "${exe_src}" "${GIST_BIN}"
+echo "building competitor indexes…"
+compete_build_csearch
+compete_build_zoekt
 
-# single-token-label  pattern  — label names the feature tier each pattern exercises.
+# tier-label  pattern — the label names the feature tier each pattern exercises.
 slate=(
   "lit+word     func\\s+\\w+\\("
   "lit+word     return\\s+nil"
   "lit+class    pgxpool\\.\\w+"
+  "err-idiom    if\\s+err\\s*!=\\s*nil"
+  "decl         const\\s+\\w+\\s*="
   "anchor^lit   ^package\\s+\\w+"
   "anchor^lit   ^func\\s"
   "anchor-lit\$  ;\$"
@@ -43,30 +48,59 @@ slate=(
   "count-class  [0-9]{4}"
   "count-word   \\w{3,8}"
   "count-hex    [a-f0-9]{2,}"
+  "uuid-ish     [0-9a-f]{8}-[0-9a-f]{4}"
+  "snake        [a-z]+_[a-z]+_[a-z]+"
+  "camel        [a-z]+[A-Z]\\w+"
+  "dotted-call  \\w+\\.\\w+\\("
   "alt-cover    return|continue|break"
   "alt-cover    func|struct|enum"
   "alt-cover    error|panic|fatal"
   "alt-mixed    panic|0x"
 )
 
-cd "$REPO" || exit 1
-printf "%-13s %-22s %10s %10s %9s\n" "tier" "pattern" "gist_cold" "rg_best" "speedup"
-printf "%-13s %-22s %10s %10s %9s\n" "-------------" "----------------------" "----------" "----------" "---------"
-gj="$(mktemp)"; rj="$(mktemp)"
-wins=0; total=0
+cd "${REPO}" || exit 1
+tools_raw="$(compete_tools regex)"; mapfile -t tools <<< "${tools_raw}"
+echo
+echo "cold regex query — fresh process, warm cache (hyperfine mean, runs=8):"
+echo "fields: <tool> <ms> (<gist speedup>); idx=indexed rivals, unidx=unindexed scanners"
+echo
+
+declare -A SUM CNT WINS
+for t in "${tools[@]}"; do SUM[${t}]=0; CNT[${t}]=0; WINS[${t}]=0; done
+csv="${COMPETE_DIR}/regex.csv"; echo "tier,pattern,tool,kind,ms,gist_ms,ratio" > "${csv}"
+
 for row in "${slate[@]}"; do
-  read -r label pat <<< "$row"
-  hyperfine --warmup 3 --runs 12 --export-json "$gj" "$EXE regex '$pat'"            >/dev/null 2>&1
-  hyperfine --warmup 3 --runs 12 --export-json "$rj" "rg '(?-u)$pat' -l -- ${ROOTS[*]}" >/dev/null 2>&1
-  g=$(python3 -c "import json;print('%.1f'%(json.load(open('$gj'))['results'][0]['mean']*1000))" 2>/dev/null || echo '?')
-  r=$(python3 -c "import json;print('%.1f'%(json.load(open('$rj'))['results'][0]['mean']*1000))" 2>/dev/null || echo '?')
-  s=$(python3 -c "print('%.2fx'%($r/$g))" 2>/dev/null || echo '?')
-  total=$((total+1))
-  python3 -c "import sys;sys.exit(0 if $r/$g>=1.0 else 1)" 2>/dev/null && wins=$((wins+1))
-  printf "%-13s %-22s %8s ms %8s ms %8s\n" "$label" "$pat" "$g" "$r" "$s"
+    read -r label pat <<< "${row}"
+    gcmd="$(compete_rgx_cmd gist "${pat}")"
+    gist_ms="$(hf_mean 3 8 "${gcmd}")"
+    printf "%-13s %-24s gist %sms\n" "${label}" "${pat}" "${gist_ms}"
+    idx_line="    idx:  "; unidx_line="    unidx:"
+    for t in "${tools[@]}"; do
+        cmd="$(compete_rgx_cmd "${t}" "${pat}")"
+        ms="$(hf_mean 2 8 "${cmd}")"
+        spd="$(ratio "${ms}" "${gist_ms}")"
+        kind="$(compete_kind "${t}")"
+        echo "${label},${pat},${t},${kind},${ms},${gist_ms},${spd}" >> "${csv}"
+        if [[ "${ms}" != "?" && "${gist_ms}" != "?" ]]; then
+            SUM[${t}]="$(python3 -c "import math;print(${SUM[${t}]}+math.log(${ms}/${gist_ms}))")"
+            CNT[${t}]=$(( CNT[${t}] + 1 ))
+            python3 -c "import sys;sys.exit(0 if ${ms}>=${gist_ms} else 1)" && WINS[${t}]=$(( WINS[${t}] + 1 ))
+        fi
+        cell="$(printf "%s %s(%s)" "${t}" "${ms}" "${spd}")"
+        if [[ "${kind}" = indexed ]]; then idx_line+=" ${cell}"; else unidx_line+=" ${cell}"; fi
+    done
+    [[ "${idx_line}" != "    idx:  " ]] && echo "${idx_line}"
+    echo "${unidx_line}"
 done
-rm -f "$gj" "$rj"
-echo "----"
-echo "gist ≥ rg on $wins/$total patterns (≥1.0x). Prefilterable tiers win outright;"
-echo "the no-literal full-scan tail is a pure automaton-throughput race (Pike VM"
-echo "vs rg's lazy DFA) — see CHANGELOG 'regex scan accelerators'."
+
+echo
+echo "── summary: geomean gist speedup · patterns gist ≥ tool ──"
+for t in "${tools[@]}"; do
+    [[ "${CNT[${t}]}" -eq 0 ]] && continue
+    g="$(python3 -c "import math;print('%.1f'%math.exp(${SUM[${t}]}/${CNT[${t}]}))")"
+    kind="$(compete_kind "${t}")"
+    printf "  %-8s %-9s %sx geomean · gist ≥ on %d/%d\n" "${kind}" "${t}" "${g}" "${WINS[${t}]}" "${CNT[${t}]}"
+done
+echo "Prefilterable tiers win outright; the no-literal dense tail (\\w{3,8}) is a"
+echo "pure automaton-throughput race — see CHANGELOG 'bit-parallel Glushkov engine'."
+echo "csv → ${csv}"
