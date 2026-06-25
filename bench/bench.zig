@@ -37,13 +37,17 @@ const Dir = std.Io.Dir;
 // code-search shapes; `{0}` / `{1}` are filled with identifiers sampled live
 // from the corpus so each pattern actually exercises true matches.
 const fixed_regex = [_][]const u8{
-    "func\\s+\\w+\\(", "return\\s+nil",    "import\\s+\\(", "[A-Z][a-z]+Error",
-    "0x[0-9a-fA-F]+",  "ctx\\s+context",   "\\w+pb\\.\\w+", "//\\s*TODO",
-    "pgxpool\\.\\w+",  "err\\s*!=\\s*nil", "[a-z]+_[a-z]+", "func\\s*\\(",
+    "func\\s+\\w+\\(",  "return\\s+nil",    "import\\s+\\(", "[A-Z][a-z]+Error",
+    "0x[0-9a-fA-F]+",   "ctx\\s+context",   "\\w+pb\\.\\w+", "//\\s*TODO",
+    "pgxpool\\.\\w+",   "err\\s*!=\\s*nil", "[a-z]+_[a-z]+", "func\\s*\\(",
+    // line anchors `^` / `$` — proven against `rg (?-u)` per-line semantics.
+    "^package\\s+\\w+", "^import",          "^func\\s",      "^\\s*//",
+    "\\)$",             "^}$",              ";$",            "^$",
 };
 const regex_templates = [_][]const u8{
     "{0}",     "{0}\\s*\\(", "{0}\\.\\w+", "{0}[0-9]",
     "\\w+{0}", "{0}.*;",     "({0}|{1})",  "{0}\\s*=\\s*\\w+",
+    "^{0}",    "{0}$",       "^\\s*{0}",
 };
 
 const corpus_mod = @import("corpus.zig");
@@ -420,6 +424,22 @@ pub fn main(init: std.process.Init) !void {
             return;
         };
         try cli.runQuery(gpa, io, needle);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "regex")) {
+        const pattern = it.next() orelse {
+            std.debug.print("usage: regex <pattern>\n", .{});
+            return;
+        };
+        try cli.runRegex(gpa, io, pattern);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "rank")) {
+        const needle = it.next() orelse {
+            std.debug.print("usage: rank <needle>\n", .{});
+            return;
+        };
+        try cli.runRank(gpa, io, needle);
         return;
     }
 
