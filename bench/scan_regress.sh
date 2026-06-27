@@ -62,9 +62,7 @@ echo "building gist (ReleaseFast) + copying binary…"
     echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
     exit 1
   }
-# shellcheck disable=SC2012
-exe_src="$(ls -t "${KERNEL}"/.zig-cache/o/*/gist-bench | head -1)"
-cp "${exe_src}" "${GIST_BIN}"
+compete_install_gist_bin || exit 1
 
 fsize() { stat -f%z "$1" 2> /dev/null || stat -c%s "$1" 2> /dev/null || echo 0; }
 # scan.zig's `  [pipeline] …` line — workers + worker-span Δ (the straggler canary).

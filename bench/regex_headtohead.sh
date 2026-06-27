@@ -24,10 +24,8 @@ source "${HERE}/_compete.sh"
 need_hyperfine
 
 echo "building gist + persisting the index once…"
-( cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index ) || exit 1
-# shellcheck disable=SC2012
-exe_src="$(ls -t "${KERNEL}"/.zig-cache/o/*/gist-bench | head -1)"
-cp "${exe_src}" "${GIST_BIN}"
+(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index) || exit 1
+compete_install_gist_bin || exit 1
 echo "building competitor indexes…"
 compete_build_csearch
 compete_build_zoekt
@@ -59,47 +57,54 @@ slate=(
 )
 
 cd "${REPO}" || exit 1
-tools_raw="$(compete_tools regex)"; mapfile -t tools <<< "${tools_raw}"
+tools_raw="$(compete_tools regex)"
+mapfile -t tools <<< "${tools_raw}"
 echo
 echo "cold regex query — fresh process, warm cache (hyperfine mean, runs=8):"
 echo "fields: <tool> <ms> (<gist speedup>); idx=indexed rivals, unidx=unindexed scanners"
 echo
 
 declare -A SUM CNT WINS
-for t in "${tools[@]}"; do SUM[${t}]=0; CNT[${t}]=0; WINS[${t}]=0; done
-csv="${COMPETE_DIR}/regex.csv"; echo "tier,pattern,tool,kind,ms,gist_ms,ratio" > "${csv}"
+for t in "${tools[@]}"; do
+  SUM[${t}]=0
+  CNT[${t}]=0
+  WINS[${t}]=0
+done
+csv="${COMPETE_DIR}/regex.csv"
+echo "tier,pattern,tool,kind,ms,gist_ms,ratio" > "${csv}"
 
 for row in "${slate[@]}"; do
-    read -r label pat <<< "${row}"
-    gcmd="$(compete_rgx_cmd gist "${pat}")"
-    gist_ms="$(hf_mean 3 8 "${gcmd}")"
-    printf "%-13s %-24s gist %sms\n" "${label}" "${pat}" "${gist_ms}"
-    idx_line="    idx:  "; unidx_line="    unidx:"
-    for t in "${tools[@]}"; do
-        cmd="$(compete_rgx_cmd "${t}" "${pat}")"
-        ms="$(hf_mean 2 8 "${cmd}")"
-        spd="$(ratio "${ms}" "${gist_ms}")"
-        kind="$(compete_kind "${t}")"
-        echo "${label},${pat},${t},${kind},${ms},${gist_ms},${spd}" >> "${csv}"
-        if [[ "${ms}" != "?" && "${gist_ms}" != "?" ]]; then
-            SUM[${t}]="$(python3 -c "import math;print(${SUM[${t}]}+math.log(${ms}/${gist_ms}))")"
-            CNT[${t}]=$(( CNT[${t}] + 1 ))
-            python3 -c "import sys;sys.exit(0 if ${ms}>=${gist_ms} else 1)" && WINS[${t}]=$(( WINS[${t}] + 1 ))
-        fi
-        cell="$(printf "%s %s(%s)" "${t}" "${ms}" "${spd}")"
-        if [[ "${kind}" = indexed ]]; then idx_line+=" ${cell}"; else unidx_line+=" ${cell}"; fi
-    done
-    [[ "${idx_line}" != "    idx:  " ]] && echo "${idx_line}"
-    echo "${unidx_line}"
+  read -r label pat <<< "${row}"
+  gcmd="$(compete_rgx_cmd gist "${pat}")"
+  gist_ms="$(hf_mean 3 8 "${gcmd}")"
+  printf "%-13s %-24s gist %sms\n" "${label}" "${pat}" "${gist_ms}"
+  idx_line="    idx:  "
+  unidx_line="    unidx:"
+  for t in "${tools[@]}"; do
+    cmd="$(compete_rgx_cmd "${t}" "${pat}")"
+    ms="$(hf_mean 2 8 "${cmd}")"
+    spd="$(ratio "${ms}" "${gist_ms}")"
+    kind="$(compete_kind "${t}")"
+    echo "${label},${pat},${t},${kind},${ms},${gist_ms},${spd}" >> "${csv}"
+    if [[ "${ms}" != "?" && "${gist_ms}" != "?" ]]; then
+      SUM[${t}]="$(python3 -c "import math;print(${SUM[${t}]}+math.log(${ms}/${gist_ms}))")"
+      CNT[${t}]=$((CNT[${t}] + 1))
+      python3 -c "import sys;sys.exit(0 if ${ms}>=${gist_ms} else 1)" && WINS[${t}]=$((WINS[${t}] + 1))
+    fi
+    cell="$(printf "%s %s(%s)" "${t}" "${ms}" "${spd}")"
+    if [[ "${kind}" = indexed ]]; then idx_line+=" ${cell}"; else unidx_line+=" ${cell}"; fi
+  done
+  [[ "${idx_line}" != "    idx:  " ]] && echo "${idx_line}"
+  echo "${unidx_line}"
 done
 
 echo
 echo "── summary: geomean gist speedup · patterns gist ≥ tool ──"
 for t in "${tools[@]}"; do
-    [[ "${CNT[${t}]}" -eq 0 ]] && continue
-    g="$(python3 -c "import math;print('%.1f'%math.exp(${SUM[${t}]}/${CNT[${t}]}))")"
-    kind="$(compete_kind "${t}")"
-    printf "  %-8s %-9s %sx geomean · gist ≥ on %d/%d\n" "${kind}" "${t}" "${g}" "${WINS[${t}]}" "${CNT[${t}]}"
+  [[ "${CNT[${t}]}" -eq 0 ]] && continue
+  g="$(python3 -c "import math;print('%.1f'%math.exp(${SUM[${t}]}/${CNT[${t}]}))")"
+  kind="$(compete_kind "${t}")"
+  printf "  %-8s %-9s %sx geomean · gist ≥ on %d/%d\n" "${kind}" "${t}" "${g}" "${WINS[${t}]}" "${CNT[${t}]}"
 done
 echo "Prefilterable tiers win outright; the no-literal dense tail (\\w{3,8}) is a"
 echo "pure automaton-throughput race — see CHANGELOG 'bit-parallel Glushkov engine'."

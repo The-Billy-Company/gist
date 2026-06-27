@@ -21,6 +21,7 @@ const gist = @import("gist");
 const search = @import("search.zig");
 const simd = @import("simd.zig");
 const cli = @import("cli.zig");
+const certify = @import("certify.zig");
 
 test {
     // The test runner only walks referenced files, so pull each sibling test in
@@ -30,6 +31,7 @@ test {
     _ = search;
     _ = @import("simd_test.zig");
     _ = @import("fresh_test.zig");
+    _ = @import("stats.zig"); // bootstrap-CI + Mann-Whitney dominance unit tests
 }
 const Index = gist.trigram.Index;
 const Regex = gist.regex.Regex;
@@ -429,6 +431,10 @@ pub fn main(init: std.process.Init) !void {
     }
     if (std.mem.eql(u8, mode, "scanbench")) {
         try runScanBench(gpa, io);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "certify")) {
+        try certify.run(gpa, io);
         return;
     }
     if (std.mem.eql(u8, mode, "index")) {
