@@ -29,7 +29,8 @@ WARMUP="${WARMUP:-3}"
 WORK="${COMPETE_DIR}/certify"
 CERT="${OUT}/CERTIFICATE.md"
 MACRO_CSV="${OUT}/certify_macro.csv"
-rm -rf "${WORK}"; mkdir -p "${WORK}" "${OUT}"
+rm -rf "${WORK}"
+mkdir -p "${WORK}" "${OUT}"
 
 # class  kind  pattern — byte-identical to certify.zig's `probes` (patterns have
 # no spaces, so `read class kind pat` recovers the pattern as the trailing field).
@@ -48,13 +49,14 @@ PROBES=(
 )
 
 echo "building gist + persisting the index once…"
-( cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index ) || exit 1
+(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index) || exit 1
 compete_install_gist_bin || exit 1
 echo "building competitor indexes…"
 compete_build_csearch
 compete_build_zoekt
 
-tools_raw="$(compete_tools regex)"; mapfile -t tools <<< "${tools_raw}"
+tools_raw="$(compete_tools regex)"
+mapfile -t tools <<< "${tools_raw}"
 echo
 echo "macroscopic race — fresh-process cold query, hyperfine runs=${RUNS} (+${WARMUP} warmup)"
 echo "field: gist ${tools[*]}"
@@ -63,45 +65,46 @@ echo
 # one hyperfine JSON per (class, tool); fair wrapper drains output + neutralizes
 # the no-match exit code (see hf_mean in _compete.sh for the rationale).
 bench_one() { # <class> <tool> <cmd>
-    local class="$1" tool="$2" cmd="$3"
-    [[ -z "${cmd}" || "${cmd}" = "false" ]] && return 0
-    hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
-        --export-json "${WORK}/${class}__${tool}.json" \
-        "{ ${cmd} ; } 2>&1 | wc -l >/dev/null" >/dev/null 2>&1 || true
+  local class="$1" tool="$2" cmd="$3"
+  [[ -z "${cmd}" || "${cmd}" = "false" ]] && return 0
+  hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
+    --export-json "${WORK}/${class}__${tool}.json" \
+    "{ ${cmd} ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1 || true
 }
 
 cd "${REPO}" || exit 1
 : > "${WORK}/order.tsv"
 for row in "${PROBES[@]}"; do
-    read -r class kind pat <<< "${row}"
-    printf '%s\t%s\t%s\n' "${class}" "${kind}" "${pat}" >> "${WORK}/order.tsv"
+  read -r class kind pat <<< "${row}"
+  printf '%s\t%s\t%s\n' "${class}" "${kind}" "${pat}" >> "${WORK}/order.tsv"
+  if [[ "${kind}" = literal ]]; then
+    gcmd="$(compete_lit_cmd gist "${pat}")"
+  else
+    gcmd="$(compete_rgx_cmd gist "${pat}")"
+  fi
+  bench_one "${class}" gist "${gcmd}"
+  printf "  %-18s " "${class}"
+  for t in "${tools[@]}"; do
     if [[ "${kind}" = literal ]]; then
-        gcmd="$(compete_lit_cmd gist "${pat}")"
-    else
-        gcmd="$(compete_rgx_cmd gist "${pat}")"
-    fi
-    bench_one "${class}" gist "${gcmd}"
-    printf "  %-18s " "${class}"
-    for t in "${tools[@]}"; do
-        if [[ "${kind}" = literal ]]; then cmd="$(compete_lit_cmd "${t}" "${pat}")"
-        else cmd="$(compete_rgx_cmd "${t}" "${pat}")"; fi
-        bench_one "${class}" "${t}" "${cmd}"
-    done
-    echo "done"
+      cmd="$(compete_lit_cmd "${t}" "${pat}")"
+    else cmd="$(compete_rgx_cmd "${t}" "${pat}")"; fi
+    bench_one "${class}" "${t}" "${cmd}"
+  done
+  echo "done"
 done
 
 # meta for the report
 roots_str="${ROOTS[*]}"
-cat > "${WORK}/meta.json" <<EOF
+cat > "${WORK}/meta.json" << EOF
 { "runs": ${RUNS}, "warmup": ${WARMUP}, "roots": "${roots_str}" }
 EOF
 
 echo
 echo "computing bootstrap-CI medians + Mann-Whitney dominance (gist vs rg)…"
 python3 "${HERE}/certify_stats.py" "${WORK}" \
-    --certificate "${CERT}" \
-    --csv "${MACRO_CSV}" \
-    --order "${WORK}/order.tsv" \
-    --meta "${WORK}/meta.json"
+  --certificate "${CERT}" \
+  --csv "${MACRO_CSV}" \
+  --order "${WORK}/order.tsv" \
+  --meta "${WORK}/meta.json"
 
 echo "macroscopic section appended to ${CERT}"
