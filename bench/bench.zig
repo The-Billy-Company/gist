@@ -21,6 +21,7 @@ const gist = @import("gist");
 const search = @import("search.zig");
 const simd = @import("simd.zig");
 const cli = @import("cli.zig");
+const lines = @import("lines.zig");
 const certify = @import("certify.zig");
 
 test {
@@ -31,6 +32,8 @@ test {
     _ = search;
     _ = @import("simd_test.zig");
     _ = @import("fresh_test.zig");
+    _ = @import("pathfilter_test.zig"); // glob matcher + type/glob path-scope tests
+    _ = @import("signals_test.zig"); // cross-language def-detection + generated-file tests
     _ = @import("stats.zig"); // bootstrap-CI + Mann-Whitney dominance unit tests
 }
 const Index = gist.trigram.Index;
@@ -463,6 +466,19 @@ pub fn main(init: std.process.Init) !void {
             return;
         };
         try cli.runRank(gpa, io, needle);
+        return;
+    }
+    // `grep [flags] <pattern>` — the agent's `rg -n --no-heading`: emit every
+    // matching line as `path:line:text`, served from the index. One engine for
+    // literal + regex; full flag surface (`-i -w -F -l -c -v -m -A -B -C -t -g
+    // -e --`) parsed by `lines.parseGrep`. See lines.zig for the contract.
+    if (std.mem.eql(u8, mode, "grep")) {
+        var rest: std.ArrayList([]const u8) = .empty;
+        defer rest.deinit(gpa);
+        while (it.next()) |arg| try rest.append(gpa, arg);
+        var parsed = (try lines.parseGrep(gpa, rest.items)) orelse return;
+        defer parsed.deinit(gpa);
+        try lines.runGrep(gpa, io, parsed.pattern, parsed.opts);
         return;
     }
 
