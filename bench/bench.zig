@@ -22,6 +22,7 @@ const search = @import("search.zig");
 const simd = @import("simd.zig");
 const cli = @import("cli.zig");
 const lines = @import("lines.zig");
+const rgcompat = @import("rgcompat.zig");
 const certify = @import("certify.zig");
 
 test {
@@ -480,6 +481,18 @@ pub fn main(init: std.process.Init) !void {
         var parsed = (try lines.parseGrep(gpa, rest.items)) orelse return;
         defer parsed.deinit(gpa);
         try lines.runGrep(gpa, io, parsed.pattern, parsed.opts);
+        return;
+    }
+
+    // `rg [flags] <pattern> [PATH...]` — the ripgrep-DEFAULT drop-in over an
+    // arbitrary directory tree (distinct from `grep`'s monorepo-index contract):
+    // rg presentation (filename iff recursive/multi-file, line numbers off unless
+    // -n, rg exit codes), the substrate for the ripgrep-suite differential proof.
+    if (std.mem.eql(u8, mode, "rg")) {
+        var rest: std.ArrayList([]const u8) = .empty;
+        defer rest.deinit(gpa);
+        while (it.next()) |arg| try rest.append(gpa, arg);
+        try rgcompat.run(gpa, io, rest.items);
         return;
     }
 
