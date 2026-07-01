@@ -19,7 +19,8 @@ Buckets:
 
 Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL): of everything gist
 claims to do, how much matches ripgrep byte-for-byte. Needs `rg` on PATH (the
-oracle) and a built `gist-bench` (../../zig-out/bin/gist-bench → `zig build`).
+oracle) and a built `gist` CLI (../../zig-out/bin/gist → `zig build`, the `rg`
+verb — see src/commands/cli/main.zig; distinct from the `gist-bench` harness).
 
 Usage:  python3 run.py            # score the frozen spec.json
         python3 run.py --list-na  # also print the NA reasons
@@ -29,7 +30,7 @@ import base64, json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-GIST = HERE.parents[1] / "zig-out" / "bin" / "gist-bench"  # …/gist/zig-out/bin
+GIST = HERE.parents[1] / "zig-out" / "bin" / "gist"  # …/gist/zig-out/bin — the CLI (`rg` verb)
 RG = "rg"
 spec = json.loads((HERE / "spec.json").read_text())
 
@@ -178,7 +179,7 @@ def score(rec):
 def main():
     from collections import Counter
     if not GIST.exists():
-        sys.exit(f"gist-bench not built at {GIST} — run `zig build` in {HERE.parents[1]}")
+        sys.exit(f"gist CLI not built at {GIST} — run `zig build` in {HERE.parents[1]}")
     list_na = "--list-na" in sys.argv[1:]
     buckets, fails, nas, results = Counter(), [], [], []
     for rec in spec:

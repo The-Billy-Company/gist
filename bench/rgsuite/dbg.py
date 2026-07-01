@@ -8,7 +8,7 @@ import base64, json, os, subprocess, sys, tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-GIST = HERE.parents[1] / "zig-out" / "bin" / "gist-bench"
+GIST = HERE.parents[1] / "zig-out" / "bin" / "gist"  # the CLI (`rg` verb), not the bench harness
 spec = {r["name"]: r for r in json.loads((HERE / "spec.json").read_text())}
 
 

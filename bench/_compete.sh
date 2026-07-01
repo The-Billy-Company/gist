@@ -103,9 +103,13 @@ compete_kind() { # echoes indexed|unindexed for a tool id
 }
 
 # ── gist binary install ───────────────────────────────────────────────────────
-# compete_install_gist_bin → copy the freshest just-built gist-bench out of the
-# zig cache to ${GIST_BIN}, runnable immediately. Caller builds first; this only
-# selects + installs the artifact (the build invocation differs per script).
+# compete_install_gist_bin → copy the freshest just-built `gist` CLI (the
+# `index`/`query`/`regex`/`rank`/`grep`/`rg` verbs — see src/commands/cli/main.zig)
+# out of the zig cache to ${GIST_BIN}, runnable immediately. Caller builds first;
+# this only selects + installs the artifact (the build invocation differs per
+# script). `gist` and `gist-bench` are separate binaries since the engine/bench
+# split (see changelog.d/+engine-out-of-bench-modular-src.changed.md) — the race
+# scripts drive the CLI's verbs, never the harness binary.
 #
 # The ad-hoc re-sign is load-bearing on macOS: `cp`-ing a Mach-O strips its
 # ad-hoc code signature, and syspolicyd then SIGKILLs ("Killed: 9") the first
@@ -115,15 +119,15 @@ compete_kind() { # echoes indexed|unindexed for a tool id
 # No-op where codesign is absent (Linux). Returns 1 if no binary was found.
 compete_install_gist_bin() {
   local exe_src="" f
-  # Newest gist-bench by mtime across the cache's hash-named build dirs. A `-nt`
+  # Newest `gist` CLI by mtime across the cache's hash-named build dirs. A `-nt`
   # glob loop (not `ls -t | head`) finds it without masking a return value (rc
   # enables SC2312) and the `-f` guard absorbs the no-match literal-glob case.
-  for f in "${KERNEL}"/.zig-cache/o/*/gist-bench; do
+  for f in "${KERNEL}"/.zig-cache/o/*/gist; do
     [[ -f "${f}" ]] || continue
     [[ -z "${exe_src}" || "${f}" -nt "${exe_src}" ]] && exe_src="${f}"
   done
   [[ -n "${exe_src}" ]] || {
-    echo "  no gist-bench in ${KERNEL}/.zig-cache/o/*/ — build first"
+    echo "  no gist CLI binary in ${KERNEL}/.zig-cache/o/*/ — build first (zig build cli -- …)"
     return 1
   }
   mkdir -p "$(dirname "${GIST_BIN}")"
