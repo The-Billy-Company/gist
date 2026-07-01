@@ -32,7 +32,8 @@ test {
     _ = search;
     _ = @import("simd_test.zig");
     _ = @import("fresh_test.zig");
-    _ = @import("pathfilter_test.zig"); // glob matcher + type/glob path-scope tests
+    _ = @import("pathfilter_test.zig"); // glob matcher + type/glob/root path-scope tests
+    _ = @import("grepargs_test.zig"); // rg-compatible argv parser (bundling, no-ops, roots)
     _ = @import("signals_test.zig"); // cross-language def-detection + generated-file tests
     _ = @import("stats.zig"); // bootstrap-CI + Mann-Whitney dominance unit tests
 }
