@@ -18,8 +18,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const gist = @import("gist");
-const corpus_mod = @import("corpus.zig");
-const simd = @import("simd.zig");
+const corpus_mod = gist.corpus;
+const simd = gist.simd;
 const pmu = @import("pmu.zig");
 const stats = @import("stats.zig");
 

@@ -18,25 +18,16 @@
 
 const std = @import("std");
 const gist = @import("gist");
-const search = @import("search.zig");
-const simd = @import("simd.zig");
-const cli = @import("cli.zig");
-const lines = @import("lines.zig");
-const rgcompat = @import("rgcompat.zig");
+const verify = gist.verify; // data-parallel candidate verify (scan/verify.zig)
+const simd = gist.simd; // SIMD substring `contains` (scan/simd.zig)
 const certify = @import("certify.zig");
 
 test {
-    // The test runner only walks referenced files, so pull each sibling test in
-    // explicitly. Tests are split out of the kernel files into `*_test.zig`:
-    // simd's differential fuzz vs std, and fresh's `widen` set-algebra.
+    // The engine tests moved under `src/` with the code they cover and are wired
+    // through `src/root.zig`; the only test still local to the harness is
+    // `stats.zig` (bootstrap-CI + Mann-Whitney dominance), so pull it in here.
     std.testing.refAllDecls(@This());
-    _ = search;
-    _ = @import("simd_test.zig");
-    _ = @import("fresh_test.zig");
-    _ = @import("pathfilter_test.zig"); // glob matcher + type/glob/root path-scope tests
-    _ = @import("grepargs_test.zig"); // rg-compatible argv parser (bundling, no-ops, roots)
-    _ = @import("signals_test.zig"); // cross-language def-detection + generated-file tests
-    _ = @import("stats.zig"); // bootstrap-CI + Mann-Whitney dominance unit tests
+    _ = @import("stats.zig");
 }
 const Index = gist.trigram.Index;
 const Regex = gist.regex.Regex;
@@ -70,7 +61,7 @@ const regex_templates = [_][]const u8{
     "^{0}",    "{0}$",       "^\\s*{0}",   "{0}\\w{2,4}",
 };
 
-const corpus_mod = @import("corpus.zig");
+const corpus_mod = gist.corpus;
 const Corpus = corpus_mod.Corpus;
 const load = corpus_mod.load;
 const out_dir = corpus_mod.out_dir;
@@ -95,7 +86,7 @@ fn gistMatches(idx: *const Index, corpus: *const Corpus, gpa: std.mem.Allocator,
     if (needle.len >= 3) {
         if (idx.queryLiteral(gpa, needle)) |cand| {
             defer gpa.free(cand);
-            try search.parallelVerify(gpa, corpus.docs, cand, needle, out);
+            try verify.parallelVerify(gpa, corpus.docs, cand, needle, out);
             return;
         } else |e| switch (e) {
             error.NeedleTooShort => {},
@@ -105,7 +96,7 @@ fn gistMatches(idx: *const Index, corpus: *const Corpus, gpa: std.mem.Allocator,
     const all = try gpa.alloc(u32, corpus.docs.len);
     defer gpa.free(all);
     for (all, 0..) |*x, i| x.* = @intCast(i);
-    try search.parallelVerify(gpa, corpus.docs, all, needle, out);
+    try verify.parallelVerify(gpa, corpus.docs, all, needle, out);
 }
 
 /// gist's matching docs for a compiled regex: prefilter on the required literal
@@ -440,59 +431,6 @@ pub fn main(init: std.process.Init) !void {
     }
     if (std.mem.eql(u8, mode, "certify")) {
         try certify.run(gpa, io);
-        return;
-    }
-    if (std.mem.eql(u8, mode, "index")) {
-        try cli.runIndex(gpa, io, &default_roots);
-        return;
-    }
-    if (std.mem.eql(u8, mode, "query")) {
-        const needle = it.next() orelse {
-            std.debug.print("usage: query <needle>\n", .{});
-            return;
-        };
-        try cli.runQuery(gpa, io, needle);
-        return;
-    }
-    if (std.mem.eql(u8, mode, "regex")) {
-        const pattern = it.next() orelse {
-            std.debug.print("usage: regex <pattern>\n", .{});
-            return;
-        };
-        try cli.runRegex(gpa, io, pattern);
-        return;
-    }
-    if (std.mem.eql(u8, mode, "rank")) {
-        const needle = it.next() orelse {
-            std.debug.print("usage: rank <needle>\n", .{});
-            return;
-        };
-        try cli.runRank(gpa, io, needle);
-        return;
-    }
-    // `grep [flags] <pattern>` — the agent's `rg -n --no-heading`: emit every
-    // matching line as `path:line:text`, served from the index. One engine for
-    // literal + regex; full flag surface (`-i -w -F -l -c -v -m -A -B -C -t -g
-    // -e --`) parsed by `lines.parseGrep`. See lines.zig for the contract.
-    if (std.mem.eql(u8, mode, "grep")) {
-        var rest: std.ArrayList([]const u8) = .empty;
-        defer rest.deinit(gpa);
-        while (it.next()) |arg| try rest.append(gpa, arg);
-        var parsed = (try lines.parseGrep(gpa, rest.items)) orelse return;
-        defer parsed.deinit(gpa);
-        try lines.runGrep(gpa, io, parsed.pattern, parsed.opts);
-        return;
-    }
-
-    // `rg [flags] <pattern> [PATH...]` — the ripgrep-DEFAULT drop-in over an
-    // arbitrary directory tree (distinct from `grep`'s monorepo-index contract):
-    // rg presentation (filename iff recursive/multi-file, line numbers off unless
-    // -n, rg exit codes), the substrate for the ripgrep-suite differential proof.
-    if (std.mem.eql(u8, mode, "rg")) {
-        var rest: std.ArrayList([]const u8) = .empty;
-        defer rest.deinit(gpa);
-        while (it.next()) |arg| try rest.append(gpa, arg);
-        try rgcompat.run(gpa, io, rest.items);
         return;
     }
 
