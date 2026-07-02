@@ -3,14 +3,32 @@
 Permanent, fail-closed correctness and contract gates — each exits non-zero on
 any violation, so a regression can't ship silently. `scan_regress.sh` and
 `streams.sh` source the shared field registry at
-[`../races/_compete.sh`](../races/_compete.sh); `equality.sh` is a pure
-two-way oracle (gist vs `rg`) and needs no field registry.
+[`../races/_compete.sh`](../races/_compete.sh); `equality.sh` and
+`index_elision_parity.sh` are pure two-way oracles and need no field registry.
 
-| File                | Gate                                                                                                                                                                                                |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `equality.sh`       | **correctness (INDEX path)**: gist ≡ `rg` over a byte-exact corpus snapshot — the soundness oracle                                                                                                 |
-| `scan_regress.sh`   | **correctness (SCAN path) + race**: the no-prefilter live-tree scan ≡ `rg` (exits 1 on FN/FP) + min-of-N vs `rg` + the straggler-balance canary                                                    |
-| `streams.sh`        | **output contract**: results→stdout, diagnostics (`—` summary / `[pipeline]` / guidance)→stderr across the literal, rank, and scan paths — the `rg`-conventional split that makes gist composable |
+| File                          | Gate                                                                                                                                                     |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `equality.sh`                 | **correctness (index vs `rg`)**: gist ≡ `rg` over a byte-exact corpus snapshot — the soundness oracle                                                    |
+| `index_elision_parity.sh`     | **correctness (index vs itself)**: the index-accelerated run ≡ the same query with `--no-index` — proves the index only elides reads, never changes results |
+| `scan_regress.sh`             | **correctness (no-prefilter fallback) + race**: the live-tree full-read fallback ≡ `rg` (exits 1 on FN/FP) + min-of-N speed floor                        |
+| `streams.sh`                  | **output contract**: results→stdout, diagnostics (`--rank`'s timing line / guidance)→stderr — the `rg`-conventional split that makes gist composable    |
+
+## `index_elision_parity.sh` — the index is acceleration-only
+
+Builds a throwaway, hermetic corpus (signal + noise + a `.gitignore`d file +
+a hidden file), indexes it, then for a battery of query shapes (literal,
+regex, caseless, word, count, files-with(out), context, invert,
+only-matching, type-/path-scoped) asserts the auto-indexed run's stdout and
+exit code are byte-identical to the same query run with `--no-index` — plus a
+post-index-edit case proving the freshness overlay still finds a needle that
+arrived after the index was built. Any divergence means the index is
+altering *results*, not just skipping reads, which breaks gist's core safety
+claim.
+
+```bash
+cd pkg/kernels/gist
+bench/gates/index_elision_parity.sh
+```
 
 ## `equality.sh` — the INDEX-path soundness oracle
 
@@ -31,22 +49,21 @@ cd pkg/kernels/gist
 bench/gates/equality.sh 150 1      # gist ≡ rg over a byte-exact corpus snapshot, per needle
 ```
 
-## `scan_regress.sh` — the SCAN-path companion oracle
+## `scan_regress.sh` — the no-prefilter fallback oracle
 
-`equality.sh` proves the **INDEX** path. A regex the trigram index can't
-prefilter at all (`\w{3,8}`, `[a-f0-9]{2,}`, `panic|0x`, …) skips the index and
-scans the live tree directly ([`src/scan/sweep.zig`](../../src/scan/sweep.zig)),
-so `equality.sh`'s proof doesn't cover it — this script is the **SCAN**-path
-oracle:
+`equality.sh` proves the path where the trigram index elides reads. A regex
+the index can't prefilter at all (`\w{3,8}`, `[a-f0-9]{2,}`, `panic|0x`, …)
+gets no elision — the unified `ripgrep/` engine reads and regex-scans every
+candidate itself over the live tree ([`src/scan/sweep.zig`](../../src/scan/sweep.zig)
+drives the parallel read fan-out), so `equality.sh`'s frozen-snapshot proof
+doesn't cover it — this script is the companion oracle:
 
-1. **soundness** — asserts each pattern still **routes** to the scan path
-   (`ROUTING FAIL` ⇒ exit 1 — the test's premise is void if dispatch silently
-   changed), then diffs gist's scan match-set against `rg (?-u)` over the
-   identical corpus and **exits 1 on any FN/FP** (a file `rg` matches past the
-   4 MiB `per_file_cap` is a documented cap-skip, not a failure);
-2. **race** — min-of-N vs `rg` while printing `sweep.zig`'s worker-span Δ, the
-   **straggler canary** that catches any regression of the fused
-   work-stealing pipeline back toward an unbalanced scan.
+1. **soundness** — diffs gist's match-set against plain `rg (?-u)` over the
+   same live roots (gist's tree-walk honors `.gitignore` and hidden-file
+   exclusion exactly like `rg`'s default, so no `--no-ignore`/`--hidden` skew)
+   and **exits 1 on any FN/FP** (a file `rg` matches past the 4 MiB
+   `per_file_cap` is a documented cap-skip, not a failure);
+2. **race** — min-of-N vs `rg` as the speed floor for the full-read path.
 
 Built ReleaseFast (release-vs-release with `rg`).
 
@@ -59,11 +76,11 @@ bench/gates/scan_regress.sh 20      # tighter timing
 ## `streams.sh` — the stdout/stderr output contract
 
 gist brands itself an *agent-friendly* code locator: an agent in a shell does
-`gist search foo --show files > files` and `gist search foo | head`. This
-script reproduces the pre-fix bug (results leaking onto stderr, or diagnostics
-mixed into stdout) as a falsifiable assertion so it can never regress — each
-path is checked for (a) results present on stdout and (b) no diagnostic
-leaking onto stdout.
+`gist foo -l > files` and `gist foo | head`. This script reproduces the
+pre-fix bug (results leaking onto stderr, or diagnostics mixed into stdout)
+as a falsifiable assertion so it can never regress — each invocation is
+checked for (a) results present on stdout and (b) no diagnostic leaking onto
+stdout, with a distinct stderr budget for `--rank`'s timing line.
 
 ```bash
 cd pkg/kernels/gist

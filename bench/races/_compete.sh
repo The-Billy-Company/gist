@@ -104,8 +104,9 @@ compete_kind() { # echoes indexed|unindexed for a tool id
 
 # ── gist binary install ───────────────────────────────────────────────────────
 # compete_install_gist_bin → copy the freshest just-built `gist` CLI (the
-# `index`/`status`/`search` verbs — see src/commands/cli/main.zig)
-# out of the zig cache to ${GIST_BIN}, runnable immediately. Caller builds first;
+# `index`/`status`/`rg` verbs + the bare `gist <pattern>` shorthand — see
+# src/commands/cli/main.zig) out of the zig cache to ${GIST_BIN}, runnable
+# immediately. Caller builds first;
 # this only selects + installs the artifact (the build invocation differs per
 # script). `gist` and `gist-bench` are separate binaries since the engine/bench
 # split (see changelog.d/+engine-out-of-bench-modular-src.changed.md) — the race
@@ -207,7 +208,7 @@ compete_lit_cmd() {
     gitgrep) echo "git -C ${REPO} grep -F -l -- '${n}' -- ${roots}" ;;
     csearch) echo "env CSEARCHINDEX='${CSEARCH_IDX}' csearch -l '\\Q${n}\\E'" ;;
     zoekt) echo "zoekt -index_dir '${ZOEKT_DIR}' -l '\"${n}\"'" ;;
-    gist) echo "${GIST_BIN} search '${n}' --fixed --show files" ;;
+    gist) echo "${GIST_BIN} '${n}' -F -l -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
@@ -223,7 +224,7 @@ compete_rgx_cmd() {
     gitgrep) echo "git -C ${REPO} grep -lP -- '${p}' -- ${roots}" ;;
     csearch) echo "env CSEARCHINDEX='${CSEARCH_IDX}' csearch -l '${p}'" ;;
     zoekt) echo "zoekt -index_dir '${ZOEKT_DIR}' -l 'regex:${p}'" ;;
-    gist) echo "${GIST_BIN} search '${p}' --show files" ;;
+    gist) echo "${GIST_BIN} '${p}' -l -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
