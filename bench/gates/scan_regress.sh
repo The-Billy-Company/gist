@@ -30,8 +30,8 @@
 # Usage: bench/scan_regress.sh [runs]   (default runs=12)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=_compete.sh
-source "${HERE}/_compete.sh"
+# shellcheck source=../races/_compete.sh
+source "${HERE}/../races/_compete.sh"
 
 RUNS="${1:-12}"
 PER_FILE_CAP=$((4 << 20)) # mirrors corpus.zig per_file_cap (4 MiB)

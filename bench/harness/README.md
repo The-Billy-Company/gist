@@ -1,0 +1,58 @@
+# bench/harness
+
+The native `gist-bench` Zig binary (`build.zig`'s `bench_exe`) — a separate
+executable from the production `gist` CLI (`src/commands/cli/main.zig`),
+dispatching three subcommands: `bench`, `verify`, and `certify`.
+
+| File            | Role                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `bench.zig`     | the harness entry point — `bench` (corpus load/build cost/latency slate) and `verify` (emit match sets + corpus snapshot for `../gates/equality.sh`) subcommands |
+| `certify.zig`   | the `certify` subcommand — the microscopic half of the Layer-A optimality certificate                          |
+| `pmu.zig`       | hardware performance counters via Apple's private `kperf` framework (`dlopen`/`std.DynLib`) — cycles + instructions retired |
+| `stats.zig`     | bootstrap-CI + Tukey outlier rejection + Mann-Whitney significance — the statistics engine `certify.zig` (and `../certify/certify_stats.py`, its Python mirror) both report through |
+
+`bench.zig` imports `certify.zig`, which imports `pmu.zig` + `stats.zig` — one
+compilation unit, one executable (`zig-out/bin/gist-bench`).
+
+## `bench` — corpus build + latency slate
+
+Loads a real corpus (every code file under the given dirs), builds the T0
+trigram `Index`, and times the query slate — reporting corpus size, one-time
+build cost, index footprint, and per-query candidate count + median latency:
+20 adversarial literals (rare symbol, dotted ident, 2-byte punctuation,
+guaranteed miss, repeated-char pathological, cross-language keywords) + 30
+regex shapes spanning every feature tier.
+
+```bash
+cd pkg/kernels/gist
+zig build -Doptimize=ReleaseFast bench                  # default Billy source roots
+zig build -Doptimize=ReleaseFast bench -- services libs  # scope to specific dirs
+```
+
+## `verify` — the equality-oracle feeder
+
+Builds the index, then for a fixed slate + `battery_n` random literals sampled
+from the corpus, writes gist's verified matching-file set per needle into
+`.local/gist-verify/` plus the exact indexed file list. The sibling
+[`../gates/equality.sh`](../gates/README.md) drives `rg` over that identical
+file set and diffs — proving the trigram filter has zero false negatives vs
+`rg`.
+
+## `certify` — the microscopic optimality certificate
+
+For each of 11 regex classes (byte-identical to `../certify/certify.sh`'s
+probes), times gist's real verify kernel **single-threaded** over the
+RAM-resident corpus and records retired **cycles + instructions per byte**
+(the bridge number Layers B–C of the certificate roadmap bound), `IPC`, and a
+95% bootstrap-CI median (200 reps, seeded). Hardware counters come from
+`pmu.zig`'s `kperf` binding — **run under `sudo` for cycles**; without root it
+degrades to wall-clock and says so, never failing.
+
+```bash
+sudo pkg/kernels/gist/zig-out/bin/gist-bench certify   # cycles/byte (run from repo root)
+zig build certify                                        # wall-clock fallback (no sudo)
+```
+
+`stats.zig`'s bootstrap-CI + Mann-Whitney implementation is unit-tested under
+`zig build test` (pulled in via `bench.zig`'s own `test` block, since the
+engine tests under `src/` ride `src/root.zig` instead).

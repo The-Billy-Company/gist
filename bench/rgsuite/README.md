@@ -4,33 +4,33 @@ This is the honest, reproducible proof that gist's `rg` verb is a **drop-in
 ripgrep** on the surface it claims to support, benchmarked against real ripgrep
 as both the **correctness oracle** and the **performance baseline**. Two tracks:
 
-- **Track A — correctness.** Replay ripgrep's *own* integration suite
+- **Track A — correctness.** Replay ripgrep's _own_ integration suite
   (`upstream/ripgrep/tests/*.rs`) against `gist rg` and diff byte-for-byte vs the
   installed `rg`. No hardcoded expected strings — ripgrep is the ground truth.
 - **Track B — performance.** Race gist's indexed query path against `rg` (and
   ugrep / ag / GNU-grep / git-grep / csearch / zoekt) on the live monorepo.
-  Scripts live one level up: `../coldquery.sh` (fresh process) and
-  `../headtohead.sh` (warm resident index).
+  Scripts live in the sibling `races/` folder: `../races/coldquery.sh` (fresh
+  process) and `../races/headtohead.sh` (warm resident index).
 
 ## Track A — correctness scoreboard
 
 `rg 15.1.0`, 441 mined `rgtest!` cases (invocations; a multi-command `rgtest!`
 mines one case per command):
 
-| Bucket | Count | Meaning |
-|---|---:|---|
-| **PASS** | 274 | `gist rg` stdout == `rg` stdout, byte-for-byte |
-| **ORDER** | 4 | identical set, dir-walk order only (gist sorts paths) → soft pass |
-| **FAIL** | 0 | a supported-surface divergence (a real bug) |
-| NA | 42 | unsupported **by design** (see boundaries below) |
-| SKIP | 121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal) |
+| Bucket    | Count | Meaning                                                                  |
+| --------- | ----: | ------------------------------------------------------------------------ |
+| **PASS**  |   274 | `gist rg` stdout == `rg` stdout, byte-for-byte                           |
+| **ORDER** |     4 | identical set, dir-walk order only (gist sorts paths) → soft pass        |
+| **FAIL**  |     0 | a supported-surface divergence (a real bug)                              |
+| NA        |    42 | unsupported **by design** (see boundaries below)                         |
+| SKIP      |   121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal) |
 
 **Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 278/278 = 100.0%.**
 Every ripgrep behavior gist claims to implement matches ripgrep exactly.
 
 ### Design boundaries (why NA is honest, not hidden failure)
 
-An NA is only ever assigned to a case that would *otherwise* diverge AND whose
+An NA is only ever assigned to a case that would _otherwise_ diverge AND whose
 divergence is attributable to one of gist's stated scope boundaries — never to
 excuse an in-scope bug. gist **fails loud (exit 2)** on features it can't honor,
 so an NA is a deliberate, announced refusal, not a silent wrong answer. The
@@ -46,10 +46,10 @@ current boundaries:
 5. **ASCII case-folding** — `-i` folds ASCII only; no Unicode case folding, and
    no per-branch `(?i)` across multiple `-e` patterns.
 6. **RE2-style engine** — `-P`/pcre2, lookaround, backreferences (mostly SKIP).
-7. **ignore scope** — a *global* gitignore (`core.excludesFile`) and fd's
+7. **ignore scope** — a _global_ gitignore (`core.excludesFile`) and fd's
    `.fdignore` dialect aren't read; the in-repo hierarchy is (see below).
 8. **type registry** — `--type-list` differs because gist's registry is a
-   documented *superset* of ripgrep's.
+   documented _superset_ of ripgrep's.
 
 ### Surface gist matches ripgrep on (all PASS)
 
@@ -75,29 +75,29 @@ tty/`/dev/null` no), and rg exit codes (0 match / 1 no-match / 2 error).
 Measured with hyperfine, warm page cache. gist queries its persisted trigram
 index (reads only candidate files); unindexed tools re-walk the tree each call.
 
-**Cold — fresh process** (`../coldquery.sh`), geomean speedup, gist wins:
+**Cold — fresh process** (`../races/coldquery.sh`), geomean speedup, gist wins:
 
-| vs | speedup | wins |
-|---|---:|---:|
-| ripgrep | **3.3×** | 11/11 |
-| git grep | 2.4× | 10/11 |
-| ag | 5.5× | 11/11 |
-| GNU grep | 9.9× | 11/11 |
-| ugrep | 13.0× | 11/11 |
+| vs       |  speedup |  wins |
+| -------- | -------: | ----: |
+| ripgrep  | **3.3×** | 11/11 |
+| git grep |     2.4× | 10/11 |
+| ag       |     5.5× | 11/11 |
+| GNU grep |     9.9× | 11/11 |
+| ugrep    |    13.0× | 11/11 |
 
 Selective needles reach 4–6× vs rg (e.g. `pgxpool` 6.1×); ubiquitous tokens
 (`func`, `})`) approach parity — gist must read the many candidate files they hit.
 
-**Warm — resident RAM index** (`../headtohead.sh`), the agent-session model
+**Warm — resident RAM index** (`../races/headtohead.sh`), the agent-session model
 gist is built for, geomean speedup, gist wins:
 
-| vs | speedup | wins |
-|---|---:|---:|
-| ripgrep | **~1770×** | 20/20 |
-| git grep | ~1400× | 20/20 |
-| ag | ~2640× | 20/20 |
-| GNU grep | ~5460× | 20/20 |
-| ugrep | ~6600× | 20/20 |
+| vs       |    speedup |  wins |
+| -------- | ---------: | ----: |
+| ripgrep  | **~1770×** | 20/20 |
+| git grep |     ~1400× | 20/20 |
+| ag       |     ~2640× | 20/20 |
+| GNU grep |     ~5460× | 20/20 |
+| ugrep    |     ~6600× | 20/20 |
 
 The honest headline: gist is a **correct rg drop-in (100% supported-surface
 parity)** that is **~3.3× faster cold** and **~1770× faster warm-resident** than
@@ -116,8 +116,8 @@ python3 run.py --list-na      # also print every NA + its reason
 python3 dbg.py <test-name>…   # side-by-side rg vs gist for one case
 
 # Track B — performance
-../coldquery.sh               # fresh-process race
-../headtohead.sh              # warm resident-index race
+../races/coldquery.sh               # fresh-process race
+../races/headtohead.sh              # warm resident-index race
 ```
 
 `spec.json` is **self-contained** (every fixture byte base64-embedded), so
@@ -130,10 +130,10 @@ python3 mine.py [path/to/ripgrep/tests]   # default: <repo>/.etc/ripgrep/tests
 
 ## Files
 
-| File | Role |
-|---|---|
-| `spec.json` | frozen, self-contained mined spec (441 `rgtest!` invocations) |
-| `mine.py` | regenerates `spec.json` from a ripgrep checkout |
-| `run.py` | differential runner + honest scoreboard (the gate) |
-| `dbg.py` | single-test side-by-side inspector |
-| `results.json` | last `run.py` per-test verdicts (regenerated each run) |
+| File           | Role                                                          |
+| -------------- | ------------------------------------------------------------- |
+| `spec.json`    | frozen, self-contained mined spec (441 `rgtest!` invocations) |
+| `mine.py`      | regenerates `spec.json` from a ripgrep checkout               |
+| `run.py`       | differential runner + honest scoreboard (the gate)            |
+| `dbg.py`       | single-test side-by-side inspector                            |
+| `results.json` | last `run.py` per-test verdicts (regenerated each run)        |

@@ -20,8 +20,8 @@
 #         RUNS=40 bench/certify.sh    (tighten the CIs)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=_compete.sh
-source "${HERE}/_compete.sh"
+# shellcheck source=../races/_compete.sh
+source "${HERE}/../races/_compete.sh"
 need_hyperfine
 
 RUNS="${RUNS:-20}"

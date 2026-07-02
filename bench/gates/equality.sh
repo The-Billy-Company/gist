@@ -14,7 +14,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-KERNEL="$(cd "${HERE}/.." && pwd)"
+KERNEL="$(cd "${HERE}/../.." && pwd)" # gates/ → bench/ → gist root
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
 BATTERY="${1:-120}"
 SEED="${2:-1}"

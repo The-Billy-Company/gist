@@ -15,8 +15,8 @@
 # Usage: bench/streams.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=_compete.sh
-source "${HERE}/_compete.sh"
+# shellcheck source=../races/_compete.sh
+source "${HERE}/../races/_compete.sh"
 
 command -v rg > /dev/null || { echo "ripgrep (rg) not found on PATH"; exit 1; }
 

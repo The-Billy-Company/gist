@@ -44,7 +44,7 @@
 
 # ── locations ────────────────────────────────────────────────────────────────
 COMPETE_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL="$(cd "${COMPETE_HERE}/.." && pwd)"
+KERNEL="$(cd "${COMPETE_HERE}/../.." && pwd)" # races/ → bench/ → gist root
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
 OUT="${REPO}/.local/gist-verify"          # gist's persisted index + paths.list live here
 COMPETE_DIR="${REPO}/.local/gist-compete" # competitor indices live here
