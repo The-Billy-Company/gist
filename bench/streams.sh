@@ -5,8 +5,8 @@
 # pattern" guidance) go to **stderr** — exactly the convention `rg` follows.
 #
 # Why this is a gate, not a nicety: gist brands itself an *agent-friendly* code
-# locator, and an agent in a shell does `gist query foo > files` and
-# `gist query foo | head`. When results went to stderr (the pre-fix bug), the
+# locator, and an agent in a shell does `gist search foo --show files > files`
+# and `gist search foo | head`. When results went to stderr (the pre-fix bug), the
 # first captured an EMPTY file and the second showed the summary line mixed into
 # the paths. This script reproduces that bug as a falsifiable assertion so it
 # can never regress: each path is checked for (a) results present on stdout and
@@ -21,7 +21,7 @@ source "${HERE}/_compete.sh"
 command -v rg > /dev/null || { echo "ripgrep (rg) not found on PATH"; exit 1; }
 
 echo "building gist (ReleaseFast) + copying binary…"
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- regex 'zzqqxxvBUILDONLY' > /dev/null 2>&1) \
+(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- search 'zzqqxxvBUILDONLY' --show files > /dev/null 2>&1) \
   || { echo "  build failed (engine may be mid-refactor by a coworker) — aborting"; exit 1; }
 compete_install_gist_bin || exit 1
 # The index must exist for the literal/rank index paths (scan path needs none).
@@ -55,17 +55,19 @@ check() {
 echo
 echo "### OUTPUT CONTRACT — results→stdout, diagnostics→stderr (the gate) ###"
 # Selective literal (index path) — a symbol that exists in this very repo.
-check "literal query (index path)"   1 -- query WalletService
+check "literal query (index path)"   1 -- search WalletService --show files
 # Ranked output (index path) — at least one ranked row.
-check "rank (index path)"            1 -- rank WalletService
+check "rank (index path)"            1 -- search WalletService --rank
 # No-prefilter regex (live-tree SCAN path) — many matches + a [pipeline] line.
-check "regex scan (no-prefilter)"    1 -- regex '[0-9]{4}'
-# Sub-trigram literal (<3 B ⇒ SCAN path).
-check "literal scan (<3 B needle)"   1 -- query '})'
+check "regex scan (no-prefilter)"    1 -- search '[0-9]{4}' --show files
+# Sub-trigram literal (<3 B ⇒ SCAN path). `--fixed` forces the literal path the
+# old `query` verb always took — `})` carries regex metachars, so without it the
+# auto-detector (correctly, rg-consistently) reads it as an unbalanced regex.
+check "literal scan (<3 B needle)"   1 -- search '})' --fixed --show files
 
 echo
-echo "### REGRESSION — the original bug: 'gist query … > file' must be NON-EMPTY ###"
-"${GIST_BIN}" query WalletService > "${O}" 2> /dev/null
+echo "### REGRESSION — the original bug: 'gist search … > file' must be NON-EMPTY ###"
+"${GIST_BIN}" search WalletService --show files > "${O}" 2> /dev/null
 npaths="$(grep -c . "${O}")"
 if [[ -s "${O}" ]]; then
   printf "  %-34s %s\n" "stdout-only capture non-empty" "ok (${npaths} paths)"
@@ -79,7 +81,7 @@ fi
 # appear in any file — including this script itself (a fixed literal here would
 # match streams.sh and stop being a miss).
 miss="zq${RANDOM}${RANDOM}_no_such_symbol_${RANDOM}qz"
-"${GIST_BIN}" query "${miss}" > "${O}" 2> "${E}"
+"${GIST_BIN}" search "${miss}" --show files > "${O}" 2> "${E}"
 if [[ ! -s "${O}" ]] && grep -qE '^— 0 matches' "${E}"; then
   printf "  %-34s %s\n" "guaranteed-miss clean stdout" "ok"
 else

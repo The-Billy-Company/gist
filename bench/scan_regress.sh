@@ -57,7 +57,7 @@ command -v rg > /dev/null || {
 need_hyperfine
 
 echo "building gist (ReleaseFast) + copying binary…"
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- regex 'zzqqxxv' > /dev/null 2>&1) \
+(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- search 'zzqqxxv' --show files > /dev/null 2>&1) \
   || {
     echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
     exit 1
@@ -66,7 +66,7 @@ compete_install_gist_bin || exit 1
 
 fsize() { stat -f%z "$1" 2> /dev/null || stat -c%s "$1" 2> /dev/null || echo 0; }
 # scan.zig's `  [pipeline] …` line — workers + worker-span Δ (the straggler canary).
-gist_balance() { "${GIST_BIN}" regex "$1" 2>&1 | grep '^  \[pipeline\]' | sed 's/^  //'; }
+gist_balance() { "${GIST_BIN}" search "$1" --show files 2>&1 | grep '^  \[pipeline\]' | sed 's/^  //'; }
 
 cd "${REPO}" || exit 1
 echo
@@ -74,7 +74,7 @@ echo "### SOUNDNESS — gist scan ≡ rg over identical corpus (the gate) ###"
 fails=0
 for p in "${PATTERNS[@]}"; do
   # One gist run; split its stderr into the match list + the scan diagnostic.
-  "${GIST_BIN}" regex "${p}" > /tmp/gist_scan_out.txt 2>&1
+  "${GIST_BIN}" search "${p}" --show files > /tmp/gist_scan_out.txt 2>&1
   # Routing guard: the scan path (and only it) prints "live tree". If a dispatch
   # change re-routes this pattern to the index path, the test's premise is void.
   if ! grep -q 'live tree' /tmp/gist_scan_out.txt; then
@@ -110,7 +110,7 @@ printf "  %-22s %9s %9s %8s   %s\n" pattern gist_ms rg_ms verdict balance
 for p in "${PATTERNS[@]}"; do
   gj="$(mktemp)"
   rj="$(mktemp)"
-  hyperfine -w3 -r"${RUNS}" --export-json "${gj}" "{ \"${GIST_BIN}\" regex '${p}' ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
+  hyperfine -w3 -r"${RUNS}" --export-json "${gj}" "{ \"${GIST_BIN}\" search '${p}' --show files ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
   hyperfine -w3 -r"${RUNS}" --export-json "${rj}" "{ rg --no-ignore --hidden '(?-u)${p}' -l ${GLOBS[*]} -- ${ROOTS[*]} ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
   gm="$(python3 -c "import json;print('%.1f'%(min(json.load(open('${gj}'))['results'][0]['times'])*1000))" 2> /dev/null || echo '?')"
   rr="$(python3 -c "import json;print('%.1f'%(min(json.load(open('${rj}'))['results'][0]['times'])*1000))" 2> /dev/null || echo '?')"
