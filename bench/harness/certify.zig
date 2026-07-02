@@ -33,25 +33,14 @@ const default_roots = corpus_mod.default_roots;
 const reps = 200;
 const warmup = 20;
 
-const Kind = enum { literal, regex };
-
-/// One probe per *regex class* gist competes on (the "every type of operation"
-/// axis). Each names the class so the certificate maps 1:1 to the claim.
-const Probe = struct { class: []const u8, kind: Kind, pattern: []const u8 };
-
-const probes = [_]Probe{
-    .{ .class = "literal-rare", .kind = .literal, .pattern = "pgxpool" },
-    .{ .class = "literal-dotted", .kind = .literal, .pattern = "context.Context" },
-    .{ .class = "literal-common", .kind = .literal, .pattern = "func" },
-    .{ .class = "literal-punct2", .kind = .literal, .pattern = "})" },
-    .{ .class = "regex-decl", .kind = .regex, .pattern = "func\\s+\\w+\\(" },
-    .{ .class = "regex-dotted", .kind = .regex, .pattern = "pgxpool\\.\\w+" },
-    .{ .class = "regex-anchored", .kind = .regex, .pattern = "^func\\s" },
-    .{ .class = "regex-classcount", .kind = .regex, .pattern = "[0-9a-f]{8}-[0-9a-f]{4}" },
-    .{ .class = "regex-alternation", .kind = .regex, .pattern = "return|continue|break" },
-    .{ .class = "regex-dense-scan", .kind = .regex, .pattern = "\\w{3,8}" },
-    .{ .class = "regex-eol", .kind = .regex, .pattern = ";$" },
-};
+// Single source of truth for the eleven probe classes — Layer D
+// (`../lowerbound/lowerbound.zig`) imports the same file so the two layers
+// can never drift apart. See `probes.zig`'s header for why this used to be a
+// hand-duplicated array.
+const probes_mod = @import("probes.zig");
+const Kind = probes_mod.Kind;
+const Probe = probes_mod.Probe;
+const probes = probes_mod.probes;
 
 const Row = struct {
     class: []const u8,
@@ -266,10 +255,10 @@ fn writeArtifacts(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mod.
     try md.appendSlice(gpa, "## What this certifies (and what it doesn't)\n\n");
     try md.appendSlice(gpa, "A *certificate of optimality* is built in four layers, cheapest evidence first:\n\n");
     try md.appendSlice(gpa, "- **Layer A — empirical dominance (this document).** gist is *fastest in its\n  class* on real workloads, established with statistics, not a single mean: a\n  95% bootstrap-CI on every median + a Mann-Whitney significance test, **fail-\n  closed** (a win requires a lower median AND p<0.05). Two halves: *microscopic*\n  (retired cycles + instructions per byte for the single-thread verify kernel —\n  the bridge number Layers B–C bound) and *macroscopic* (process-vs-process vs\n  the field, the end-to-end claim).\n");
-    try md.appendSlice(gpa, "- **Layer B — port-optimality.** the hot loop's instruction selection + port\n  pressure match the static microarchitectural bound (llvm-mca). _pending._\n");
-    try md.appendSlice(gpa, "- **Layer C — roofline.** cycles/byte sits on the hardware ceiling (memory\n  bandwidth or compute), so no implementation on this chip can go faster. _pending._\n");
-    try md.appendSlice(gpa, "- **Layer D — algorithmic lower bound.** the algorithm matches the\n  information-theoretic floor for the operation. _pending._\n\n");
-    try md.appendSlice(gpa, "Honesty rule: this is a *fit + dominance* certificate. \"Fastest it can\n  mathematically be\" is the limit Layers B–D converge toward; until they land,\n  this document claims exactly what it measures — and surfaces every class where\n  a rival (e.g. an indexed RE2 twin on an ultra-rare cold literal) wins.\n\n");
+    try md.appendSlice(gpa, "- **Layer B — port-optimality.** the hot loop's instruction selection + port\n  pressure match the static microarchitectural bound (llvm-mca). See `bench/portcert/` — run `bench/portcert/portcert.sh` to (re)populate its section below.\n");
+    try md.appendSlice(gpa, "- **Layer C — roofline.** cycles/byte sits on the hardware ceiling (memory\n  bandwidth or compute), so no implementation on this chip can go faster. See `bench/roofline/` — run `zig build roofline` then `bench/roofline/roofline_report.py` to (re)populate its section below.\n");
+    try md.appendSlice(gpa, "- **Layer D — algorithmic lower bound.** the algorithm matches the\n  information-theoretic floor for the operation. See `bench/lowerbound/` — run `zig build lowerbound` then `bench/lowerbound/lowerbound_report.py` to (re)populate its section below.\n\n");
+    try md.appendSlice(gpa, "Honesty rule: this is a *fit + dominance* certificate. Every claim above is\n  a **measured number with a provenance**, never asserted. Note the layering:\n  this run (`zig build certify`) rewrites the WHOLE file, so Layers B-D's\n  sections below only exist if you re-splice them afterward — see each\n  layer's own `bench/<layer>/README.md` for its one-line rerun command.\n\n");
     try md.appendSlice(gpa, "## Layer A — empirical, microscopic (single-thread kernel)\n\n");
     try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- machine: `{s}` · zig `{s}`\n", .{ @tagName(builtin.target.cpu.arch), builtin.zig_version_string }));
     try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- meter: {s}\n", .{meter.note}));
