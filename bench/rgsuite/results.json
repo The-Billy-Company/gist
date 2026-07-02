@@ -490,14 +490,14 @@
  {
   "name": "f45_relative_cwd#2",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "-l",
    "test",
    "--ignore-file",
    ".not-an-ignore"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f45_relative_cwd#3",
@@ -1045,7 +1045,7 @@
  {
   "name": "f917_trim_max_columns_matches",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "FAIL",
   "argv": [
    "--trim",
    "--max-columns-preview",
@@ -1055,7 +1055,7 @@
    "--no-filename",
    "abc"
   ],
-  "detail": "--color=always unsupported by design \u2014 gist emits no ANSI\n"
+  "detail": null
  },
  {
   "name": "f917_trim_max_columns_multi_standard",
@@ -1071,7 +1071,7 @@
    "--no-filename",
    "a\\n?bc"
   ],
-  "detail": "--color=always unsupported by design \u2014 gist emits no ANSI\n"
+  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
  },
  {
   "name": "f917_trim_max_columns_multi_only_matching",
@@ -2729,11 +2729,11 @@
  {
   "name": "type_list",
   "file": "misc.rs",
-  "bucket": "NA",
+  "bucket": "FAIL",
   "argv": [
    "--type-list"
   ],
-  "detail": "--type-list: gist's type registry is a documented superset of ripgrep's\n"
+  "detail": null
  },
  {
   "name": "sort_files",
@@ -3206,7 +3206,7 @@
    "--hyperlink-format=",
    "foo"
   ],
-  "detail": "--color=always unsupported by design \u2014 gist emits no ANSI\n"
+  "detail": "unknown flag --hyperlink-format\n"
  },
  {
   "name": "r428_unrecognized_style#1",
@@ -3384,7 +3384,7 @@
  {
   "name": "r599",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "FAIL",
   "argv": [
    "--color",
    "ansi",
@@ -3400,7 +3400,7 @@
    "^$",
    "input.txt"
   ],
-  "detail": "--color=always unsupported by design \u2014 gist emits no ANSI\n"
+  "detail": null
  },
  {
   "name": "r693_context_in_contextless_mode",
@@ -4199,14 +4199,14 @@
  {
   "name": "r1765",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "FAIL",
   "argv": [
    "x?",
    "--crlf",
    "--color",
    "always"
   ],
-  "detail": "--color=always unsupported by design \u2014 gist emits no ANSI\n"
+  "detail": null
  },
  {
   "name": "r1838_nul_error_with_binary_detection#1",

@@ -12,7 +12,7 @@ A single `rgtest!` body may execute `rg` more than once (`cmd.stdout()`,
 `dir.command()…`, `.pipe(…)`, `.assert_err()`, …). We emit ONE record per rg
 invocation — `<name>`, or `<name>#1`, `<name>#2`, … when a body runs N>1 times —
 all sharing the same fixture. Concatenating multiple invocations into one argv
-(the old behaviour) produced bogus argv like `['--files','--files','a/src']`.
+(the old behavior) produced bogus argv like `['--files','--files','a/src']`.
 
 Regenerate only when bumping the pinned ripgrep the suite tracks:
     python3 mine.py [path/to/ripgrep/tests]   # default: <repo>/.etc/ripgrep/tests
