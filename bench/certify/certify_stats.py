@@ -147,7 +147,16 @@ def collect(results_dir: Path, order: list[tuple[str, str, str]]) -> list[ClassR
             tool = jf.stem.split("__", 1)[1]
             if tool == "gist":
                 continue
-            t = load_times_ms(jf)
+            try:
+                t = load_times_ms(jf)
+            except json.JSONDecodeError:
+                # A rival's hyperfine invocation can fail to export (a transient
+                # spawn/timeout hiccup on a shared box running ~10 coworking
+                # agents) — an empty/truncated JSON, not a real result. Treat
+                # exactly like the pre-existing "rival never ran" case below
+                # (`if t:`) rather than aborting the whole certificate for one
+                # missing cell.
+                continue
             if t:
                 rivals[tool] = t
         out.append(ClassResult(name, kind, pattern, gist, rivals))

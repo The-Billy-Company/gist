@@ -158,12 +158,13 @@ fn cmpStrings(_: void, a: []const u8, b: []const u8) bool {
 }
 
 fn printCorpusHeader(corpus: *const Corpus, load_ns: u64, idx: *const Index, build_ns: u64) void {
-    const idx_bytes = idx.postings.len * @sizeOf(@TypeOf(idx.postings[0]));
+    const idx_bytes = idx.serializedSize();
     std.debug.print("corpus: {d} files · {d:.1} MiB · loaded {d:.0} ms\n", .{
         corpus.docs.len, @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20), ms(load_ns),
     });
-    std.debug.print("index:  {d} postings · {d:.1} MiB ({d:.2}x corpus) · built {d:.0} ms ({d:.1} MiB/s)\n\n", .{
-        idx.postings.len,
+    std.debug.print("index:  {d} postings ({d} distinct trigrams) · {d:.1} MiB ({d:.2}x corpus) · built {d:.0} ms ({d:.1} MiB/s)\n\n", .{
+        idx.posting_count,
+        idx.dir_tri.len,
         @as(f64, @floatFromInt(idx_bytes)) / (1 << 20),
         @as(f64, @floatFromInt(idx_bytes)) / @as(f64, @floatFromInt(@max(corpus.bytes, 1))),
         ms(build_ns),
