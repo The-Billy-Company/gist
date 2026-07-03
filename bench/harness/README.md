@@ -4,12 +4,12 @@ The native `gist-bench` Zig binary (`build.zig`'s `bench_exe`) — a separate
 executable from the production `gist` CLI (`src/commands/cli/main.zig`),
 dispatching three subcommands: `bench`, `verify`, and `certify`.
 
-| File            | Role                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `bench.zig`     | the harness entry point — `bench` (corpus load/build cost/latency slate) and `verify` (emit match sets + corpus snapshot for `../gates/equality.sh`) subcommands |
-| `certify.zig`   | the `certify` subcommand — the microscopic half of the Layer-A optimality certificate                          |
-| `pmu.zig`       | hardware performance counters via Apple's private `kperf` framework (`dlopen`/`std.DynLib`) — cycles + instructions retired |
-| `stats.zig`     | bootstrap-CI + Tukey outlier rejection + Mann-Whitney significance — the statistics engine `certify.zig` (and `../certify/certify_stats.py`, its Python mirror) both report through |
+| File          | Role                                                                                                                                                                                |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bench.zig`   | the harness entry point — `bench` (corpus load/build cost/latency slate) and `verify` (emit match sets + corpus snapshot for `../gates/equality.sh`) subcommands                    |
+| `certify.zig` | the `certify` subcommand — the microscopic half of the Layer-A optimality certificate                                                                                               |
+| `pmu.zig`     | hardware performance counters via Apple's private `kperf` framework (`dlopen`/`std.DynLib`) — cycles + instructions retired                                                         |
+| `stats.zig`   | bootstrap-CI + Tukey outlier rejection + Mann-Whitney significance — the statistics engine `certify.zig` (and `../certify/certify_stats.py`, its Python mirror) both report through |
 
 `bench.zig` imports `certify.zig`, which imports `pmu.zig` + `stats.zig` — one
 compilation unit, one executable (`zig-out/bin/gist-bench`).

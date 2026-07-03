@@ -1,8 +1,8 @@
 # gist/bench/lowerbound — Layer D (algorithmic lower bound)
 
 Layer D of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
-Where Layer A proves gist is *empirically fastest in its class*, Layer C that
-its cycles/byte sit on the *hardware* ceiling, Layer D proves the last thing
+Where Layer A proves gist is _empirically fastest in its class_, Layer C that
+its cycles/byte sit on the _hardware_ ceiling, Layer D proves the last thing
 left to prove: gist's **algorithm** matches the **information-theoretic floor**
 for the search operation — no algorithm on any machine can do asymptotically
 less work.
@@ -12,19 +12,19 @@ less work.
 A **fail-closed, structural byte-touch audit**. `gist-lowerbound` builds the
 trigram index over the real Billy corpus, then for each of the eleven regex
 classes (imported from [`../harness/probes.zig`](../harness/probes.zig), the
-*same* module [`certify.zig`](../harness/certify.zig) uses, so Layer D lines
+_same_ module [`certify.zig`](../harness/certify.zig) uses, so Layer D lines
 up 1:1 with Layers A–C by construction, not by a hand-kept copy) it measures:
 
 - **candidate bytes** — Σ lengths of the documents the trigram filter admits
   (the full-scan verify floor);
-- **passes / candidate byte** — the bytes an *independent single-pass
-  re-implementation* touches ÷ candidate bytes;
+- **passes / candidate byte** — the bytes an _independent single-pass
+  re-implementation_ touches ÷ candidate bytes;
 - **cand%** — candidate bytes ÷ corpus bytes (the pruning the filter achieves).
 
 `lowerbound_report.py` splices the formal argument + the measured table into
 `.local/gist-verify/CERTIFICATE.md` as the `## Layer D` section.
 
-No production code is instrumented. The audit is *structural*: it re-implements
+No production code is instrumented. The audit is _structural_: it re-implements
 the fused scan in the harness with a byte counter, asserts (a) that reference's
 match verdict equals gist's **real** verify (`simd.contains` / `Regex.docMatch`)
 on **every** document — a disagreement is a real correctness defect — and (b)
@@ -39,16 +39,16 @@ not asserted:
 
 1. **The verify stage is Ω(candidate bytes), in one pass.** Deciding whether a
    pattern occurs in a candidate document forces you, in the worst (adversarial)
-   case, to examine every one of its bytes: an unread byte could *be* the match,
-   or could *break* one — the adversary sets it after you commit. gist's fused
+   case, to examine every one of its bytes: an unread byte could _be_ the match,
+   or could _break_ one — the adversary sets it after you commit. gist's fused
    byte-class DFA (`src/regex/dfa.zig`) reads each candidate byte **exactly
    once** — `passes ≡ 1.0000` across all seven DFA classes on the 160 MiB
-   corpus — with none of the memchr-then-rescan *double* byte-traffic a per-line
+   corpus — with none of the memchr-then-rescan _double_ byte-traffic a per-line
    matcher pays. The SIMD literal path (`src/scan/simd.zig`) reads **≤ N**
    (`passes` 0.18–0.71: vector first/last-byte skips + early exit on first hit).
 
 2. **The trigram filter makes total work sublinear.** gist never touches most of
-   the corpus, because the index prunes candidates *before* verify runs. On this
+   the corpus, because the index prunes candidates _before_ verify runs. On this
    corpus the selective classes admit as little as **4.35%** of the bytes
    (`regex-dotted`) — the other 95.65% are pruned untouched.
 
@@ -83,11 +83,11 @@ paper over by weakening the assertion.
 ## Prior art
 
 - **Donald E. Knuth, James H. Morris, Vaughan R. Pratt, "Fast Pattern Matching
-  in Strings" (1977), *SIAM Journal on Computing* 6(2):323–350.** The
+  in Strings" (1977), _SIAM Journal on Computing_ 6(2):323–350.** The
   linear-time exact string-match result; establishes the Θ(n+m) worst case and,
-  with it, the Ω(n) worst-case *read* floor for verifying a match.
+  with it, the Ω(n) worst-case _read_ floor for verifying a match.
 - **Robert S. Boyer, J Strother Moore, "A Fast String Searching Algorithm"
-  (1977), *Communications of the ACM* 20(10):762–772.** Sublinear on *average*
+  (1977), _Communications of the ACM_ 20(10):762–772.** Sublinear on _average_
   (skips via the bad-character / good-suffix heuristics — Ω(n/m) reads minimum),
   but still Ω(n) in the adversarial worst case. gist's SIMD literal path is in
   this family (first/last-byte vector skips), which is why it reads **≤** the

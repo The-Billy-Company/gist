@@ -51,7 +51,10 @@ command -v rg > /dev/null || {
 need_hyperfine
 
 echo "building gist (ReleaseFast) + copying binary…"
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- 'zzqqxxv' -l > /dev/null 2>&1; true) \
+(
+  cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- 'zzqqxxv' -l > /dev/null 2>&1
+  true
+) \
   || {
     echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
     exit 1

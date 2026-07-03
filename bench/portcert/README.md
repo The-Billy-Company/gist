@@ -1,21 +1,21 @@
 # bench/portcert — Layer B (port-optimality, static)
 
 Layer B of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
-Where Layer A proves gist is *empirically fastest in its class*, Layer B
-proves *why the hot loop can't be beaten on this instruction sequence*: it
+Where Layer A proves gist is _empirically fastest in its class_, Layer B
+proves _why the hot loop can't be beaten on this instruction sequence_: it
 asks `llvm-mca` for the static microarchitectural bound (port pressure /
 reciprocal throughput) of gist's two hot loops and checks Layer A's measured
 cycles/byte against it.
 
 ## What it is
 
-| File                          | Role                                                                                          |
-| ------------------------------ | ----------------------------------------------------------------------------------------------- |
-| `portcert.sh`                 | cross-compiles the two probes to two reference microarchitectures, runs `llvm-mca`, writes `portcert.csv`/`portcert.json`, splices the certificate |
-| `portcert_report.py`          | renders the `## Layer B` markdown section from `portcert.json` and splices it into `.local/gist-verify/CERTIFICATE.md` |
-| `probes/simd_contains.zig`    | byte-faithful copy of the hot loop in [`../../src/scan/simd.zig`](../../src/scan/simd.zig)'s `contains` — throughput-bound |
-| `probes/dfa_step.zig`         | byte-faithful copy of the hot loop in [`../../src/regex/dfa.zig`](../../src/regex/dfa.zig)'s `docMatch` — latency-bound |
-| `probes_test.zig`             | the drift guard — asserts each probe is bit-identical to the real production function it copies, over adversarial random inputs (`zig build test`) |
+| File                       | Role                                                                                                                                               |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `portcert.sh`              | cross-compiles the two probes to two reference microarchitectures, runs `llvm-mca`, writes `portcert.csv`/`portcert.json`, splices the certificate |
+| `portcert_report.py`       | renders the `## Layer B` markdown section from `portcert.json` and splices it into `.local/gist-verify/CERTIFICATE.md`                             |
+| `probes/simd_contains.zig` | byte-faithful copy of the hot loop in [`../../src/scan/simd.zig`](../../src/scan/simd.zig)'s `contains` — throughput-bound                         |
+| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/regex/dfa.zig`](../../src/regex/dfa.zig)'s `docMatch` — latency-bound                            |
+| `probes_test.zig`          | the drift guard — asserts each probe is bit-identical to the real production function it copies, over adversarial random inputs (`zig build test`) |
 
 **Why cross-compiled reference cores, not this machine.** This dev box is
 Apple Silicon, and LLVM ships **no real scheduling model for any Apple CPU** —

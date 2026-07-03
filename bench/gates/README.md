@@ -6,12 +6,12 @@ any violation, so a regression can't ship silently. `scan_regress.sh` and
 [`../races/_compete.sh`](../races/_compete.sh); `equality.sh` and
 `index_elision_parity.sh` are pure two-way oracles and need no field registry.
 
-| File                          | Gate                                                                                                                                                     |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `equality.sh`                 | **correctness (index vs `rg`)**: gist ≡ `rg` over a byte-exact corpus snapshot — the soundness oracle                                                    |
-| `index_elision_parity.sh`     | **correctness (index vs itself)**: the index-accelerated run ≡ the same query with `--no-index` — proves the index only elides reads, never changes results |
-| `scan_regress.sh`             | **correctness (no-prefilter fallback) + race**: the live-tree full-read fallback ≡ `rg` (exits 1 on FN/FP) + min-of-N speed floor                        |
-| `streams.sh`                  | **output contract**: results→stdout, diagnostics (`--rank`'s timing line / guidance)→stderr — the `rg`-conventional split that makes gist composable    |
+| File                      | Gate                                                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `equality.sh`             | **correctness (index vs `rg`)**: gist ≡ `rg` over a byte-exact corpus snapshot — the soundness oracle                                                       |
+| `index_elision_parity.sh` | **correctness (index vs itself)**: the index-accelerated run ≡ the same query with `--no-index` — proves the index only elides reads, never changes results |
+| `scan_regress.sh`         | **correctness (no-prefilter fallback) + race**: the live-tree full-read fallback ≡ `rg` (exits 1 on FN/FP) + min-of-N speed floor                           |
+| `streams.sh`              | **output contract**: results→stdout, diagnostics (`--rank`'s timing line / guidance)→stderr — the `rg`-conventional split that makes gist composable        |
 
 ## `index_elision_parity.sh` — the index is acceleration-only
 
@@ -22,7 +22,7 @@ only-matching, type-/path-scoped) asserts the auto-indexed run's stdout and
 exit code are byte-identical to the same query run with `--no-index` — plus a
 post-index-edit case proving the freshness overlay still finds a needle that
 arrived after the index was built. Any divergence means the index is
-altering *results*, not just skipping reads, which breaks gist's core safety
+altering _results_, not just skipping reads, which breaks gist's core safety
 claim.
 
 ```bash
@@ -75,7 +75,7 @@ bench/gates/scan_regress.sh 20      # tighter timing
 
 ## `streams.sh` — the stdout/stderr output contract
 
-gist brands itself an *agent-friendly* code locator: an agent in a shell does
+gist brands itself an _agent-friendly_ code locator: an agent in a shell does
 `gist foo -l > files` and `gist foo | head`. This script reproduces the
 pre-fix bug (results leaking onto stderr, or diagnostics mixed into stdout)
 as a falsifiable assertion so it can never regress — each invocation is

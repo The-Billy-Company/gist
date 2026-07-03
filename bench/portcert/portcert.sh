@@ -31,10 +31,10 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL="$(cd "${HERE}/../.." && pwd)"     # portcert/ → bench/ → gist root
+KERNEL="$(cd "${HERE}/../.." && pwd)" # portcert/ → bench/ → gist root
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
-OUT="${REPO}/.local/gist-verify"          # shared with Layer A (CERTIFICATE.md)
-WORK="${OUT}/portcert"                     # our emitted .s + llvm-mca logs
+OUT="${REPO}/.local/gist-verify" # shared with Layer A (CERTIFICATE.md)
+WORK="${OUT}/portcert"           # our emitted .s + llvm-mca logs
 CERT="${OUT}/CERTIFICATE.md"
 CSV="${OUT}/portcert.csv"
 JSON="${OUT}/portcert.json"
@@ -57,7 +57,10 @@ EOF
 fi
 MCA_VERSION="$("${MCA}" --version 2> /dev/null | awk '/LLVM version/{print $NF; exit}')"
 
-command -v zig > /dev/null || { echo "portcert: zig not on PATH — cannot cross-compile probes." >&2; exit 0; }
+command -v zig > /dev/null || {
+  echo "portcert: zig not on PATH — cannot cross-compile probes." >&2
+  exit 0
+}
 
 mkdir -p "${WORK}"
 echo "portcert · Layer B (static µarch port bound) · llvm-mca ${MCA_VERSION:-?}"
@@ -82,10 +85,16 @@ PROBES=(
 # NEON `.16b`=16 on aarch64).
 bytes_per_iter() { # <probe> <asm_region_file>
   local probe="$1" region="$2"
-  if [[ "${probe}" == dfa_step ]]; then echo 1; return; fi
-  if grep -q 'zmm' "${region}"; then echo 64
-  elif grep -q 'ymm' "${region}"; then echo 32
-  elif grep -q '\.16b\|xmm\|q[0-9]' "${region}"; then echo 16
+  if [[ "${probe}" == dfa_step ]]; then
+    echo 1
+    return
+  fi
+  if grep -q 'zmm' "${region}"; then
+    echo 64
+  elif grep -q 'ymm' "${region}"; then
+    echo 32
+  elif grep -q '\.16b\|xmm\|q[0-9]' "${region}"; then
+    echo 16
   else echo 0; fi
 }
 
@@ -119,9 +128,9 @@ for pspec in "${PROBES[@]}"; do
     asm="${WORK}/${probe}.${disp}.s"
     log="${WORK}/${probe}.${disp}.mca.txt"
 
-    ( cd "${KERNEL}" && zig build-obj "bench/portcert/probes/${probe}.zig" \
-        -target "${triple}" -mcpu="${zig_cpu}" -O ReleaseFast \
-        -femit-asm="${asm}" -fno-emit-bin ) 2> "${WORK}/${probe}.${disp}.build.txt" || {
+    (cd "${KERNEL}" && zig build-obj "bench/portcert/probes/${probe}.zig" \
+      -target "${triple}" -mcpu="${zig_cpu}" -O ReleaseFast \
+      -femit-asm="${asm}" -fno-emit-bin) 2> "${WORK}/${probe}.${disp}.build.txt" || {
       echo "  ${probe}/${disp}: cross-compile FAILED (see build log) — skipping." >&2
       continue
     }

@@ -7,12 +7,12 @@ executed**; it defines the tool registry, the shared `ROOTS`/`XDIRS` scoping,
 and the per-tool invocation helpers (`compete_lit_cmd`, `compete_rgx_cmd`,
 `hf_mean`, …) that every race and gate script in `bench/` builds on.
 
-| File                    | Race                                                                                                      |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `_compete.sh`           | shared competitor registry — locations, tool roster, fairness scoping, invocation helpers (sourced only)  |
-| `headtohead.sh`         | **warm**: gist's resident-index p50 vs the unindexed scanners at their warm fastest (the long-lived agent-session model) |
-| `coldquery.sh`          | **cold literal**: fresh-process gist vs csearch/zoekt (indexed) + rg/ugrep/ag/ggrep/git-grep (unindexed)  |
-| `regex_headtohead.sh`   | **cold regex**: same field, gist's byte-class DFA vs RE2 (csearch/zoekt) and PCRE (`-P`) / `(?-u)`        |
+| File                  | Race                                                                                                                     |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `_compete.sh`         | shared competitor registry — locations, tool roster, fairness scoping, invocation helpers (sourced only)                 |
+| `headtohead.sh`       | **warm**: gist's resident-index p50 vs the unindexed scanners at their warm fastest (the long-lived agent-session model) |
+| `coldquery.sh`        | **cold literal**: fresh-process gist vs csearch/zoekt (indexed) + rg/ugrep/ag/ggrep/git-grep (unindexed)                 |
+| `regex_headtohead.sh` | **cold regex**: same field, gist's byte-class DFA vs RE2 (csearch/zoekt) and PCRE (`-P`) / `(?-u)`                       |
 
 ## Scenarios
 

@@ -25,7 +25,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../races/_compete.sh
 source "${HERE}/../races/_compete.sh"
 
-command -v rg > /dev/null || { echo "ripgrep (rg) not found on PATH"; exit 1; }
+command -v rg > /dev/null || {
+  echo "ripgrep (rg) not found on PATH"
+  exit 1
+}
 
 echo "building gist (ReleaseFast) + copying binary…"
 # stdin closed: a socket- or pipe-backed fd 0 (some CI/agent shells, never a
@@ -33,13 +36,17 @@ echo "building gist (ReleaseFast) + copying binary…"
 # which gist matches byte-for-byte for parity) and blocks forever waiting for
 # EOF that never comes — exactly the failure mode this smoke build must avoid.
 (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- 'zzqqxxvBUILDONLY' -l < /dev/null > /dev/null 2>&1) \
-  || { echo "  build failed (engine may be mid-refactor by a coworker) — aborting"; exit 1; }
+  || {
+    echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
+    exit 1
+  }
 compete_install_gist_bin || exit 1
 # The index must exist for the read-elision + --rank paths (the plain walk needs none).
 [[ -f "${OUT}/index.gist" ]] || (cd "${REPO}" && "${GIST_BIN}" index > /dev/null 2>&1)
 
 cd "${REPO}" || exit 1
-O="$(mktemp)"; E="$(mktemp)"
+O="$(mktemp)"
+E="$(mktemp)"
 trap 'rm -f "${O}" "${E}"' EXIT
 fails=0
 
@@ -47,10 +54,12 @@ fails=0
 # stdin is closed so a rootless invocation never mistakes the pty for a piped
 # stream and blocks on it (`readableStdin()`, see main.zig's implicit path).
 check() {
-  local label="$1" minlines="$2" maxerr="$3"; shift 4
+  local label="$1" minlines="$2" maxerr="$3"
+  shift 4
   "${GIST_BIN}" "$@" < /dev/null > "${O}" 2> "${E}"
   local olines elines
-  olines="$(grep -c . "${O}")"; elines="$(grep -c . "${E}")"
+  olines="$(grep -c . "${O}")"
+  elines="$(grep -c . "${E}")"
   local status="ok"
   if [[ "${olines}" -lt "${minlines}" ]]; then status="FAIL: stdout had ${olines} lines (<${minlines})"; fi
   if [[ "${elines}" -gt "${maxerr}" ]]; then status="FAIL: stderr had ${elines} line(s) (>${maxerr}): $(head -1 "${E}")"; fi
@@ -61,14 +70,14 @@ check() {
 echo
 echo "### OUTPUT CONTRACT — results→stdout; stderr silent except --rank's timing line ###"
 # Selective literal (index-accelerated read-elision path) — a symbol that exists in this very repo.
-check "literal query (index-accelerated)"  1 0 -- WalletService -l
+check "literal query (index-accelerated)" 1 0 -- WalletService -l
 # Ranked output (index-backed) — at least one ranked row, exactly one timing line on stderr.
-check "rank (index-backed)"                1 1 -- WalletService --rank
+check "rank (index-backed)" 1 1 -- WalletService --rank
 # No-prefilter regex — many matches, still zero stderr.
-check "regex query"                        1 0 -- '[0-9]{4}' -l
+check "regex query" 1 0 -- '[0-9]{4}' -l
 # Sub-trigram literal (<3 B). `-F` forces the literal path rather than an
 # unbalanced-regex parse error (`})` carries regex metachars).
-check "literal (<3 B needle)"              1 0 -- '})' -F -l
+check "literal (<3 B needle)" 1 0 -- '})' -F -l
 
 echo
 echo "### REGRESSION — the original bug: 'gist … > file' must be NON-EMPTY ###"

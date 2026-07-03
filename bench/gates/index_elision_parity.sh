@@ -71,7 +71,9 @@ chk() {
     return
   fi
   if diff -q "${WORK}/.a" "${WORK}/.b" > /dev/null; then
-    printf "  ok    %-22s (%s lines)\n" "${label}" "$(wc -l < "${WORK}/.a" | tr -d ' ')"
+    local lines
+    lines=$(wc -l < "${WORK}/.a" | tr -d ' ')
+    printf "  ok    %-22s (%s lines)\n" "${label}" "${lines}"
   else
     printf "  FAIL  %-22s stdout differs:\n" "${label}"
     diff "${WORK}/.a" "${WORK}/.b" | head -12 | sed 's/^/        /'
@@ -81,20 +83,20 @@ chk() {
 
 echo
 echo "### index-elided ≡ full live read (the gate) ###"
-chk "literal"          needle_alpha
-chk "literal-lines"    -n needle_alpha
-chk "regex"            'needle_\w+'
-chk "caseless"         -i needle_alpha
-chk "word"             -w needle_alpha
-chk "count"            -c needle_alpha
-chk "files-with"       -l needle_alpha
-chk "files-without"    --files-without-match needle_alpha
-chk "context"          -C1 needle_alpha
-chk "invert"           -v needle_alpha
-chk "only-matching"    -o needle_alpha
-chk "no-match"         zzz_nonexistent_qxv
-chk "type-scoped"      -tzig needle_alpha
-chk "path-scoped"      needle_alpha libs/deep
+chk "literal" needle_alpha
+chk "literal-lines" -n needle_alpha
+chk "regex" 'needle_\w+'
+chk "caseless" -i needle_alpha
+chk "word" -w needle_alpha
+chk "count" -c needle_alpha
+chk "files-with" -l needle_alpha
+chk "files-without" --files-without-match needle_alpha
+chk "context" -C1 needle_alpha
+chk "invert" -v needle_alpha
+chk "only-matching" -o needle_alpha
+chk "no-match" zzz_nonexistent_qxv
+chk "type-scoped" -tzig needle_alpha
+chk "path-scoped" needle_alpha libs/deep
 
 # Freshness: append the needle to a file that had NONE at index time. The index's
 # trigram data for it is now stale (says "no needle"); the freshness overlay must
@@ -102,8 +104,8 @@ chk "path-scoped"      needle_alpha libs/deep
 # a silent false negative. Both runs must still agree.
 sleep 1
 printf '\nfn late() void {} // needle_alpha arrives post-index\n' >> libs/noise_7.zig
-chk "freshness-gained"  needle_alpha
-chk "freshness-lines"   -n needle_alpha
+chk "freshness-gained" needle_alpha
+chk "freshness-lines" -n needle_alpha
 
 echo
 if [[ "${fails}" -eq 0 ]]; then
