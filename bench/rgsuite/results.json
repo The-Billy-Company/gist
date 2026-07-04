@@ -480,24 +480,24 @@
  {
   "name": "f45_relative_cwd#1",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "-l",
    "test"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f45_relative_cwd#2",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "-l",
    "test",
    "--ignore-file",
    ".not-an-ignore"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f45_relative_cwd#3",
