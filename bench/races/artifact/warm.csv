@@ -1,0 +1,41 @@
+needle,tool,ms,gist_ms,ratio
+pgxpool,rg,186.3,0.215,866.5x
+pgxpool,gitgrep,310.4,0.215,1443.7x
+context.Context,rg,193.8,0.414,468.1x
+context.Context,gitgrep,311.1,0.414,751.4x
+func ,rg,227.5,0.808,281.6x
+func ,gitgrep,267.8,0.808,331.4x
+TODO,rg,186.3,0.078,2388.5x
+TODO,gitgrep,284.6,0.078,3648.7x
+queryLiteral,rg,192.0,0.192,1000.0x
+queryLiteral,gitgrep,281.3,0.192,1465.1x
+rate_limit,rg,187.3,0.711,263.4x
+rate_limit,gitgrep,291.3,0.711,409.7x
+zzqxv,rg,185.4,0.002,92700.0x
+zzqxv,gitgrep,285.8,0.002,142900.0x
+ctx,rg,200.0,0.209,956.9x
+ctx,gitgrep,290.1,0.209,1388.0x
+://,rg,194.9,0.205,950.7x
+://,gitgrep,276.5,0.205,1348.8x
+func(,rg,194.6,0.564,345.0x
+func(,gitgrep,275.1,0.564,487.8x
+return nil,rg,193.2,0.716,269.8x
+return nil,gitgrep,289.7,0.716,404.6x
+SELECT,rg,188.3,0.173,1088.4x
+SELECT,gitgrep,271.9,0.173,1571.7x
+import,rg,268.8,0.518,518.9x
+import,gitgrep,298.7,0.518,576.6x
+}),rg,226.6,2.096,108.1x
+}),gitgrep,271.0,2.096,129.3x
+AAAAAA,rg,202.8,0.169,1200.0x
+AAAAAA,gitgrep,281.4,0.169,1665.1x
+goroutine,rg,185.6,0.525,353.5x
+goroutine,gitgrep,276.7,0.525,527.0x
+panic(,rg,182.8,0.169,1081.7x
+panic(,gitgrep,284.1,0.169,1681.1x
+Result<,rg,187.9,0.068,2763.2x
+Result<,gitgrep,272.6,0.068,4008.8x
+def ,rg,203.9,0.788,258.8x
+def ,gitgrep,286.3,0.788,363.3x
+.unwrap(),rg,183.6,0.153,1200.0x
+.unwrap(),gitgrep,273.1,0.153,1785.0x

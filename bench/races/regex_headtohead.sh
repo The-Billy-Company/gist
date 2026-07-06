@@ -85,7 +85,9 @@ for row in "${slate[@]}"; do
     ms="$(hf_mean 2 8 "${cmd}")"
     spd="$(ratio "${ms}" "${gist_ms}")"
     kind="$(compete_kind "${t}")"
-    echo "${label},${pat},${t},${kind},${ms},${gist_ms},${spd}" >> "${csv}"
+    # Quote the pattern: several patterns contain commas (`\w{3,8}`, `[a-f0-9]{2,}`)
+    # which would otherwise split into extra CSV columns and misalign every field.
+    echo "${label},\"${pat}\",${t},${kind},${ms},${gist_ms},${spd}" >> "${csv}"
     if [[ "${ms}" != "?" && "${gist_ms}" != "?" ]]; then
       SUM[${t}]="$(python3 -c "import math;print(${SUM[${t}]}+math.log(${ms}/${gist_ms}))")"
       CNT[${t}]=$((CNT[${t}] + 1))

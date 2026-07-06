@@ -125,3 +125,86 @@ python3 "${HERE}/certify_stats.py" "${WORK}" \
   --meta "${WORK}/meta.json"
 
 echo "macroscopic section appended to ${CERT}"
+
+# ── reproducibility artifacts — a certificate a third party can regenerate from
+# committed bytes: raw samples + the machine/tool/corpus provenance that produced
+# them (check_artifacts.py enforces this set). ──
+echo "emitting reproducibility metadata…"
+mkdir -p "${OUT}/raw"
+cp -f "${WORK}"/*.json "${OUT}/raw/" 2> /dev/null || true # raw per-cell hyperfine samples
+
+{
+  printf 'zig %s\n' "$(cd "${KERNEL}" && zig version 2> /dev/null || echo '?')"
+  printf 'rg %s\n' "$(rg --version 2> /dev/null | head -1 | awk '{print $2}')"
+  printf 'hyperfine %s\n' "$(hyperfine --version 2> /dev/null | awk '{print $2}')"
+  if have csearch; then v="$(go version -m "$(command -v csearch)" 2> /dev/null | awk '/codesearch/{print $3; exit}')"; printf 'csearch %s\n' "${v:-installed}"; fi
+  if have zoekt; then v="$(go version -m "$(command -v zoekt)" 2> /dev/null | awk '/sourcegraph\/zoekt/{print $3; exit}')"; printf 'zoekt %s\n' "${v:-installed}"; fi
+  have ugrep && printf 'ugrep %s\n' "$(ugrep --version 2> /dev/null | head -1 | awk '{print $2}')"
+  have ag && printf 'ag %s\n' "$(ag --version 2> /dev/null | head -1 | awk '{print $3}')"
+  have ggrep && printf 'ggrep %s\n' "$(ggrep --version 2> /dev/null | head -1 | awk '{print $NF}')"
+  printf 'git %s\n' "$(git --version 2> /dev/null | awk '{print $3}')"
+} > "${OUT}/tool-versions.txt"
+
+python3 - "${PATHS_LIST}" "${REPO}" "${OUT}/corpus-manifest.tsv" "${OUT}/machine.json" "${RUNS}" "${WARMUP}" "${roots_str}" << 'PY'
+import sys, os, json, platform, subprocess
+paths_list, repo, manifest, machine_json, runs, warmup, roots = sys.argv[1:8]
+n = tot = 0
+with open(manifest, "w") as mf:
+    mf.write("path\tsize_bytes\n")
+    try: raw = open(paths_list, "rb").read()
+    except OSError: raw = b""
+    for pb in raw.split(b"\0"):
+        if not pb: continue
+        p = pb.decode("utf-8", "surrogateescape")
+        try: sz = os.path.getsize(os.path.join(repo, p))
+        except OSError: sz = 0
+        mf.write(f"{p}\t{sz}\n"); n += 1; tot += sz
+def sysctl(k):
+    try: return subprocess.check_output(["sysctl", "-n", k], text=True).strip()
+    except Exception: return ""
+def head():
+    try: return subprocess.check_output(["git", "-C", repo, "rev-parse", "HEAD"], text=True).strip()
+    except Exception: return "unknown"
+fs = "unknown"
+try:
+    if platform.system() == "Darwin":
+        for ln in subprocess.check_output(["diskutil", "info", "/"], text=True).splitlines():
+            if "File System Personality" in ln: fs = ln.split(":", 1)[1].strip(); break
+    else:
+        fs = subprocess.check_output(["stat", "-f", "-c", "%T", "/"], text=True).strip()
+except Exception: pass
+machine = {
+    "cpu_model": sysctl("machdep.cpu.brand_string") or platform.processor() or "unknown",
+    "cpu_count": int(sysctl("hw.ncpu") or os.cpu_count() or 0),
+    "ram_bytes": int(sysctl("hw.memsize") or 0),
+    "os": f"{platform.system()} {platform.release()}", "kernel": platform.release(),
+    "filesystem": fs, "git_commit": head(),
+    "corpus_file_count": n, "corpus_total_bytes": tot,
+    "runs": int(runs), "warmup": int(warmup), "roots": roots,
+}
+open(machine_json, "w").write(json.dumps(machine, indent=2) + "\n")
+print(f"  machine.json: {machine['cpu_model']} · {machine['cpu_count']} cores · corpus {n} files / {tot} B")
+PY
+
+python3 - "${OUT}/raw" "${OUT}/command-log.txt" << 'PY'
+import sys, os, json, glob
+raw_dir, out = sys.argv[1], sys.argv[2]
+lines = []
+for jf in sorted(glob.glob(os.path.join(raw_dir, "*.json"))):
+    try: doc = json.load(open(jf))
+    except Exception: continue
+    cmd = (doc.get("results") or [{}])[0].get("command")
+    if cmd: lines.append(f"{os.path.basename(jf)}\t{cmd}")
+open(out, "w").write("\n".join(lines) + "\n")
+print(f"  command-log.txt: {len(lines)} timed commands")
+PY
+
+# Publish a committed snapshot when asked (CERT_PUBLISH_DIR is crate-relative).
+if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
+  pub="${KERNEL}/${CERT_PUBLISH_DIR}"
+  mkdir -p "${pub}/raw"
+  cp -f "${CERT}" "${MACRO_CSV}" "${OUT}/machine.json" "${OUT}/tool-versions.txt" \
+    "${OUT}/corpus-manifest.tsv" "${OUT}/command-log.txt" "${pub}/"
+  cp -f "${OUT}/raw/"*.json "${pub}/raw/" 2> /dev/null || true
+  echo "published reproducible certificate → ${pub}"
+fi
