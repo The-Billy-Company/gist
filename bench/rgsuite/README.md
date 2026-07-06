@@ -1,7 +1,9 @@
 # gist ⇄ ripgrep drop-in proof (`rgsuite`)
 
-This is the honest, reproducible proof that gist's `rg` verb is a **drop-in
-ripgrep** on the surface it claims to support, benchmarked against real ripgrep
+This is the honest, reproducible measurement of how close gist's `rg` verb is to
+a **drop-in ripgrep** on the surface it claims to support (currently **98.6%**
+byte-for-byte, with 4 known divergences — see the scoreboard), benchmarked against
+real ripgrep
 as both the **correctness oracle** and the **performance baseline**. Two tracks:
 
 - **Track A — correctness.** Replay ripgrep's _own_ integration suite
@@ -19,14 +21,17 @@ mines one case per command):
 
 | Bucket    | Count | Meaning                                                                  |
 | --------- | ----: | ------------------------------------------------------------------------ |
-| **PASS**  |   274 | `gist rg` stdout == `rg` stdout, byte-for-byte                           |
-| **ORDER** |     4 | identical set, dir-walk order only (gist sorts paths) → soft pass        |
-| **FAIL**  |     0 | a supported-surface divergence (a real bug)                              |
-| NA        |    42 | unsupported **by design** (see boundaries below)                         |
+| **PASS**  |   275 | `gist rg` stdout == `rg` stdout, byte-for-byte                           |
+| **ORDER** |     3 | identical set, dir-walk order only (gist sorts paths) → soft pass        |
+| **FAIL**  |     4 | a supported-surface divergence (a real bug — see below)                  |
+| NA        |    38 | unsupported **by design** (see boundaries below)                         |
 | SKIP      |   121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal) |
 
-**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 278/278 = 100.0%.**
-Every ripgrep behavior gist claims to implement matches ripgrep exactly.
+**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 278/282 = 98.6%.**
+Four supported-surface cases still diverge from ripgrep, so this is **not yet
+zero-FAIL**: `f917_trim_max_columns_matches`, `type_list`, `r599`, `r1765`. Until
+they are fixed or reclassified NA with recorded rationale, gist is a
+**98.6%-parity** drop-in on its supported surface, not a byte-identical one.
 
 ### Design boundaries (why NA is honest, not hidden failure)
 
@@ -99,8 +104,9 @@ gist is built for, geomean speedup, gist wins:
 | GNU grep |     ~5460× | 20/20 |
 | ugrep    |     ~6600× | 20/20 |
 
-The honest headline: gist is a **correct rg drop-in (100% supported-surface
-parity)** that is **~3.3× faster cold** and **~1770× faster warm-resident** than
+The honest headline: gist is a **near-drop-in rg (98.6% supported-surface parity,
+4 known FAILs)** that is **~3.3× faster cold** and **~1770× faster warm-resident**
+than
 ripgrep — the "40×" claim sits comfortably between the one-shot and resident
 models and is conservative for gist's intended long-lived agent-session use.
 

@@ -248,7 +248,18 @@ need_hyperfine() { have hyperfine || {
 #      aborts hyperfine. wc over a few hundred paths is microseconds — uniform,
 #      negligible overhead for all tools.
 hf_mean() {
-  local warmup="$1" runs="$2" cmd="$3" js
+  local warmup="$1" runs="$2" cmd="$3" js rc
+  # Fail-closed pre-check: the drain pipe above intentionally neutralizes a needle
+  # MISS (exit 1) but would equally mask a HARD error (exit >=2 — unknown flag,
+  # crash, bad regex, unreadable path). Run the command once first: 0/1 are valid,
+  # >=2 disqualifies the cell with "?" instead of timing a failure path.
+  eval "${cmd}" > /dev/null 2>&1
+  rc=$?
+  if [[ "${rc}" -ge 2 ]]; then
+    echo "  cell failed (exit ${rc}), excluded: ${cmd}" >&2
+    echo "?"
+    return
+  fi
   js="$(mktemp)"
   hyperfine --warmup "${warmup}" --runs "${runs}" --export-json "${js}" \
     "{ ${cmd} ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
