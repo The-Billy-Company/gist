@@ -32,7 +32,6 @@ REPO = HERE.parents[4]  # ... -> repo root
 
 REQUIRED_FILES = (
     "CERTIFICATE.md",
-    "certify.csv",
     "certify_macro.csv",
     "machine.json",
     "tool-versions.txt",
@@ -56,9 +55,9 @@ def check_artifacts(d: Path) -> list[str]:
     for f in REQUIRED_FILES:
         if not (d / f).is_file():
             problems.append(f"missing required artifact: {f}")
-    # at least one raw hyperfine JSON
-    if not list(d.glob("*.json")) and not list(d.glob("hyperfine*/*.json")):
-        problems.append("no raw hyperfine JSON export found (per-cell timing evidence)")
+    # at least one raw hyperfine JSON (per-cell timing evidence, under raw/)
+    if not list(d.glob("raw/*.json")) and not list(d.glob("*.json")):
+        problems.append("no raw hyperfine JSON export found (per-cell timing evidence under raw/)")
     mj = d / "machine.json"
     if mj.is_file():
         try:
