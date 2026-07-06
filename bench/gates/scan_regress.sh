@@ -51,10 +51,12 @@ command -v rg > /dev/null || {
 need_hyperfine
 
 echo "building gist (ReleaseFast) + copying binary…"
-(
-  cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- 'zzqqxxv' -l > /dev/null 2>&1
-  true
-) \
+# Fail-closed: the default install step COMPILES + installs the `gist` binary
+# without running it, so a nonzero exit is an unambiguous build failure. (The old
+# `cli -- 'zzqqxxv' -l` form RAN the fresh binary against a non-matching needle,
+# whose exit 1 is indistinguishable from a compile error's exit 1 — the trailing
+# `true` papered over both, letting compete_install_gist_bin copy a stale binary.)
+(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) \
   || {
     echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
     exit 1

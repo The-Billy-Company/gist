@@ -64,12 +64,23 @@ echo
 
 # one hyperfine JSON per (class, tool); fair wrapper drains output + neutralizes
 # the no-match exit code (see hf_mean in _compete.sh for the rationale).
-bench_one() { # <class> <tool> <cmd>
-  local class="$1" tool="$2" cmd="$3"
+bench_one() { # <class> <tool> <cmd> → 0 timed, 1 hard failure (cell excluded)
+  local class="$1" tool="$2" cmd="$3" rc
   [[ -z "${cmd}" || "${cmd}" = "false" ]] && return 0
+  # Fail-closed pre-check: run the command once and inspect its REAL exit code.
+  # 0 = match, 1 = no match — both valid results. >=2 = a hard error (unknown
+  # flag, crash, bad regex, unreadable path) that the `| wc -l` drain would mask
+  # (the pipe's status is always wc's 0) and hyperfine would then time as a fast
+  # "search". Excluding the cell here is what makes the certificate fail-closed.
+  eval "${cmd}" > /dev/null 2>&1
+  rc=$?
+  if [[ "${rc}" -ge 2 ]]; then
+    echo "  CELL FAILED (exit ${rc}) ${class}/${tool}: ${cmd}" >&2
+    return 1
+  fi
   hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
     --export-json "${WORK}/${class}__${tool}.json" \
-    "{ ${cmd} ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1 || true
+    "{ ${cmd} ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
 }
 
 cd "${REPO}" || exit 1
@@ -82,12 +93,18 @@ for row in "${PROBES[@]}"; do
   else
     gcmd="$(compete_rgx_cmd gist "${pat}")"
   fi
-  bench_one "${class}" gist "${gcmd}"
+  # gist is the subject of the certificate: a hard failure invalidates it, so abort.
+  bench_one "${class}" gist "${gcmd}" || {
+    echo "certificate aborted: gist hard-failed on ${class} (see error above)" >&2
+    exit 1
+  }
   printf "  %-18s " "${class}"
   for t in "${tools[@]}"; do
     if [[ "${kind}" = literal ]]; then
       cmd="$(compete_lit_cmd "${t}" "${pat}")"
     else cmd="$(compete_rgx_cmd "${t}" "${pat}")"; fi
+    # A competitor hard failure warns + excludes that cell (no set -e here), but
+    # does not abort gist's certificate.
     bench_one "${class}" "${t}" "${cmd}"
   done
   echo "done"
