@@ -44,7 +44,7 @@ REQUIRED_MACHINE_KEYS = (
 )
 REQUIRED_TOOLS = ("zig", "rg", "csearch", "zoekt", "hyperfine")
 TRANSCRIBE_MARKERS = re.compile(r"transcrib|hardcod|\bmanual\b|hand-wave|paste (?:it|the)", re.I)
-CSV_READ = re.compile(r"read_csv|DictReader|loadtxt|genfromtxt|csv\.reader|open\([^)]*\.csv")
+CSV_READ = re.compile(r"read_csv|DictReader|loadtxt|genfromtxt|csv\.reader|json\.load|open\([^)]*\.(csv|json)")
 
 
 def check_artifacts(d: Path) -> list[str]:
