@@ -191,7 +191,7 @@ def main():
             fails.append(rec)
         elif b == "NA":
             nas.append((rec["name"], detail))
-    (HERE / "results.json").write_text(json.dumps(results, indent=1))
+    (HERE / "results.json").write_text(json.dumps(results, indent=1) + "\n")
 
     total = sum(buckets.values())
     print(f"=== gist rg vs ripgrep {_rg_version()} — {total} mined tests ===")

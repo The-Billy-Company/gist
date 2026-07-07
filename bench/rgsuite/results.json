@@ -4513,7 +4513,7 @@
    ")(",
    "file"
   ],
-  "detail": "bad pattern\n"
+  "detail": "bad pattern ')(' \u2014 outside gist's linear-time syntax: no lookaround, no backreferences (\\0\u2013\\9; NUL is \\x00), no unrecogn"
  },
  {
   "name": "r2480#3",
@@ -4554,7 +4554,7 @@
    "bar",
    "file"
   ],
-  "detail": "bad pattern\n"
+  "detail": "(?i) on some patterns but not others \u2014 gist compiles one engine; use rg for this\n"
  },
  {
   "name": "r2480#6",
