@@ -21,8 +21,8 @@ mines one case per command):
 
 | Bucket    | Count | Meaning                                                                  |
 | --------- | ----: | ------------------------------------------------------------------------ |
-| **PASS**  |   275 | `gist rg` stdout == `rg` stdout, byte-for-byte                           |
-| **ORDER** |     3 | identical set, dir-walk order only (gist sorts paths) → soft pass        |
+| **PASS**  |   264 | `gist rg` stdout == `rg` stdout, byte-for-byte                           |
+| **ORDER** |    14 | identical set, worker-discovery order only (see below) → soft pass       |
 | **FAIL**  |     4 | a supported-surface divergence (a real bug — see below)                  |
 | NA        |    38 | unsupported **by design** (see boundaries below)                         |
 | SKIP      |   121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal) |
@@ -32,6 +32,15 @@ Four supported-surface cases still diverge from ripgrep, so this is **not yet
 zero-FAIL**: `f917_trim_max_columns_matches`, `type_list`, `r599`, `r1765`. Until
 they are fixed or reclassified NA with recorded rationale, gist is a
 **98.6%-parity** drop-in on its supported surface, not a byte-identical one.
+
+ORDER grew from 3 to 14 when the parallel engine (`pipeline.zig`) switched from
+buffer-then-sort to streaming each hit to stdout the instant a worker finds it —
+the same EPIPE-triggered cooperative cancellation ripgrep's own printer uses, so
+`gist foo | head` can abort the walk instead of finishing the whole tree. The
+trade is worker-discovery order instead of global path-sort order on any
+multi-file query the parallel engine handles; single-worker/small-corpus cases
+(this suite's per-test throwaway fixtures) still happen to land sorted often
+enough that most cases stay PASS.
 
 ### Design boundaries (why NA is honest, not hidden failure)
 

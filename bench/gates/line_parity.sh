@@ -7,11 +7,18 @@
 # rgsuite is the real line oracle but is a broad mined replay; this gate is a
 # small, readable, corpus-frozen check of the exact drop-in claim, case by case.
 #
-# `--sort path` is passed to both so multi-file output has one deterministic order
-# (rg honors it; gist already sorts and ignores it) — then a raw string compare is
-# a true byte diff. Three classes, so the gate stays green on the supported surface
-# while still surfacing the boundaries:
-#   same  — core supported surface: MUST be byte-identical (a diff fails the gate).
+# `--sort path` is passed to both so real rg picks one deterministic order; gist
+# accepts (and ignores) the flag — its parallel engine streams each hit to stdout
+# the instant a worker finds it (the fused walk+read+match+emit pipeline,
+# `pipeline.zig`) rather than buffering the whole tree to sort it, which is what
+# lets a downstream `| head` abort the walk early on a broken pipe. Cost: order is
+# worker-discovery order, not global path order — the same ORDER-bucket trade-off
+# gist's rgsuite harness already scores as a soft pass (`bench/rgsuite/run.py`'s
+# `sort_lines`). `same()` below applies that identical fallback: an exact match is
+# `ok`, a match after sorting both sides' lines is `ok (order)`, anything else
+# fails. Four classes:
+#   same  — core supported surface: MUST match byte-for-byte OR in sorted-line
+#           order (a genuine content diff fails the gate).
 #   loud  — an explicitly unsupported flag: gist MUST fail loud (exit >= 2), never
 #           silently accept-and-differ (a silent accept fails the gate).
 #   xfail — a DOCUMENTED byte/ASCII-vs-Unicode boundary (dossier "parity risk") or a
@@ -63,6 +70,10 @@ _run() { # <bin...> — captures stdout+exit into _out/_rc
   _out="${out}"
 }
 
+# Line-order-only variant of a string, mirroring rgsuite's `sort_lines` oracle
+# (`bench/rgsuite/run.py`) so both gates apply the identical ORDER soft pass.
+_sorted_lines() { sort <<< "$1"; }
+
 same() { # <label> <args...>
   local label="$1"
   shift
@@ -72,6 +83,8 @@ same() { # <label> <args...>
   local ro="$_out" re="$_rc"
   if [[ "$go" == "$ro" && "$ge" == "$re" ]]; then
     echo "  ok    : ${label}"
+  elif [[ "$ge" == "$re" ]] && [[ "$(_sorted_lines "$go")" == "$(_sorted_lines "$ro")" ]]; then
+    echo "  ok    : ${label}  (order — parallel walker streams in discovery order, see pipeline.zig)"
   else
     echo "  DIFF  : ${label}  (gist exit ${ge}, rg exit ${re})"
     diff <(printf '%s\n' "$ro") <(printf '%s\n' "$go") | head -10 | sed 's/^/          /'

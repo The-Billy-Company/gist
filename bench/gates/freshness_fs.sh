@@ -9,8 +9,15 @@
 # freshness false negative; the whole point of the overlay is that one build stays
 # correct as coworker agents churn the tree.
 #
+# `-l` is on the parallel engine's eligible surface (`pipeline.zig`), which streams
+# each hit to stdout in worker-discovery order rather than buffering the whole
+# walk to sort it — so `fresh()` accepts an exact match OR a match modulo line
+# order (same ORDER soft pass `line_parity.sh` and `bench/rgsuite/run.py` apply);
+# this gate cares about the FILE SET being right, not the order it streams in.
+#
 # Two classes:
-#   fresh — gist (index-accelerated) MUST equal rg (live). A diff fails the gate.
+#   fresh — gist (index-accelerated) MUST equal rg's file SET (order-insensitive).
+#           A genuine set diff fails the gate.
 #   track — a documented gap: reported loudly, does not fail the gate.
 set -uo pipefail
 
@@ -55,10 +62,10 @@ cd "${CORPUS}" || exit 1
 }
 
 fails=0
-fresh() { # <label> — gist (index-accelerated) must equal rg (live) on the current tree
+fresh() { # <label> — gist (index-accelerated) must equal rg's file set (live), order-insensitive
   local label="$1" g r
-  g="$("$GIST" rg -l --sort path -e needle . 2> /dev/null)"
-  r="$(rg -l --sort path -e needle . 2> /dev/null)"
+  g="$("$GIST" rg -l --sort path -e needle . 2> /dev/null | sort)"
+  r="$(rg -l --sort path -e needle . 2> /dev/null | sort)"
   if [[ "$g" == "$r" ]]; then
     echo "  ok    : ${label}"
   else

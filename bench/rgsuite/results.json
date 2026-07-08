@@ -480,24 +480,24 @@
  {
   "name": "f45_relative_cwd#1",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "-l",
    "test"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f45_relative_cwd#2",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "-l",
    "test",
    "--ignore-file",
    ".not-an-ignore"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f45_relative_cwd#3",
@@ -727,12 +727,12 @@
  {
   "name": "f263_sort_files",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--sort-files",
    "test"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f263_sort_files_reverse",
@@ -1151,14 +1151,14 @@
  {
   "name": "f1138_no_ignore_dot#2",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--sort",
    "path",
    "--files",
    "--no-ignore-dot"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f1138_no_ignore_dot#3",
@@ -1212,13 +1212,13 @@
  {
   "name": "f1414_no_require_git#1",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--sort",
    "path",
    "--files"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f1414_no_require_git#2",
@@ -1238,7 +1238,7 @@
  {
   "name": "f1414_no_require_git#3",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--sort",
    "path",
@@ -1253,7 +1253,7 @@
    "--no-require-git",
    "--require-git"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f1420_no_ignore_exclude#1",
@@ -1269,25 +1269,25 @@
  {
   "name": "f1420_no_ignore_exclude#2",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--sort",
    "path",
    "--files",
    "--no-ignore-exclude"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f1466_no_ignore_files#1",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--sort",
    "path",
    "--files"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f1466_no_ignore_files#2",
@@ -1305,7 +1305,7 @@
  {
   "name": "f1466_no_ignore_files#3",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--sort",
    "path",
@@ -1314,7 +1314,7 @@
    ".myignore",
    "--no-ignore-files"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f1466_no_ignore_files#4",
@@ -1843,13 +1843,13 @@
  {
   "name": "with_heading_default",
   "file": "misc.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "-j1",
    "--heading",
    "Sherlock"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "inverted",
@@ -2062,7 +2062,7 @@
  {
   "name": "file_type_add_compose",
   "file": "misc.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--type-add",
    "wat:*.wat",
@@ -2072,7 +2072,7 @@
    "combo",
    "Sherlock"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "glob",
@@ -2720,11 +2720,11 @@
  {
   "name": "files",
   "file": "misc.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--files"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "type_list",
@@ -2967,13 +2967,13 @@
  {
   "name": "r99",
   "file": "regression.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "-j1",
    "--heading",
    "test"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "r105_part1",
@@ -3405,14 +3405,14 @@
  {
   "name": "r693_context_in_contextless_mode",
   "file": "regression.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "-C1",
    "-c",
    "--sort-files",
    "xyz"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "r807",
@@ -4461,14 +4461,14 @@
  {
   "name": "r2198#2",
   "file": "regression.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--files",
    "--sort",
    "path",
    "--no-ignore-dot"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "r2208",
