@@ -1,6 +1,6 @@
 # gist/bench/lowerbound — Layer D (algorithmic lower bound)
 
-Layer D of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
+Layer D of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layers-ad).
 Where Layer A proves gist is _empirically fastest in its class_, Layer C that
 its cycles/byte sit on the _hardware_ ceiling, Layer D proves the last thing
 left to prove: gist's **algorithm** matches the **information-theoretic floor**

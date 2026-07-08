@@ -42,14 +42,14 @@ REF="$(mktemp -d)"
 trap 'chmod -R u+rwx "${CORPUS}" 2>/dev/null; rm -rf "${CORPUS}" "${REF}"' EXIT
 
 mkdir -p "${CORPUS}/sub"
-printf 'needle base\n' > "${CORPUS}/base.txt"      # indexed, has needle
-printf 'nothing here\n' > "${CORPUS}/plain.txt"    # indexed, no needle
-printf 'will change\n' > "${CORPUS}/edit.txt"      # indexed, no needle (→ edited)
-printf 'needle doomed\n' > "${CORPUS}/del.txt"     # indexed, has needle (→ deleted)
-printf 'needle movable\n' > "${CORPUS}/ren.txt"    # indexed, has needle (→ renamed)
-printf 'append base\n' > "${CORPUS}/pm_app.txt"    # indexed, no needle (→ preserved-mtime append)
-printf 'sixsix\n' > "${CORPUS}/pm_same.txt"        # indexed, no needle, 7 bytes (→ same-size swap)
-printf 'needle deep\n' > "${CORPUS}/sub/deep.txt"  # indexed, has needle (→ unreadable dir)
+printf 'needle base\n' > "${CORPUS}/base.txt"     # indexed, has needle
+printf 'nothing here\n' > "${CORPUS}/plain.txt"   # indexed, no needle
+printf 'will change\n' > "${CORPUS}/edit.txt"     # indexed, no needle (→ edited)
+printf 'needle doomed\n' > "${CORPUS}/del.txt"    # indexed, has needle (→ deleted)
+printf 'needle movable\n' > "${CORPUS}/ren.txt"   # indexed, has needle (→ renamed)
+printf 'append base\n' > "${CORPUS}/pm_app.txt"   # indexed, no needle (→ preserved-mtime append)
+printf 'sixsix\n' > "${CORPUS}/pm_same.txt"       # indexed, no needle, 7 bytes (→ same-size swap)
+printf 'needle deep\n' > "${CORPUS}/sub/deep.txt" # indexed, has needle (→ unreadable dir)
 
 cd "${CORPUS}" || exit 1
 "$GIST" index > /dev/null 2>&1 || {

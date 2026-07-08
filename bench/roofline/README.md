@@ -1,6 +1,6 @@
 # bench/roofline — Layer C (hardware ceiling)
 
-Layer C of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
+Layer C of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layers-ad).
 Where Layer A proves gist is _empirically fastest in its class_ and Layer B
 that its hot loop matches the static instruction-level bound, Layer C proves
 the last hardware claim: gist's cycles/byte sit on _this machine's_ memory

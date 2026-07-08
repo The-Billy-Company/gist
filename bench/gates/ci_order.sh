@@ -25,8 +25,11 @@ allow_known=0
 for a in "$@"; do case "$a" in
   --gates-only) gates_only=1 ;;
   --allow-known) allow_known=1 ;;
-  *) echo "unknown arg: $a" >&2; exit 2 ;;
-esac; done
+  *)
+    echo "unknown arg: $a" >&2
+    exit 2
+    ;;
+esac done
 
 correctness_failed=0
 run() { # <label> <cmd...>

@@ -137,8 +137,14 @@ cp -f "${WORK}"/*.json "${OUT}/raw/" 2> /dev/null || true # raw per-cell hyperfi
   printf 'zig %s\n' "$(cd "${KERNEL}" && zig version 2> /dev/null || echo '?')"
   printf 'rg %s\n' "$(rg --version 2> /dev/null | head -1 | awk '{print $2}')"
   printf 'hyperfine %s\n' "$(hyperfine --version 2> /dev/null | awk '{print $2}')"
-  if have csearch; then v="$(go version -m "$(command -v csearch)" 2> /dev/null | awk '/codesearch/{print $3; exit}')"; printf 'csearch %s\n' "${v:-installed}"; fi
-  if have zoekt; then v="$(go version -m "$(command -v zoekt)" 2> /dev/null | awk '/sourcegraph\/zoekt/{print $3; exit}')"; printf 'zoekt %s\n' "${v:-installed}"; fi
+  if have csearch; then
+    v="$(go version -m "$(command -v csearch)" 2> /dev/null | awk '/codesearch/{print $3; exit}')"
+    printf 'csearch %s\n' "${v:-installed}"
+  fi
+  if have zoekt; then
+    v="$(go version -m "$(command -v zoekt)" 2> /dev/null | awk '/sourcegraph\/zoekt/{print $3; exit}')"
+    printf 'zoekt %s\n' "${v:-installed}"
+  fi
   have ugrep && printf 'ugrep %s\n' "$(ugrep --version 2> /dev/null | head -1 | awk '{print $2}')"
   have ag && printf 'ag %s\n' "$(ag --version 2> /dev/null | head -1 | awk '{print $3}')"
   have ggrep && printf 'ggrep %s\n' "$(ggrep --version 2> /dev/null | head -1 | awk '{print $NF}')"
