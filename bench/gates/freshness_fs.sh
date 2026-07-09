@@ -42,14 +42,14 @@ REF="$(mktemp -d)"
 trap 'chmod -R u+rwx "${CORPUS}" 2>/dev/null; rm -rf "${CORPUS}" "${REF}"' EXIT
 
 mkdir -p "${CORPUS}/sub"
-printf 'needle base\n' > "${CORPUS}/base.txt"      # indexed, has needle
-printf 'nothing here\n' > "${CORPUS}/plain.txt"    # indexed, no needle
-printf 'will change\n' > "${CORPUS}/edit.txt"      # indexed, no needle (→ edited)
-printf 'needle doomed\n' > "${CORPUS}/del.txt"     # indexed, has needle (→ deleted)
-printf 'needle movable\n' > "${CORPUS}/ren.txt"    # indexed, has needle (→ renamed)
-printf 'append base\n' > "${CORPUS}/pm_app.txt"    # indexed, no needle (→ preserved-mtime append)
-printf 'sixsix\n' > "${CORPUS}/pm_same.txt"        # indexed, no needle, 7 bytes (→ same-size swap)
-printf 'needle deep\n' > "${CORPUS}/sub/deep.txt"  # indexed, has needle (→ unreadable dir)
+printf 'needle base\n' > "${CORPUS}/base.txt"     # indexed, has needle
+printf 'nothing here\n' > "${CORPUS}/plain.txt"   # indexed, no needle
+printf 'will change\n' > "${CORPUS}/edit.txt"     # indexed, no needle (→ edited)
+printf 'needle doomed\n' > "${CORPUS}/del.txt"    # indexed, has needle (→ deleted)
+printf 'needle movable\n' > "${CORPUS}/ren.txt"   # indexed, has needle (→ renamed)
+printf 'append base\n' > "${CORPUS}/pm_app.txt"   # indexed, no needle (→ preserved-mtime append)
+printf 'sixsix\n' > "${CORPUS}/pm_same.txt"       # indexed, no needle, 7 bytes (→ same-size swap)
+printf 'needle deep\n' > "${CORPUS}/sub/deep.txt" # indexed, has needle (→ unreadable dir)
 
 cd "${CORPUS}" || exit 1
 "$GIST" index > /dev/null 2>&1 || {
@@ -101,22 +101,39 @@ printf 'needle\n' > pm_same.txt # 7 bytes == 'sixsix\n', defeats a size-only che
 touch -r "${REF}/pm_same.ref" pm_same.txt
 fresh "preserved-mtime SAME-SIZE overwrite still found"
 
-echo "### tracked divergence — documented, does not fail the gate ###"
-chmod 000 sub
-g="$("$GIST" rg -l --sort path -e needle . 2> /tmp/fresh_ge.$$)"
-ge=$?
-gerr="$(cat /tmp/fresh_ge.$$)"
-rg -l --sort path -e needle . > /dev/null 2> /tmp/fresh_re.$$
-re=$?
-rm -f /tmp/fresh_ge.$$ /tmp/fresh_re.$$
-chmod u+rwx sub
-if [[ -n "$gerr" || "$ge" -ge 1 ]]; then
-  echo "  xpass : unreadable dir reported (gist exit ${ge}, stderr present) — matches rg's diagnostic"
-else
-  echo "  track : unreadable dir is a SILENT traversal failure — gist exit ${ge}, empty stderr;"
-  echo "          rg exits ${re} with a 'Permission denied' warning. A skipped dir with no"
-  echo "          diagnostic is an unsignalled false negative (CANDIDATE BUG: report walk errors)."
-fi
+echo "### walk-error signaling — an unreadable dir must be reported, never silent ###"
+# Both engines discover `sub/` recursively by default (`-l` doesn't disqualify
+# the parallel dispatch — see `pipeline.eligible`), so this must hold whichever
+# one runs. `GIST_NO_PARALLEL` (see that function's doc comment) forces the
+# serial engine for the second pass — the exact gap that let the parallel
+# engine's own `processDir` swallow an EACCES `openat` in silence (fixed
+# alongside `run.zig`'s `reportWalkError`; see `pipeline.zig`'s twin of it).
+walk_error_case() { # <engine label>
+  local engine="$1" g ge gerr re
+  chmod 000 sub
+  g="$("$GIST" rg -l --sort path -e needle . 2> /tmp/fresh_ge.$$)"
+  ge=$?
+  gerr="$(cat /tmp/fresh_ge.$$)"
+  rg -l --sort path -e needle . > /dev/null 2> /tmp/fresh_re.$$
+  re=$?
+  rm -f /tmp/fresh_ge.$$ /tmp/fresh_re.$$
+  chmod u+rwx sub
+  # rg prints `rg: <path>: Permission denied (os error 13)` and exits 2; a dir the
+  # walk can't descend is a POTENTIAL false negative that MUST be signaled. Was a
+  # tracked CANDIDATE BUG (gist skipped it silently, exit 0) — now fixed on both
+  # engines to match rg's diagnostic + exit code.
+  if [[ "$gerr" == *"Permission denied"* && "$ge" == "2" && "$re" == "2" ]]; then
+    echo "  ok    : unreadable dir reported [${engine}] (gist exit ${ge}, 'Permission denied' on stderr) — matches rg"
+  else
+    echo "  FAIL  : unreadable dir not signaled like rg [${engine}] (gist exit ${ge}, stderr=[${gerr}]; rg exit ${re})"
+    fails=$((fails + 1))
+  fi
+}
+unset GIST_NO_PARALLEL
+walk_error_case "parallel/pipeline.zig"
+export GIST_NO_PARALLEL=1
+walk_error_case "serial/run.zig"
+unset GIST_NO_PARALLEL
 
 echo
 if [[ "$fails" -eq 0 ]]; then
