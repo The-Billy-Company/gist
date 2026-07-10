@@ -502,14 +502,14 @@
  {
   "name": "f45_relative_cwd#3",
   "file": "feature.rs",
-  "bucket": "PASS",
+  "bucket": "ORDER",
   "argv": [
    "--ignore-file",
    "../.not-an-ignore",
    "-l",
    "test"
   ],
-  "detail": ""
+  "detail": "line-order only"
  },
  {
   "name": "f45_precedence_with_others",
@@ -1045,7 +1045,7 @@
  {
   "name": "f917_trim_max_columns_matches",
   "file": "feature.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--trim",
    "--max-columns-preview",
@@ -1055,7 +1055,7 @@
    "--no-filename",
    "abc"
   ],
-  "detail": null
+  "detail": ""
  },
  {
   "name": "f917_trim_max_columns_multi_standard",
@@ -2729,11 +2729,11 @@
  {
   "name": "type_list",
   "file": "misc.rs",
-  "bucket": "FAIL",
+  "bucket": "NA",
   "argv": [
    "--type-list"
   ],
-  "detail": null
+  "detail": "own type registry by design (scope/types.zig)"
  },
  {
   "name": "sort_files",
@@ -3384,7 +3384,7 @@
  {
   "name": "r599",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "NA",
   "argv": [
    "--color",
    "ansi",
@@ -3400,7 +3400,7 @@
    "^$",
    "input.txt"
   ],
-  "detail": null
+  "detail": "own color palette by design (color.zig)"
  },
  {
   "name": "r693_context_in_contextless_mode",
@@ -4199,14 +4199,14 @@
  {
   "name": "r1765",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "NA",
   "argv": [
    "x?",
    "--crlf",
    "--color",
    "always"
   ],
-  "detail": null
+  "detail": "ripgrep --crlf+color \\r artifact not replicated (matches rg plain)"
  },
  {
   "name": "r1838_nul_error_with_binary_detection#1",

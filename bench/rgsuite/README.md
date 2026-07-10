@@ -1,10 +1,15 @@
 # gist ⇄ ripgrep drop-in proof (`rgsuite`)
 
 This is the honest, reproducible measurement of how close gist's `rg` verb is to
-a **drop-in ripgrep** on the surface it claims to support (currently **98.6%**
-byte-for-byte, with 4 known divergences — see the scoreboard), benchmarked against
-real ripgrep
-as both the **correctness oracle** and the **performance baseline**. Two tracks:
+a **drop-in ripgrep** on the surface it claims to support (currently **100.0%
+byte-for-byte, zero FAILs** — see the scoreboard), benchmarked against real
+ripgrep as both the **correctness oracle** and the **performance baseline**.
+`run.py` replays the whole suite once per **engine** — the parallel
+work-stealing walk (`pipeline.zig`, gist's default recursive-walk dispatch)
+and the serial fallback (`run.zig`, forced via the internal `GIST_NO_PARALLEL`
+knob) — since the two share the walk/ignore/emit machinery but not the same
+code path, and a single-engine run has already once missed a real regression
+(see "Two engines, one suite" below). Two tracks:
 
 - **Track A — correctness.** Replay ripgrep's _own_ integration suite
   (`upstream/ripgrep/tests/*.rs`) against `gist rg` and diff byte-for-byte vs the
@@ -17,30 +22,40 @@ as both the **correctness oracle** and the **performance baseline**. Two tracks:
 ## Track A — correctness scoreboard
 
 `rg 15.1.0`, 441 mined `rgtest!` cases (invocations; a multi-command `rgtest!`
-mines one case per command):
+mines one case per command), replayed against **both** engines:
 
-| Bucket    | Count | Meaning                                                                  |
-| --------- | ----: | ------------------------------------------------------------------------ |
-| **PASS**  |   264 | `gist rg` stdout == `rg` stdout, byte-for-byte                           |
-| **ORDER** |    14 | identical set, worker-discovery order only (see below) → soft pass       |
-| **FAIL**  |     4 | a supported-surface divergence (a real bug — see below)                  |
-| NA        |    38 | unsupported **by design** (see boundaries below)                         |
-| SKIP      |   121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal) |
+| Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                  |
+| --------- | ------------------------: | -----------------: | ------------------------------------------------------------------------ |
+| **PASS**  |                       264 |                276 | `gist rg` stdout == `rg` stdout, byte-for-byte                           |
+| **ORDER** |                        15 |                  3 | identical set, worker-discovery order only (see below) → soft pass       |
+| **FAIL**  |                         0 |                  0 | a supported-surface divergence (a real bug)                              |
+| NA        |                        41 |                 41 | unsupported **by design** (see boundaries below)                         |
+| SKIP      |                       121 |                121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal) |
 
-**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 278/282 = 98.6%.**
-Four supported-surface cases still diverge from ripgrep, so this is **not yet
-zero-FAIL**: `f917_trim_max_columns_matches`, `type_list`, `r599`, `r1765`. Until
-they are fixed or reclassified NA with recorded rationale, gist is a
-**98.6%-parity** drop-in on its supported surface, not a byte-identical one.
+**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 279/279 = 100.0%
+on both engines — genuinely zero-FAIL**, not just on whichever engine a given
+case happens to dispatch to.
 
-ORDER grew from 3 to 14 when the parallel engine (`pipeline.zig`) switched from
-buffer-then-sort to streaming each hit to stdout the instant a worker finds it —
-the same EPIPE-triggered cooperative cancellation ripgrep's own printer uses, so
-`gist foo | head` can abort the walk instead of finishing the whole tree. The
-trade is worker-discovery order instead of global path-sort order on any
-multi-file query the parallel engine handles; single-worker/small-corpus cases
-(this suite's per-test throwaway fixtures) still happen to land sorted often
-enough that most cases stay PASS.
+ORDER is higher on the parallel engine because it streams each hit to stdout
+the instant a worker finds it — the same EPIPE-triggered cooperative
+cancellation ripgrep's own printer uses, so `gist foo | head` can abort the
+walk instead of finishing the whole tree. The trade is worker-discovery order
+instead of global path-sort order on any multi-file query; the serial engine
+keeps ripgrep's own effective order more often, hence its smaller ORDER count.
+
+### Two engines, one suite (why this isn't redundant)
+
+`pipeline.zig` (the parallel engine) landed a day after a serial-engine-only
+fix closed two rg-parity gaps (`-g`/`--iglob` override, unreadable-directory
+walk-error reporting) — and inherited both bugs unfixed, because its own
+ignore-chain (`Ignore.skipFromVerdict`) and directory-open path were written
+fresh rather than reusing the serial engine's already-fixed code. Every
+recursive-walk case in this suite dispatches to the parallel engine by
+default (`pipeline.eligible`), so a single-engine run of this exact suite
+would have stayed green through that regression — the FAIL only surfaces when
+the suite is forced onto each engine explicitly via `GIST_NO_PARALLEL`. This
+is now permanent: both `run.py` and the `bench/gates/{line_parity,
+freshness_fs}.sh` gates replay their whole case list once per engine.
 
 ### Design boundaries (why NA is honest, not hidden failure)
 
@@ -113,11 +128,11 @@ gist is built for, geomean speedup, gist wins:
 | GNU grep |     ~5460× | 20/20 |
 | ugrep    |     ~6600× | 20/20 |
 
-The honest headline: gist is a **near-drop-in rg (98.6% supported-surface parity,
-4 known FAILs)** that is **~3.3× faster cold** and **~1770× faster warm-resident**
-than
-ripgrep — the "40×" claim sits comfortably between the one-shot and resident
-models and is conservative for gist's intended long-lived agent-session use.
+The honest headline: gist is a **byte-identical drop-in rg (100.0% supported-
+surface parity, zero FAILs on both engines)** that is **~3.3× faster cold** and
+**~1770× faster warm-resident** than ripgrep — the "40×" claim sits comfortably
+between the one-shot and resident models and is conservative for gist's
+intended long-lived agent-session use.
 
 ## Running it
 

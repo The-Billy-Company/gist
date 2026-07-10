@@ -121,43 +121,66 @@ track() { # <label> <reason> <args...> — a documented/tracked divergence: neve
   fi
 }
 
-echo "### core supported surface — must be byte-identical ###"
-same "plain literal" -e foo .
-same "fixed-string -F (regex metachars literal)" -F -e 'foo()' .
-same "multiple -e" -e foo -e alpha .
-same "context -C1" -C1 -e return .
-same "after-context -A1" -A1 -e foo a.txt
-same "before-context -B1" -B1 -e baz a.txt
-same "only-matching -o" -o -e 'f.o' a.txt
-same "count -c" -c -e foo .
-same "count-matches --count-matches" --count-matches -e foo .
-same "word -w" -w -e foo .
-same "ignore-case -i (ASCII)" -i -e hello a.txt
-same "line-regexp -x" -x -e 'foo bar' a.txt
-same "empty-line ^\$" -e '^$' a.txt
-same "replace -r with capture" -r 'X$1X' -e 'f(o)o' a.txt
-same "CRLF --crlf" --crlf -e 'foo$' crlf.txt
-same "hidden --hidden" --hidden -e foo .
-same "no-ignore --no-ignore" --no-ignore -e foo .
-same "non-UTF-8 bytes -a" -a -e foo bin.dat
-same "max-columns-preview (plain)" --max-columns 8 --max-columns-preview -e foo longline.txt
-same "path with colon" -e foo -- 'colon:name.txt'
-same "path with space" -e foo -- 'with space.txt'
-same "path leading dash" -e foo -- '-dash.txt'
+# The whole case list runs once per ENGINE — parallel (pipeline.zig, gist's
+# default recursive-walk path) and serial (run.zig, forced via the internal
+# `GIST_NO_PARALLEL` knob — see `pipeline.eligible`'s doc comment). This is
+# not redundancy: the parallel engine landed a day after a serial-only ignore-
+# parity fix and silently missed porting it (`Ignore.skipFromVerdict` had no
+# whitelist-override params while `Ignore.shouldSkip` did) — a single-engine
+# run of this exact suite would have stayed green throughout that regression,
+# because most cases here dispatch straight to the parallel path by default.
+run_suite() { # <engine label>
+  local engine="$1"
+  echo "### core supported surface — must be byte-identical [${engine}] ###"
+  same "plain literal" -e foo .
+  same "fixed-string -F (regex metachars literal)" -F -e 'foo()' .
+  same "multiple -e" -e foo -e alpha .
+  same "context -C1" -C1 -e return .
+  same "after-context -A1" -A1 -e foo a.txt
+  same "before-context -B1" -B1 -e baz a.txt
+  same "only-matching -o" -o -e 'f.o' a.txt
+  same "count -c" -c -e foo .
+  same "count-matches --count-matches" --count-matches -e foo .
+  same "word -w" -w -e foo .
+  same "ignore-case -i (ASCII)" -i -e hello a.txt
+  same "line-regexp -x" -x -e 'foo bar' a.txt
+  same "empty-line ^\$" -e '^$' a.txt
+  same "replace -r with capture" -r 'X$1X' -e 'f(o)o' a.txt
+  same "CRLF --crlf" --crlf -e 'foo$' crlf.txt
+  same "hidden --hidden" --hidden -e foo .
+  same "no-ignore --no-ignore" --no-ignore -e foo .
+  same "non-UTF-8 bytes -a" -a -e foo bin.dat
+  same "max-columns-preview (plain)" --max-columns 8 --max-columns-preview -e foo longline.txt
+  same "path with colon" -e foo -- 'colon:name.txt'
+  same "path with space" -e foo -- 'with space.txt'
+  same "path leading dash" -e foo -- '-dash.txt'
+  # ripgrep's `Override` whitelist: a `-g`/`--iglob` glob force-includes a hidden or
+  # ignored file it matches (bypasses BOTH filters); a `-t` type only un-hides (it
+  # never un-ignores). Was a tracked CANDIDATE BUG — gist under-included; now byte-
+  # identical to rg's asymmetry on BOTH engines (run.zig `walkDirLinked` +
+  # ignore.zig `shouldSkip`; pipeline.zig `handleEntry` + `skipFromVerdict`).
+  same "glob -g overrides hidden AND ignore" -g '*.txt' -e foo .
+  same "iglob --iglob overrides too (case-insensitive)" --iglob '*.TXT' -e foo .
 
-echo "### unsupported flags — must fail loud (never silently differ) ###"
-loud "multiline -U" -U -e 'foo.bar' .
-loud "pcre2 -P" -P -e foo .
+  echo "### unsupported flags — must fail loud (never silently differ) [${engine}] ###"
+  loud "multiline -U" -U -e 'foo.bar' .
+  loud "pcre2 -P" -P -e foo .
 
-echo "### tracked divergences — documented, do NOT fail the gate ###"
-track "glob -g vs hidden/ignore" "CANDIDATE BUG: gist -g includes hidden/ignored files matching the glob; rg keeps them filtered" -g '*.txt' -e foo .
-track "trim + max-columns-preview + color" "known rgsuite FAIL f917: colored trimmed preview differs" --trim --max-columns 8 --max-columns-preview --color always -e foo longline.txt
-track "Unicode word boundary on non-ASCII" "gist is a byte/ASCII (?-u) engine; rg default \\b is Unicode-aware" -e 'é\b' utf8.txt
-track "Unicode case fold -i on non-ASCII" "gist folds ASCII only; rg default -i folds Unicode" -i -e 'CAFÉ' utf8.txt
+  echo "### tracked divergences — documented, do NOT fail the gate [${engine}] ###"
+  track "trim + max-columns-preview + color" "known rgsuite FAIL f917: colored trimmed preview differs" --trim --max-columns 8 --max-columns-preview --color always -e foo longline.txt
+  track "Unicode word boundary on non-ASCII" "gist is a byte/ASCII (?-u) engine; rg default \\b is Unicode-aware" -e 'é\b' utf8.txt
+  track "Unicode case fold -i on non-ASCII" "gist folds ASCII only; rg default -i folds Unicode" -i -e 'CAFÉ' utf8.txt
+}
+
+unset GIST_NO_PARALLEL
+run_suite "parallel/pipeline.zig"
+export GIST_NO_PARALLEL=1
+run_suite "serial/run.zig"
+unset GIST_NO_PARALLEL
 
 echo
 if [[ "$fails" -eq 0 ]]; then
-  echo "PASS: line-output parity holds on the supported surface; unsupported flags fail loud."
+  echo "PASS: line-output parity holds on the supported surface on BOTH engines; unsupported flags fail loud."
 else
   echo "FAIL: ${fails} supported-surface case(s) diverge or leak — gist is not a byte-identical rg drop-in there."
   exit 1

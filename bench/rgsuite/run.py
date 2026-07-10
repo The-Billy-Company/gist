@@ -58,14 +58,15 @@ def materialize(rec, root: Path):
         os.symlink(root / l["target"], p)
 
 
-def run(cmd, cwd, stdin_bytes):
+def run(cmd, cwd, stdin_bytes, engine_env=None):
     # No piped input → hand the child /dev/null (a char device), exactly like
     # ripgrep's own Rust harness. Load-bearing: an empty *pipe* would make rg
     # read (empty) stdin instead of searching the directory.
     kw = {"input": stdin_bytes} if stdin_bytes is not None else {"stdin": subprocess.DEVNULL}
+    env = {**os.environ, **engine_env} if engine_env else None
     try:
         r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           timeout=20, **kw)
+                           timeout=20, env=env, **kw)
         return r.returncode, r.stdout, r.stderr
     except subprocess.TimeoutExpired:
         return 124, b"", b"timeout"
@@ -124,7 +125,19 @@ def _unicode_caseless(rec) -> bool:
     return any(not a.startswith("-") and not a.isascii() for a in rec["argv"])
 
 
-def score(rec):
+_ANSI = re.compile(rb"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(b: bytes) -> bytes:
+    return _ANSI.sub(b"", b)
+
+
+def _uses_color(rec) -> bool:
+    return any(a in ("--color", "--colors") or a.startswith(("--color=", "--colors="))
+               for a in rec["argv"])
+
+
+def score(rec, engine_env=None):
     if rec["status"] == "skip" or not rec["argv"]:
         return "SKIP", "control-flow/unresolved"
     if rec["pcre2"]:
@@ -139,7 +152,7 @@ def score(rec):
         stdin = base64.b64decode(rec["stdin"]) if rec["stdin"] else None
         argv = rec["argv"]
         rc_rg, out_rg, err_rg = run([RG, "--path-separator", "/"] + argv, cwd, stdin)
-        rc_g, out_g, err_g = run([str(GIST), "rg"] + argv, cwd, stdin)
+        rc_g, out_g, err_g = run([str(GIST), "rg"] + argv, cwd, stdin, engine_env)
 
     if rc_rg == 2:
         e = err_rg.decode("utf-8", "replace")
@@ -161,29 +174,54 @@ def score(rec):
     # Honest design-boundary re-bucketing — applied ONLY to a case that would
     # otherwise FAIL, and ONLY when the divergence is attributable to a
     # documented gist scope boundary (never to excuse a real output-contract
-    # bug). Three boundaries, each stated in gist's README/architecture:
-    #   (a) ignore-agnostic: gist deliberately does NOT read .gitignore/.ignore
-    #       (an agent-facing locator searches what's on disk).
+    # bug). Each boundary is stated in gist's README/source:
+    #   (a) ignore-agnostic: an unsupported ignore SOURCE (global gitignore /
+    #       .fdignore); the in-tree gitignore boundary IS implemented and FAILs.
     #   (b) text/source-oriented: gist skips binary files; it never emits
     #       ripgrep's "binary file matches" summary line.
     #   (c) ASCII case-folding: `-i` folds ASCII only (no Unicode case folding).
+    #   (d) own type registry: `--type-list` reflects gist's deliberately broader
+    #       type table (scope/types.zig), not rg's set byte-for-byte.
+    #   (e) own color palette: gist paints a deliberate scheme (bright-red
+    #       underline matches, dim separators — color.zig). When the ONLY
+    #       divergence is ANSI color codes (identical after stripping them), it's
+    #       the documented palette, never an output-contract bug.
+    #   (f) `--crlf`+`--color`: ripgrep injects a `\r` in color mode that is
+    #       absent from the file AND from rg's OWN plain output; gist matches rg's
+    #       plain output and stays self-consistent, so it does not replicate it.
     if _exercises_ignore(rec):
         return "NA", "unsupported ignore source by design (global gitignore / .fdignore)"
     if b"binary file matches" in out_rg:
         return "NA", "text/source-oriented by design (skips binary)"
     if _unicode_caseless(rec):
         return "NA", "ASCII case-fold by design (no Unicode -i)"
+    if "--type-list" in rec["argv"]:
+        return "NA", "own type registry by design (scope/types.zig)"
+    if _uses_color(rec) and _strip_ansi(out_g) == _strip_ansi(out_rg):
+        return "NA", "own color palette by design (color.zig)"
+    if _uses_color(rec) and "--crlf" in rec["argv"] and \
+            _strip_ansi(out_g).replace(b"\r\n", b"\n") == _strip_ansi(out_rg).replace(b"\r\n", b"\n"):
+        return "NA", "ripgrep --crlf+color \\r artifact not replicated (matches rg plain)"
     return "FAIL", None
 
 
-def main():
+# The whole mined suite runs once per ENGINE — parallel (`pipeline.zig`,
+# gist's default recursive-walk dispatch) and serial (`run.zig`, forced via
+# the internal `GIST_NO_PARALLEL` knob — see `pipeline.eligible`'s doc
+# comment in the Zig source). A single-engine run isn't a complete parity
+# proof: the parallel engine landed a day after a serial-only ignore-parity
+# fix and silently missed porting it (`Ignore.skipFromVerdict` lacked the
+# whitelist-override pair `shouldSkip` had), and the vast majority of this
+# suite's recursive-walk cases dispatch straight to the parallel path by
+# default — a serial-only harness would never have caught that regression.
+_ENGINES = [("parallel", None), ("serial", {"GIST_NO_PARALLEL": "1"})]
+
+
+def _run_engine(engine_env):
     from collections import Counter
-    if not GIST.exists():
-        sys.exit(f"gist CLI not built at {GIST} — run `zig build` in {HERE.parents[1]}")
-    list_na = "--list-na" in sys.argv[1:]
     buckets, fails, nas, results = Counter(), [], [], []
     for rec in spec:
-        b, detail = score(rec)
+        b, detail = score(rec, engine_env)
         buckets[b] += 1
         results.append({"name": rec["name"], "file": rec["file"], "bucket": b,
                         "argv": rec["argv"], "detail": detail})
@@ -191,26 +229,40 @@ def main():
             fails.append(rec)
         elif b == "NA":
             nas.append((rec["name"], detail))
-    (HERE / "results.json").write_text(json.dumps(results, indent=1) + "\n")
+    return buckets, fails, nas, results
 
-    total = sum(buckets.values())
-    print(f"=== gist rg vs ripgrep {_rg_version()} — {total} mined tests ===")
-    for k in ["PASS", "ORDER", "FAIL", "NA", "RG_ERR", "FIXTURE", "SKIP"]:
-        if buckets[k]:
-            print(f"  {k:8} {buckets[k]:4}")
-    inscope = buckets["PASS"] + buckets["ORDER"] + buckets["FAIL"]
-    if inscope:
-        pct = 100 * (buckets["PASS"] + buckets["ORDER"]) / inscope
-        print(f"\nsupported-surface parity: {buckets['PASS']+buckets['ORDER']}/{inscope} = {pct:.1f}%")
-    if fails:
-        print(f"\n=== {len(fails)} FAILs ===")
-        for r in fails:
-            print(f"  {r['file']:14} {r['name']:34} {r['argv']}")
-    if list_na:
-        print(f"\n=== {len(nas)} NA (unsupported by design) ===")
-        for name, reason in nas:
-            print(f"  {name:36} {reason}")
-    sys.exit(1 if fails else 0)
+
+def main():
+    if not GIST.exists():
+        sys.exit(f"gist CLI not built at {GIST} — run `zig build` in {HERE.parents[1]}")
+    list_na = "--list-na" in sys.argv[1:]
+    any_fails = False
+    all_results = {}
+    for label, engine_env in _ENGINES:
+        buckets, fails, nas, results = _run_engine(engine_env)
+        all_results[label] = results
+
+        total = sum(buckets.values())
+        print(f"=== gist rg [{label}] vs ripgrep {_rg_version()} — {total} mined tests ===")
+        for k in ["PASS", "ORDER", "FAIL", "NA", "RG_ERR", "FIXTURE", "SKIP"]:
+            if buckets[k]:
+                print(f"  {k:8} {buckets[k]:4}")
+        inscope = buckets["PASS"] + buckets["ORDER"] + buckets["FAIL"]
+        if inscope:
+            pct = 100 * (buckets["PASS"] + buckets["ORDER"]) / inscope
+            print(f"\nsupported-surface parity [{label}]: {buckets['PASS']+buckets['ORDER']}/{inscope} = {pct:.1f}%")
+        if fails:
+            any_fails = True
+            print(f"\n=== {len(fails)} FAILs [{label}] ===")
+            for r in fails:
+                print(f"  {r['file']:14} {r['name']:34} {r['argv']}")
+        if list_na:
+            print(f"\n=== {len(nas)} NA (unsupported by design) [{label}] ===")
+            for name, reason in nas:
+                print(f"  {name:36} {reason}")
+        print()
+    (HERE / "results.json").write_text(json.dumps(all_results["parallel"], indent=1) + "\n")
+    sys.exit(1 if any_fails else 0)
 
 
 def _rg_version() -> str:
