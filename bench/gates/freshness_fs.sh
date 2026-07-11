@@ -28,9 +28,9 @@ command -v rg > /dev/null || {
   echo "ripgrep (rg) not found on PATH"
   exit 1
 }
-if [[ ! -x "$GIST" ]]; then
+if [[ ! -x "${GIST}" ]]; then
   echo "building gist (ReleaseFast)…"
-  (cd "$KERNEL" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || {
+  (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || {
     echo "gist build failed"
     exit 1
   }
@@ -52,7 +52,7 @@ printf 'sixsix\n' > "${CORPUS}/pm_same.txt"       # indexed, no needle, 7 bytes 
 printf 'needle deep\n' > "${CORPUS}/sub/deep.txt" # indexed, has needle (→ unreadable dir)
 
 cd "${CORPUS}" || exit 1
-"$GIST" index > /dev/null 2>&1 || {
+"${GIST}" index > /dev/null 2>&1 || {
   echo "gist index failed"
   exit 1
 }
@@ -64,13 +64,13 @@ cd "${CORPUS}" || exit 1
 fails=0
 fresh() { # <label> — gist (index-accelerated) must equal rg's file set (live), order-insensitive
   local label="$1" g r
-  g="$("$GIST" rg -l --sort path -e needle . 2> /dev/null | sort)"
+  g="$("${GIST}" rg -l --sort path -e needle . 2> /dev/null | sort)"
   r="$(rg -l --sort path -e needle . 2> /dev/null | sort)"
-  if [[ "$g" == "$r" ]]; then
+  if [[ "${g}" == "${r}" ]]; then
     echo "  ok    : ${label}"
   else
     echo "  FAIL  : ${label}  (freshness divergence vs live rg)"
-    diff <(printf '%s\n' "$r") <(printf '%s\n' "$g") | head -10 | sed 's/^/          /'
+    diff <(printf '%s\n' "${r}") <(printf '%s\n' "${g}") | head -10 | sed 's/^/          /'
     fails=$((fails + 1))
   fi
 }
@@ -111,7 +111,7 @@ echo "### walk-error signaling — an unreadable dir must be reported, never sil
 walk_error_case() { # <engine label>
   local engine="$1" g ge gerr re
   chmod 000 sub
-  g="$("$GIST" rg -l --sort path -e needle . 2> /tmp/fresh_ge.$$)"
+  g="$("${GIST}" rg -l --sort path -e needle . 2> /tmp/fresh_ge.$$)"
   ge=$?
   gerr="$(cat /tmp/fresh_ge.$$)"
   rg -l --sort path -e needle . > /dev/null 2> /tmp/fresh_re.$$
@@ -122,7 +122,7 @@ walk_error_case() { # <engine label>
   # walk can't descend is a POTENTIAL false negative that MUST be signaled. Was a
   # tracked CANDIDATE BUG (gist skipped it silently, exit 0) — now fixed on both
   # engines to match rg's diagnostic + exit code.
-  if [[ "$gerr" == *"Permission denied"* && "$ge" == "2" && "$re" == "2" ]]; then
+  if [[ "${gerr}" == *"Permission denied"* && "${ge}" == "2" && "${re}" == "2" ]]; then
     echo "  ok    : unreadable dir reported [${engine}] (gist exit ${ge}, 'Permission denied' on stderr) — matches rg"
   else
     echo "  FAIL  : unreadable dir not signaled like rg [${engine}] (gist exit ${ge}, stderr=[${gerr}]; rg exit ${re})"
@@ -136,7 +136,7 @@ walk_error_case "serial/run.zig"
 unset GIST_NO_PARALLEL
 
 echo
-if [[ "$fails" -eq 0 ]]; then
+if [[ "${fails}" -eq 0 ]]; then
   echo "PASS: freshness holds — one build stays byte-correct vs live rg across add/edit/delete/rename/preserved-mtime."
 else
   echo "FAIL: ${fails} freshness case(s) diverge from the live tree."

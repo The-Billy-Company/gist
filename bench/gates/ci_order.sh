@@ -22,11 +22,11 @@ cd "${KERNEL}" || exit 1
 
 gates_only=0
 allow_known=0
-for a in "$@"; do case "$a" in
+for a in "$@"; do case "${a}" in
   --gates-only) gates_only=1 ;;
   --allow-known) allow_known=1 ;;
   *)
-    echo "unknown arg: $a" >&2
+    echo "unknown arg: ${a}" >&2
     exit 2
     ;;
 esac done
@@ -44,12 +44,12 @@ run() { # <label> <cmd...>
 }
 
 echo "═══ PHASE 1 · CORRECTNESS ═══"
-if [[ "$gates_only" -eq 0 ]]; then
+if [[ "${gates_only}" -eq 0 ]]; then
   run "zig build test" zig build test
 else
   echo "── zig build test (skipped: --gates-only)"
 fi
-if [[ "$allow_known" -eq 1 ]]; then
+if [[ "${allow_known}" -eq 1 ]]; then
   run "rgsuite parity (check_results.py --allow-fail)" python3 bench/rgsuite/check_results.py --allow-fail
 else
   run "rgsuite parity (check_results.py)" python3 bench/rgsuite/check_results.py
@@ -61,14 +61,14 @@ run "freshness (freshness_fs.sh)" bash bench/gates/freshness_fs.sh
 
 echo
 echo "═══ PHASE 2 · PERFORMANCE (only after correctness is clean) ═══"
-if [[ "$correctness_failed" -ne 0 ]]; then
+if [[ "${correctness_failed}" -ne 0 ]]; then
   echo "SKIPPED: ${correctness_failed} correctness gate(s) failed — a perf verdict over unproven"
   echo "behavior is untrustworthy. Fix correctness (or re-run with --allow-known), then rerun."
   exit 1
 fi
 missing=""
-for t in hyperfine csearch zoekt rg; do command -v "$t" > /dev/null || missing="${missing} ${t}"; done
-if [[ -n "$missing" ]]; then
+for t in hyperfine csearch zoekt rg; do command -v "${t}" > /dev/null || missing="${missing} ${t}"; done
+if [[ -n "${missing}" ]]; then
   echo "SKIPPED: perf tools not on PATH (${missing# }). Correctness passed; the certificate"
   echo "needs the full field (rg/csearch/zoekt) + hyperfine. Install them to certify."
   exit 0
@@ -78,7 +78,7 @@ run "certificate artifacts (check_artifacts.py)" python3 bench/certify/check_art
 run "index-size accounting (index_size_accounting.py)" python3 bench/gates/index_size_accounting.py
 
 echo
-if [[ "$correctness_failed" -eq 0 ]]; then
+if [[ "${correctness_failed}" -eq 0 ]]; then
   echo "OK: correctness clean; performance certificate produced."
 else
   exit 1

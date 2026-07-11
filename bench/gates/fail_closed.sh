@@ -31,12 +31,12 @@ KERNEL="$(cd "${HERE}/../.." && pwd)" # gates/ -> bench/ -> gist root
 run_drained() {
   local out rc
   out="$(mktemp)"
-  bash -c "$1" > "$out" 2>&1
+  bash -c "$1" > "${out}" 2>&1
   rc=$?
-  wc -l < "$out" > /dev/null # uniform, microsecond drain
-  rm -f "$out"
-  [[ "$rc" -le 1 ]] && return 0
-  return "$rc"
+  wc -l < "${out}" > /dev/null # uniform, microsecond drain
+  rm -f "${out}"
+  [[ "${rc}" -le 1 ]] && return 0
+  return "${rc}"
 }
 
 fails=0
@@ -62,24 +62,24 @@ bad "nonexistent_command_xyz_9271" "127     (command not found)"
 
 echo "### fail-closed contract — the wired gist CLI ###"
 GIST="${GIST:-${KERNEL}/zig-out/bin/gist}"
-if [[ ! -x "$GIST" ]]; then
+if [[ ! -x "${GIST}" ]]; then
   echo "  (building gist — ReleaseFast install step)…"
-  (cd "$KERNEL" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || true
+  (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || true
 fi
-if [[ -x "$GIST" ]]; then
+if [[ -x "${GIST}" ]]; then
   corpus="$(mktemp -d)"
   printf 'please find me here\n' > "${corpus}/a.txt"
-  ok "'$GIST' -l -- find '$corpus'" "gist literal, matches (exit 0)"
-  ok "'$GIST' -l -- zznomatchzz '$corpus'" "gist literal, no match (exit 1)"
-  bad "'$GIST' '(' -l -- '$corpus'" "gist unbalanced regex (must fail, not time a parse error)"
-  bad "'$GIST' --definitely-not-a-real-flag -- x '$corpus'" "gist unknown flag (must fail loud)"
-  rm -rf "$corpus"
+  ok "'${GIST}' -l -- find '${corpus}'" "gist literal, matches (exit 0)"
+  ok "'${GIST}' -l -- zznomatchzz '${corpus}'" "gist literal, no match (exit 1)"
+  bad "'${GIST}' '(' -l -- '${corpus}'" "gist unbalanced regex (must fail, not time a parse error)"
+  bad "'${GIST}' --definitely-not-a-real-flag -- x '${corpus}'" "gist unknown flag (must fail loud)"
+  rm -rf "${corpus}"
 else
   echo "  (skipped: no gist binary and 'zig build' unavailable on PATH)"
 fi
 
 echo
-if [[ "$fails" -eq 0 ]]; then
+if [[ "${fails}" -eq 0 ]]; then
   echo "PASS: fail-closed contract holds — exit 0/1 timed, exit >= 2 surfaced."
 else
   echo "FAIL: ${fails} case(s) violate the fail-closed contract."

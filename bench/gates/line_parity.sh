@@ -33,9 +33,9 @@ command -v rg > /dev/null || {
   echo "ripgrep (rg) not found on PATH"
   exit 1
 }
-if [[ ! -x "$GIST" ]]; then
+if [[ ! -x "${GIST}" ]]; then
   echo "building gist (ReleaseFast)…"
-  (cd "$KERNEL" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || {
+  (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || {
     echo "gist build failed"
     exit 1
   }
@@ -77,17 +77,20 @@ _sorted_lines() { sort <<< "$1"; }
 same() { # <label> <args...>
   local label="$1"
   shift
-  _run "$GIST" rg "${GARGS[@]}" "$@"
-  local go="$_out" ge="$_rc"
+  _run "${GIST}" rg "${GARGS[@]}" "$@"
+  local go="${_out}" ge="${_rc}"
   _run rg "${GARGS[@]}" "$@"
-  local ro="$_out" re="$_rc"
-  if [[ "$go" == "$ro" && "$ge" == "$re" ]]; then
+  local ro="${_out}" re="${_rc}"
+  local go_sorted ro_sorted
+  go_sorted="$(_sorted_lines "${go}")"
+  ro_sorted="$(_sorted_lines "${ro}")"
+  if [[ "${go}" == "${ro}" && "${ge}" == "${re}" ]]; then
     echo "  ok    : ${label}"
-  elif [[ "$ge" == "$re" ]] && [[ "$(_sorted_lines "$go")" == "$(_sorted_lines "$ro")" ]]; then
+  elif [[ "${ge}" == "${re}" ]] && [[ "${go_sorted}" == "${ro_sorted}" ]]; then
     echo "  ok    : ${label}  (order — parallel walker streams in discovery order, see pipeline.zig)"
   else
     echo "  DIFF  : ${label}  (gist exit ${ge}, rg exit ${re})"
-    diff <(printf '%s\n' "$ro") <(printf '%s\n' "$go") | head -10 | sed 's/^/          /'
+    diff <(printf '%s\n' "${ro}") <(printf '%s\n' "${go}") | head -10 | sed 's/^/          /'
     fails=$((fails + 1))
   fi
 }
@@ -95,8 +98,8 @@ same() { # <label> <args...>
 loud() { # <label> <args...> — gist must fail loud (exit >= 2)
   local label="$1"
   shift
-  _run "$GIST" rg "${GARGS[@]}" "$@"
-  if [[ "$_rc" -ge 2 ]]; then
+  _run "${GIST}" rg "${GARGS[@]}" "$@"
+  if [[ "${_rc}" -ge 2 ]]; then
     echo "  ok    : ${label}  (fails loud, exit ${_rc})"
   else
     echo "  LEAK  : ${label}  (gist exit ${_rc} — should reject an unsupported flag)"
@@ -107,17 +110,17 @@ loud() { # <label> <args...> — gist must fail loud (exit >= 2)
 track() { # <label> <reason> <args...> — a documented/tracked divergence: never fails
   local label="$1" reason="$2"
   shift 2
-  _run "$GIST" rg "${GARGS[@]}" "$@"
-  local go="$_out" ge="$_rc"
+  _run "${GIST}" rg "${GARGS[@]}" "$@"
+  local go="${_out}" ge="${_rc}"
   _run rg "${GARGS[@]}" "$@"
-  local ro="$_out" re="$_rc"
-  if [[ "$go" == "$ro" && "$ge" == "$re" ]]; then
+  local ro="${_out}" re="${_rc}"
+  if [[ "${go}" == "${ro}" && "${ge}" == "${re}" ]]; then
     echo "  xpass : ${label}  (matches rg — promotable to 'same')"
-  elif [[ "$ge" -ge 2 ]]; then
+  elif [[ "${ge}" -ge 2 ]]; then
     echo "  track : ${label}  (gist fails loud, exit ${ge}) — ${reason}"
   else
     echo "  track : ${label} — ${reason}"
-    diff <(printf '%s\n' "$ro") <(printf '%s\n' "$go") | head -6 | sed 's/^/          /'
+    diff <(printf '%s\n' "${ro}") <(printf '%s\n' "${go}") | head -6 | sed 's/^/          /'
   fi
 }
 
@@ -145,6 +148,7 @@ run_suite() { # <engine label>
   same "ignore-case -i (ASCII)" -i -e hello a.txt
   same "line-regexp -x" -x -e 'foo bar' a.txt
   same "empty-line ^\$" -e '^$' a.txt
+  # shellcheck disable=SC2016 # $1 is a ripgrep replacement backreference, not a shell var
   same "replace -r with capture" -r 'X$1X' -e 'f(o)o' a.txt
   same "CRLF --crlf" --crlf -e 'foo$' crlf.txt
   same "hidden --hidden" --hidden -e foo .
@@ -179,7 +183,7 @@ run_suite "serial/run.zig"
 unset GIST_NO_PARALLEL
 
 echo
-if [[ "$fails" -eq 0 ]]; then
+if [[ "${fails}" -eq 0 ]]; then
   echo "PASS: line-output parity holds on the supported surface on BOTH engines; unsupported flags fail loud."
 else
   echo "FAIL: ${fails} supported-surface case(s) diverge or leak — gist is not a byte-identical rg drop-in there."
