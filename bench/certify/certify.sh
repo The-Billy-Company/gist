@@ -134,21 +134,38 @@ mkdir -p "${OUT}/raw"
 cp -f "${WORK}"/*.json "${OUT}/raw/" 2> /dev/null || true # raw per-cell hyperfine samples
 
 {
-  printf 'zig %s\n' "$(cd "${KERNEL}" && zig version 2> /dev/null || echo '?')"
-  printf 'rg %s\n' "$(rg --version 2> /dev/null | head -1 | awk '{print $2}')"
-  printf 'hyperfine %s\n' "$(hyperfine --version 2> /dev/null | awk '{print $2}')"
+  # Separate assignments (not inline $(…)) so shellcheck SC2312 isn't masked —
+  # the assignment adopts the substitution's real exit status.
+  zig_v="$(cd "${KERNEL}" && zig version 2> /dev/null || echo '?')"
+  printf 'zig %s\n' "${zig_v}"
+  rg_v="$(rg --version 2> /dev/null | head -1 | awk '{print $2}')"
+  printf 'rg %s\n' "${rg_v}"
+  hf_v="$(hyperfine --version 2> /dev/null | awk '{print $2}')"
+  printf 'hyperfine %s\n' "${hf_v}"
   if have csearch; then
-    v="$(go version -m "$(command -v csearch)" 2> /dev/null | awk '/codesearch/{print $3; exit}')"
+    csbin="$(command -v csearch)"
+    v="$(go version -m "${csbin}" 2> /dev/null | awk '/codesearch/{print $3; exit}')"
     printf 'csearch %s\n' "${v:-installed}"
   fi
   if have zoekt; then
-    v="$(go version -m "$(command -v zoekt)" 2> /dev/null | awk '/sourcegraph\/zoekt/{print $3; exit}')"
+    zkbin="$(command -v zoekt)"
+    v="$(go version -m "${zkbin}" 2> /dev/null | awk '/sourcegraph\/zoekt/{print $3; exit}')"
     printf 'zoekt %s\n' "${v:-installed}"
   fi
-  have ugrep && printf 'ugrep %s\n' "$(ugrep --version 2> /dev/null | head -1 | awk '{print $2}')"
-  have ag && printf 'ag %s\n' "$(ag --version 2> /dev/null | head -1 | awk '{print $3}')"
-  have ggrep && printf 'ggrep %s\n' "$(ggrep --version 2> /dev/null | head -1 | awk '{print $NF}')"
-  printf 'git %s\n' "$(git --version 2> /dev/null | awk '{print $3}')"
+  if have ugrep; then
+    ug_v="$(ugrep --version 2> /dev/null | head -1 | awk '{print $2}')"
+    printf 'ugrep %s\n' "${ug_v}"
+  fi
+  if have ag; then
+    ag_v="$(ag --version 2> /dev/null | head -1 | awk '{print $3}')"
+    printf 'ag %s\n' "${ag_v}"
+  fi
+  if have ggrep; then
+    gg_v="$(ggrep --version 2> /dev/null | head -1 | awk '{print $NF}')"
+    printf 'ggrep %s\n' "${gg_v}"
+  fi
+  git_v="$(git --version 2> /dev/null | awk '{print $3}')"
+  printf 'git %s\n' "${git_v}"
 } > "${OUT}/tool-versions.txt"
 
 python3 - "${PATHS_LIST}" "${REPO}" "${OUT}/corpus-manifest.tsv" "${OUT}/machine.json" "${RUNS}" "${WARMUP}" "${roots_str}" << 'PY'
