@@ -1,55 +1,60 @@
 #!/usr/bin/env bash
-# Freshness filesystem gate — the live-tree half of the "no false negatives" claim.
+# Freshness filesystem gate — live-tree proof under corpus/README.md's model.
 #
-# `corpus/fresh_test.zig` unit-tests the `widen` set algebra; this gate exercises
-# the REAL CLI against a REAL filesystem: build the index ONCE, then mutate the
-# tree (add / edit / delete / rename / preserved-mtime / unreadable dir) and after
-# each mutation require the index-accelerated `gist rg -l` to equal `rg -l` on the
-# live tree — rg (which always reads live) is the ground truth. A miss is a
-# freshness false negative; the whole point of the overlay is that one build stays
-# correct as coworker agents churn the tree.
+# The corpus has >1024 indexed files so indexSavingsWorthTable admits the path.
+# `GIST_TEST_REQUIRE_ELISION=1` makes the parallel engine load synchronously and
+# fail unless the real elision oracle is active; a tiny corpus/full-read fallback
+# can no longer pass vacuously. Every mutation is then compared with live `rg`.
 #
-# `-l` is on the parallel engine's eligible surface (`pipeline.zig`), which streams
-# each hit to stdout in worker-discovery order rather than buffering the whole
-# walk to sort it — so `fresh()` accepts an exact match OR a match modulo line
-# order (same ORDER soft pass `line_parity.sh` and `bench/rgsuite/run.py` apply);
-# this gate cares about the FILE SET being right, not the order it streams in.
-#
-# Two classes:
-#   fresh — gist (index-accelerated) MUST equal rg's file SET (order-insensitive).
-#           A genuine set diff fails the gate.
-#   track — a documented gap: reported loudly, does not fail the gate.
+# `-l` is parallel-eligible and streams in discovery order, so comparisons sort
+# both file sets. Unit tests pin mtime/ctime equality and unavailable-metadata
+# decisions; this live gate pins add/edit/delete/rename, preserved/backdated
+# mtime, same-size overwrite, an exact anchor boundary, and traversal failure.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 KERNEL="$(cd "${HERE}/../.." && pwd)"
-GIST="${GIST:-${KERNEL}/zig-out/bin/gist}"
 command -v rg > /dev/null || {
   echo "ripgrep (rg) not found on PATH"
   exit 1
 }
-if [[ ! -x "${GIST}" ]]; then
+if [[ -z "${GIST:-}" ]]; then
+  GIST="${KERNEL}/zig-out/bin/gist"
   echo "building gist (ReleaseFast)…"
   (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || {
     echo "gist build failed"
     exit 1
   }
 fi
+[[ -x "${GIST}" ]] || {
+  echo "gist binary not executable: ${GIST}"
+  exit 1
+}
 
 CORPUS="$(mktemp -d)"
 REF="$(mktemp -d)"
 # chmod first so the 000 subdir from the unreadable-dir case is removable.
 trap 'chmod -R u+rwx "${CORPUS}" 2>/dev/null; rm -rf "${CORPUS}" "${REF}"' EXIT
 
-mkdir -p "${CORPUS}/sub"
-printf 'needle base\n' > "${CORPUS}/base.txt"     # indexed, has needle
-printf 'nothing here\n' > "${CORPUS}/plain.txt"   # indexed, no needle
-printf 'will change\n' > "${CORPUS}/edit.txt"     # indexed, no needle (→ edited)
-printf 'needle doomed\n' > "${CORPUS}/del.txt"    # indexed, has needle (→ deleted)
-printf 'needle movable\n' > "${CORPUS}/ren.txt"   # indexed, has needle (→ renamed)
-printf 'append base\n' > "${CORPUS}/pm_app.txt"   # indexed, no needle (→ preserved-mtime append)
-printf 'sixsix\n' > "${CORPUS}/pm_same.txt"       # indexed, no needle, 7 bytes (→ same-size swap)
-printf 'needle deep\n' > "${CORPUS}/sub/deep.txt" # indexed, has needle (→ unreadable dir)
+mkdir -p "${CORPUS}/libs/sub"
+printf 'needle base\n' > "${CORPUS}/libs/base.txt"      # indexed, has needle
+printf 'nothing here\n' > "${CORPUS}/libs/plain.txt"    # indexed, no needle
+printf 'will change\n' > "${CORPUS}/libs/edit.txt"      # indexed, no needle (→ edited)
+printf 'needle doomed\n' > "${CORPUS}/libs/del.txt"     # indexed, has needle (→ deleted)
+printf 'needle movable\n' > "${CORPUS}/libs/ren.txt"    # indexed, has needle (→ renamed)
+printf 'append base\n' > "${CORPUS}/libs/pm_app.txt"    # indexed, no needle (→ preserved-mtime append)
+printf 'sixsix\n' > "${CORPUS}/libs/pm_same.txt"        # indexed, 7 bytes (→ same-size swap)
+printf 'mtime old\n' > "${CORPUS}/libs/mtime_equal.txt" # indexed, no needle (→ mtime == anchor)
+printf 'ctime old\n' > "${CORPUS}/libs/ctime_equal.txt" # indexed, no needle (→ ctime == anchor)
+printf 'needle deep\n' > "${CORPUS}/libs/sub/deep.txt"  # indexed, has needle (→ unreadable dir)
+
+# Material noise is part of the correctness fixture, not a benchmark: it forces
+# the table-admission threshold and leaves >1000 known non-candidates to elide.
+i=0
+while [[ "${i}" -lt 1100 ]]; do
+  printf 'ordinary noise %04d\n' "${i}" > "${CORPUS}/libs/noise_${i}.txt"
+  i=$((i + 1))
+done
 
 cd "${CORPUS}" || exit 1
 "${GIST}" index > /dev/null 2>&1 || {
@@ -62,44 +67,122 @@ cd "${CORPUS}" || exit 1
 }
 
 fails=0
-fresh() { # <label> — gist (index-accelerated) must equal rg's file set (live), order-insensitive
-  local label="$1" g r
-  g="$("${GIST}" rg -l --sort path -e needle . 2> /dev/null | sort)"
-  r="$(rg -l --sort path -e needle . 2> /dev/null | sort)"
-  if [[ "${g}" == "${r}" ]]; then
-    echo "  ok    : ${label}"
+fresh() { # <label> [pattern] — required parallel index elision must equal live rg
+  local label="$1" pattern="${2:-needle}" g r ge
+  GIST_TEST_REQUIRE_ELISION=1 GIST_WORKERS=1 "${GIST}" rg -l --sort path -e "${pattern}" . > "${REF}/gist.raw" 2> "${REF}/gist.err"
+  ge=$?
+  g="$(sort "${REF}/gist.raw")"
+  r="$(rg -l --sort path -e "${pattern}" . 2> /dev/null | sort)"
+  if [[ "${ge}" -eq 0 && "${g}" == "${r}" ]]; then
+    echo "  ok    : ${label} [forced index elision]"
   else
-    echo "  FAIL  : ${label}  (freshness divergence vs live rg)"
-    diff <(printf '%s\n' "${r}") <(printf '%s\n' "${g}") | head -10 | sed 's/^/          /'
+    echo "  FAIL  : ${label}  (exit=${ge}; $(< "${REF}/gist.err"))"
+    diff <(printf '%s\n' "${r}") <(printf '%s\n' "${g}") | sed -n '1,10p' | sed 's/^/          /'
     fails=$((fails + 1))
   fi
 }
 
-echo "### freshness — one index build must stay correct as the tree mutates ###"
+fresh_serial() { # final compatibility check for run.zig's synchronous overlay
+  local label="$1" g r ge
+  GIST_NO_PARALLEL=1 "${GIST}" rg -l --sort path -e needle . > "${REF}/gist-serial.raw" 2> "${REF}/gist-serial.err"
+  ge=$?
+  g="$(sort "${REF}/gist-serial.raw")"
+  r="$(rg -l --sort path -e needle . 2> /dev/null | sort)"
+  if [[ "${ge}" -eq 0 && "${g}" == "${r}" ]]; then
+    echo "  ok    : ${label} [serial overlay]"
+  else
+    echo "  FAIL  : ${label} (exit=${ge}; $(< "${REF}/gist-serial.err"))"
+    fails=$((fails + 1))
+  fi
+}
+
+assert_preserved_mtime_uses_ctime() { # <path>
+  python3 - "$1" .local/gist-verify/built.ns << 'PY'
+import os
+import struct
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+anchor = struct.unpack("<q", Path(sys.argv[2]).read_bytes()[:8])[0]
+stat = path.stat()
+if not stat.st_mtime_ns < anchor <= stat.st_ctime_ns:
+    raise SystemExit(
+        f"{path}: fixture did not isolate ctime "
+        f"(mtime={stat.st_mtime_ns}, anchor={anchor}, ctime={stat.st_ctime_ns})"
+    )
+PY
+}
+
+echo "### freshness — one index build, real elision, live filesystem ###"
 fresh "baseline (index just built)"
 
-printf 'needle new\n' > new.txt
+printf 'needle new\n' > libs/new.txt
 fresh "new file under indexed root is found"
 
-printf 'now with needle\n' >> edit.txt
+printf 'now with needle\n' >> libs/edit.txt
 fresh "edited indexed file that gains the needle is found"
 
-rm del.txt
+rm libs/del.txt
 fresh "deleted indexed file is not printed"
 
-mv ren.txt ren2.txt
+mv libs/ren.txt libs/ren2.txt
 fresh "renamed indexed file tracked (old path gone, new path found)"
 
-# preserved-mtime: content changes but the mtime is restored to its pre-edit value.
-cp -p pm_app.txt "${REF}/pm_app.ref"
-printf 'sneaky needle\n' >> pm_app.txt
-touch -r "${REF}/pm_app.ref" pm_app.txt
-fresh "preserved-mtime APPEND still found (gist re-verifies live bytes)"
+# Preserved mtime: each assertion proves mtime is still pre-anchor while ctime is
+# post-anchor. Passing therefore exercises the new ctime leg, not mtime or size.
+cp -p libs/pm_app.txt "${REF}/pm_app.ref"
+printf 'sneaky needle\n' >> libs/pm_app.txt
+touch -r "${REF}/pm_app.ref" libs/pm_app.txt
+assert_preserved_mtime_uses_ctime libs/pm_app.txt || exit 1
+fresh "preserved-mtime APPEND is found via ctime"
 
-cp -p pm_same.txt "${REF}/pm_same.ref"
-printf 'needle\n' > pm_same.txt # 7 bytes == 'sixsix\n', defeats a size-only check
-touch -r "${REF}/pm_same.ref" pm_same.txt
-fresh "preserved-mtime SAME-SIZE overwrite still found"
+cp -p libs/pm_same.txt "${REF}/pm_same.ref"
+printf 'needle\n' > libs/pm_same.txt # 7 bytes == 'sixsix\n', defeats size checks
+touch -r "${REF}/pm_same.ref" libs/pm_same.txt
+assert_preserved_mtime_uses_ctime libs/pm_same.txt || exit 1
+fresh "preserved-mtime SAME-SIZE overwrite is found via ctime"
+
+# Exact mtime boundary: setting mtime to built.ns must remain live (`>=`, not
+# `>`). The ctime equality leg is isolated next by temporarily setting the
+# anchor to the file's unforgeable post-write ctime.
+printf 'mtime_boundary_token\n' > libs/mtime_equal.txt
+python3 - libs/mtime_equal.txt .local/gist-verify/built.ns << 'PY'
+import os
+import struct
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+anchor = struct.unpack("<q", Path(sys.argv[2]).read_bytes()[:8])[0]
+stat = path.stat()
+os.utime(path, ns=(stat.st_atime_ns, anchor))
+if path.stat().st_mtime_ns != anchor:
+    raise SystemExit("filesystem cannot represent the exact anchor tick")
+PY
+fresh "mtime == anchor is conservatively live" mtime_boundary_token
+
+cp .local/gist-verify/built.ns "${REF}/built.ns"
+cp -p libs/ctime_equal.txt "${REF}/ctime_equal.ref"
+printf 'ctime_boundary_token\n' > libs/ctime_equal.txt
+touch -r "${REF}/ctime_equal.ref" libs/ctime_equal.txt
+python3 - libs/ctime_equal.txt .local/gist-verify/built.ns << 'PY'
+import os
+import struct
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+anchor_path = Path(sys.argv[2])
+stat = path.stat()
+if not stat.st_mtime_ns < stat.st_ctime_ns:
+    raise SystemExit("fixture did not preserve an older mtime")
+anchor_path.write_bytes(struct.pack("<q", stat.st_ctime_ns))
+PY
+fresh "ctime == anchor is conservatively live" ctime_boundary_token
+cp "${REF}/built.ns" .local/gist-verify/built.ns
+
+fresh_serial "serial fresh.candidates remains compatible"
 
 echo "### walk-error signaling — an unreadable dir must be reported, never silent ###"
 # Both engines discover `sub/` recursively by default (`-l` doesn't disqualify
@@ -109,15 +192,18 @@ echo "### walk-error signaling — an unreadable dir must be reported, never sil
 # engine's own `processDir` swallow an EACCES `openat` in silence (fixed
 # alongside `run.zig`'s `reportWalkError`; see `pipeline.zig`'s twin of it).
 walk_error_case() { # <engine label>
-  local engine="$1" g ge gerr re
-  chmod 000 sub
-  g="$("${GIST}" rg -l --sort path -e needle . 2> /tmp/fresh_ge.$$)"
+  local engine="$1" ge gerr re
+  chmod 000 libs/sub
+  if [[ "${engine}" == parallel* ]]; then
+    GIST_TEST_REQUIRE_ELISION=1 GIST_WORKERS=1 "${GIST}" rg -l --sort path -e needle . > "${REF}/fresh_gout" 2> "${REF}/fresh_ge"
+  else
+    GIST_NO_PARALLEL=1 "${GIST}" rg -l --sort path -e needle . > "${REF}/fresh_gout" 2> "${REF}/fresh_ge"
+  fi
   ge=$?
-  gerr="$(cat /tmp/fresh_ge.$$)"
-  rg -l --sort path -e needle . > /dev/null 2> /tmp/fresh_re.$$
+  gerr="$(< "${REF}/fresh_ge")"
+  rg -l --sort path -e needle . > /dev/null 2> "${REF}/fresh_re"
   re=$?
-  rm -f /tmp/fresh_ge.$$ /tmp/fresh_re.$$
-  chmod u+rwx sub
+  chmod u+rwx libs/sub
   # rg prints `rg: <path>: Permission denied (os error 13)` and exits 2; a dir the
   # walk can't descend is a POTENTIAL false negative that MUST be signaled. Was a
   # tracked CANDIDATE BUG (gist skipped it silently, exit 0) — now fixed on both
@@ -129,15 +215,12 @@ walk_error_case() { # <engine label>
     fails=$((fails + 1))
   fi
 }
-unset GIST_NO_PARALLEL
 walk_error_case "parallel/pipeline.zig"
-export GIST_NO_PARALLEL=1
 walk_error_case "serial/run.zig"
-unset GIST_NO_PARALLEL
 
 echo
 if [[ "${fails}" -eq 0 ]]; then
-  echo "PASS: freshness holds — one build stays byte-correct vs live rg across add/edit/delete/rename/preserved-mtime."
+  echo "PASS: freshness matches live rg with forced elision across metadata boundaries and tree mutations."
 else
   echo "FAIL: ${fails} freshness case(s) diverge from the live tree."
   exit 1

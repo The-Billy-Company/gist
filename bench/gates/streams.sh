@@ -31,11 +31,9 @@ command -v rg > /dev/null || {
 }
 
 echo "building gist (ReleaseFast) + copying binary…"
-# stdin closed: a socket- or pipe-backed fd 0 (some CI/agent shells, never a
-# real tty) reads as "piped" to rg's own stdin heuristic (`readableStdin()`,
-# which gist matches byte-for-byte for parity) and blocks forever waiting for
-# EOF that never comes — exactly the failure mode this smoke build must avoid.
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- 'zzqqxxvBUILDONLY' -l < /dev/null > /dev/null 2>&1) \
+# Install without executing: the gate must test `zig-out/bin/gist`, never a
+# hash-named cache artifact selected by timestamp.
+(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) \
   || {
     echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
     exit 1

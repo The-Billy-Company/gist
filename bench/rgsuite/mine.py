@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Mine ripgrep's tests/*.rs integration suite into a self-contained, tool- agnostic spec (fixtures + argv + comparison mode) → spec.json.
+"""Mine ripgrep's tests/*.rs integration suite into a self-contained, tool-
+agnostic spec (fixtures + argv + comparison mode) → spec.json.
 
 We use LIVE `rg` as the oracle in run.py, so we deliberately do NOT parse the
 hardcoded `expected` strings — only what's needed to reproduce each scenario:
@@ -19,14 +20,9 @@ Regenerate only when bumping the pinned ripgrep the suite tracks:
 Each record carries status ok|skip so the scoreboard stays honest about what it
 could and couldn't reproduce.
 """
-
-import base64
-import contextlib
-import json
+from __future__ import annotations
+import base64, json, re, sys
 from pathlib import Path
-import re
-import sys
-
 
 HERE = Path(__file__).resolve().parent
 _DEFAULT = HERE.parents[4] / ".etc" / "ripgrep" / "tests"  # …/upstream/ripgrep/tests
@@ -41,18 +37,14 @@ def parse_str(src: str, i: int):
         j = i + 1
         hashes = 0
         while src[j] == '#':
-            hashes += 1
-            j += 1
-        if src[j] != '"':
-            raise AssertionError
+            hashes += 1; j += 1
+        assert src[j] == '"'
         j += 1
         close = '"' + '#' * hashes
         end = src.index(close, j)
         return src[j:end].encode(), end + len(close)
-    if src[i] != '"':
-        raise AssertionError
-    out = bytearray()
-    j = i + 1
+    assert src[i] == '"'
+    out = bytearray(); j = i + 1
     while True:
         c = src[j]
         if c == '\\':
@@ -60,108 +52,77 @@ def parse_str(src: str, i: int):
             simple = {'n': b'\n', 't': b'\t', 'r': b'\r', '"': b'"', '\\': b'\\',
                       '0': b'\x00', "'": b"'"}
             if n in simple:
-                out += simple[n]
-                j += 2
+                out += simple[n]; j += 2
             elif n == 'x':
-                out.append(int(src[j+2:j+4], 16))
-                j += 4
+                out.append(int(src[j+2:j+4], 16)); j += 4
             elif n == 'u':
                 k = src.index('}', j)
-                out += chr(int(src[j+3:k], 16)).encode()
-                j = k + 1
+                out += chr(int(src[j+3:k], 16)).encode(); j = k + 1
             elif n == '\n':  # line continuation
                 j += 2
-                while src[j] in ' \t':
-                    j += 1
+                while src[j] in ' \t': j += 1
             else:
-                out += n.encode()
-                j += 2
+                out += n.encode(); j += 2
         elif c == '"':
             return bytes(out), j + 1
         else:
-            out += c.encode()
-            j += 1
+            out += c.encode(); j += 1
 
 
 def strip_comments(src: str) -> str:
-    """Remove Rust // line and /* */ block comments, string/char-literal aware (so `//` inside a regex string or a URL in an expected block survives).
-
-    A
-        `// comment` inside a `.args(&[…])` array would otherwise wreck tokenizing.
-
-    """
-    out = []
-    j = 0
-    n = len(src)
+    """Remove Rust // line and /* */ block comments, string/char-literal aware
+    (so `//` inside a regex string or a URL in an expected block survives). A
+    `// comment` inside a `.args(&[…])` array would otherwise wreck tokenizing."""
+    out = []; j = 0; n = len(src)
     while j < n:
         c = src[j]
         if c == 'b' and (src[j+1:j+2] == '"' or (src[j+1:j+2] == 'r' and src[j+2:j+3] in '"#')):
-            out.append('b')
-            j += 1
-            c = src[j]
+            out.append('b'); j += 1; c = src[j]
         if c == '"' or (c == 'r' and src[j+1:j+2] in '"#'):
-            with contextlib.suppress(Exception):
-                _, end = parse_str(src, j)
-                out.append(src[j:end])
-                j = end
-                continue
+            try:
+                _, end = parse_str(src, j); out.append(src[j:end]); j = end; continue
+            except Exception:
+                pass
         if c == '/' and src[j+1:j+2] == '/':
-            while j < n and src[j] != '\n':
-                j += 1
+            while j < n and src[j] != '\n': j += 1
             continue
         if c == '/' and src[j+1:j+2] == '*':
-            end = src.find('*/', j + 2)
-            j = (end + 2) if end != -1 else n
-            continue
-        out.append(c)
-        j += 1
+            end = src.find('*/', j + 2); j = (end + 2) if end != -1 else n; continue
+        out.append(c); j += 1
     return ''.join(out)
 
 
 def blank_strings(src: str) -> str:
-    """Replace every string-literal body with `""` so a keyword scan only sees real code.
-
-    Without this, an expected-output block containing the word
-        "match"/"if"/"for" would be misread as control flow.
-
-    """
-    out = []
-    j = 0
-    n = len(src)
+    """Replace every string-literal body with `""` so a keyword scan only sees
+    real code. Without this, an expected-output block containing the word
+    "match"/"if"/"for" would be misread as control flow."""
+    out = []; j = 0; n = len(src)
     while j < n:
         c = src[j]
         if c == 'b' and (src[j+1:j+2] == '"' or (src[j+1:j+2] == 'r' and src[j+2:j+3] in '"#')):
-            j += 1
-            c = src[j]
+            j += 1; c = src[j]
         if c == '"' or (c == 'r' and src[j+1:j+2] in '"#'):
-            with contextlib.suppress(Exception):
-                _, end = parse_str(src, j)
-                out.append('""')
-                j = end
-                continue
-        out.append(c)
-        j += 1
+            try:
+                _, end = parse_str(src, j); out.append('""'); j = end; continue
+            except Exception:
+                pass
+        out.append(c); j += 1
     return ''.join(out)
 
 
 def read_stmt(src: str, i: int):
-    """From src[i], read a Rust expression/statement up to the terminating top-level ';'.
-
-    String/bracket aware. Return (text, idx_of_semicolon).
-
-    """
-    depth = 0
-    j = i
+    """From src[i], read a Rust expression/statement up to the terminating
+    top-level ';'. String/bracket aware. Return (text, idx_of_semicolon)."""
+    depth = 0; j = i
     while j < len(src):
         c = src[j]
         if c == '"' or (c == 'r' and src[j+1:j+2] in ('"', '#')):
-            with contextlib.suppress(Exception):
-                _, j = parse_str(src, j)
-                continue
-        if c in '([{':
-            depth += 1
-        elif c in ')]}':
-            depth -= 1
+            try:
+                _, j = parse_str(src, j); continue
+            except Exception:
+                pass
+        if c in '([{': depth += 1
+        elif c in ')]}': depth -= 1
         elif c == ';' and depth == 0:
             return src[i:j], j
         j += 1
@@ -175,8 +136,7 @@ def resolve_value(expr: str, consts: dict, binds: list, pos: int):
     Handles string / raw-string / byte-string literals, `include_bytes!` /
     `include_str!` (read relative to the tests dir), `const` upper-case names,
     a trailing `.as_bytes()`, and local `let name = …` scalar bindings (the
-    most recent binding textually before `pos`).
-    """
+    most recent binding textually before `pos`)."""
     expr = expr.strip()
     if expr.startswith('&'):
         expr = expr[1:].strip()
@@ -185,20 +145,16 @@ def resolve_value(expr: str, consts: dict, binds: list, pos: int):
     # byte string: b"…", br"…", br#"…"#  → parse from the leading quote/'r'.
     if expr.startswith(('b"', 'br"', 'br#')):
         try:
-            b, _ = parse_str(expr[1:], 0)
+            b, _ = parse_str(expr[1:], 0); return b
         except Exception:
             return None
-        else:
-            return b
     if expr.startswith(('"', 'r"', 'r#')):
         try:
-            b, _ = parse_str(expr, 0)
+            b, _ = parse_str(expr, 0); return b
         except Exception:
             return None
-        else:
-            return b
 
-    m = re.match(r'include_(?:bytes|str)!\s*\(\s*(.*?)\s*,?\s*\)\s*$', expr, re.DOTALL)
+    m = re.match(r'include_(?:bytes|str)!\s*\(\s*(.*?)\s*,?\s*\)\s*$', expr, re.S)
     if m:
         try:
             rel, _ = parse_str(m.group(1).strip(), 0)
@@ -258,9 +214,8 @@ def _latest(binds: list, name: str, pos: int, kind: str):
 
 # ---------------------------------------------------------------- consts + bindings
 def load_consts():
-    """Load consts from disk."""
     consts = {}
-    for f in ["hay.rs", *FILES]:
+    for f in ["hay.rs"] + FILES:
         src = strip_comments((TESTS / f).read_text())
         for m in re.finditer(
             r'\bconst\s+([A-Z_][A-Z0-9_]*)\s*:\s*&(?:\'static\s+)?(?:\[u8\]|str)\s*=\s*', src):
@@ -287,12 +242,10 @@ def _array_tokens(expr: str):
 
 
 def parse_bindings(body: str, consts: dict):
-    """Local `let (mut)? name = …;` bindings inside a test body → resolved scalars (bytes) and array-literal token lists, for later argv/fixture use.
-
+    """Local `let (mut)? name = …;` bindings inside a test body → resolved
+    scalars (bytes) and array-literal token lists, for later argv/fixture use.
     Also models `name.extend(other)` mutations (used by the f1842_* tests) by
-        recording a fresh, appended array binding at the extend's position.
-
-    """
+    recording a fresh, appended array binding at the extend's position."""
     binds = []
     for m in re.finditer(r'\blet\s+(?:mut\s+)?([a-z_]\w*)\s*=\s*', body):
         val, _ = read_stmt(body, m.end())
@@ -316,50 +269,40 @@ def parse_bindings(body: str, consts: dict):
 # ---------------------------------------------------------------- arg-list parse
 def match_paren(src: str, i: int):
     """src[i] == '('. Return (inner, end_after_close), string-aware."""
-    depth = 0
-    j = i
+    depth = 0; j = i
     while j < len(src):
         c = src[j]
-        if c == '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
-            with contextlib.suppress(Exception):
-                _, j = parse_str(src, j)
-                continue
-        if c == '(':
-            depth += 1
+        if c in '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
+            try:
+                _, j = parse_str(src, j); continue
+            except Exception:
+                pass
+        if c == '(': depth += 1
         elif c == ')':
             depth -= 1
-            if depth == 0:
-                return src[i+1:j], j + 1
+            if depth == 0: return src[i+1:j], j + 1
         j += 1
     return src[i+1:], len(src)
 
 
 def split_top(inner: str):
     """Split a call arg list on top-level commas (string+bracket aware)."""
-    parts = []
-    depth = 0
-    buf = ''
-    j = 0
+    parts = []; depth = 0; buf = ''; j = 0
     while j < len(inner):
         c = inner[j]
-        if c == '"' or (c == 'r' and j+1 < len(inner) and inner[j+1] in '#"'):
-            with contextlib.suppress(Exception):
-                _, nj = parse_str(inner, j)
-                buf += inner[j:nj]
-                j = nj
-                continue
-        if c in '([{':
-            depth += 1
-        elif c in ')]}':
-            depth -= 1
+        if c in '"' or (c == 'r' and j+1 < len(inner) and inner[j+1] in '#"'):
+            try:
+                _, nj = parse_str(inner, j); buf += inner[j:nj]; j = nj; continue
+            except Exception:
+                pass
+        if c in '([{': depth += 1
+        elif c in ')]}': depth -= 1
         if c == ',' and depth == 0:
-            parts.append(buf.strip())
-            buf = ''
+            parts.append(buf.strip()); buf = ''
         else:
             buf += c
         j += 1
-    if buf.strip():
-        parts.append(buf.strip())
+    if buf.strip(): parts.append(buf.strip())
     return parts
 
 
@@ -370,20 +313,18 @@ def extract_blocks(src: str):
         i = src.index('|', m.end())
         i = src.index('|', i + 1)  # end of closure params
         b = src.index('{', i)
-        depth = 0
-        j = b
+        depth = 0; j = b
         while j < len(src):
             c = src[j]
-            if c == '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
-                with contextlib.suppress(Exception):
-                    _, j = parse_str(src, j)
-                    continue
-            if c == '{':
-                depth += 1
+            if c in '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
+                try:
+                    _, j = parse_str(src, j); continue
+                except Exception:
+                    pass
+            if c == '{': depth += 1
             elif c == '}':
                 depth -= 1
-                if depth == 0:
-                    break
+                if depth == 0: break
             j += 1
         yield m.group(1), src[b+1:j]
 
@@ -419,15 +360,13 @@ def mine_block(name, body, consts, srcfile):
     code = blank_strings(_PCRE2_GUARD.sub(' ', body))
     if re.search(r'\bfor\b|\bwhile\b|\bif\b|\bmatch\b|\.lines\(\)|cmd_exists|is_cross', code):
         base = _rec(name, srcfile, [], [], [], [], _fresh(), pcre2, cmp)
-        base['status'] = 'skip'
-        base['skip'] = ['control-flow']
+        base['status'] = 'skip'; base['skip'] = ['control-flow']
         return [base]
     # A `helper(dir)` call builds fixtures we can't see (e.g. sort_setup, which
     # also uses PathBuf::join'd paths + access-time ordering) → honest skip.
     if re.search(r'\b\w+\(\s*dir\s*\)', code):
         base = _rec(name, srcfile, [], [], [], [], _fresh(), pcre2, cmp)
-        base['status'] = 'skip'
-        base['skip'] = ['fixture-helper']
+        base['status'] = 'skip'; base['skip'] = ['fixture-helper']
         return [base]
 
     binds = parse_bindings(body, consts)
@@ -439,10 +378,8 @@ def mine_block(name, body, consts, srcfile):
         start = 0
         while True:
             p = body.find(h + '(', start)
-            if p < 0:
-                break
-            occ.append((p, h))
-            start = p + len(h) + 1
+            if p < 0: break
+            occ.append((p, h)); start = p + len(h) + 1
     occ.sort()
 
     # ripgrep's TestCommand ACCUMULATES args across runs on the same variable —
@@ -469,13 +406,11 @@ def mine_block(name, body, consts, srcfile):
 
         if head in ('dir.create', 'dir.try_create', 'dir.create_bytes', 'dir.try_create_bytes'):
             if len(args) < 2:
-                block_skip.append(f'{head}:argc')
-                continue
+                block_skip.append(f'{head}:argc'); continue
             path = resolve_token(args[0], consts, binds, pos)
             content = resolve_value(args[1], consts, binds, pos)
             if path is None or content is None:
-                block_skip.append(f'{head}:unresolved')
-                continue
+                block_skip.append(f'{head}:unresolved'); continue
             files.append({'path': path, 'b64': base64.b64encode(content).decode()})
         elif head == 'dir.create_dir':
             p = resolve_token(args[0], consts, binds, pos)
@@ -488,16 +423,14 @@ def mine_block(name, body, consts, srcfile):
              else block_skip.append('create_size:unresolved'))
         elif head in ('dir.link_dir', 'dir.link_file'):
             if len(args) < 2:
-                block_skip.append(f'{head}:argc')
-                continue
+                block_skip.append(f'{head}:argc'); continue
             src = resolve_token(args[0], consts, binds, pos)
             tgt = resolve_token(args[1], consts, binds, pos)
             (symlinks.append({'path': tgt, 'target': src})
              if src and tgt else block_skip.append('symlink:unresolved'))
         elif head == 'dir.remove':
             p = resolve_token(args[0], consts, binds, pos)
-            if p:
-                removed.add(p)
+            if p: removed.add(p)
         elif head == '.command':
             new_cmd()
         elif head == '.arg':
@@ -509,8 +442,7 @@ def mine_block(name, body, consts, srcfile):
             cur['pending'] = True
             (cur['argv'].extend(arr) if arr is not None else cur['skip'].append('args:unresolved'))
         elif head == '.current_dir':
-            cur['current_dir'] = resolve_token(args[0], consts, binds, pos)
-            cur['pending'] = True
+            cur['current_dir'] = resolve_token(args[0], consts, binds, pos); cur['pending'] = True
         elif head == '.pipe':
             b = resolve_value(args[0], consts, binds, pos)
             if b is None:
@@ -524,8 +456,8 @@ def mine_block(name, body, consts, srcfile):
             emit('err')
         elif head == '.assert_exit_code':
             code = None
-            with contextlib.suppress(ValueError, IndexError):
-                code = int(args[0])
+            try: code = int(args[0])
+            except (ValueError, IndexError): pass
             emit('exit', code)
         elif head == '.assert_non_empty_stderr':
             emit('stderr')
@@ -540,8 +472,7 @@ def mine_block(name, body, consts, srcfile):
 
     if not invs:
         base = _rec(name, srcfile, files, dirs, symlinks, sized, _fresh(), pcre2, cmp)
-        base['status'] = 'skip'
-        base['skip'] = block_skip or ['no-invocation']
+        base['status'] = 'skip'; base['skip'] = block_skip or ['no-invocation']
         return [base]
 
     recs = []
@@ -565,7 +496,6 @@ def _rec(name, srcfile, files, dirs, symlinks, sized, inv, pcre2, cmp):
 
 
 def main():
-    """CLI entry point."""
     if not TESTS.is_dir():
         sys.exit(f"ripgrep tests not found at {TESTS} — pass the path as argv[1]")
     consts = load_consts()

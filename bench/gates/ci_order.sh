@@ -31,7 +31,7 @@ for a in "$@"; do case "${a}" in
     ;;
 esac done
 
-correctness_failed=0
+failures=0
 run() { # <label> <cmd...>
   echo "── ${1}"
   shift
@@ -39,7 +39,7 @@ run() { # <label> <cmd...>
     echo "   PASS"
   else
     echo "   FAIL (exit $?)"
-    correctness_failed=$((correctness_failed + 1))
+    failures=$((failures + 1))
   fi
 }
 
@@ -61,11 +61,28 @@ run "freshness (freshness_fs.sh)" bash bench/gates/freshness_fs.sh
 
 echo
 echo "═══ PHASE 2 · PERFORMANCE (only after correctness is clean) ═══"
-if [[ "${correctness_failed}" -ne 0 ]]; then
-  echo "SKIPPED: ${correctness_failed} correctness gate(s) failed — a perf verdict over unproven"
+if [[ "${failures}" -ne 0 ]]; then
+  echo "SKIPPED: ${failures} correctness gate(s) failed — a perf verdict over unproven"
   echo "behavior is untrustworthy. Fix correctness (or re-run with --allow-known), then rerun."
   exit 1
 fi
+# Committed bundle is optional until republished on a clean HEAD. If present,
+# check_artifacts.py --require-head enforces machine.git_commit == HEAD + clean tree.
+set +e
+python3 bench/certify/check_artifacts.py \
+  --artifacts-dir bench/certify/artifact --artifacts --require-head
+art_rc=$?
+set -e
+case "${art_rc}" in
+  0) echo "OK: committed certificate bundle";;
+  2) echo "NOTE: no HEAD-bound committed certificate yet — regenerate with"
+     echo "      CERT_PUBLISH_DIR=bench/certify/artifact bash bench/certify/certify.sh"
+     echo "      on a clean tree after this branch lands its code fixes.";;
+  *) echo "FAIL: committed certificate bundle"
+     failures=$((failures + 1))
+     echo "SKIPPED: committed evidence bundle is invalid; refusing to replace it with an unvalidated run."
+     exit 1;;
+esac
 missing=""
 for t in hyperfine csearch zoekt rg; do command -v "${t}" > /dev/null || missing="${missing} ${t}"; done
 if [[ -n "${missing}" ]]; then
@@ -74,12 +91,12 @@ if [[ -n "${missing}" ]]; then
   exit 0
 fi
 run "macro certificate (certify.sh)" bash bench/certify/certify.sh
-run "certificate artifacts (check_artifacts.py)" python3 bench/certify/check_artifacts.py --artifacts
 run "index-size accounting (index_size_accounting.py)" python3 bench/gates/index_size_accounting.py
+run "fresh certificate artifacts (check_artifacts.py)" python3 bench/certify/check_artifacts.py --artifacts --require-head
 
 echo
-if [[ "${correctness_failed}" -eq 0 ]]; then
-  echo "OK: correctness clean; performance certificate produced."
+if [[ "${failures}" -eq 0 ]]; then
+  echo "OK: correctness clean; fresh and committed performance evidence validated."
 else
   exit 1
 fi

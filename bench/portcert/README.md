@@ -1,6 +1,6 @@
 # bench/portcert — Layer B (port-optimality, static)
 
-Layer B of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layers-ad).
+Layer B of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
 Where Layer A proves gist is _empirically fastest in its class_, Layer B
 proves _why the hot loop can't be beaten on this instruction sequence_: it
 asks `llvm-mca` for the static microarchitectural bound (port pressure /

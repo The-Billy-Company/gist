@@ -19,8 +19,7 @@ source "${HERE}/_compete.sh"
 need_hyperfine
 
 echo "building gist + persisting the index once…"
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index) || exit 1
-compete_install_gist_bin || exit 1
+compete_build_gist_index || exit 1
 echo "building competitor indexes (over gist's exact corpus where possible)…"
 compete_build_csearch
 compete_build_zoekt
@@ -51,13 +50,20 @@ echo "needle,tool,kind,ms,gist_ms,ratio" > "${csv}"
 
 for n in "${needles[@]}"; do
   gcmd="$(compete_lit_cmd gist "${n}")"
-  gist_ms="$(hf_mean 3 8 "${gcmd}")"
+  rcmd="$(compete_lit_cmd rg "${n}")"
+  if ! gist_ms="$(hf_mean 3 8 "${gcmd}" "${rcmd}")"; then
+    echo "aborting: gist failed semantic/status precheck for literal '${n}'" >&2
+    exit 1
+  fi
   printf "%-16s gist %sms\n" "${n}" "${gist_ms}"
   idx_line="    idx:  "
   unidx_line="    unidx:"
   for t in "${tools[@]}"; do
     cmd="$(compete_lit_cmd "${t}" "${n}")"
-    ms="$(hf_mean 2 8 "${cmd}")"
+    if ! ms="$(hf_mean 2 8 "${cmd}")"; then
+      echo "aborting: ${t} hard-failed while benchmarking literal '${n}'" >&2
+      exit 1
+    fi
     spd="$(ratio "${ms}" "${gist_ms}")"
     kind="$(compete_kind "${t}")"
     echo "${n},${t},${kind},${ms},${gist_ms},${spd}" >> "${csv}"

@@ -18,8 +18,25 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 source "${HERE}/_compete.sh"
 need_hyperfine
 
-echo "building gist + capturing warm latency…"
+warm_needles=(pgxpool context.Context "func " TODO queryLiteral rate_limit zzqxv ctx
+  :// "func(" "return nil" SELECT import "})" AAAAAA goroutine "panic(" "Result<"
+  "def " ".unwrap()")
+
+echo "building gist + prechecking every warm cell against rg…"
+compete_build_gist_index || exit 1
+cd "${REPO}" || exit 1
+for needle in "${warm_needles[@]}"; do
+  gcmd="$(compete_lit_cmd gist "${needle}")"
+  rcmd="$(compete_lit_cmd rg "${needle}")"
+  compete_precheck_equivalent "${gcmd}" "${rcmd}" "warm/${needle}" || exit 1
+done
+
+echo "capturing warm latency…"
 (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast bench > /dev/null 2>&1) || exit 1
+[[ -s "${OUT}/bench.csv" ]] || {
+  echo "warm benchmark did not emit ${OUT}/bench.csv" >&2
+  exit 1
+}
 
 # Warm race is gist-resident vs the unindexed scanners only (see header).
 tools_raw="$(compete_tools literal)"
@@ -45,12 +62,21 @@ done
 csv="${COMPETE_DIR}/warm.csv"
 echo "needle,tool,ms,gist_ms,ratio" > "${csv}"
 
+row=0
 while IFS=$'\t' read -r needle gist_ns _; do
+  if [[ "${needle}" != "${warm_needles[${row}]:-}" ]]; then
+    echo "warm needle contract drift at row ${row}: ${needle}" >&2
+    exit 1
+  fi
+  row=$((row + 1))
   gist_ms="$(python3 -c "print('%.3f'%(${gist_ns}/1e6))")"
   line="$(printf "%-16s gist %sms" "${needle}" "${gist_ms}")"
   for t in "${tools[@]}"; do
     cmd="$(compete_lit_cmd "${t}" "${needle}")"
-    ms="$(hf_mean 2 8 "${cmd}")"
+    if ! ms="$(hf_mean 2 8 "${cmd}")"; then
+      echo "aborting: ${t} hard-failed while benchmarking literal '${needle}'" >&2
+      exit 1
+    fi
     spd="$(ratio "${ms}" "${gist_ms}")"
     echo "${needle},${t},${ms},${gist_ms},${spd}" >> "${csv}"
     if [[ "${ms}" != "?" ]]; then
@@ -62,6 +88,10 @@ while IFS=$'\t' read -r needle gist_ns _; do
   done
   echo "${line}"
 done < "${OUT}/bench.csv"
+if [[ "${row}" -ne "${#warm_needles[@]}" ]]; then
+  echo "warm needle contract drift: bench emitted ${row}/${#warm_needles[@]} rows" >&2
+  exit 1
+fi
 
 echo
 echo "── summary: geomean gist warm speedup · queries gist ≥ tool ──"

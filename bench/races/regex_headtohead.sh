@@ -24,8 +24,7 @@ source "${HERE}/_compete.sh"
 need_hyperfine
 
 echo "building gist + persisting the index once…"
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index) || exit 1
-compete_install_gist_bin || exit 1
+compete_build_gist_index || exit 1
 echo "building competitor indexes…"
 compete_build_csearch
 compete_build_zoekt
@@ -76,13 +75,20 @@ echo "tier,pattern,tool,kind,ms,gist_ms,ratio" > "${csv}"
 for row in "${slate[@]}"; do
   read -r label pat <<< "${row}"
   gcmd="$(compete_rgx_cmd gist "${pat}")"
-  gist_ms="$(hf_mean 3 8 "${gcmd}")"
+  rcmd="$(compete_rgx_cmd rg "${pat}")"
+  if ! gist_ms="$(hf_mean 3 8 "${gcmd}" "${rcmd}")"; then
+    echo "aborting: gist failed semantic/status precheck for regex '${pat}'" >&2
+    exit 1
+  fi
   printf "%-13s %-24s gist %sms\n" "${label}" "${pat}" "${gist_ms}"
   idx_line="    idx:  "
   unidx_line="    unidx:"
   for t in "${tools[@]}"; do
     cmd="$(compete_rgx_cmd "${t}" "${pat}")"
-    ms="$(hf_mean 2 8 "${cmd}")"
+    if ! ms="$(hf_mean 2 8 "${cmd}")"; then
+      echo "aborting: ${t} hard-failed while benchmarking regex '${pat}'" >&2
+      exit 1
+    fi
     spd="$(ratio "${ms}" "${gist_ms}")"
     kind="$(compete_kind "${t}")"
     # Quote the pattern: several patterns contain commas (`\w{3,8}`, `[a-f0-9]{2,}`)

@@ -17,22 +17,21 @@ would otherwise check by hand:
 Usage: check_results.py [--allow-fail] [--results PATH] [--readme PATH]
 Exit 0 iff every rule holds (and, without --allow-fail, FAIL == 0).
 """
+from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import re
 import sys
-
+from pathlib import Path
 
 BUCKETS = ("PASS", "ORDER", "FAIL", "NA", "SKIP")
 HERE = Path(__file__).resolve().parent
 
 
 def load_counts(results_path: Path) -> tuple[dict[str, int], list[dict]]:
-    """Load counts from disk."""
     rows = json.loads(results_path.read_text())
-    counts = dict.fromkeys(BUCKETS, 0)
+    counts = {b: 0 for b in BUCKETS}
     for r in rows:
         b = r.get("bucket")
         if b not in counts:
@@ -42,7 +41,6 @@ def load_counts(results_path: Path) -> tuple[dict[str, int], list[dict]]:
 
 
 def readme_counts(readme_path: Path) -> tuple[dict[str, int], tuple[int, int, float] | None]:
-    """Return tuple[dict[str, int], tuple[int, int, float] | None] for readme counts."""
     text = readme_path.read_text()
     counts: dict[str, int] = {}
     for b in BUCKETS:
@@ -58,7 +56,6 @@ def readme_counts(readme_path: Path) -> tuple[dict[str, int], tuple[int, int, fl
 
 
 def main() -> int:
-    """CLI entry point."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--allow-fail", action="store_true", help="tolerate FAIL > 0 (still requires every FAIL to be documented)")
     ap.add_argument("--results", type=Path, default=HERE / "results.json")
@@ -71,7 +68,7 @@ def main() -> int:
     denom = supported + counts["FAIL"]
     pct = round(100.0 * supported / denom, 1) if denom else 0.0
 
-    print("results.json: " + " · ".join(f"{b} {counts[b]}" for b in BUCKETS) + f"  (total {total})")
+    print(f"results.json: " + " · ".join(f"{b} {counts[b]}" for b in BUCKETS) + f"  (total {total})")
     print(f"supported-surface parity = {supported}/{denom} = {pct}%")
 
     problems: list[str] = []

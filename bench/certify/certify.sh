@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# certify.sh — Layer A of the optimality certificate, MACROSCOPIC half.
+# certify.sh — complete Layer A certificate (microscopic + macroscopic).
 #
 # The microscopic half (`zig build certify`) proves gist's in-process verify
 # kernel runs at N cycles/byte. This half proves the *end-to-end* claim the user
@@ -16,13 +16,25 @@
 # each tool on its fastest honest path). gist + indexed rivals cold-load an index
 # built ONCE over the same corpus; rg/ugrep/ag/grep re-walk + re-scan.
 #
-# Usage:  bench/certify.sh            (RUNS=20 WARMUP=3 by default)
-#         RUNS=40 bench/certify.sh    (tighten the CIs)
+# Usage:  bench/certify/certify.sh            (RUNS=20 WARMUP=3 by default)
+#         RUNS=40 bench/certify/certify.sh    (tighten the CIs)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../races/_compete.sh
 source "${HERE}/../races/_compete.sh"
 need_hyperfine
+
+# Refuse to mint a certificate whose machine.git_commit could not equal a clean HEAD.
+if ! git -C "${REPO}" rev-parse --verify HEAD >/dev/null 2>&1; then
+  echo "certificate aborted: cannot resolve git HEAD" >&2
+  exit 1
+fi
+if [[ -n "$(git -C "${REPO}" status --porcelain 2>/dev/null)" ]]; then
+  echo "certificate aborted: worktree is dirty — commit or isolate changes before certifying" >&2
+  git -C "${REPO}" status --porcelain >&2
+  exit 1
+fi
+
 
 RUNS="${RUNS:-20}"
 WARMUP="${WARMUP:-3}"
@@ -31,6 +43,16 @@ CERT="${OUT}/CERTIFICATE.md"
 MACRO_CSV="${OUT}/certify_macro.csv"
 rm -rf "${WORK}"
 mkdir -p "${WORK}" "${OUT}"
+
+echo "measuring microscopic Layer A (ReleaseFast)…"
+(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast certify) || {
+  echo "certificate aborted: microscopic certify run failed" >&2
+  exit 1
+}
+[[ -s "${OUT}/certify.csv" ]] || {
+  echo "certificate aborted: microscopic run did not emit ${OUT}/certify.csv" >&2
+  exit 1
+}
 
 # class  kind  pattern — byte-identical to certify.zig's `probes` (patterns have
 # no spaces, so `read class kind pat` recovers the pattern as the trailing field).
@@ -49,8 +71,7 @@ PROBES=(
 )
 
 echo "building gist + persisting the index once…"
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast cli -- index) || exit 1
-compete_install_gist_bin || exit 1
+compete_build_gist_index || exit 1
 echo "building competitor indexes…"
 compete_build_csearch
 compete_build_zoekt
@@ -62,25 +83,22 @@ echo "macroscopic race — fresh-process cold query, hyperfine runs=${RUNS} (+${
 echo "field: gist ${tools[*]}"
 echo
 
-# one hyperfine JSON per (class, tool); fair wrapper drains output + neutralizes
-# the no-match exit code (see hf_mean in _compete.sh for the rationale).
-bench_one() { # <class> <tool> <cmd> → 0 timed, 1 hard failure (cell excluded)
-  local class="$1" tool="$2" cmd="$3" rc
+# One hyperfine JSON per (class, tool). A gist cell additionally takes its
+# official-rg oracle and must prove an exact, order-insensitive file set first.
+bench_one() { # <class> <tool> <cmd> [rg-oracle] → 0 timed, 1 rejected
+  local class="$1" tool="$2" cmd="$3" oracle="${4:-}"
   [[ -z "${cmd}" || "${cmd}" = "false" ]] && return 0
-  # Fail-closed pre-check: run the command once and inspect its REAL exit code.
-  # 0 = match, 1 = no match — both valid results. >=2 = a hard error (unknown
-  # flag, crash, bad regex, unreadable path) that the `| wc -l` drain would mask
-  # (the pipe's status is always wc's 0) and hyperfine would then time as a fast
-  # "search". Excluding the cell here is what makes the certificate fail-closed.
-  eval "${cmd}" > /dev/null 2>&1
-  rc=$?
-  if [[ "${rc}" -ge 2 ]]; then
-    echo "  CELL FAILED (exit ${rc}) ${class}/${tool}: ${cmd}" >&2
+  if [[ -n "${oracle}" ]]; then
+    compete_precheck_equivalent "${cmd}" "${oracle}" "${class}/${tool}" || return 1
+  else
+    compete_precheck_status "${cmd}" "${class}/${tool}" || return 1
+  fi
+  if ! compete_hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
+    --export-json "${WORK}/${class}__${tool}.json" \
+    "${cmd}" > /dev/null 2>&1; then
+    echo "  CELL FAILED during timing ${class}/${tool}: ${cmd}" >&2
     return 1
   fi
-  hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
-    --export-json "${WORK}/${class}__${tool}.json" \
-    "{ ${cmd} ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
 }
 
 cd "${REPO}" || exit 1
@@ -90,12 +108,14 @@ for row in "${PROBES[@]}"; do
   printf '%s\t%s\t%s\n' "${class}" "${kind}" "${pat}" >> "${WORK}/order.tsv"
   if [[ "${kind}" = literal ]]; then
     gcmd="$(compete_lit_cmd gist "${pat}")"
+    rcmd="$(compete_lit_cmd rg "${pat}")"
   else
     gcmd="$(compete_rgx_cmd gist "${pat}")"
+    rcmd="$(compete_rgx_cmd rg "${pat}")"
   fi
   # gist is the subject of the certificate: a hard failure invalidates it, so abort.
-  bench_one "${class}" gist "${gcmd}" || {
-    echo "certificate aborted: gist hard-failed on ${class} (see error above)" >&2
+  bench_one "${class}" gist "${gcmd}" "${rcmd}" || {
+    echo "certificate aborted: gist failed equivalence/status on ${class}" >&2
     exit 1
   }
   printf "  %-18s " "${class}"
@@ -130,104 +150,162 @@ echo "macroscopic section appended to ${CERT}"
 # committed bytes: raw samples + the machine/tool/corpus provenance that produced
 # them (check_artifacts.py enforces this set). ──
 echo "emitting reproducibility metadata…"
+rm -rf "${OUT}/raw"
 mkdir -p "${OUT}/raw"
-cp -f "${WORK}"/*.json "${OUT}/raw/" 2> /dev/null || true # raw per-cell hyperfine samples
+raw_files=("${WORK}"/*__*.json)
+[[ -f "${raw_files[0]}" ]] || {
+  echo "certificate aborted: no raw hyperfine cells were emitted" >&2
+  exit 1
+}
+cp -f "${raw_files[@]}" "${OUT}/raw/"
 
+tool_identity() { # <certificate tool id> <executable>
+  local name="$1" executable="$2"
+  [[ -x "${executable}" ]] || {
+    echo "certificate aborted: no executable identity for ${name}" >&2
+    return 1
+  }
+  python3 - "${name}" "${executable}" << 'PY'
+import hashlib
+import sys
+
+digest = hashlib.sha256()
+with open(sys.argv[2], "rb") as executable:
+    for chunk in iter(lambda: executable.read(1 << 20), b""):
+        digest.update(chunk)
+print(f"{sys.argv[1]} sha256:{digest.hexdigest()}")
+PY
+}
+
+zig_bin="$(command -v zig)" || exit 1
+hyperfine_bin="$(command -v hyperfine)" || exit 1
 {
-  # Separate assignments (not inline $(…)) so shellcheck SC2312 isn't masked —
-  # the assignment adopts the substitution's real exit status.
-  zig_v="$(cd "${KERNEL}" && zig version 2> /dev/null || echo '?')"
-  printf 'zig %s\n' "${zig_v}"
-  rg_v="$(rg --version 2> /dev/null | head -1 | awk '{print $2}')"
-  printf 'rg %s\n' "${rg_v}"
-  hf_v="$(hyperfine --version 2> /dev/null | awk '{print $2}')"
-  printf 'hyperfine %s\n' "${hf_v}"
-  if have csearch; then
-    csbin="$(command -v csearch)"
-    v="$(go version -m "${csbin}" 2> /dev/null | awk '/codesearch/{print $3; exit}')"
-    printf 'csearch %s\n' "${v:-installed}"
-  fi
-  if have zoekt; then
-    zkbin="$(command -v zoekt)"
-    v="$(go version -m "${zkbin}" 2> /dev/null | awk '/sourcegraph\/zoekt/{print $3; exit}')"
-    printf 'zoekt %s\n' "${v:-installed}"
-  fi
-  if have ugrep; then
-    ug_v="$(ugrep --version 2> /dev/null | head -1 | awk '{print $2}')"
-    printf 'ugrep %s\n' "${ug_v}"
-  fi
-  if have ag; then
-    ag_v="$(ag --version 2> /dev/null | head -1 | awk '{print $3}')"
-    printf 'ag %s\n' "${ag_v}"
-  fi
-  if have ggrep; then
-    gg_v="$(ggrep --version 2> /dev/null | head -1 | awk '{print $NF}')"
-    printf 'ggrep %s\n' "${gg_v}"
-  fi
-  git_v="$(git --version 2> /dev/null | awk '{print $3}')"
-  printf 'git %s\n' "${git_v}"
-} > "${OUT}/tool-versions.txt"
+  tool_identity gist "${GIST_BIN}" || exit 1
+  tool_identity zig "${zig_bin}" || exit 1
+  tool_identity hyperfine "${hyperfine_bin}" || exit 1
+  for t in "${tools[@]}"; do
+    executable="${t}"
+    [[ "${t}" = gitgrep ]] && executable=git
+    tool_bin="$(command -v "${executable}")" || exit 1
+    tool_identity "${t}" "${tool_bin}" || exit 1
+  done
+} > "${OUT}/tool-versions.txt.tmp"
+mv "${OUT}/tool-versions.txt.tmp" "${OUT}/tool-versions.txt"
 
-python3 - "${PATHS_LIST}" "${REPO}" "${OUT}/corpus-manifest.tsv" "${OUT}/machine.json" "${RUNS}" "${WARMUP}" "${roots_str}" << 'PY'
-import sys, os, json, platform, subprocess
+python3 - "${PATHS_LIST}" "${REPO}" "${OUT}/corpus-manifest.tsv" "${OUT}/machine.json" "${RUNS}" "${WARMUP}" "${roots_str}" << 'PY' || exit 1
+import hashlib
+import json
+import os
+import platform
+import subprocess
+import sys
+
 paths_list, repo, manifest, machine_json, runs, warmup, roots = sys.argv[1:8]
 n = tot = 0
-with open(manifest, "w") as mf:
-    mf.write("path\tsize_bytes\n")
-    try: raw = open(paths_list, "rb").read()
-    except OSError: raw = b""
+raw = open(paths_list, "rb").read()
+manifest_tmp = manifest + ".tmp"
+with open(manifest_tmp, "wb") as mf:
+    mf.write(b"path\tsize_bytes\tsha256\n")
     for pb in raw.split(b"\0"):
-        if not pb: continue
-        p = pb.decode("utf-8", "surrogateescape")
-        try: sz = os.path.getsize(os.path.join(repo, p))
-        except OSError: sz = 0
-        mf.write(f"{p}\t{sz}\n"); n += 1; tot += sz
+        if not pb:
+            continue
+        if any(c in pb for c in (b"\t", b"\n", b"\r")):
+            raise SystemExit(f"manifest cannot encode control characters in path: {pb!r}")
+        path = os.path.join(os.fsencode(repo), pb)
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            before = os.fstat(source.fileno())
+            for chunk in iter(lambda: source.read(1 << 20), b""):
+                digest.update(chunk)
+            after = os.fstat(source.fileno())
+        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+            raise SystemExit(f"corpus file changed while hashing: {os.fsdecode(pb)}")
+        mf.write(pb + f"\t{before.st_size}\t{digest.hexdigest()}\n".encode())
+        n += 1
+        tot += before.st_size
+os.replace(manifest_tmp, manifest)
+
 def sysctl(k):
-    try: return subprocess.check_output(["sysctl", "-n", k], text=True).strip()
-    except Exception: return ""
+    try:
+        return subprocess.check_output(["sysctl", "-n", k], text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+
 def head():
-    try: return subprocess.check_output(["git", "-C", repo, "rev-parse", "HEAD"], text=True).strip()
-    except Exception: return "unknown"
+    try:
+        return subprocess.check_output(["git", "-C", repo, "rev-parse", "HEAD"], text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
 fs = "unknown"
 try:
     if platform.system() == "Darwin":
         for ln in subprocess.check_output(["diskutil", "info", "/"], text=True).splitlines():
-            if "File System Personality" in ln: fs = ln.split(":", 1)[1].strip(); break
+            if "File System Personality" in ln:
+                fs = ln.split(":", 1)[1].strip()
+                break
     else:
         fs = subprocess.check_output(["stat", "-f", "-c", "%T", "/"], text=True).strip()
-except Exception: pass
+except (OSError, subprocess.CalledProcessError):
+    pass
+ram_bytes = int(sysctl("hw.memsize") or 0)
+if not ram_bytes:
+    try:
+        ram_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    except (OSError, ValueError):
+        pass
 machine = {
     "cpu_model": sysctl("machdep.cpu.brand_string") or platform.processor() or "unknown",
     "cpu_count": int(sysctl("hw.ncpu") or os.cpu_count() or 0),
-    "ram_bytes": int(sysctl("hw.memsize") or 0),
-    "os": f"{platform.system()} {platform.release()}", "kernel": platform.release(),
-    "filesystem": fs, "git_commit": head(),
-    "corpus_file_count": n, "corpus_total_bytes": tot,
-    "runs": int(runs), "warmup": int(warmup), "roots": roots,
+    "ram_bytes": ram_bytes,
+    "os": f"{platform.system()} {platform.release()}",
+    "kernel": platform.release(),
+    "filesystem": fs,
+    "git_commit": head(),
+    "corpus_file_count": n,
+    "corpus_total_bytes": tot,
+    "runs": int(runs),
+    "warmup": int(warmup),
+    "roots": roots,
 }
-open(machine_json, "w").write(json.dumps(machine, indent=2) + "\n")
+with open(machine_json, "w") as output:
+    output.write(json.dumps(machine, indent=2) + "\n")
 print(f"  machine.json: {machine['cpu_model']} · {machine['cpu_count']} cores · corpus {n} files / {tot} B")
 PY
 
-python3 - "${OUT}/raw" "${OUT}/command-log.txt" << 'PY'
-import sys, os, json, glob
-raw_dir, out = sys.argv[1], sys.argv[2]
+python3 - "${OUT}/raw" "${OUT}/command-log.txt" << 'PY' || exit 1
+import json
+import sys
+from pathlib import Path
+
+raw_dir, out = map(Path, sys.argv[1:3])
 lines = []
-for jf in sorted(glob.glob(os.path.join(raw_dir, "*.json"))):
-    try: doc = json.load(open(jf))
-    except Exception: continue
-    cmd = (doc.get("results") or [{}])[0].get("command")
-    if cmd: lines.append(f"{os.path.basename(jf)}\t{cmd}")
-open(out, "w").write("\n".join(lines) + "\n")
+for jf in sorted(raw_dir.glob("*__*.json")):
+    doc = json.loads(jf.read_text())
+    results = doc.get("results") or []
+    if len(results) != 1 or not results[0].get("command"):
+        raise SystemExit(f"raw cell lacks one exact command: {jf}")
+    command = results[0]["command"]
+    if "\n" in command or "\t" in command:
+        raise SystemExit(f"command log cannot encode control characters: {jf}")
+    lines.append(f"{jf.name}\t{command}")
+out.write_text("\n".join(lines) + "\n")
 print(f"  command-log.txt: {len(lines)} timed commands")
 PY
+
+python3 "${HERE}/../gates/index_size_accounting.py" \
+  --index-dir "${OUT}" --csearch "${CSEARCH_IDX}" --zoekt "${ZOEKT_DIR}" || exit 1
+python3 "${HERE}/check_artifacts.py" --artifacts-dir "${OUT}" --artifacts || exit 1
 
 # Publish a committed snapshot when asked (CERT_PUBLISH_DIR is crate-relative).
 if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   pub="${KERNEL}/${CERT_PUBLISH_DIR}"
+  rm -rf "${pub}/raw"
   mkdir -p "${pub}/raw"
-  cp -f "${CERT}" "${MACRO_CSV}" "${OUT}/machine.json" "${OUT}/tool-versions.txt" \
-    "${OUT}/corpus-manifest.tsv" "${OUT}/command-log.txt" "${pub}/"
-  cp -f "${OUT}/raw/"*.json "${pub}/raw/" 2> /dev/null || true
+  cp -f "${CERT}" "${OUT}/certify.csv" "${MACRO_CSV}" "${OUT}/machine.json" \
+    "${OUT}/tool-versions.txt" "${OUT}/corpus-manifest.tsv" \
+    "${OUT}/command-log.txt" "${OUT}/index-sizes.json" "${pub}/"
+  cp -f "${OUT}/raw/"*.json "${pub}/raw/" || exit 1
+  python3 "${HERE}/check_artifacts.py" --artifacts-dir "${pub}" --artifacts || exit 1
   echo "published reproducible certificate → ${pub}"
 fi

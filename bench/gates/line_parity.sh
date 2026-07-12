@@ -7,18 +7,14 @@
 # rgsuite is the real line oracle but is a broad mined replay; this gate is a
 # small, readable, corpus-frozen check of the exact drop-in claim, case by case.
 #
-# `--sort path` is passed to both so real rg picks one deterministic order; gist
-# accepts (and ignores) the flag — its parallel engine streams each hit to stdout
-# the instant a worker finds it (the fused walk+read+match+emit pipeline,
-# `pipeline.zig`) rather than buffering the whole tree to sort it, which is what
-# lets a downstream `| head` abort the walk early on a broken pipe. Cost: order is
-# worker-discovery order, not global path order — the same ORDER-bucket trade-off
-# gist's rgsuite harness already scores as a soft pass (`bench/rgsuite/run.py`'s
-# `sort_lines`). `same()` below applies that identical fallback: an exact match is
-# `ok`, a match after sorting both sides' lines is `ok (order)`, anything else
-# fails. Four classes:
-#   same  — core supported surface: MUST match byte-for-byte OR in sorted-line
-#           order (a genuine content diff fails the gate).
+# `--sort path` is passed to both so real rg picks one deterministic order. For a
+# recursive tree, gist's parallel engine may stream files in worker-discovery
+# order, so `same()` permits only that rgsuite-style ORDER soft pass. An explicit
+# single file has no cross-file ordering excuse: every such case uses
+# `same_exact()` and must match stdout byte-for-byte, including the final newline.
+# Three classes:
+#   same / same_exact — supported surface; content always exact, and only a
+#                       recursive multi-file walk may differ by whole-line order.
 #   loud  — an explicitly unsupported flag: gist MUST fail loud (exit >= 2), never
 #           silently accept-and-differ (a silent accept fails the gate).
 #   xfail — a DOCUMENTED byte/ASCII-vs-Unicode boundary (dossier "parity risk") or a
@@ -42,8 +38,11 @@ if [[ ! -x "${GIST}" ]]; then
 fi
 
 # ── frozen corpus ────────────────────────────────────────────────────────────
-CORPUS="$(mktemp -d)"
-trap 'rm -rf "${CORPUS}"' EXIT
+WORK="$(mktemp -d)"
+CORPUS="${WORK}/corpus"
+CAPTURE="${WORK}/capture"
+trap 'rm -rf "${WORK}"' EXIT
+mkdir -p "${CORPUS}" "${CAPTURE}"
 mkdir -p "${CORPUS}/sub"
 printf 'hello world\nfoo bar\nHELLO again\n\nfoo baz\n' > "${CORPUS}/a.txt"
 printf 'TODO fix\nfn main\ncall foo() now\nreturn 42\n' > "${CORPUS}/b.txt"
@@ -59,46 +58,85 @@ printf 'lead %s foo tail\n' "$(printf 'x%.0s' {1..80})" > "${CORPUS}/longline.tx
 printf 'caf\xc3\xa9 start\nr\xc3\xa9sum\xc3\xa9 foo\n' > "${CORPUS}/utf8.txt"
 printf '\xff\xfe foo \x00 bar\n' > "${CORPUS}/bin.dat"
 
+# Deterministic, generated-at-runtime evidence for the two large result classes
+# cited by the drop-in claim. Short tokens keep each fixture below 1.1 MiB while
+# `rg -n` still emits exactly 265,286 / 147,087 result lines. No huge fixture is
+# committed; this generator is the fixture contract.
+python3 - "${CORPUS}" << 'PY'
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for name, token, count in (
+    ("large-265286.txt", "A30", 265_286),
+    ("large-147087.txt", "B32", 147_087),
+):
+    (root / name).write_text((token + "\n") * count)
+PY
+
 cd "${CORPUS}" || exit 1
 GARGS=(-n --no-heading --sort path)
 fails=0
 
-_run() { # <bin...> — captures stdout+exit into _out/_rc
-  local out
-  out="$("$@" 2> /dev/null)"
+_run_to() { # <stdout-file> <bin...> — preserves stdout bytes + exit
+  local out="$1"
+  shift
+  "$@" > "${out}" 2> "${out}.err"
   _rc=$?
-  _out="${out}"
 }
 
-# Line-order-only variant of a string, mirroring rgsuite's `sort_lines` oracle
-# (`bench/rgsuite/run.py`) so both gates apply the identical ORDER soft pass.
-_sorted_lines() { sort <<< "$1"; }
+_preview() {
+  diff -u "$1" "$2" | awk 'NR <= 10 { print "          " $0 }'
+}
 
-same() { # <label> <args...>
-  local label="$1"
-  shift
-  _run "${GIST}" rg "${GARGS[@]}" "$@"
-  local go="${_out}" ge="${_rc}"
-  _run rg "${GARGS[@]}" "$@"
-  local ro="${_out}" re="${_rc}"
-  local go_sorted ro_sorted
-  go_sorted="$(_sorted_lines "${go}")"
-  ro_sorted="$(_sorted_lines "${ro}")"
-  if [[ "${go}" == "${ro}" && "${ge}" == "${re}" ]]; then
+_compare() { # <exact|order> <expected-lines|-> <label> <args...>
+  local mode="$1" expected_lines="$2" label="$3"
+  local go="${CAPTURE}/gist.out" ro="${CAPTURE}/rg.out" ge re lines
+  shift 3
+  _run_to "${go}" "${GIST}" rg "${GARGS[@]}" "$@"
+  ge="${_rc}"
+  _run_to "${ro}" rg "${GARGS[@]}" "$@"
+  re="${_rc}"
+  if [[ "${ge}" == "${re}" ]] && cmp -s "${go}" "${ro}"; then
     echo "  ok    : ${label}"
-  elif [[ "${ge}" == "${re}" ]] && [[ "${go_sorted}" == "${ro_sorted}" ]]; then
-    echo "  ok    : ${label}  (order — parallel walker streams in discovery order, see pipeline.zig)"
+  elif [[ "${mode}" = order && "${ge}" == "${re}" ]]; then
+    LC_ALL=C sort "${go}" > "${CAPTURE}/gist.sorted"
+    LC_ALL=C sort "${ro}" > "${CAPTURE}/rg.sorted"
+    if cmp -s "${CAPTURE}/gist.sorted" "${CAPTURE}/rg.sorted"; then
+      echo "  ok    : ${label}  (order — parallel walker streams in discovery order)"
+    else
+      echo "  DIFF  : ${label}  (gist exit ${ge}, rg exit ${re})"
+      _preview "${ro}" "${go}"
+      fails=$((fails + 1))
+    fi
   else
     echo "  DIFF  : ${label}  (gist exit ${ge}, rg exit ${re})"
-    diff <(printf '%s\n' "${ro}") <(printf '%s\n' "${go}") | head -10 | sed 's/^/          /'
+    _preview "${ro}" "${go}"
     fails=$((fails + 1))
   fi
+  if [[ "${expected_lines}" != "-" ]]; then
+    lines="$(wc -l < "${ro}" | tr -d ' ')"
+    if [[ "${lines}" = "${expected_lines}" ]]; then
+      echo "          generated result class: ${lines} lines exact"
+    else
+      echo "  DIFF  : ${label} generated ${lines}, expected ${expected_lines} lines"
+      fails=$((fails + 1))
+    fi
+  fi
+}
+
+same() { _compare order - "$@"; }
+same_exact() { _compare exact - "$@"; }
+same_exact_lines() { # <label> <line-count> <args...>
+  local label="$1" lines="$2"
+  shift 2
+  _compare exact "${lines}" "${label}" "$@"
 }
 
 loud() { # <label> <args...> — gist must fail loud (exit >= 2)
   local label="$1"
   shift
-  _run "${GIST}" rg "${GARGS[@]}" "$@"
+  _run_to "${CAPTURE}/gist.out" "${GIST}" rg "${GARGS[@]}" "$@"
   if [[ "${_rc}" -ge 2 ]]; then
     echo "  ok    : ${label}  (fails loud, exit ${_rc})"
   else
@@ -108,19 +146,19 @@ loud() { # <label> <args...> — gist must fail loud (exit >= 2)
 }
 
 track() { # <label> <reason> <args...> — a documented/tracked divergence: never fails
-  local label="$1" reason="$2"
+  local label="$1" reason="$2" go="${CAPTURE}/gist.out" ro="${CAPTURE}/rg.out" ge re
   shift 2
-  _run "${GIST}" rg "${GARGS[@]}" "$@"
-  local go="${_out}" ge="${_rc}"
-  _run rg "${GARGS[@]}" "$@"
-  local ro="${_out}" re="${_rc}"
-  if [[ "${go}" == "${ro}" && "${ge}" == "${re}" ]]; then
+  _run_to "${go}" "${GIST}" rg "${GARGS[@]}" "$@"
+  ge="${_rc}"
+  _run_to "${ro}" rg "${GARGS[@]}" "$@"
+  re="${_rc}"
+  if [[ "${ge}" == "${re}" ]] && cmp -s "${go}" "${ro}"; then
     echo "  xpass : ${label}  (matches rg — promotable to 'same')"
   elif [[ "${ge}" -ge 2 ]]; then
     echo "  track : ${label}  (gist fails loud, exit ${ge}) — ${reason}"
   else
     echo "  track : ${label} — ${reason}"
-    diff <(printf '%s\n' "${ro}") <(printf '%s\n' "${go}") | head -6 | sed 's/^/          /'
+    _preview "${ro}" "${go}"
   fi
 }
 
@@ -139,25 +177,27 @@ run_suite() { # <engine label>
   same "fixed-string -F (regex metachars literal)" -F -e 'foo()' .
   same "multiple -e" -e foo -e alpha .
   same "context -C1" -C1 -e return .
-  same "after-context -A1" -A1 -e foo a.txt
-  same "before-context -B1" -B1 -e baz a.txt
-  same "only-matching -o" -o -e 'f.o' a.txt
+  same_exact "after-context -A1" -A1 -e foo a.txt
+  same_exact "before-context -B1" -B1 -e baz a.txt
+  same_exact "only-matching -o" -o -e 'f.o' a.txt
   same "count -c" -c -e foo .
   same "count-matches --count-matches" --count-matches -e foo .
   same "word -w" -w -e foo .
-  same "ignore-case -i (ASCII)" -i -e hello a.txt
-  same "line-regexp -x" -x -e 'foo bar' a.txt
-  same "empty-line ^\$" -e '^$' a.txt
-  # shellcheck disable=SC2016 # $1 is a ripgrep replacement backreference, not a shell var
-  same "replace -r with capture" -r 'X$1X' -e 'f(o)o' a.txt
-  same "CRLF --crlf" --crlf -e 'foo$' crlf.txt
+  same_exact "ignore-case -i (ASCII)" -i -e hello a.txt
+  same_exact "line-regexp -x" -x -e 'foo bar' a.txt
+  same_exact "empty-line ^\$" -e '^$' a.txt
+  same_exact "replace -r with capture" -r "X\$1X" -e 'f(o)o' a.txt
+  same_exact "CRLF --crlf" --crlf -e 'foo$' crlf.txt
   same "hidden --hidden" --hidden -e foo .
   same "no-ignore --no-ignore" --no-ignore -e foo .
-  same "non-UTF-8 bytes -a" -a -e foo bin.dat
-  same "max-columns-preview (plain)" --max-columns 8 --max-columns-preview -e foo longline.txt
-  same "path with colon" -e foo -- 'colon:name.txt'
-  same "path with space" -e foo -- 'with space.txt'
-  same "path leading dash" -e foo -- '-dash.txt'
+  same_exact "non-UTF-8 bytes -a" -a -e foo bin.dat
+  same_exact "max-columns-preview (plain)" --max-columns 8 --max-columns-preview -e foo longline.txt
+  same_exact "path with colon" -e foo -- 'colon:name.txt'
+  same_exact "path with space" -e foo -- 'with space.txt'
+  same_exact "path leading dash" -e foo -- '-dash.txt'
+  echo "### generated large-result classes — exact bytes [${engine}] ###"
+  same_exact_lines "cited 265,286-line class" 265286 -F -e A30 large-265286.txt
+  same_exact_lines "cited 147,087-line class" 147087 -F -e B32 large-147087.txt
   # ripgrep's `Override` whitelist: a `-g`/`--iglob` glob force-includes a hidden or
   # ignored file it matches (bypasses BOTH filters); a `-t` type only un-hides (it
   # never un-ignores). Was a tracked CANDIDATE BUG — gist under-included; now byte-

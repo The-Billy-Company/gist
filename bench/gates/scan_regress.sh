@@ -15,10 +15,11 @@
 #      hidden files exactly like rg's default (no `--no-ignore`/`--hidden` skew;
 #      confirmed byte-for-byte against `rg` for regular, non-ignored files). A
 #      file in rg's set but not gist's is a FALSE NEGATIVE (a candidate scan may
-#      never drop a true match) — UNLESS it is larger than the 4 MiB
-#      per_file_cap gist caps reads at by contract (then it is a documented
-#      cap-skip, not a bug). A file in gist's set but not rg's is a FALSE
-#      POSITIVE. Any real FN/FP ⇒ exit 1. (There's no separate stderr
+#      never drop a true match). Files above gist's 4 MiB per-file cap are called
+#      out separately, but remain a semantic mismatch and block timing: a race
+#      cell is only valid when the complete file sets are exact. A file in gist's
+#      set but not rg's is a FALSE POSITIVE. Any mismatch ⇒ exit 1. (There's no
+#      separate stderr
 #      announcement for "took the no-prefilter path" in the unified engine — the
 #      index only elides reads, it never changes the result — so this no longer
 #      asserts routing, only the output soundness + the speed floor below.)
@@ -39,6 +40,8 @@ source "${HERE}/../races/_compete.sh"
 
 RUNS="${1:-12}"
 PER_FILE_CAP=$((4 << 20)) # mirrors corpus.zig per_file_cap (4 MiB)
+TMP="$(mktemp -d)"
+trap 'rm -rf "${TMP}"' EXIT
 
 # The no-prefilter slate — patterns lacking a ≥3 B required literal AND an
 # all-≥3 alternation cover, so the trigram index can't elide a single read.
@@ -70,47 +73,54 @@ echo
 echo "### SOUNDNESS — gist ≡ rg over the live tree, no-prefilter patterns (the gate) ###"
 fails=0
 for p in "${PATTERNS[@]}"; do
-  "${GIST_BIN}" "${p}" -l -- "${ROOTS[@]}" < /dev/null 2> /dev/null | sort -u > /tmp/gist_scan_g.txt
-  rg "(?-u)${p}" -l -- "${ROOTS[@]}" 2> /dev/null | sort -u > /tmp/gist_scan_r.txt
-  comm -12 /tmp/gist_scan_g.txt /tmp/gist_scan_r.txt > /tmp/gist_scan_shared.txt
-  comm -23 /tmp/gist_scan_g.txt /tmp/gist_scan_r.txt > /tmp/gist_scan_fp.txt # gist-only
-  comm -13 /tmp/gist_scan_g.txt /tmp/gist_scan_r.txt > /tmp/gist_scan_rgonly.txt
-  shared="$(wc -l < /tmp/gist_scan_shared.txt | tr -d ' ')"
-  fp="$(wc -l < /tmp/gist_scan_fp.txt | tr -d ' ')"
+  gcmd="$(compete_rgx_cmd gist "${p}")"
+  rcmd="$(compete_rgx_cmd rg "${p}")"
+  if ! compete_capture_set "${gcmd}" "${TMP}/gist" "${p}/gist" \
+    || ! compete_capture_set "${rcmd}" "${TMP}/rg" "${p}/rg"; then
+    printf "  %-22s HARD ERROR\n" "${p}"
+    fails=$((fails + 1))
+    continue
+  fi
+  comm -12 "${TMP}/gist" "${TMP}/rg" > "${TMP}/shared"
+  comm -23 "${TMP}/gist" "${TMP}/rg" > "${TMP}/fp" # gist-only
+  comm -13 "${TMP}/gist" "${TMP}/rg" > "${TMP}/rgonly"
+  shared="$(wc -l < "${TMP}/shared" | tr -d ' ')"
+  fp="$(wc -l < "${TMP}/fp" | tr -d ' ')"
   fn=0
   cap=0
   while IFS= read -r f; do
     [[ -z "${f}" ]] && continue
     sz="$(fsize "${f}")"
     if [[ "${sz}" -gt "${PER_FILE_CAP}" ]]; then cap=$((cap + 1)); else fn=$((fn + 1)); fi
-  done < /tmp/gist_scan_rgonly.txt
+  done < "${TMP}/rgonly"
   status="ok"
-  if [[ "${fn}" -gt 0 || "${fp}" -gt 0 ]]; then
+  if [[ "${fn}" -gt 0 || "${fp}" -gt 0 || "${cap}" -gt 0 ]]; then
     status="FAIL"
     fails=$((fails + 1))
   fi
   printf "  %-22s shared=%-6s FN=%-3s FP=%-3s cap_skip=%-3s  %s\n" "${p}" "${shared}" "${fn}" "${fp}" "${cap}" "${status}"
 done
 
+if [[ "${fails}" -ne 0 ]]; then
+  echo
+  echo "FAILED: ${fails} pattern(s) diverged or hard-failed. SPEED SKIPPED: unproven cells are never timed."
+  exit 1
+fi
+
 echo
 echo "### SPEED (min of ${RUNS}) — no-prefilter patterns, full-read floor ###"
 printf "  %-22s %9s %9s %8s\n" pattern gist_ms rg_ms verdict
 for p in "${PATTERNS[@]}"; do
-  gj="$(mktemp)"
-  rj="$(mktemp)"
-  hyperfine -w3 -r"${RUNS}" --export-json "${gj}" "{ \"${GIST_BIN}\" '${p}' -l -- ${ROOTS[*]} < /dev/null ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
-  hyperfine -w3 -r"${RUNS}" --export-json "${rj}" "{ rg '(?-u)${p}' -l -- ${ROOTS[*]} ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
-  gm="$(python3 -c "import json;print('%.1f'%(min(json.load(open('${gj}'))['results'][0]['times'])*1000))" 2> /dev/null || echo '?')"
-  rr="$(python3 -c "import json;print('%.1f'%(min(json.load(open('${rj}'))['results'][0]['times'])*1000))" 2> /dev/null || echo '?')"
+  gcmd="$(compete_rgx_cmd gist "${p}")"
+  rcmd="$(compete_rgx_cmd rg "${p}")"
+  if ! gm="$(hf_min 3 "${RUNS}" "${gcmd}" "${rcmd}")" \
+    || ! rr="$(hf_min 3 "${RUNS}" "${rcmd}")"; then
+    echo "aborting: SPEED cell '${p}' failed status/equivalence precheck" >&2
+    exit 1
+  fi
   v="$(python3 -c "g=${gm};r=${rr};print(f'{r/g:.2f}x' if g<r else f'-{g/r:.2f}x')" 2> /dev/null || echo '?')"
   printf "  %-22s %9s %9s %8s\n" "${p}" "${gm}" "${rr}" "${v}"
-  rm -f "${gj}" "${rj}"
 done
 
 echo
-if [[ "${fails}" -eq 0 ]]; then
-  echo "PROVEN: gist ≡ rg over the live tree — ${#PATTERNS[@]} no-prefilter patterns, 0 FN / 0 FP (cap-skips are the documented 4 MiB per_file_cap)."
-else
-  echo "FAILED: ${fails} pattern(s) regressed (real FN/FP). See the gate table above."
-  exit 1
-fi
+echo "PROVEN: gist ≡ rg over the live tree — ${#PATTERNS[@]} no-prefilter patterns, exact file sets, 0 FN / 0 FP / cap-skips."

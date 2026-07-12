@@ -5,12 +5,12 @@ gitignored `.local/gist-compete/*.csv`. The `gist_{cold_field,warm_dominance,reg
 dataviz figures read these at render time — generated from committed data, not
 transcribed. `check_artifacts.py --dataviz` enforces that.
 
-| File                    | Race                                                                   | Columns                                   |
-| ----------------------- | ---------------------------------------------------------------------- | ----------------------------------------- |
-| `cold.csv`              | `coldquery.sh` — cold one-shot literal                                 | `needle,tool,kind,ms,gist_ms,ratio`       |
-| `warm.csv`              | `headtohead.sh` — warm resident vs unindexed                           | `needle,tool,ms,gist_ms,ratio`            |
-| `regex.csv`             | `regex_headtohead.sh` — cold regex tiers                               | `tier,pattern,tool,kind,ms,gist_ms,ratio` |
-| `scan_progression.json` | curated PMU / optimization history (not a race — see its `provenance`) | —                                         |
+| File | Race | Columns |
+|---|---|---|
+| `cold.csv` | `coldquery.sh` — cold one-shot literal | `needle,tool,kind,ms,gist_ms,ratio` |
+| `warm.csv` | `headtohead.sh` — warm resident vs unindexed | `needle,tool,ms,gist_ms,ratio` |
+| `regex.csv` | `regex_headtohead.sh` — cold regex tiers | `tier,pattern,tool,kind,ms,gist_ms,ratio` |
+| `scan_progression.json` | curated PMU / optimization history (not a race — see its `provenance`) | — |
 
 **Machine-specific** (Apple M2, ~15.3k-file worktree, `ratio = rival_ms / gist_ms`;
 `>1` = gist faster). The verdicts on this box: gist's **WARM resident** path

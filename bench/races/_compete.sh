@@ -19,13 +19,13 @@
 #                invocation re-walks the tree and re-scans, warm OR cold.
 #
 # FAIRNESS (stated, not hand-waved):
-#   * Every tool is scoped to the same source ROOTS. rg/git-grep honor
-#     .gitignore natively (skip the gitignored ~99 GB of build artifacts). ag is
-#     handed `--path-to-ignore .gitignore` (the root ignore set rg reads for
-#     free). ugrep/GNU-grep have no per-file gitignore, so they get the heavy
-#     dir-exclude set (`$XDIRS`) — they still scan a slightly larger file set
-#     (gitignored *individual* files rg skips), which only makes them do MORE
-#     work, never less: gist's win over them is therefore conservative.
+#   * Every tool is scoped to the same source ROOTS. gist/rg both disable the
+#     VCS walker and consume the SAME explicit root `.gitignore`; this avoids
+#     ripgrep's parallel multi-root parent-ignore re-anchoring producing a
+#     nondeterministic oracle set. git-grep uses the tracked set natively; ag
+#     receives the same root ignore. ugrep/GNU-grep have no per-file gitignore,
+#     so they get the heavy dir-exclude set (`$XDIRS`) and conservatively scan
+#     slightly more.
 #   * csearch indexes gist's EXACT corpus file list (`paths.list`, the doc→path
 #     table gist persists) → byte-for-byte the same files → result sets ≈ rg's
 #     (the small delta is the few files csearch's own binary heuristic drops).
@@ -103,14 +103,10 @@ compete_kind() { # echoes indexed|unindexed for a tool id
 }
 
 # ── gist binary install ───────────────────────────────────────────────────────
-# compete_install_gist_bin → copy the freshest just-built `gist` CLI (the
-# `index`/`status`/`rg` verbs + the bare `gist <pattern>` shorthand — see
-# src/commands/cli/main.zig) out of the zig cache to ${GIST_BIN}, runnable
-# immediately. Caller builds first;
-# this only selects + installs the artifact (the build invocation differs per
-# script). `gist` and `gist-bench` are separate binaries since the engine/bench
-# split (see changelog.d/+engine-out-of-bench-modular-src.changed.md) — the race
-# scripts drive the CLI's verbs, never the harness binary.
+# compete_install_gist_bin → copy the deterministic installed `gist` CLI (the
+# `index`/`status`/`rg` verbs + bare shorthand) from `zig-out/bin`. Never select
+# a hash-named cache artifact by mtime: an older intermediate build can have a
+# newer timestamp and silently invalidate every gate/certificate.
 #
 # The ad-hoc re-sign is load-bearing on macOS: `cp`-ing a Mach-O strips its
 # ad-hoc code signature, and syspolicyd then SIGKILLs ("Killed: 9") the first
@@ -119,22 +115,21 @@ compete_kind() { # echoes indexed|unindexed for a tool id
 # masking it). `codesign --sign -` re-stamps the copy so it runs on first exec.
 # No-op where codesign is absent (Linux). Returns 1 if no binary was found.
 compete_install_gist_bin() {
-  local exe_src="" f
-  # Newest `gist` CLI by mtime across the cache's hash-named build dirs. A `-nt`
-  # glob loop (not `ls -t | head`) finds it without masking a return value (rc
-  # enables SC2312) and the `-f` guard absorbs the no-match literal-glob case.
-  for f in "${KERNEL}"/.zig-cache/o/*/gist; do
-    [[ -f "${f}" ]] || continue
-    [[ -z "${exe_src}" || "${f}" -nt "${exe_src}" ]] && exe_src="${f}"
-  done
-  [[ -n "${exe_src}" ]] || {
-    echo "  no gist CLI binary in ${KERNEL}/.zig-cache/o/*/ — build first (zig build cli -- …)"
+  local exe_src="${KERNEL}/zig-out/bin/gist"
+  [[ -x "${exe_src}" ]] || {
+    echo "  no installed gist CLI at ${exe_src} — run zig build first"
     return 1
   }
   mkdir -p "$(dirname "${GIST_BIN}")"
   cp "${exe_src}" "${GIST_BIN}"
   command -v codesign > /dev/null 2>&1 && codesign --force --sign - "${GIST_BIN}" > /dev/null 2>&1
   return 0
+}
+
+compete_build_gist_index() {
+  (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast) || return 1
+  compete_install_gist_bin || return 1
+  (cd "${REPO}" && "${GIST_BIN}" index) || return 1
 }
 
 # ── index construction (once per run) ────────────────────────────────────────
@@ -201,14 +196,14 @@ compete_lit_cmd() {
   local tool="${1}" n="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg -F -l -- '${n}' ${roots}" ;;
+    rg) echo "rg -F -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- '${n}' ${roots}" ;;
     ugrep) echo "ugrep -rl -F${xd} -- '${n}' ${roots}" ;;
     ag) echo "ag -l -Q -s --path-to-ignore ${REPO}/.gitignore -- '${n}' ${roots}" ;;
     ggrep) echo "ggrep -rIlF${xd} -- '${n}' ${roots}" ;;
     gitgrep) echo "git -C ${REPO} grep -F -l -- '${n}' -- ${roots}" ;;
     csearch) echo "env CSEARCHINDEX='${CSEARCH_IDX}' csearch -l '\\Q${n}\\E'" ;;
     zoekt) echo "zoekt -index_dir '${ZOEKT_DIR}' -l '\"${n}\"'" ;;
-    gist) echo "${GIST_BIN} '${n}' -F -l -- ${roots}" ;;
+    gist) echo "${GIST_BIN} '${n}' -F -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
@@ -217,55 +212,109 @@ compete_rgx_cmd() {
   local tool="${1}" p="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg '(?-u)${p}' -l -- ${roots}" ;;
+    rg) echo "rg '(?-u)${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
     ugrep) echo "ugrep -rl -P${xd} -- '${p}' ${roots}" ;;
     ag) echo "ag -l -s --path-to-ignore ${REPO}/.gitignore -- '${p}' ${roots}" ;;
     ggrep) echo "ggrep -rIlP${xd} -- '${p}' ${roots}" ;;
     gitgrep) echo "git -C ${REPO} grep -lP -- '${p}' -- ${roots}" ;;
     csearch) echo "env CSEARCHINDEX='${CSEARCH_IDX}' csearch -l '${p}'" ;;
     zoekt) echo "zoekt -index_dir '${ZOEKT_DIR}' -l 'regex:${p}'" ;;
-    gist) echo "${GIST_BIN} '${p}' -l -- ${roots}" ;;
+    gist) echo "${GIST_BIN} '${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
 
-# ── timing + arithmetic helpers (shared by every race script) ─────────────────
+# ── semantic + timing helpers (shared by every race script) ──────────────────
 need_hyperfine() { have hyperfine || {
   echo "need hyperfine (brew install hyperfine)"
   exit 1
 }; }
 
-# hf_mean <warmup> <runs> <cmd> → mean ms over the runs, or "?" on failure.
-#
-# The command is wrapped `{ … ; } 2>&1 | wc -l >/dev/null` for two reasons that
-# make the race both correct and fair:
-#   1. It FORCES full output consumption. ugrep's multithreaded `-l` output is
-#      lazy — when a benchmark harness discards its stdout it short-circuits and
-#      "finishes" in microseconds without scanning. Draining every match line
-#      makes every tool actually produce its complete file list.
-#   2. The pipe's exit status is wc's (always 0), so a needle MISS (rg/grep/ugrep
-#      exit 1 on no match — a valid "0 files" result, not a failure) no longer
-#      aborts hyperfine. wc over a few hundred paths is microseconds — uniform,
-#      negligible overhead for all tools.
-hf_mean() {
-  local warmup="$1" runs="$2" cmd="$3" js rc
-  # Fail-closed pre-check: the drain pipe above intentionally neutralizes a needle
-  # MISS (exit 1) but would equally mask a HARD error (exit >=2 — unknown flag,
-  # crash, bad regex, unreadable path). Run the command once first: 0/1 are valid,
-  # >=2 disqualifies the cell with "?" instead of timing a failure path.
-  eval "${cmd}" > /dev/null 2>&1
+# Capture a complete list-files result as an order-insensitive exact set. Exit 1
+# is rg's valid no-match result; >=2 is always a hard benchmark failure.
+compete_capture_set() { # <cmd> <sorted-output> <label>
+  local cmd="$1" out="$2" label="${3:-command}" rc
+  local raw="${out}.raw" err="${out}.err"
+  bash -c "${cmd}" > "${raw}" 2> "${err}"
   rc=$?
   if [[ "${rc}" -ge 2 ]]; then
-    echo "  cell failed (exit ${rc}), excluded: ${cmd}" >&2
-    echo "?"
-    return
+    echo "  HARD ERROR (exit ${rc}) ${label}: ${cmd}" >&2
+    rm -f "${raw}" "${err}"
+    return 1
+  fi
+  LC_ALL=C sort -u "${raw}" > "${out}" || {
+    rm -f "${raw}" "${err}"
+    return 1
+  }
+  rm -f "${raw}" "${err}"
+}
+
+compete_precheck_status() { # <cmd> <label>
+  local cmd="$1" label="${2:-command}" rc
+  bash -c "${cmd}" > /dev/null 2>&1
+  rc=$?
+  if [[ "${rc}" -ge 2 ]]; then
+    echo "  HARD ERROR (exit ${rc}) ${label}: ${cmd}" >&2
+    return 1
+  fi
+}
+
+# The candidate and official-rg oracle must emit the same complete file set
+# before a gist cell may be timed. This is intentionally independent of order.
+compete_precheck_equivalent() { # <candidate-cmd> <rg-cmd> <label>
+  local candidate="$1" oracle="$2" label="${3:-gist cell}" tmp
+  tmp="$(mktemp -d)"
+  if ! compete_capture_set "${candidate}" "${tmp}/candidate" "${label}/gist" \
+    || ! compete_capture_set "${oracle}" "${tmp}/oracle" "${label}/rg"; then
+    rm -rf "${tmp}"
+    return 1
+  fi
+  if ! cmp -s "${tmp}/candidate" "${tmp}/oracle"; then
+    echo "  SEMANTIC MISMATCH ${label}: gist file set != rg" >&2
+    diff -u "${tmp}/oracle" "${tmp}/candidate" > "${tmp}/diff" || true
+    awk 'NR <= 12 { print "    " $0 }' "${tmp}/diff" >&2
+    rm -rf "${tmp}"
+    return 1
+  fi
+  rm -rf "${tmp}"
+}
+
+# Hyperfine's own pipe sink forces complete output without a shell pipeline, so
+# the producer's status stays authoritative. Only rg's no-match exit 1 is
+# ignored; any >=2 during a measured iteration aborts the cell.
+compete_hyperfine() {
+  hyperfine --output=pipe --ignore-failure=1 "$@"
+}
+
+_hf_value() { # <mean|min> <warmup> <runs> <cmd> [official-rg-oracle]
+  local stat="$1" warmup="$2" runs="$3" cmd="$4" oracle="${5:-}" js rc
+  if [[ -n "${oracle}" ]]; then
+    compete_precheck_equivalent "${cmd}" "${oracle}" "${stat} benchmark" || return 1
+  else
+    compete_precheck_status "${cmd}" "${stat} benchmark" || return 1
   fi
   js="$(mktemp)"
-  hyperfine --warmup "${warmup}" --runs "${runs}" --export-json "${js}" \
-    "{ ${cmd} ; } 2>&1 | wc -l >/dev/null" > /dev/null 2>&1
-  python3 -c "import json;print('%.1f'%(json.load(open('${js}'))['results'][0]['mean']*1000))" 2> /dev/null || echo "?"
+  if ! compete_hyperfine --warmup "${warmup}" --runs "${runs}" \
+    --export-json "${js}" "${cmd}" > /dev/null 2>&1; then
+    echo "  TIMED COMMAND FAILED: ${cmd}" >&2
+    rm -f "${js}"
+    return 1
+  fi
+  python3 - "${js}" "${stat}" << 'PY'
+import json
+import sys
+
+result = json.load(open(sys.argv[1]))["results"][0]
+value = result["mean"] if sys.argv[2] == "mean" else min(result["times"])
+print(f"{value * 1000:.1f}")
+PY
+  rc=$?
   rm -f "${js}"
+  return "${rc}"
 }
+
+hf_mean() { _hf_value mean "$@"; }
+hf_min() { _hf_value min "$@"; }
 
 ratio() {
   [[ "$1" = "?" || "$2" = "?" ]] && {
