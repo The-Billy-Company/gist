@@ -197,7 +197,7 @@ def render(results: list[ClassResult], meta: dict, rng: random.Random) -> str:
         rg = r.rivals.get("rg")
         if rg is None:
             lines.append(
-                f"| `{r.name}` | `{r.pattern}` | {g_med:.1f} ({g_lo:.1f}–{g_hi:.1f}) "
+                f"| `{r.name}` | `{r.pattern}` | {g_med:.1f} ({g_lo:.1f}-{g_hi:.1f}) "
                 "| — | — | — | (no rg) |"
             )
             continue
@@ -208,8 +208,8 @@ def render(results: list[ClassResult], meta: dict, rng: random.Random) -> str:
         loss += d.verdict == "loss"
         p_str = "<0.001" if d.p < 0.001 else f"{d.p:.3f}"
         lines.append(
-            f"| `{r.name}` | `{r.pattern}` | {g_med:.1f} ({g_lo:.1f}–{g_hi:.1f}) "
-            f"| {rg_med:.1f} ({rg_lo:.1f}–{rg_hi:.1f}) | {d.speedup:.2f}× | {p_str} "
+            f"| `{r.name}` | `{r.pattern}` | {g_med:.1f} ({g_lo:.1f}-{g_hi:.1f}) "
+            f"| {rg_med:.1f} ({rg_lo:.1f}-{rg_hi:.1f}) | {d.speedup:.2f}x | {p_str} "
             f"| {VERDICT_GLYPH[d.verdict]} |"
         )
         # context: every other tool's median + speedup vs gist
@@ -219,7 +219,7 @@ def render(results: list[ClassResult], meta: dict, rng: random.Random) -> str:
                 continue
             m = quantile(sorted(ts), 0.50)
             spd = (m / g_med) if g_med > 0 else 0.0
-            others.append(f"{tool} {m:.1f}ms ({spd:.1f}×)")
+            others.append(f"{tool} {m:.1f}ms ({spd:.1f}x)")
         if others:
             ctx_rows.append(f"- `{r.name}`: " + " · ".join(others))
 
@@ -232,9 +232,9 @@ def render(results: list[ClassResult], meta: dict, rng: random.Random) -> str:
     if loss == 0 and total > 0:
         lines.append("")
         lines.append(
-            "> No class is slower than ripgrep at p<{:.2f}: gist holds **parity or "
+            f"> No class is slower than ripgrep at p<{ALPHA:.2f}: gist holds **parity or "
             "better on every regex class ripgrep supports** — the claimed "
-            "across-the-board parity, measured and significance-tested.".format(ALPHA)
+            "across-the-board parity, measured and significance-tested."
         )
     if ctx_rows:
         lines.append("")

@@ -27,6 +27,7 @@ Usage:  python3 run.py            # score the frozen spec.json
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -57,13 +58,13 @@ def materialize(rec, root: Path):
         with p.open("wb") as fh:
             fh.truncate(int(s["size"]))
     # Symlinks (ripgrep's Dir::link_file/link_dir → absolute symlink target).
-    for l in rec.get("symlinks", []):
-        p = root / l["path"]
+    for link in rec.get("symlinks", []):
+        p = root / link["path"]
         p.parent.mkdir(parents=True, exist_ok=True)
         if p.is_symlink() or p.exists():
-            try: p.unlink()
-            except OSError: pass
-        p.symlink_to(root / l["target"])
+            with contextlib.suppress(OSError):
+                p.unlink()
+        p.symlink_to(root / link["target"])
 
 
 def run(cmd, cwd, stdin_bytes, engine_env=None):
@@ -76,8 +77,7 @@ def run(cmd, cwd, stdin_bytes, engine_env=None):
     kw = {"input": stdin_bytes} if stdin_bytes is not None else {"stdin": subprocess.DEVNULL}
     env = {**os.environ, **engine_env} if engine_env else None
     try:
-        r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           timeout=20, env=env, **kw)
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=20, env=env, **kw)
     except subprocess.TimeoutExpired:
         return 124, b"", b"timeout"
     else:
@@ -167,8 +167,8 @@ def score(rec, engine_env=None):
         cwd = str(root / rec["current_dir"]) if rec["current_dir"] else str(root)
         stdin = base64.b64decode(rec["stdin"]) if rec["stdin"] else None
         argv = rec["argv"]
-        rc_rg, out_rg, err_rg = run([RG, "--path-separator", "/"] + argv, cwd, stdin)
-        rc_g, out_g, err_g = run([str(GIST), "rg"] + argv, cwd, stdin, engine_env)
+        rc_rg, out_rg, err_rg = run([RG, "--path-separator", "/", *argv], cwd, stdin)
+        rc_g, out_g, err_g = run([str(GIST), "rg", *argv], cwd, stdin, engine_env)
 
     if rc_rg == 2:
         e = err_rg.decode("utf-8", "replace")

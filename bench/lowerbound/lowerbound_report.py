@@ -120,7 +120,7 @@ def render(rows: list[Row]) -> str:
         "*before* verify runs — the technique of Russ Cox, *\"Regular Expression "
         "Matching with a Trigram Index, or How Google Code Search Worked\"* (2012), "
         "gist's direct ancestor. `cand%` below is the fraction of corpus bytes "
-        "admitted; `100% − cand%` is pruned away untouched."
+        "admitted; `100% - cand%` is pruned away untouched."
     )
     lines.append("")
     lines.append(

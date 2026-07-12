@@ -3,7 +3,7 @@
 
 The roofline model (Williams, Waterman & Patterson, "Roofline: An Insightful
 Visual Performance Model for Multicore Architectures", CACM 2009) bounds a
-kernel's throughput by min(peak compute, peak memory-bandwidth × arithmetic
+kernel's throughput by min(peak compute, peak memory-bandwidth x arithmetic
 intensity). gist's verify path is a byte classifier / streaming scan with tiny
 arithmetic intensity (a handful of ops per byte), so it lives on the **memory
 ridge**: no implementation on this chip can go materially faster because the
@@ -154,7 +154,7 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
     lines: list[str] = [LAYER_C_HEADER, ""]
     lines.append(
         "_The roofline model (Williams, Waterman & Patterson, CACM 2009) caps a kernel at "
-        "min(peak compute, peak bandwidth × arithmetic intensity). gist's scan is a byte "
+        "min(peak compute, peak bandwidth x arithmetic intensity). gist's scan is a byte "
         "classifier — a dual-window SIMD compare per stride — with tiny arithmetic intensity, "
         "so it lives in the **memory-bound region**: its ceiling is memory bandwidth, not "
         "compute. Ceiling = this machine's measured single-core STREAM read bandwidth "
@@ -221,7 +221,7 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
             f"**{pg:.1f} GB/s = {frac:.0f}% of the {dram:.1f} GB/s single-core pure-read ceiling** "
             "(same-run ratio, so this holds even as absolute GB/s drifts with box load). The scan "
             "issues **two overlapping vector loads per stride** (first-byte + last-byte windows, "
-            "memchr-style), so it moves ~2× the needle bytes through the load ports — "
+            "memchr-style), so it moves ~2x the needle bytes through the load ports — "
             "hitting a large fraction of a *pure-read* STREAM ceiling that a compare-and-verify "
             "scan can "
             "never fully reach. The kernel is limited by memory/load-port throughput, not by "

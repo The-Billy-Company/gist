@@ -33,7 +33,7 @@ HERE = Path(__file__).resolve().parent
 def load_counts(results_path: Path) -> tuple[dict[str, int], list[dict]]:
     """Load counts from disk."""
     rows = json.loads(results_path.read_text())
-    counts = {b: 0 for b in BUCKETS}
+    counts = dict.fromkeys(BUCKETS, 0)
     for r in rows:
         b = r.get("bucket")
         if b not in counts:
@@ -72,7 +72,7 @@ def main() -> int:
     denom = supported + counts["FAIL"]
     pct = round(100.0 * supported / denom, 1) if denom else 0.0
 
-    print(f"results.json: " + " · ".join(f"{b} {counts[b]}" for b in BUCKETS) + f"  (total {total})")
+    print("results.json: " + " · ".join(f"{b} {counts[b]}" for b in BUCKETS) + f"  (total {total})")
     print(f"supported-surface parity = {supported}/{denom} = {pct}%")
 
     problems: list[str] = []

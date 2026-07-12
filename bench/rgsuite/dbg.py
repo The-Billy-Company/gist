@@ -6,6 +6,7 @@ Usage:  python3 dbg.py <name> [<name>…].
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 from pathlib import Path
 import subprocess
@@ -34,23 +35,25 @@ def show(n):
             p.parent.mkdir(parents=True, exist_ok=True)
             with p.open("wb") as fh:
                 fh.truncate(int(s["size"]))
-        for l in r.get("symlinks", []):
-            p = root / l["path"]
+        for link in r.get("symlinks", []):
+            p = root / link["path"]
             p.parent.mkdir(parents=True, exist_ok=True)
             if p.is_symlink() or p.exists():
-                try: p.unlink()
-                except OSError: pass
-            p.symlink_to(root / l["target"])
+                with contextlib.suppress(OSError):
+                    p.unlink()
+            p.symlink_to(root / link["target"])
         cwd = str(root / r["current_dir"]) if r["current_dir"] else str(root)
         kw = {"input": base64.b64decode(r["stdin"])} if r["stdin"] else {"stdin": subprocess.DEVNULL}
         rr = subprocess.run(["rg", "--path-separator", "/"] + r["argv"], cwd=cwd,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kw)
+                            capture_output=True, **kw)
         gg = subprocess.run([str(GIST), "rg"] + r["argv"], cwd=cwd,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kw)
+                            capture_output=True, **kw)
     print(f"### {n}  argv={r['argv']}  files={[f['path'] for f in r['files']]} dirs={r['dirs']}")
     print(f"  rc rg={rr.returncode} gist={gg.returncode}")
-    print("  --- rg stdout ---");   print("   " + rr.stdout.decode("utf-8", "replace").replace("\n", "\n   ")[:600])
-    print("  --- gist stdout ---"); print("   " + gg.stdout.decode("utf-8", "replace").replace("\n", "\n   ")[:600])
+    print("  --- rg stdout ---")
+    print("   " + rr.stdout.decode("utf-8", "replace").replace("\n", "\n   ")[:600])
+    print("  --- gist stdout ---")
+    print("   " + gg.stdout.decode("utf-8", "replace").replace("\n", "\n   ")[:600])
     if gg.returncode == 2:
         print("  gist stderr:", gg.stderr.decode()[:150])
 
