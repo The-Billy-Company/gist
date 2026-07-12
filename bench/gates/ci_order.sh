@@ -74,14 +74,18 @@ python3 bench/certify/check_artifacts.py \
 art_rc=$?
 set -e
 case "${art_rc}" in
-  0) echo "OK: committed certificate bundle";;
-  2) echo "NOTE: no HEAD-bound committed certificate yet — regenerate with"
-     echo "      CERT_PUBLISH_DIR=bench/certify/artifact bash bench/certify/certify.sh"
-     echo "      on a clean tree after this branch lands its code fixes.";;
-  *) echo "FAIL: committed certificate bundle"
-     failures=$((failures + 1))
-     echo "SKIPPED: committed evidence bundle is invalid; refusing to replace it with an unvalidated run."
-     exit 1;;
+  0) echo "OK: committed certificate bundle" ;;
+  2)
+    echo "NOTE: no HEAD-bound committed certificate yet — regenerate with"
+    echo "      CERT_PUBLISH_DIR=bench/certify/artifact bash bench/certify/certify.sh"
+    echo "      on a clean tree after this branch lands its code fixes."
+    ;;
+  *)
+    echo "FAIL: committed certificate bundle"
+    failures=$((failures + 1))
+    echo "SKIPPED: committed evidence bundle is invalid; refusing to replace it with an unvalidated run."
+    exit 1
+    ;;
 esac
 missing=""
 for t in hyperfine csearch zoekt rg; do command -v "${t}" > /dev/null || missing="${missing} ${t}"; done

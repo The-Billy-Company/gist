@@ -25,16 +25,15 @@ source "${HERE}/../races/_compete.sh"
 need_hyperfine
 
 # Refuse to mint a certificate whose machine.git_commit could not equal a clean HEAD.
-if ! git -C "${REPO}" rev-parse --verify HEAD >/dev/null 2>&1; then
+if ! git -C "${REPO}" rev-parse --verify HEAD > /dev/null 2>&1; then
   echo "certificate aborted: cannot resolve git HEAD" >&2
   exit 1
 fi
-if [[ -n "$(git -C "${REPO}" status --porcelain 2>/dev/null)" ]]; then
+if [[ -n "$(git -C "${REPO}" status --porcelain 2> /dev/null)" ]]; then
   echo "certificate aborted: worktree is dirty — commit or isolate changes before certifying" >&2
   git -C "${REPO}" status --porcelain >&2
   exit 1
 fi
-
 
 RUNS="${RUNS:-20}"
 WARMUP="${WARMUP:-3}"

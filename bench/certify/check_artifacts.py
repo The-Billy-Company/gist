@@ -86,7 +86,7 @@ def _git_output(*args: str) -> str | None:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         return None
 
 

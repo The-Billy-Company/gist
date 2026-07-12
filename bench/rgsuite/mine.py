@@ -457,7 +457,7 @@ def mine_block(name, body, consts, srcfile):
         elif head == '.assert_exit_code':
             code = None
             try: code = int(args[0])
-            except (ValueError, IndexError): pass
+            except ValueError, IndexError: pass
             emit('exit', code)
         elif head == '.assert_non_empty_stderr':
             emit('stderr')
