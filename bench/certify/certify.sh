@@ -29,7 +29,8 @@ if ! git -C "${REPO}" rev-parse --verify HEAD > /dev/null 2>&1; then
   echo "certificate aborted: cannot resolve git HEAD" >&2
   exit 1
 fi
-if [[ -n "$(git -C "${REPO}" status --porcelain 2> /dev/null)" ]]; then
+dirty="$(git -C "${REPO}" status --porcelain 2> /dev/null || true)"
+if [[ -n "${dirty}" ]]; then
   echo "certificate aborted: worktree is dirty — commit or isolate changes before certifying" >&2
   git -C "${REPO}" status --porcelain >&2
   exit 1
