@@ -31,7 +31,6 @@ stdlib only. Mirrors `bench/certify/certify_stats.py`'s splice technique.
 # silence them file-wide (repo precedent: services/ai, taskrunner, entrain all
 # ignore RUF001/002/003 for intentional glyphs).
 
-from __future__ import annotations
 
 import argparse
 import csv

@@ -17,7 +17,6 @@ would otherwise check by hand:
 Usage: check_results.py [--allow-fail] [--results PATH] [--readme PATH]
 Exit 0 iff every rule holds (and, without --allow-fail, FAIL == 0).
 """
-from __future__ import annotations
 
 import argparse
 import json

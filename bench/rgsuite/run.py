@@ -24,7 +24,6 @@ verb — see src/commands/cli/main.zig; distinct from the `gist-bench` harness).
 Usage:  python3 run.py            # score the frozen spec.json
         python3 run.py --list-na  # also print the NA reasons
 """
-from __future__ import annotations
 
 import base64
 import contextlib

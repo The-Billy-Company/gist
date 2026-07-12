@@ -16,7 +16,6 @@ operator to run `zig build certify` first.
 stdlib only. Idempotent.
 """
 
-from __future__ import annotations
 
 import argparse
 import json

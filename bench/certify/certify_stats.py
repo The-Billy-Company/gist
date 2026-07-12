@@ -20,7 +20,6 @@ microscopic section written by `zig build certify` untouched.
 stdlib only. Deterministic: the bootstrap RNG is seeded.
 """
 
-from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass

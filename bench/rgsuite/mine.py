@@ -19,7 +19,6 @@ Regenerate only when bumping the pinned ripgrep the suite tracks:
 Each record carries status ok|skip so the scoreboard stays honest about what it
 could and couldn't reproduce.
 """
-from __future__ import annotations
 
 import base64
 import contextlib

@@ -18,7 +18,6 @@ Usage: check_artifacts.py [--artifacts-dir DIR] [--dataviz-dir DIR]
                           [--artifacts] [--dataviz]   (default: run both)
 Exit 0 iff every requested check passes; 2 if a certificate dir is simply absent.
 """
-from __future__ import annotations
 
 import argparse
 import json

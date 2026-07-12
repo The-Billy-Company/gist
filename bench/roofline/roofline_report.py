@@ -29,7 +29,6 @@ It splices a `## Layer C — roofline (hardware ceiling)` section into
 # so silence them file-wide (repo precedent: services/ai, taskrunner, entrain all
 # ignore RUF001/002/003 for intentional glyphs).
 
-from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
@@ -114,7 +113,7 @@ def load_compute_ceiling(path: Path, ghz: float) -> ComputeBound | None:
         return None
     try:
         doc = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return None
     cores: list[tuple[str, float, float]] = []
     for r in doc.get("results", []):

@@ -14,7 +14,6 @@ Usage: index_size_accounting.py [--index-dir DIR] [--csearch PATH] [--zoekt DIR]
                                 [--assert-total-under-csearch]
 Env: GIST_INDEX_DIR, CSEARCHINDEX.
 """
-from __future__ import annotations
 
 import argparse
 import json
