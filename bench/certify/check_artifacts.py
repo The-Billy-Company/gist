@@ -80,18 +80,24 @@ CSV_READ = re.compile(
 )
 
 def _git_output(*args: str) -> str | None:
+    """Return stripped stdout from git -C REPO, or None on failure."""
     try:
         return subprocess.check_output(
             ["git", "-C", str(REPO), *args],
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-    except OSError, subprocess.CalledProcessError:
+    except (OSError, subprocess.CalledProcessError) as exc:
+        _ = exc
         return None
 
 
 def _check_clean_head(meta: dict, problems: list[str]) -> None:
-    """machine.git_commit must equal HEAD, and the worktree must be clean."""
+    """Require machine.git_commit equals clean HEAD.
+
+    Appends human-readable problems when HEAD cannot be resolved, the recorded
+    commit drifts from HEAD, or the worktree is dirty.
+    """
     commit = str(meta.get("git_commit", ""))
     head = _git_output("rev-parse", "HEAD")
     if head is None:
@@ -306,6 +312,11 @@ def _check_index_sizes(path: Path, problems: list[str]) -> None:
 
 
 def check_artifacts(d: Path, *, require_head: bool = True) -> list[str]:
+    """Validate a certificate artifact directory.
+
+    Returns a problem list, ``["__ABSENT__"]`` when the bundle is missing
+    or pending regeneration, or an empty list on success.
+    """
     if not d.is_dir():
         print(f"  (no certificate dir at {d} — run `bench/certify/certify.sh` first)")
         return ["__ABSENT__"]
@@ -333,6 +344,7 @@ def check_artifacts(d: Path, *, require_head: bool = True) -> list[str]:
 
 
 def check_dataviz(d: Path) -> list[str]:
+    """Fail if figure scripts transcribe numbers instead of reading committed data."""
     scripts = sorted(d.glob("gist_*.py"))
     if not scripts:
         return [f"no gist_*.py figure scripts under {d}"]
@@ -355,6 +367,7 @@ def check_dataviz(d: Path) -> list[str]:
 
 
 def main() -> int:
+    """Run artifact and/or dataviz reproducibility checks."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--artifacts-dir", type=Path, default=REPO / ".local" / "gist-verify")
     ap.add_argument(

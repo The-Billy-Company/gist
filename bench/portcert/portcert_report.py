@@ -16,7 +16,6 @@ operator to run `zig build certify` first.
 stdlib only. Idempotent.
 """
 
-from __future__ import annotations
 
 import argparse
 import json
@@ -54,6 +53,7 @@ BOUND_NOTE = (
 
 
 def render(doc: dict) -> str:
+    """Render generated source artifacts."""
     ver = doc.get("llvm_mca_version", "?")
     results = doc.get("results", [])
     lines = [LAYER_B_HEADER, ""]
@@ -81,18 +81,18 @@ def render(doc: dict) -> str:
         "| bytes/iter | cyc/byte (port bound) |"
     )
     lines.append("|---|---|---|---|--:|--:|--:|")
-    for r in results:
-        lines.append(
-            "| `{probe}` | `{source}` | `{uarch}` | {bound} | {rt} | {bpi} | {cpb} |".format(
-                probe=r["probe"],
-                source=r["source"],
-                uarch=r["target_uarch"],
-                bound=r["bound"],
-                rt=r["block_rthroughput_cyc_iter"],
-                bpi=r["bytes_per_iter"],
-                cpb=r["cyc_per_byte"],
-            )
+    lines.extend(
+        "| `{probe}` | `{source}` | `{uarch}` | {bound} | {rt} | {bpi} | {cpb} |".format(
+            probe=r["probe"],
+            source=r["source"],
+            uarch=r["target_uarch"],
+            bound=r["bound"],
+            rt=r["block_rthroughput_cyc_iter"],
+            bpi=r["bytes_per_iter"],
+            cpb=r["cyc_per_byte"],
         )
+        for r in results
+    )
     lines.append("")
     lines.append(BOUND_NOTE)
     lines.append("")
@@ -102,6 +102,7 @@ def render(doc: dict) -> str:
 
 
 def splice(cert: Path, section: str) -> None:
+    """Perform splice."""
     text = cert.read_text()
 
     # Drop any existing Layer B section (heading → next `## Layer` or EOF).
@@ -122,6 +123,7 @@ def splice(cert: Path, section: str) -> None:
 
 
 def main() -> int:
+    """CLI entry point."""
     ap = argparse.ArgumentParser(description="gist Layer B port-optimality certificate splicer")
     ap.add_argument("--json", type=Path, required=True, help="portcert.json from portcert.sh")
     ap.add_argument("--certificate", type=Path, required=True, help="CERTIFICATE.md to splice into")

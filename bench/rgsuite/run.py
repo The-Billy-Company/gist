@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Differential drop-in proof: replay ripgrep's OWN integration suite against
-gist's `rg` verb and score it honestly against real ripgrep as the oracle.
+"""Differential drop-in proof: replay ripgrep's OWN integration suite against gist's `rg` verb and score it honestly against real ripgrep as the oracle.
 
 For each mined test we materialize its fixture in a throwaway dir, run REAL `rg`
 and `gist rg` on byte-identical inputs (same argv, same stdin), and compare
@@ -25,9 +24,17 @@ verb — see src/commands/cli/main.zig; distinct from the `gist-bench` harness).
 Usage:  python3 run.py            # score the frozen spec.json
         python3 run.py --list-na  # also print the NA reasons
 """
-from __future__ import annotations
-import base64, json, os, re, subprocess, sys, tempfile
+
+import base64
+import contextlib
+import json
+import os
 from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+
 
 HERE = Path(__file__).resolve().parent
 GIST = HERE.parents[1] / "zig-out" / "bin" / "gist"  # …/gist/zig-out/bin — the CLI (`rg` verb)
@@ -36,6 +43,7 @@ spec = json.loads((HERE / "spec.json").read_text())
 
 
 def materialize(rec, root: Path):
+    """Perform materialize."""
     for d in rec["dirs"]:
         (root / d).mkdir(parents=True, exist_ok=True)
     for f in rec["files"]:
@@ -46,33 +54,37 @@ def materialize(rec, root: Path):
     for s in rec.get("sized", []):
         p = root / s["path"]
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "wb") as fh:
+        with p.open("wb") as fh:
             fh.truncate(int(s["size"]))
     # Symlinks (ripgrep's Dir::link_file/link_dir → absolute symlink target).
-    for l in rec.get("symlinks", []):
-        p = root / l["path"]
+    for link in rec.get("symlinks", []):
+        p = root / link["path"]
         p.parent.mkdir(parents=True, exist_ok=True)
         if p.is_symlink() or p.exists():
-            try: p.unlink()
-            except OSError: pass
-        os.symlink(root / l["target"], p)
+            with contextlib.suppress(OSError):
+                p.unlink()
+        p.symlink_to(root / link["target"])
 
 
 def run(cmd, cwd, stdin_bytes, engine_env=None):
-    # No piped input → hand the child /dev/null (a char device), exactly like
-    # ripgrep's own Rust harness. Load-bearing: an empty *pipe* would make rg
-    # read (empty) stdin instead of searching the directory.
+    """Run a command with optional stdin bytes; return (rc, stdout, stderr).
+
+    No piped input → hand the child /dev/null (a char device), exactly like
+    ripgrep's own Rust harness. Load-bearing: an empty *pipe* would make rg
+    read (empty) stdin instead of searching the directory.
+    """
     kw = {"input": stdin_bytes} if stdin_bytes is not None else {"stdin": subprocess.DEVNULL}
     env = {**os.environ, **engine_env} if engine_env else None
     try:
-        r = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                           timeout=20, env=env, **kw)
-        return r.returncode, r.stdout, r.stderr
+        r = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=20, env=env, **kw)
     except subprocess.TimeoutExpired:
         return 124, b"", b"timeout"
+    else:
+        return r.returncode, r.stdout, r.stderr
 
 
 def sort_lines(b: bytes) -> bytes:
+    """Return bytes for sort lines."""
     ls = b.decode("utf-8", "replace").strip("\n").split("\n") if b.strip() else []
     return ("\n".join(sorted(ls)) + ("\n" if ls else "")).encode()
 
@@ -81,10 +93,11 @@ def sort_lines(b: bytes) -> bytes:
 # total`) that are inherently non-deterministic. ripgrep's own tests only assert
 # `contains("seconds")`, never the value — so we normalize both sides' timing
 # lines to a fixed token before the byte-exact diff (not a correctness property).
-_SECONDS = re.compile(rb"^[0-9.]+ (seconds spent searching|seconds total)$", re.M)
+_SECONDS = re.compile(rb"^[0-9.]+ (seconds spent searching|seconds total)$", re.MULTILINE)
 
 
 def norm_time(b: bytes) -> bytes:
+    """Return bytes for norm time."""
     return _SECONDS.sub(rb"T \1", b)
 
 
@@ -98,6 +111,7 @@ _BYTES_PRINTED = re.compile(rb'"bytes_printed":\d+')
 
 
 def norm_json(b: bytes) -> bytes:
+    """Return bytes for norm json."""
     b = _ELAPSED.sub(rb'"elapsed":{}', b)
     return _BYTES_PRINTED.sub(rb'"bytes_printed":0', b)
 
@@ -138,6 +152,7 @@ def _uses_color(rec) -> bool:
 
 
 def score(rec, engine_env=None):
+    """Perform score."""
     if rec["status"] == "skip" or not rec["argv"]:
         return "SKIP", "control-flow/unresolved"
     if rec["pcre2"]:
@@ -151,8 +166,8 @@ def score(rec, engine_env=None):
         cwd = str(root / rec["current_dir"]) if rec["current_dir"] else str(root)
         stdin = base64.b64decode(rec["stdin"]) if rec["stdin"] else None
         argv = rec["argv"]
-        rc_rg, out_rg, err_rg = run([RG, "--path-separator", "/"] + argv, cwd, stdin)
-        rc_g, out_g, err_g = run([str(GIST), "rg"] + argv, cwd, stdin, engine_env)
+        rc_rg, out_rg, err_rg = run([RG, "--path-separator", "/", *argv], cwd, stdin)
+        rc_g, out_g, err_g = run([str(GIST), "rg", *argv], cwd, stdin, engine_env)
 
     if rc_rg == 2:
         e = err_rg.decode("utf-8", "replace")
@@ -233,6 +248,7 @@ def _run_engine(engine_env):
 
 
 def main():
+    """CLI entry point."""
     if not GIST.exists():
         sys.exit(f"gist CLI not built at {GIST} — run `zig build` in {HERE.parents[1]}")
     list_na = "--list-na" in sys.argv[1:]
