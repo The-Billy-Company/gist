@@ -19,8 +19,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
+import sys
+
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[4]  # gates -> bench -> gist -> kernels -> libs -> repo
@@ -29,16 +30,19 @@ PATH_TABLE = "paths.list"
 
 
 def dir_bytes(p: Path) -> int:
+    """Return int for dir bytes."""
     if p.is_file():
         return p.stat().st_size
     return sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
 
 
 def mib(n: int) -> str:
+    """Return str for mib."""
     return f"{n / (1024 * 1024):.1f} MiB"
 
 
 def main() -> int:
+    """CLI entry point."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--index-dir", type=Path, default=Path(os.environ.get("GIST_INDEX_DIR", REPO_ROOT / ".local" / "gist-verify")))
     ap.add_argument("--csearch", type=Path, default=Path(os.environ.get("CSEARCHINDEX", Path.home() / ".csearchindex")))

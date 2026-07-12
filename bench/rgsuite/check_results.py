@@ -21,15 +21,17 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 import re
 import sys
-from pathlib import Path
+
 
 BUCKETS = ("PASS", "ORDER", "FAIL", "NA", "SKIP")
 HERE = Path(__file__).resolve().parent
 
 
 def load_counts(results_path: Path) -> tuple[dict[str, int], list[dict]]:
+    """Load counts from disk."""
     rows = json.loads(results_path.read_text())
     counts = {b: 0 for b in BUCKETS}
     for r in rows:
@@ -41,6 +43,7 @@ def load_counts(results_path: Path) -> tuple[dict[str, int], list[dict]]:
 
 
 def readme_counts(readme_path: Path) -> tuple[dict[str, int], tuple[int, int, float] | None]:
+    """Return tuple[dict[str, int], tuple[int, int, float] | None] for readme counts."""
     text = readme_path.read_text()
     counts: dict[str, int] = {}
     for b in BUCKETS:
@@ -56,6 +59,7 @@ def readme_counts(readme_path: Path) -> tuple[dict[str, int], tuple[int, int, fl
 
 
 def main() -> int:
+    """CLI entry point."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--allow-fail", action="store_true", help="tolerate FAIL > 0 (still requires every FAIL to be documented)")
     ap.add_argument("--results", type=Path, default=HERE / "results.json")

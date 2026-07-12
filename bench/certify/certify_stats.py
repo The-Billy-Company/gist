@@ -23,12 +23,12 @@ stdlib only. Deterministic: the bootstrap RNG is seeded.
 from __future__ import annotations
 
 import argparse
-import bisect
+from dataclasses import dataclass
 import json
 import math
-import random
-from dataclasses import dataclass
 from pathlib import Path
+import random
+
 
 ALPHA = 0.05
 BOOTSTRAP = 10_000
@@ -70,6 +70,7 @@ def _normal_cdf(x: float) -> float:
 
 @dataclass
 class Dominance:
+    """Dominance value object."""
     verdict: str  # "win" | "parity" | "loss"
     speedup: float  # median(b) / median(a) — >1 means A (gist) faster
     p: float
@@ -78,8 +79,11 @@ class Dominance:
 
 
 def dominance(a: list[float], b: list[float], alpha: float = ALPHA) -> Dominance:
-    """Tie-corrected Mann-Whitney U (normal approx, continuity-corrected), then a
-    fail-closed verdict. `a`,`b` are costs (lower = faster); a = gist, b = rival."""
+    """Tie-corrected Mann-Whitney U (normal approx, continuity-corrected), then a fail-closed verdict.
+
+    `a`,`b` are costs (lower = faster); a = gist, b = rival.
+
+    """
     a_med = quantile(sorted(a), 0.50)
     b_med = quantile(sorted(b), 0.50)
     n1, n2 = len(a), len(b)
@@ -128,6 +132,7 @@ def load_times_ms(path: Path) -> list[float]:
 
 @dataclass
 class ClassResult:
+    """ClassResult value object."""
     name: str
     kind: str
     pattern: str
@@ -136,6 +141,7 @@ class ClassResult:
 
 
 def collect(results_dir: Path, order: list[tuple[str, str, str]]) -> list[ClassResult]:
+    """Return list[ClassResult] for collect."""
     out = []
     for name, kind, pattern in order:
         gist_path = results_dir / f"{name}__gist.json"
@@ -168,6 +174,7 @@ VERDICT_GLYPH = {"win": "✅ win", "parity": "≈ parity", "loss": "❌ loss"}
 
 
 def render(results: list[ClassResult], meta: dict, rng: random.Random) -> str:
+    """Render generated source artifacts."""
     runs = meta.get("runs", "?")
     warmup = meta.get("warmup", "?")
     lines: list[str] = [MACRO_HEADER, ""]
@@ -250,6 +257,7 @@ def splice_certificate(cert: Path, macro: str) -> None:
 
 
 def write_csv(results: list[ClassResult], csv_path: Path, rng: random.Random) -> None:
+    """Perform write csv."""
     rows = ["class\tpattern\ttool\tmedian_ms\tci_lo_ms\tci_hi_ms\tspeedup_vs_gist\tverdict"]
     for r in results:
         g_med, g_lo, g_hi = median_ci(r.gist, rng)
@@ -268,6 +276,7 @@ def write_csv(results: list[ClassResult], csv_path: Path, rng: random.Random) ->
 
 
 def main() -> int:
+    """CLI entry point."""
     ap = argparse.ArgumentParser(description="gist macroscopic dominance post-processor")
     ap.add_argument("results_dir", type=Path, help="dir of hyperfine ${class}__${tool}.json")
     ap.add_argument("--certificate", type=Path, required=True)

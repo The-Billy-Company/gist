@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
-import sys
 from pathlib import Path
+import re
+
 
 HERE = Path(__file__).resolve().parent
 CRATE = HERE.parents[1]  # certify -> bench -> gist
@@ -43,18 +43,21 @@ REQUIRED_MACHINE_KEYS = (
     "git_commit", "corpus_file_count", "corpus_total_bytes",
 )
 REQUIRED_TOOLS = ("zig", "rg", "csearch", "zoekt", "hyperfine")
-TRANSCRIBE_MARKERS = re.compile(r"transcrib|hardcod|\bmanual\b|hand-wave|paste (?:it|the)", re.I)
+TRANSCRIBE_MARKERS = re.compile(r"transcrib|hardcod|\bmanual\b|hand-wave|paste (?:it|the)", re.IGNORECASE)
 CSV_READ = re.compile(r"read_csv|DictReader|loadtxt|genfromtxt|csv\.reader|json\.load|open\([^)]*\.(csv|json)")
 
 
 def check_artifacts(d: Path) -> list[str]:
+    """Check artifacts and return problem strings."""
     if not d.is_dir():
         print(f"  (no certificate dir at {d} — run `bench/certify/certify.sh` first)")
         return ["__ABSENT__"]
     problems: list[str] = []
-    for f in REQUIRED_FILES:
-        if not (d / f).is_file():
-            problems.append(f"missing required artifact: {f}")
+    problems.extend(
+        f"missing required artifact: {f}"
+        for f in REQUIRED_FILES
+        if not (d / f).is_file()
+    )
     # at least one raw hyperfine JSON (per-cell timing evidence, under raw/)
     if not list(d.glob("raw/*.json")) and not list(d.glob("*.json")):
         problems.append("no raw hyperfine JSON export found (per-cell timing evidence under raw/)")
@@ -62,21 +65,26 @@ def check_artifacts(d: Path) -> list[str]:
     if mj.is_file():
         try:
             meta = json.loads(mj.read_text())
-            for k in REQUIRED_MACHINE_KEYS:
-                if k not in meta:
-                    problems.append(f"machine.json missing key: {k}")
+            problems.extend(
+                f"machine.json missing key: {k}"
+                for k in REQUIRED_MACHINE_KEYS
+                if k not in meta
+            )
         except json.JSONDecodeError as e:
             problems.append(f"machine.json is not valid JSON: {e}")
     tv = d / "tool-versions.txt"
     if tv.is_file():
         text = tv.read_text().lower()
-        for t in REQUIRED_TOOLS:
-            if t not in text:
-                problems.append(f"tool-versions.txt missing a version line for: {t}")
+        problems.extend(
+            f"tool-versions.txt missing a version line for: {t}"
+            for t in REQUIRED_TOOLS
+            if t not in text
+        )
     return problems
 
 
 def check_dataviz(d: Path) -> list[str]:
+    """Check dataviz and return problem strings."""
     scripts = sorted(d.glob("gist_*.py"))
     if not scripts:
         return [f"no gist_*.py figure scripts under {d}"]
@@ -93,6 +101,7 @@ def check_dataviz(d: Path) -> list[str]:
 
 
 def main() -> int:
+    """CLI entry point."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--artifacts-dir", type=Path, default=REPO / ".local" / "gist-verify")
     ap.add_argument("--dataviz-dir", type=Path, default=REPO / "scripts" / "act" / "workspace" / "dataviz" / "figures")

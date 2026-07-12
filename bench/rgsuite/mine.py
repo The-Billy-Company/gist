@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Mine ripgrep's tests/*.rs integration suite into a self-contained, tool-
-agnostic spec (fixtures + argv + comparison mode) → spec.json.
+"""Mine ripgrep's tests/*.rs integration suite into a self-contained, tool- agnostic spec (fixtures + argv + comparison mode) → spec.json.
 
 We use LIVE `rg` as the oracle in run.py, so we deliberately do NOT parse the
 hardcoded `expected` strings — only what's needed to reproduce each scenario:
@@ -21,8 +20,13 @@ Each record carries status ok|skip so the scoreboard stays honest about what it
 could and couldn't reproduce.
 """
 from __future__ import annotations
-import base64, json, re, sys
+
+import base64
+import json
 from pathlib import Path
+import re
+import sys
+
 
 HERE = Path(__file__).resolve().parent
 _DEFAULT = HERE.parents[4] / ".etc" / "ripgrep" / "tests"  # …/upstream/ripgrep/tests
@@ -70,9 +74,12 @@ def parse_str(src: str, i: int):
 
 
 def strip_comments(src: str) -> str:
-    """Remove Rust // line and /* */ block comments, string/char-literal aware
-    (so `//` inside a regex string or a URL in an expected block survives). A
-    `// comment` inside a `.args(&[…])` array would otherwise wreck tokenizing."""
+    """Remove Rust // line and /* */ block comments, string/char-literal aware (so `//` inside a regex string or a URL in an expected block survives).
+
+    A
+        `// comment` inside a `.args(&[…])` array would otherwise wreck tokenizing.
+
+    """
     out = []; j = 0; n = len(src)
     while j < n:
         c = src[j]
@@ -93,9 +100,12 @@ def strip_comments(src: str) -> str:
 
 
 def blank_strings(src: str) -> str:
-    """Replace every string-literal body with `""` so a keyword scan only sees
-    real code. Without this, an expected-output block containing the word
-    "match"/"if"/"for" would be misread as control flow."""
+    """Replace every string-literal body with `""` so a keyword scan only sees real code.
+
+    Without this, an expected-output block containing the word
+        "match"/"if"/"for" would be misread as control flow.
+
+    """
     out = []; j = 0; n = len(src)
     while j < n:
         c = src[j]
@@ -111,8 +121,11 @@ def blank_strings(src: str) -> str:
 
 
 def read_stmt(src: str, i: int):
-    """From src[i], read a Rust expression/statement up to the terminating
-    top-level ';'. String/bracket aware. Return (text, idx_of_semicolon)."""
+    """From src[i], read a Rust expression/statement up to the terminating top-level ';'.
+
+    String/bracket aware. Return (text, idx_of_semicolon).
+
+    """
     depth = 0; j = i
     while j < len(src):
         c = src[j]
@@ -136,7 +149,8 @@ def resolve_value(expr: str, consts: dict, binds: list, pos: int):
     Handles string / raw-string / byte-string literals, `include_bytes!` /
     `include_str!` (read relative to the tests dir), `const` upper-case names,
     a trailing `.as_bytes()`, and local `let name = …` scalar bindings (the
-    most recent binding textually before `pos`)."""
+    most recent binding textually before `pos`).
+    """
     expr = expr.strip()
     if expr.startswith('&'):
         expr = expr[1:].strip()
@@ -145,16 +159,20 @@ def resolve_value(expr: str, consts: dict, binds: list, pos: int):
     # byte string: b"…", br"…", br#"…"#  → parse from the leading quote/'r'.
     if expr.startswith(('b"', 'br"', 'br#')):
         try:
-            b, _ = parse_str(expr[1:], 0); return b
+            b, _ = parse_str(expr[1:], 0)
         except Exception:
             return None
+        else:
+            return b
     if expr.startswith(('"', 'r"', 'r#')):
         try:
-            b, _ = parse_str(expr, 0); return b
+            b, _ = parse_str(expr, 0)
         except Exception:
             return None
+        else:
+            return b
 
-    m = re.match(r'include_(?:bytes|str)!\s*\(\s*(.*?)\s*,?\s*\)\s*$', expr, re.S)
+    m = re.match(r'include_(?:bytes|str)!\s*\(\s*(.*?)\s*,?\s*\)\s*$', expr, re.DOTALL)
     if m:
         try:
             rel, _ = parse_str(m.group(1).strip(), 0)
@@ -214,6 +232,7 @@ def _latest(binds: list, name: str, pos: int, kind: str):
 
 # ---------------------------------------------------------------- consts + bindings
 def load_consts():
+    """Load consts from disk."""
     consts = {}
     for f in ["hay.rs"] + FILES:
         src = strip_comments((TESTS / f).read_text())
@@ -242,10 +261,12 @@ def _array_tokens(expr: str):
 
 
 def parse_bindings(body: str, consts: dict):
-    """Local `let (mut)? name = …;` bindings inside a test body → resolved
-    scalars (bytes) and array-literal token lists, for later argv/fixture use.
+    """Local `let (mut)? name = …;` bindings inside a test body → resolved scalars (bytes) and array-literal token lists, for later argv/fixture use.
+
     Also models `name.extend(other)` mutations (used by the f1842_* tests) by
-    recording a fresh, appended array binding at the extend's position."""
+        recording a fresh, appended array binding at the extend's position.
+
+    """
     binds = []
     for m in re.finditer(r'\blet\s+(?:mut\s+)?([a-z_]\w*)\s*=\s*', body):
         val, _ = read_stmt(body, m.end())
@@ -272,7 +293,7 @@ def match_paren(src: str, i: int):
     depth = 0; j = i
     while j < len(src):
         c = src[j]
-        if c in '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
+        if c == '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
             try:
                 _, j = parse_str(src, j); continue
             except Exception:
@@ -290,7 +311,7 @@ def split_top(inner: str):
     parts = []; depth = 0; buf = ''; j = 0
     while j < len(inner):
         c = inner[j]
-        if c in '"' or (c == 'r' and j+1 < len(inner) and inner[j+1] in '#"'):
+        if c == '"' or (c == 'r' and j+1 < len(inner) and inner[j+1] in '#"'):
             try:
                 _, nj = parse_str(inner, j); buf += inner[j:nj]; j = nj; continue
             except Exception:
@@ -316,7 +337,7 @@ def extract_blocks(src: str):
         depth = 0; j = b
         while j < len(src):
             c = src[j]
-            if c in '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
+            if c == '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
                 try:
                     _, j = parse_str(src, j); continue
                 except Exception:
@@ -496,6 +517,7 @@ def _rec(name, srcfile, files, dirs, symlinks, sized, inv, pcre2, cmp):
 
 
 def main():
+    """CLI entry point."""
     if not TESTS.is_dir():
         sys.exit(f"ripgrep tests not found at {TESTS} — pass the path as argv[1]")
     consts = load_consts()
