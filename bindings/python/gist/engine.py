@@ -37,7 +37,12 @@ _UNSUPPORTED_MARKERS = (
 @functools.cache
 def binary() -> str:
     """Absolute path to the `gist` binary. Resolution order: env `GIST_BIN`,
-    then `gist` on PATH, then the repo's freshly built `zig-out/bin/gist`."""
+    then `gist` on PATH, then the repo's built `zig-out/bin/gist`. As an
+    *in-repo* last resort — never in a distributed wheel — build the CLI once
+    from source when the kernel's `build.zig` is present and `zig` is on PATH,
+    so any repo consumer (a lint gate, `gen-verify`, an ad-hoc script) drives
+    the engine without pre-installing it. A missing engine is **fail-closed**
+    (`GistNotFoundError`), never a silent fallback to a second matcher."""
     env = os.environ.get("GIST_BIN")
     if env:
         p = Path(env).expanduser()
@@ -49,14 +54,38 @@ def binary() -> str:
     if on_path:
         return on_path
     # pkg/kernels/gist/bindings/python/gist/engine.py → kernel root is parents[3]
-    built = Path(__file__).resolve().parents[3] / "zig-out" / "bin" / "gist"
+    kernel = Path(__file__).resolve().parents[3]
+    built = kernel / "zig-out" / "bin" / "gist"
     if built.is_file():
         return str(built)
+    # In-repo bootstrap: the kernel source (`build.zig`) is only present in the
+    # monorepo, so this branch is inert in a shipped wheel (pure locator there).
+    if (kernel / "build.zig").is_file() and (zig := shutil.which("zig")):
+        _build_cli(zig, kernel)
+        if built.is_file():
+            return str(built)
     msg = (
         "no `gist` binary found — set GIST_BIN, put `gist` on PATH, "
         "or build it with `make install-gist`"
     )
     raise GistNotFoundError(msg)
+
+
+def _build_cli(zig: str, kernel: Path) -> None:
+    """`zig build -Doptimize=ReleaseFast` in the kernel dir — idempotent, and
+    Zig's build cache makes a warm rebuild ~instant. Best-effort: on failure
+    `binary()` falls through to its fail-closed `GistNotFoundError`."""
+    try:
+        subprocess.run(  # noqa: S603 — fixed argv, no shell
+            [zig, "build", "-Doptimize=ReleaseFast"],
+            cwd=kernel,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def _invoke(
