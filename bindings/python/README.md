@@ -58,12 +58,30 @@ results come from the *same* engine the CLI uses, never a second matcher.
 Subprocess is the authoritative transport (ADR-352): a pattern outside GIST's
 linear-time syntax exits the child with code 2 and surfaces as a typed
 `UnsupportedPatternError` — it never terminates the host the way an in-process
-`die()`/exit would. An in-process resident session (cffi) is the specified
-graduation rung, and is what will deliver the warm-index speedup for
-many-query callers like doc-radar.
+`die()`/exit would.
 
 The binary is resolved at call time: env `GIST_BIN`, then `gist` on PATH, then
 the repo's `zig-out/bin/gist`. Build it with `make install-gist`.
+
+## Warm path — persistent `Session` (ADR-352 rung 2.5)
+
+For a many-query caller (doc-radar, a lint pass, an agent loop), a `Session`
+keeps a Unix-socket connection to a running `gist serve` daemon warm across
+calls, so an eligible query skips the cold subprocess's process + index-mmap +
+candidate-read startup entirely:
+
+```python
+with gist.Session() as s:                      # dials $GIST_SESSION_SOCK / the repo default
+    hot   = s.files(gist.SearchRequest("TODO"))       # -l, warm
+    total = s.count(gist.SearchRequest("panic"))      # --count-matches, warm
+```
+
+It is **fail-open by construction**: no daemon listening, an ineligible request
+(`gist.warm_eligible(req)` is `False` for scoped roots, globs/types, context, or
+any rich flag), or a wire hiccup transparently falls back to the byte-identical
+cold subprocess — the daemon is a pure accelerator, never a new failure mode.
+The wire protocol is the same one `src/session/protocol.zig` defines and the Zig
+CLI + Rust clients speak, so all three frame-match against the one daemon.
 
 ## Prior art
 

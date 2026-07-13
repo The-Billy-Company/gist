@@ -55,8 +55,8 @@ bench/gates/equality.sh 150 1      # gist ≡ rg over a byte-exact corpus snapsh
 `equality.sh` proves the path where the trigram index elides reads. A regex
 the index can't prefilter at all (`\w{3,8}`, `[a-f0-9]{2,}`, `panic|0x`, …)
 gets no elision — the unified `ripgrep/` engine reads and regex-scans every
-candidate itself over the live tree ([`src/scan/sweep.zig`](../../src/scan/sweep.zig)
-drives the parallel read fan-out), so `equality.sh`'s frozen-snapshot proof
+candidate itself over the live tree ([`src/commands/ripgrep/pipeline.zig`](../../src/commands/ripgrep/pipeline.zig)
+drives the fused work-stealing walk+read+scan fan-out), so `equality.sh`'s frozen-snapshot proof
 doesn't cover it — this script is the companion oracle:
 
 1. **soundness** — diffs gist's match-set against plain `rg (?-u)` over the

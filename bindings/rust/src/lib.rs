@@ -35,10 +35,14 @@ pub mod contract;
 mod engine;
 mod error;
 mod request;
+#[cfg(unix)]
+mod session;
 
 pub use contract::{Match, MatchKind, Submatch};
 pub use error::{Error, Result};
 pub use request::SearchRequest;
+#[cfg(unix)]
+pub use session::{Session, default_socket_path, warm_eligible};
 
 /// Find `pattern`, returning structured [`Match`] records. For anything beyond a
 /// bare pattern (paths, case-folding, globs, context…) build a [`SearchRequest`].

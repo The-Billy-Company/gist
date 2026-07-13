@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Gist-vs-ripgrep cold speedup regression gate (principia-style ratios).
+"""Gist cold speedup regression gate (principia-style ratios).
 
-Two modes, same floors (`ratio_baseline.json`):
+Two modes, with floors from `ratio_baseline.json`:
 
   --committed (default)
       Read the published `certify_macro.csv` medians and assert every class's
-      gist/rg speedup clears its floor. Hermetic — no hyperfine, no wall-clock
-      jitter. Exit 2 if the committed certificate is still pending regeneration.
+      gist/rg speedup plus any configured indexed-rival guards clear their
+      floors. Hermetic — no hyperfine, no wall-clock jitter. Exit 2 if the
+      committed certificate is still pending regeneration.
 
   --live
       Re-measure a slim cold slate (gist + rg only, hyperfine min-of-N) on this
@@ -65,13 +66,24 @@ def _load_floors() -> dict[str, float]:
     return {k: float(v) for k, v in doc.items() if not k.startswith("_")}
 
 
-def _speedups_from_macro(path: Path) -> dict[str, float]:
-    """Derive gist-faster ratios from committed macro medians (rg_ms / gist_ms)."""
+def _load_rival_floors() -> dict[str, dict[str, float]]:
+    doc = json.loads(BASELINE.read_text())
+    rivals = doc.get("_rivals", {})
+    return {
+        rival: {cls: float(floor) for cls, floor in floors.items()}
+        for rival, floors in rivals.items()
+    }
+
+
+def _speedups_from_macro(
+    path: Path, rival: str = "rg", classes: set[str] | None = None
+) -> dict[str, float]:
+    """Derive gist-faster ratios from committed medians (rival_ms / gist_ms)."""
     by_class: dict[str, dict[str, float]] = {}
     with path.open(newline="") as source:
         for row in csv.DictReader(source, delimiter="\t"):
             cls, tool = row.get("class", ""), row.get("tool", "")
-            if tool not in ("gist", "rg"):
+            if (classes is not None and cls not in classes) or tool not in ("gist", rival):
                 continue
             try:
                 by_class.setdefault(cls, {})[tool] = float(row["median_ms"])
@@ -79,12 +91,12 @@ def _speedups_from_macro(path: Path) -> dict[str, float]:
                 raise SystemExit(f"{path.name}: bad median for {cls}/{tool}: {error}") from error
     out: dict[str, float] = {}
     for cls, tools in by_class.items():
-        if "gist" not in tools or "rg" not in tools:
-            raise SystemExit(f"{path.name}: class {cls!r} missing gist or rg median")
-        gist_ms, rg_ms = tools["gist"], tools["rg"]
+        if "gist" not in tools or rival not in tools:
+            raise SystemExit(f"{path.name}: class {cls!r} missing gist or {rival} median")
+        gist_ms, rival_ms = tools["gist"], tools[rival]
         if gist_ms <= 0:
             raise SystemExit(f"{path.name}: non-positive gist median for {cls}")
-        out[cls] = rg_ms / gist_ms
+        out[cls] = rival_ms / gist_ms
     return out
 
 
@@ -102,6 +114,8 @@ def _assert_floors(speedups: dict[str, float], floors: dict[str, float]) -> list
 def _report(speedups: dict[str, float], floors: dict[str, float], title: str) -> list[str]:
     print(title)
     for cls, _, _ in PROBES:
+        if cls not in floors:
+            continue
         floor = floors[cls]
         got = speedups.get(cls, 0.0)
         mark = "ok" if got >= floor else "REGRESSION"
@@ -123,7 +137,18 @@ def check_committed() -> int:
     if set(speedups) != expected:
         print(f"  FAIL: macro class set {sorted(speedups)} != certificate classes")
         return 1
-    failures = _report(speedups, floors, "[ratio] committed certify_macro.csv vs ratio_baseline.json")
+    failures = _report(
+        speedups, floors, "[ratio] committed certify_macro.csv vs ratio_baseline.json"
+    )
+    for rival, rival_floors in _load_rival_floors().items():
+        rival_speedups = _speedups_from_macro(MACRO, rival, set(rival_floors))
+        failures.extend(
+            _report(
+                rival_speedups,
+                rival_floors,
+                f"[ratio] committed gist vs {rival}",
+            )
+        )
     if failures:
         print("  FAIL: gist cold speedup regression:\n    " + "\n    ".join(failures))
         return 1
@@ -214,9 +239,7 @@ def check_live(*, warmup: int, runs: int, force: bool) -> int:
         for cls, kind, pattern in PROBES:
             gcmd = _shell_cmd(kind, "gist", pattern)
             rcmd = _shell_cmd(kind, "rg", pattern)
-            gist_ms = _hf_min_ms(
-                gcmd, work / f"{cls}__gist.json", warmup=warmup, runs=runs
-            )
+            gist_ms = _hf_min_ms(gcmd, work / f"{cls}__gist.json", warmup=warmup, runs=runs)
             rg_ms = _hf_min_ms(rcmd, work / f"{cls}__rg.json", warmup=warmup, runs=runs)
             speedups[cls] = rg_ms / gist_ms if gist_ms > 0 else 0.0
             print(

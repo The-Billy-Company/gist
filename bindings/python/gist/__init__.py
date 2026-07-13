@@ -32,6 +32,7 @@ from .errors import (
     UnsupportedPatternError,
 )
 from .request import Match, MatchKind, SearchRequest, Submatch
+from .session import Session, warm_eligible
 
 
 if TYPE_CHECKING:
@@ -49,6 +50,7 @@ __all__ = [
     "MatchKind",
     "SearchFailedError",
     "SearchRequest",
+    "Session",
     "Submatch",
     "UnsupportedPatternError",
     "binary",
@@ -59,6 +61,7 @@ __all__ = [
     "search",
     "status",
     "version",
+    "warm_eligible",
 ]
 
 

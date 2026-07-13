@@ -32,12 +32,29 @@ results come from the same engine the CLI uses, never a second matcher.
 Subprocess is the authoritative transport (ADR-352): the engine fails loud on
 unsupported input via `die()` → `process::exit(2)`, which would terminate a host
 that linked it in-process. Here a bad pattern exits the *child* and surfaces as a
-typed `Error::UnsupportedPattern` — the host is never touched. A resident
-in-process FFI session (over `libgist.a`) is GIST's specified graduation rung;
-when it lands, this same API swaps its transport underneath unchanged.
+typed `Error::UnsupportedPattern` — the host is never touched.
 
 The binary is resolved at call time: env `GIST_BIN`, then `gist` on `PATH`, then
 the repo's `zig-out/bin/gist`. Build it with `make install-gist`.
+
+## Warm path — persistent `Session` (ADR-352 rung 2.5, Unix)
+
+A `Session` keeps a Unix-socket connection to a running `gist serve` daemon warm
+across many calls, so an eligible query skips the cold subprocess's process +
+index-mmap + candidate-read startup:
+
+```rust
+let mut s = gist::Session::default_socket();   // $GIST_SESSION_SOCK or the repo default
+let hot   = s.files(&gist::SearchRequest::new("TODO"))?;   // -l, warm
+let total = s.count(&gist::SearchRequest::new("panic"))?;  // --count-matches, warm
+```
+
+It is **fail-open by construction**: no daemon listening, an ineligible request
+(`gist::warm_eligible(&req)` is `false` for scoped roots, globs/types, context,
+or any rich flag), or a wire hiccup transparently falls back to the
+byte-identical cold subprocess. The wire protocol is the same one
+`src/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
+three frame-match against the one daemon.
 
 ## Standalone by design
 
