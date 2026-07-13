@@ -32,6 +32,9 @@ test {
 const Index = gist.trigram.Index;
 const Regex = gist.regex.Regex;
 const Dir = std.Io.Dir;
+const serve = gist.commands.serve; // the resident daemon (ADR-352 rung 2.5)
+const proto = gist.session.protocol; // the UDS wire codec the client speaks
+const net = std.Io.net;
 
 // Curated regex battery (ASCII / byte-oriented, == ripgrep `(?-u)`). Real
 // code-search shapes; `{0}` / `{1}` are filled with identifiers sampled live
@@ -379,6 +382,119 @@ fn runVerify(gpa: std.mem.Allocator, io: std.Io, battery_n: usize, seed: u64) !v
     std.debug.print("wrote {d} literal needles + {d} regexes + corpus.list → {s}/\nrun bench/equality.sh to diff against rg.\n", .{ needles.items.len, regexes.items.len, out_dir });
 }
 
+// ── session mode: the persistent-client → daemon product path (ADR-352 rung 2.5) ──
+//
+// The `bench` mode above times the in-process engine (no transport, no process
+// spawn) — the microsecond ceiling. This mode times the number a REAL long-lived
+// client sees: a `gist serve` daemon on its own thread, dialed once over a Unix
+// socket, then a slate replayed over that ONE connection so no per-query process
+// spawn or index reload is paid. It is the honest product analogue of the
+// in-process number — the resident daemon's whole reason to exist — and, unlike
+// the in-process path, it rides the freshness barrier: on Linux the inotify
+// watcher arms the clean fast path (≈ in-process); on a target without a watcher
+// backend every query reconciles, so the p50 here truthfully reports the
+// freshness tax rather than hiding it.
+
+const DaemonArgs = struct { gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket: []const u8 };
+
+fn daemonThread(args: DaemonArgs) void {
+    serve.run(args.gpa, args.io, args.roots, args.socket) catch {};
+}
+
+/// Dial the freshly spawned daemon, retrying to absorb the bind/listen race.
+fn dialRetry(io: std.Io, socket: []const u8) !net.Stream {
+    const ua = try net.UnixAddress.init(socket);
+    var attempt: usize = 0;
+    while (attempt < 1000) : (attempt += 1) {
+        if (ua.connect(io)) |s| return s else |_| {}
+        try io.sleep(.fromNanoseconds(10 * std.time.ns_per_ms), .real);
+    }
+    return error.DaemonNeverCameUp;
+}
+
+/// One request/response over the persistent connection; returns the matched-file
+/// count. `qbytes` is the pre-encoded query frame (constant per needle), so the
+/// timed loop pays only the write + daemon answer + read, not re-encoding.
+fn sessionQuery(gpa: std.mem.Allocator, fd: std.posix.fd_t, qbytes: []const u8) !usize {
+    if (!proto.writeAll(fd, qbytes)) return error.ConnClosed;
+    var resp = try proto.recvFrame(gpa, fd);
+    defer resp.deinit();
+    if (resp.op != .result) return error.Declined;
+    const view = try proto.decodeResult(resp.payload());
+    var n: usize = 0;
+    switch (view) {
+        .files => |it0| {
+            var it = it0;
+            while (try it.next()) |_| n += 1;
+        },
+        .count => {},
+    }
+    return n;
+}
+
+fn runSession(gpa: std.mem.Allocator, io: std.Io) !void {
+    const roots: []const []const u8 = &default_roots;
+    try Dir.cwd().createDirPath(io, out_dir);
+    const socket = out_dir ++ "/gistd-bench.sock";
+    Dir.cwd().deleteFile(io, socket) catch {};
+
+    std.debug.print("gist session · abi v{d} · persistent client → daemon over {s}\nroots:", .{ gist.abi(), socket });
+    for (roots) |r| std.debug.print(" {s}", .{r});
+    std.debug.print("\n\n", .{});
+
+    const t = try std.Thread.spawn(.{}, daemonThread, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
+    const stream = try dialRetry(io, socket);
+    const fd = stream.socket.handle;
+
+    // HELLO → READY handshake (proto-version gate).
+    try proto.sendFrame(gpa, fd, .hello, &.{proto.protocol_version});
+    {
+        var ready = try proto.recvFrame(gpa, fd);
+        defer ready.deinit();
+        if (ready.op != .ready) return error.HandshakeFailed;
+    }
+
+    const warmup = 5;
+    const runs = 50;
+    std.debug.print("per-query latency over the warm connection (files mode), {d} runs each (+{d} warmup):\n", .{ runs, warmup });
+    std.debug.print("{s:<18} {s:>8} {s:>12} {s:>12} {s:>12}\n", .{ "needle", "files", "p50", "p95", "p99" });
+    std.debug.print("{s:-<18} {s:->8} {s:->12} {s:->12} {s:->12}\n", .{ "", "", "", "", "" });
+
+    var samples: [runs]u64 = undefined;
+    var csv: std.ArrayList(u8) = .empty;
+    defer csv.deinit(gpa);
+
+    for (fixed_slate) |needle| {
+        var qbuf: std.ArrayList(u8) = .empty;
+        defer qbuf.deinit(gpa);
+        try proto.encodeQuery(&qbuf, gpa, .{ .pattern = needle, .mode = .files, .fixed = true });
+
+        var files: usize = 0;
+        for (0..warmup) |_| files = try sessionQuery(gpa, fd, qbuf.items);
+        for (0..runs) |i| {
+            const q0 = nowNs(io);
+            files = try sessionQuery(gpa, fd, qbuf.items);
+            samples[i] = @intCast(nowNs(io) - q0);
+        }
+        std.mem.sort(u64, &samples, {}, comptime std.sort.asc(u64));
+        const p50 = percentile(&samples, 0.50);
+        std.debug.print("{s:<18} {d:>8} {d:>9.1} us {d:>9.1} us {d:>9.1} us\n", .{
+            needle,                                                    files,
+            @as(f64, @floatFromInt(p50)) / 1e3,                        @as(f64, @floatFromInt(percentile(&samples, 0.95))) / 1e3,
+            @as(f64, @floatFromInt(percentile(&samples, 0.99))) / 1e3,
+        });
+        var line: [128]u8 = undefined;
+        try csv.appendSlice(gpa, try std.fmt.bufPrint(&line, "{s}\t{d}\t{d}\n", .{ needle, p50, files }));
+    }
+    try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/session.csv", .data = csv.items });
+    std.debug.print("\nwrote {s}/session.csv\n", .{out_dir});
+
+    // Clean shutdown: stop the accept loop and join the daemon thread.
+    proto.sendFrame(gpa, fd, .shutdown, "") catch {};
+    stream.close(io);
+    t.join();
+}
+
 /// Isolate the scan primitive: single-threaded full-corpus scan with
 /// `std.mem.indexOf` vs the SIMD `contains`, per needle length. Proves where
 /// (and how much) the SIMD path beats std's naive 2–4 byte `findPosLinear`.
@@ -428,6 +544,10 @@ pub fn main(init: std.process.Init) !void {
     }
     if (std.mem.eql(u8, mode, "scanbench")) {
         try runScanBench(gpa, io);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "session")) {
+        try runSession(gpa, io);
         return;
     }
     if (std.mem.eql(u8, mode, "certify")) {

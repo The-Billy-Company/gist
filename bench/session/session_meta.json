@@ -1,0 +1,7 @@
+{
+  "armed": false,
+  "watcher": "reconcile-always (FSEvents TODO \u2014 ADR-352)",
+  "platform": "Darwin arm64",
+  "geomean_speedup": 7.2,
+  "needles": 20
+}

@@ -93,6 +93,10 @@ case "${art_rc}" in
     exit 1
     ;;
 esac
+# Warm (resident-session) evidence: committed + hermetic (no daemon, no timing),
+# and armed-only — report-only on an unarmed platform's freshness-taxed number.
+run "warm session floors (gate_session.py --committed)" \
+  python3 bench/session/gate_session.py --committed
 missing=""
 for t in hyperfine csearch zoekt rg; do command -v "${t}" > /dev/null || missing="${missing} ${t}"; done
 if [[ -n "${missing}" ]]; then

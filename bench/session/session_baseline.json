@@ -1,0 +1,4 @@
+{
+  "_comment": "Floor for the ARMED warm fast path (a watcher proving quiescence — Linux inotify today): the geomean warm-persistent-client speedup vs ripgrep-cold must clear this. The value is a theorem-backed floor, not a guess: the armed path STRICTLY dominates the unarmed reconcile-always path (it skips the very metadata walk the unarmed path pays), and the unarmed macOS certificate measured 7.2x, so an armed platform is guaranteed to exceed it. 5.0 sits below that with margin, failing only a genuine regression. Raise deliberately after an armed-platform (Linux CI) republish. On unarmed platforms the gate is report-only, so this floor is never applied to a freshness-taxed number.",
+  "armed_geomean_floor": 5.0
+}
