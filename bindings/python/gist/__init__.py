@@ -36,6 +36,8 @@ from .request import Match, MatchKind, SearchRequest, Submatch
 
 if TYPE_CHECKING:
     import os
+    from collections.abc import Mapping
+    from typing import Any
 
 
 __all__ = [
@@ -104,12 +106,12 @@ def run(
     return engine.run(request, cwd=cwd, timeout=timeout)
 
 
-def request_from_tool(payload: object) -> SearchRequest:
+def request_from_tool(payload: Mapping[str, Any]) -> SearchRequest:
     """Map an agent tool payload (a dict) into a `SearchRequest`. Lazy import
     keeps `gist.agent` off the hot path for plain script callers."""
     from .agent import request_from_tool as _rft
 
-    return _rft(payload)  # type: ignore[arg-type]
+    return _rft(payload)
 
 
 def status(*, cwd: str | os.PathLike[str] | None = None) -> str:
