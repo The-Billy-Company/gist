@@ -8,7 +8,8 @@
 #
 #   correctness : zig build test · rgsuite parity · line-output parity ·
 #                 index-elision parity · fail-closed contract · freshness
-#   performance : certify.sh · certificate-artifacts · index-size accounting
+#   performance : certify.sh · certificate-artifacts · ratio regression ·
+#                 index-size accounting
 #
 # Flags:
 #   --gates-only   skip `zig build test` (fast orchestration check)
@@ -66,19 +67,24 @@ if [[ "${failures}" -ne 0 ]]; then
   echo "behavior is untrustworthy. Fix correctness (or re-run with --allow-known), then rerun."
   exit 1
 fi
-# Committed bundle is optional until republished on a clean HEAD. If present,
-# check_artifacts.py --require-head enforces machine.git_commit == HEAD + clean tree.
+# Committed bundle provenance is recorded in machine.git_commit; integrity is
+# gated without requiring the *current* dirty coworking HEAD to equal that SHA
+# (--no-require-head). Minting still requires a clean tree (certify.sh).
 set +e
 python3 bench/certify/check_artifacts.py \
-  --artifacts-dir bench/certify/artifact --artifacts --require-head
+  --artifacts-dir bench/certify/artifact --artifacts --no-require-head
 art_rc=$?
 set -e
 case "${art_rc}" in
-  0) echo "OK: committed certificate bundle" ;;
+  0)
+    echo "OK: committed certificate bundle"
+    run "cold speedup floors (ratio_regress.py --committed)" \
+      python3 bench/certify/ratio_regress.py --committed
+    ;;
   2)
-    echo "NOTE: no HEAD-bound committed certificate yet — regenerate with"
+    echo "NOTE: no committed certificate yet — regenerate with"
     echo "      CERT_PUBLISH_DIR=bench/certify/artifact bash bench/certify/certify.sh"
-    echo "      on a clean tree after this branch lands its code fixes."
+    echo "      on a clean tree (or isolated git worktree)."
     ;;
   *)
     echo "FAIL: committed certificate bundle"

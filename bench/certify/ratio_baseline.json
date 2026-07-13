@@ -1,0 +1,14 @@
+{
+  "_comment": "Min gist/rg cold speedup floors (rg_median / gist_median). Ratio-based — hardware cancels when remeasured live. Floors sit ~40–60% below the published Apple M4 Max certificate (11/11 win) with noise margin; regenerate floors after a deliberate certify republish. NOT a default CI merge gate — see ratio_regress.py.",
+  "literal-rare": 3.0,
+  "literal-dotted": 2.5,
+  "literal-common": 1.8,
+  "literal-punct2": 1.3,
+  "regex-decl": 1.8,
+  "regex-dotted": 4.0,
+  "regex-anchored": 1.8,
+  "regex-classcount": 1.15,
+  "regex-alternation": 1.6,
+  "regex-dense-scan": 1.6,
+  "regex-eol": 1.05
+}

@@ -12,6 +12,7 @@ any violation, so a regression can't ship silently. `scan_regress.sh` and
 | `index_elision_parity.sh` | **correctness (index vs itself)**: the index-accelerated run ≡ the same query with `--no-index` — proves the index only elides reads, never changes results |
 | `scan_regress.sh`         | **correctness (no-prefilter fallback) + race**: the live-tree full-read fallback ≡ `rg` (exits 1 on FN/FP) + min-of-N speed floor                           |
 | `streams.sh`              | **output contract**: results→stdout, diagnostics (`--rank`'s timing line / guidance)→stderr — the `rg`-conventional split that makes gist composable        |
+| `ci_order.sh`             | **orchestration**: correctness gates first, then performance (certificate + ratio floors)                                                                   |
 
 ## `index_elision_parity.sh` — the index is acceleration-only
 
