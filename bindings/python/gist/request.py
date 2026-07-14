@@ -48,6 +48,35 @@ class Match:
         return self.submatches[0].start + 1 if self.submatches else 0
 
 
+class RankKind(StrEnum):
+    """How the engine's `--rank` view classified a file — the property `grep`
+    can't express (`src/rank/signals.zig`)."""
+
+    DEF = "def"  # a match on this file's line defines the symbol
+    USE = "use"  # only call sites / references
+    GEN = "gen"  # generated file (codegen), demoted by the authored boost
+
+
+@dataclass(frozen=True, slots=True)
+class Ranked:
+    """One row of the engine's `--rank` view: a file ranked definition-first by
+    the RRF kernel, tagged with the engine's own class. This is gist's native
+    ranked shape (no rg equivalent) — a *presentation* result, deliberately not
+    a wire-contract match kind, so it lives beside `Match` but outside the
+    `SearchRequest` contract."""
+
+    path: str
+    line_number: int  # the best line to surface (the definition, if the file has one)
+    kind: RankKind
+    count: int  # matching lines in this file
+    snippet: str  # the surfaced line, trimmed by the engine
+
+    @property
+    def generated(self) -> bool:
+        """True for codegen the engine demotes — never the agent's edit target."""
+        return self.kind is RankKind.GEN
+
+
 @dataclass(frozen=True, slots=True)
 class SearchRequest:
     """A search expressed once, runnable on any face. Only `pattern` is

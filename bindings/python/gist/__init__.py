@@ -14,6 +14,18 @@ does not reimplement it.
     total  = gist.count("panic", paths=["services"]) # total matching lines
     report = gist.status()                            # index freshness report
 
+Beyond *where* a pattern occurs, `summary` answers *how it is distributed* —
+search then aggregate in one call — and `rank` answers *which hit matters most*,
+gist's definition-first view (a symbol's declaration ahead of its call sites,
+codegen demoted), with no rg equivalent:
+
+    hot = gist.summary("TODO", paths=["services"], by="dir")   # ranked buckets
+    for g in hot.top(5):
+        print(f"{g.count:4}  {g.key}")
+
+    for r in gist.rank("SearchRequest", limit=5):              # def-first, engine-classified
+        print(f"[{r.kind}] {r.path}:{r.line_number}")          # skip r.generated for codegen
+
 Every convenience wrapper accepts the same keyword options as `SearchRequest`;
 pass a `SearchRequest` to `gist.run` when you want to build it once and reuse it
 (e.g. across faces, or through the agent adapter `request_from_tool`).
@@ -23,7 +35,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import engine
+from . import aggregate, engine
+from .aggregate import Group, Tally, tally
 from .contract import ABI_VERSION, ENGINE_VERSION
 from .errors import (
     GistError,
@@ -31,13 +44,13 @@ from .errors import (
     SearchFailedError,
     UnsupportedPatternError,
 )
-from .request import Match, MatchKind, SearchRequest, Submatch
+from .request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
 from .session import Session, warm_eligible
 
 
 if TYPE_CHECKING:
-    import os
     from collections.abc import Mapping
+    import os
     from typing import Any
 
 
@@ -46,20 +59,28 @@ __all__ = [
     "ENGINE_VERSION",
     "GistError",
     "GistNotFoundError",
+    "Group",
     "Match",
     "MatchKind",
+    "RankKind",
+    "Ranked",
     "SearchFailedError",
     "SearchRequest",
     "Session",
     "Submatch",
+    "Tally",
     "UnsupportedPatternError",
+    "aggregate",
     "binary",
     "count",
     "files",
+    "rank",
     "request_from_tool",
     "run",
     "search",
     "status",
+    "summary",
+    "tally",
     "version",
     "warm_eligible",
 ]
@@ -107,6 +128,39 @@ def run(
 ) -> list[Match]:
     """Execute a prebuilt `SearchRequest`, returning structured matches."""
     return engine.run(request, cwd=cwd, timeout=timeout)
+
+
+def summary(
+    pattern: str,
+    *,
+    by: str | aggregate.GroupKey = "file",
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float = engine.DEFAULT_TIMEOUT,
+    **options: object,
+) -> Tally:
+    """Search for `pattern`, then aggregate the matches along `by` — a named
+    axis (`"file"` · `"dir"` · `"ext"` · `"match"`) or a `Callable[[Match], str]`
+    — into buckets ranked by descending count. Keyword options are the same
+    `SearchRequest` fields `search` accepts (`paths`, `types`, `ignore_case`, …).
+    """
+    matches = engine.run(SearchRequest(pattern=pattern, **options), cwd=cwd, timeout=timeout)
+    return tally(matches, by=by)
+
+
+def rank(
+    pattern: str,
+    *,
+    limit: int = 20,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float = engine.DEFAULT_TIMEOUT,
+    **options: object,
+) -> list[Ranked]:
+    """The engine's definition-first ranked view: the top-`limit` files for
+    `pattern`, each tagged `def`/`use`/`gen` by the engine itself — a symbol's
+    definition ahead of its call sites, generated files demoted. Needs a
+    persisted index (empty without one). Keyword options are `SearchRequest`
+    fields (`paths`, `fixed`, `ignore_case`, …)."""
+    return engine.rank(SearchRequest(pattern=pattern, **options), limit=limit, cwd=cwd, timeout=timeout)
 
 
 def request_from_tool(payload: Mapping[str, Any]) -> SearchRequest:

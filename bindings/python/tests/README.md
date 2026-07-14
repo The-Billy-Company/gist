@@ -7,6 +7,14 @@
   tests asserting GIST's discovery set is byte-equivalent to ripgrep's. They
   skip cleanly when no `gist` binary is built (`make install-gist`) or no `rg`
   is on PATH.
+- `test_aggregate.py` — the result-side `tally`/`summary` layer. The pure cases
+  drive synthetic `Match` records with no binary (ranking, tie-break, context
+  skip, every axis); the integration cases assert `summary` agrees with the flat
+  `search` it derives from.
+- `test_rank.py` — the engine's `--rank` view surfaced as `gist.rank`. The pure
+  cases pin the row grammar + `def`/`use`/`gen` parsing with no binary; the
+  integration cases build a throwaway index and assert `rank` reads it back with
+  the engine's own classification.
 
 ```bash
 cd pkg/kernels/gist/bindings/python && uv run pytest        # or: python -m pytest

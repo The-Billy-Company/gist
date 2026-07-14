@@ -124,6 +124,124 @@ impl Match {
     }
 }
 
+// ── ranked view (`gist --rank`) ──────────────────────────────────────────────
+
+/// How the engine's `--rank` view classified a file — the property `grep` can't
+/// express (`src/rank/signals.zig`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RankKind {
+    /// A match on one of this file's lines *defines* the symbol.
+    Def,
+    /// Only call sites / references — no definition here.
+    Use,
+    /// A generated file (codegen), demoted by the authored boost.
+    Gen,
+}
+
+impl RankKind {
+    /// The contract spelling (`"def"` / `"use"` / `"gen"`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Def => "def",
+            Self::Use => "use",
+            Self::Gen => "gen",
+        }
+    }
+
+    /// Parse the engine's one-word tag; `None` for anything else.
+    fn parse(tag: &str) -> Option<Self> {
+        match tag {
+            "def" => Some(Self::Def),
+            "use" => Some(Self::Use),
+            "gen" => Some(Self::Gen),
+            _ => None,
+        }
+    }
+}
+
+/// One row of the engine's `--rank` view: a file ranked definition-first by the
+/// RRF kernel and tagged with the engine's own class. This is gist's native
+/// ranked shape (no rg equivalent) — a *presentation* result, deliberately not a
+/// wire-contract [`MatchKind`], so it lives beside [`Match`] but outside the
+/// [`crate::SearchRequest`] contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ranked {
+    /// Path of the ranked file.
+    pub path: String,
+    /// The best line to surface — the definition, when the file has one.
+    pub line_number: u64,
+    /// The engine's classification of the file.
+    pub kind: RankKind,
+    /// Matching lines in this file.
+    pub count: u64,
+    /// The surfaced line, trimmed by the engine.
+    pub snippet: String,
+}
+
+impl Ranked {
+    /// True for codegen the engine demotes — never the agent's edit target.
+    #[must_use]
+    pub fn generated(&self) -> bool {
+        self.kind == RankKind::Gen
+    }
+}
+
+/// Parse `--rank` stdout into [`Ranked`] rows in the engine's definition-first
+/// order, dropping the interleaved timing/blank lines. Timing prints to stderr,
+/// so stdout is rows-only, but the filter is defensive by design.
+pub(crate) fn parse_rank(stream: &str) -> Vec<Ranked> {
+    stream.lines().filter_map(parse_rank_row).collect()
+}
+
+/// Parse one `--rank` row — `  N. path:line  [kind]  ×count  snippet` (rank.zig)
+/// — into a [`Ranked`], or `None` if the line isn't a row. The `[kind]` bracket
+/// is the anchor: `path:line` sits before it, `×count snippet` after; this
+/// mirrors the Python face's `_RANK_ROW` regex without a regex dependency.
+fn parse_rank_row(line: &str) -> Option<Ranked> {
+    let (kind, open, close) = ["def", "use", "gen"].iter().find_map(|tag| {
+        let bracket = format!("[{tag}]");
+        let i = line.find(&bracket)?;
+        Some((RankKind::parse(tag)?, i, i + bracket.len()))
+    })?;
+
+    // Left of the bracket: `<n>. path:line`. The regex's non-greedy path means
+    // the line number is the digit run immediately before the bracket.
+    let left = line[..open].trim_end();
+    let colon = left.rfind(':')?;
+    let line_number: u64 = left[colon + 1..].parse().ok()?;
+    let path = strip_rank_index(&left[..colon]);
+    if path.is_empty() {
+        return None;
+    }
+
+    // Right of the bracket: `  ×count  snippet` (× is U+00D7, the sign rank.zig
+    // prints ahead of the per-file count).
+    let rest = line[close..].trim_start().strip_prefix('\u{00d7}')?;
+    let digits = rest.find(|c: char| !c.is_ascii_digit())?;
+    let count: u64 = rest[..digits].parse().ok()?;
+
+    Some(Ranked {
+        path: path.to_owned(),
+        line_number,
+        kind,
+        count,
+        snippet: rest[digits..].trim_start().to_owned(),
+    })
+}
+
+/// Strip the `\s*\d+\.\s*` rank-index prefix, leaving the bare path. Dot-safe:
+/// only a leading run of digits followed by `.` is removed, so a dotted path
+/// (`atelier.pb.go`) survives intact.
+fn strip_rank_index(head: &str) -> &str {
+    let h = head.trim_start();
+    let digits = h.find(|c: char| !c.is_ascii_digit()).unwrap_or(h.len());
+    if digits == 0 {
+        return h;
+    }
+    h[digits..].strip_prefix('.').map_or(h, str::trim_start)
+}
+
 // ── `--json` wire records (private; deserialized then mapped to `Match`) ────
 
 #[derive(Deserialize)]
@@ -188,4 +306,66 @@ pub(crate) fn parse_json(stream: &str) -> Vec<Match> {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod rank_parse {
+    use super::{RankKind, Ranked, parse_rank};
+
+    // A captured `--rank` stdout block (rank.zig's exact
+    // ` N. path:line  [kind]  ×count  snippet`; × is U+00D7).
+    const SAMPLE: &str = concat!(
+        " 1. pkg/kernels/gist/bindings/rust/src/request.rs:33  [def]  \u{00d7}11  pub struct SearchRequest {\n",
+        " 2. pkg/kernels/gist/bindings/rust/tests/session.rs:15  [use]  \u{00d7}19  use gist::{SearchRequest};\n",
+        " 3. services/backend/api/internal/pb/grpc/atelierpb/atelier.pb.go:2227  [gen]  \u{00d7}52  type SearchRequest struct {\n",
+    );
+
+    #[test]
+    fn reads_every_field() {
+        let rows = parse_rank(SAMPLE);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(
+            rows[0],
+            Ranked {
+                path: "pkg/kernels/gist/bindings/rust/src/request.rs".to_owned(),
+                line_number: 33,
+                kind: RankKind::Def,
+                count: 11,
+                snippet: "pub struct SearchRequest {".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn classifies_kinds() {
+        let kinds: Vec<RankKind> = parse_rank(SAMPLE).iter().map(|r| r.kind).collect();
+        assert_eq!(kinds, [RankKind::Def, RankKind::Use, RankKind::Gen]);
+    }
+
+    #[test]
+    fn generated_flags_only_gen() {
+        let flags: Vec<bool> = parse_rank(SAMPLE).iter().map(Ranked::generated).collect();
+        assert_eq!(flags, [false, false, true]);
+    }
+
+    #[test]
+    fn dotted_generated_path_survives() {
+        // The rank-index prefix strip must not eat the `.pb.go` dots in the path.
+        let row = &parse_rank(SAMPLE)[2];
+        assert_eq!(
+            row.path,
+            "services/backend/api/internal/pb/grpc/atelierpb/atelier.pb.go"
+        );
+        assert_eq!(row.line_number, 2227);
+        assert_eq!(row.count, 52);
+    }
+
+    #[test]
+    fn skips_timing_and_blank_lines() {
+        // Timing prints to stderr; a defensive parse still drops any non-row.
+        let noisy = format!(
+            "{SAMPLE}\n— 3 ranked matches (top 3) · read 24/26456 candidates · total 48.4 ms\n"
+        );
+        assert_eq!(parse_rank(&noisy).len(), 3);
+    }
 }

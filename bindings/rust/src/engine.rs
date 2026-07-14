@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::contract::{self, EXIT_ERROR, EXIT_MATCHED, EXIT_NO_MATCH, Match};
+use crate::contract::{self, EXIT_ERROR, EXIT_MATCHED, EXIT_NO_MATCH, Match, Ranked};
 use crate::error::{Error, Result};
 use crate::request::SearchRequest;
 
@@ -224,6 +224,23 @@ pub fn count(request: &SearchRequest) -> Result<usize> {
         .lines()
         .filter_map(|l| l.trim().parse::<usize>().ok())
         .sum())
+}
+
+/// The engine's definition-first `--rank` view: the top-`limit` files for the
+/// request's pattern, each tagged `def`/`use`/`gen` by the engine (`limit == 0`
+/// uses the engine default). Ranking reads a persisted index — with none there
+/// is nothing to rank, so the result is empty, never an error.
+///
+/// # Errors
+/// See [`SearchRequest::rank`].
+pub fn rank(request: &SearchRequest, limit: u32) -> Result<Vec<Ranked>> {
+    let flag = if limit == 0 {
+        "--rank".to_owned()
+    } else {
+        format!("--rank={limit}")
+    };
+    let out = invoke(&[flag.as_str()], request)?;
+    Ok(contract::parse_rank(&out.stdout))
 }
 
 /// The persisted-index report (`gist status`) — is an index ready, how fresh,

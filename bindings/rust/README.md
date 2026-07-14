@@ -56,6 +56,60 @@ byte-identical cold subprocess. The wire protocol is the same one
 `src/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
 three frame-match against the one daemon.
 
+## Find, then aggregate
+
+`search`/`files`/`count` answer *where* a pattern occurs. `summary` answers *how
+it is distributed* — the question an agent asks next — by searching, then
+grouping the matches into buckets ranked by count:
+
+```rust
+// busiest directories first
+for g in gist::summary("TODO", gist::Axis::Dir)?.top(5) {
+    println!("{:4}  {}", g.count(), g.key);
+}
+
+// which ADRs does the tree cite most? — bucket by the literal that matched
+let cited = gist::summary(r"ADR-\d+", gist::Axis::Match)?;
+
+// a custom axis is any Fn(&Match) -> String
+let by_component = gist::tally_by(gist::search("panic")?, |m| {
+    m.path.split('/').next().unwrap_or("").to_owned()
+});
+```
+
+`Axis` is the named set — `File` · `Dir` · `Ext` · `Match` — and `tally_by` takes
+any `Fn(&Match) -> String` for a custom one. `tally(matches, axis)` is the pure
+core: it aggregates any `Match` sequence you already have (so it composes with
+`search` and is unit-testable without the binary), and only `MatchKind::Match`
+lines are counted — `-A/-B/-C` context lines never inflate a tally. Aggregation
+is a result-side layer: it does **not** widen `SearchRequest` (the contract stays
+match-finding-only) and never runs a second matcher.
+
+## Which hit matters most — the ranked view
+
+`rank` is gist's one native shape with no rg equivalent: the definition-first
+[RRF view](../../README.md#ranking) that puts a symbol's declaration ahead of its
+200 call sites and **demotes generated files** (which the repo forbids editing, so
+they're never the target):
+
+```rust
+for r in gist::rank("SearchRequest", 8)? {
+    println!("{:>3} [{}]  {}:{}", r.count, r.kind.as_str(), r.path, r.line_number);
+}
+
+let authored: Vec<_> = gist::rank("apperr.New", 20)?
+    .into_iter()
+    .filter(|r| !r.generated())     // skip codegen
+    .collect();
+```
+
+Each `Ranked` row carries the engine's own `def`/`use`/`gen` classification
+(`RankKind`) — read straight from `--rank`, **never reclassified in Rust**, so
+"what is generated" can't fork from the engine (`src/rank/signals.zig`). Ranking
+reads the persisted index, so it needs one built (`make install-gist`); with no
+index there is nothing to rank and the result is empty. The `limit` caps the rows
+(`0` = the engine default of 20).
+
 ## Standalone by design
 
 Unlike the sibling C-ABI bindings (`principia` / `lamina` / `billog`), this crate

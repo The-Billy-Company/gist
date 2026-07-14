@@ -19,6 +19,21 @@
 //! # Ok::<(), gist::Error>(())
 //! ```
 //!
+//! Beyond *where* a pattern occurs, [`summary`] answers *how it is distributed*
+//! (search then aggregate into ranked buckets), and [`rank`] answers *which hit
+//! matters most* — gist's definition-first view (a symbol's declaration ahead of
+//! its call sites, codegen demoted), with no rg equivalent:
+//!
+//! ```no_run
+//! for g in gist::summary("TODO", gist::Axis::Dir)?.top(5) {
+//!     println!("{:4}  {}", g.count(), g.key);
+//! }
+//! for r in gist::rank("SearchRequest", 5)? {
+//!     println!("[{}] {}:{}", r.kind.as_str(), r.path, r.line_number); // skip r.generated()
+//! }
+//! # Ok::<(), gist::Error>(())
+//! ```
+//!
 //! ## Why subprocess, not FFI
 //!
 //! The engine fails loud on unsupported input via `die()` → `process::exit(2)`,
@@ -31,6 +46,7 @@
 //! The binary is resolved at call time: env `GIST_BIN`, then `gist` on `PATH`,
 //! then the repo's `zig-out/bin/gist`. Build it with `make install-gist`.
 
+mod aggregate;
 pub mod contract;
 mod engine;
 mod error;
@@ -38,7 +54,8 @@ mod request;
 #[cfg(unix)]
 mod session;
 
-pub use contract::{Match, MatchKind, Submatch};
+pub use aggregate::{Axis, Group, Tally, tally, tally_by};
+pub use contract::{Match, MatchKind, RankKind, Ranked, Submatch};
 pub use error::{Error, Result};
 pub use request::SearchRequest;
 #[cfg(unix)]
@@ -67,6 +84,26 @@ pub fn files(pattern: impl Into<SearchRequest>) -> Result<Vec<String>> {
 /// See [`SearchRequest::run`].
 pub fn count(pattern: impl Into<SearchRequest>) -> Result<usize> {
     pattern.into().count()
+}
+
+/// Search `pattern`, then tally the matches along `by` — "find, then see the
+/// distribution" in one call. For scoped roots, globs, or other options, build a
+/// [`SearchRequest`] and call [`SearchRequest::summary`].
+///
+/// # Errors
+/// See [`SearchRequest::run`].
+pub fn summary(pattern: impl Into<SearchRequest>, by: Axis) -> Result<Tally> {
+    pattern.into().summary(by)
+}
+
+/// The engine's definition-first `--rank` view: the top-`limit` files for
+/// `pattern`, each tagged `def`/`use`/`gen` by the engine (`0` = engine
+/// default). Ranking needs a persisted index; with none, the result is empty.
+///
+/// # Errors
+/// See [`SearchRequest::run`].
+pub fn rank(pattern: impl Into<SearchRequest>, limit: u32) -> Result<Vec<Ranked>> {
+    pattern.into().rank(limit)
 }
 
 /// The persisted-index freshness report (`gist status`).

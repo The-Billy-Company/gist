@@ -14,12 +14,13 @@ import functools
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
 from .contract import EXIT_ERROR, EXIT_MATCHED, EXIT_NO_MATCH
 from .errors import GistNotFoundError, SearchFailedError, UnsupportedPatternError
-from .request import Match, MatchKind, SearchRequest, Submatch
+from .request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
 
 
 DEFAULT_TIMEOUT = 30.0
@@ -197,6 +198,53 @@ def count(
     """Total matching lines across the searched tree (`--count-matches`)."""
     proc = _invoke(["--count-matches", "--no-filename"], request, cwd=cwd, timeout=timeout)
     return sum(int(x) for x in proc.stdout.splitlines() if x.strip().isdigit())
+
+
+# One `--rank` row: rank-index, `path:line`, `[def|use|gen]`, the per-file count,
+# then the snippet (rank.zig). `\u00d7` is the multiplication sign the engine
+# prints ahead of the count (kept as an escape so the source stays ASCII).
+_RANK_ROW = re.compile(
+    r"^\s*\d+\.\s+(?P<path>.+?):(?P<line>\d+)\s+\[(?P<kind>def|use|gen)\]\s+\u00d7(?P<count>\d+)\s+(?P<snippet>.*)$"
+)
+
+
+def rank(
+    request: SearchRequest,
+    *,
+    limit: int = 20,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> list[Ranked]:
+    """The engine's definition-first `--rank` view: the top-`limit` files for the
+    request's pattern, each tagged with the engine's own `def`/`use`/`gen` class
+    (`limit <= 0` uses the engine default of 20). Ranking needs a persisted
+    index — with none there is nothing to rank, so the result is empty.
+
+    This is gist's one native shape with no rg equivalent; the def/use/gen class
+    is read straight from the engine, never reclassified here."""
+    tail = ["--rank"] if limit <= 0 else [f"--rank={limit}"]
+    proc = _invoke(tail, request, cwd=cwd, timeout=timeout)
+    return _parse_rank(proc.stdout)
+
+
+def _parse_rank(stream: str) -> list[Ranked]:
+    """Parse `--rank` stdout rows into `Ranked` records (timing goes to stderr,
+    so stdout is rows only)."""
+    out: list[Ranked] = []
+    for line in stream.splitlines():
+        m = _RANK_ROW.match(line)
+        if m is None:
+            continue
+        out.append(
+            Ranked(
+                path=m["path"],
+                line_number=int(m["line"]),
+                kind=RankKind(m["kind"]),
+                count=int(m["count"]),
+                snippet=m["snippet"],
+            )
+        )
+    return out
 
 
 def status(*, cwd: str | os.PathLike[str] | None = None, timeout: float = DEFAULT_TIMEOUT) -> str:

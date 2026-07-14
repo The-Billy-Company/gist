@@ -372,6 +372,26 @@ impl SearchRequest {
     pub fn count(&self) -> Result<usize> {
         engine::count(self)
     }
+
+    /// Run, then aggregate the matches along `by` into buckets ranked by
+    /// descending count — [`run`](SearchRequest::run) then [`crate::tally`].
+    ///
+    /// # Errors
+    /// As [`run`](SearchRequest::run).
+    pub fn summary(&self, by: crate::Axis) -> Result<crate::Tally> {
+        Ok(crate::tally(self.run()?, by))
+    }
+
+    /// The engine's definition-first `--rank` view for this request: the
+    /// top-`limit` files (`0` = the engine default), each tagged `def`/`use`/`gen`.
+    /// Ranking needs a persisted index; with none, the result is empty.
+    ///
+    /// # Errors
+    /// As [`run`](SearchRequest::run); the ranked rows are parsed from the
+    /// engine's `--rank` stdout.
+    pub fn rank(&self, limit: u32) -> Result<Vec<crate::Ranked>> {
+        engine::rank(self, limit)
+    }
 }
 
 impl<S: Into<String>> From<S> for SearchRequest {
