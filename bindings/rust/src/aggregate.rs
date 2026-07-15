@@ -140,7 +140,7 @@ impl Tally {
         }
     }
 
-    /// The bucket labelled `key`, or `None` if the pattern never hit it.
+    /// The bucket labeled `key`, or `None` if the pattern never hit it.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Group> {
         self.groups.iter().find(|g| g.key == key)

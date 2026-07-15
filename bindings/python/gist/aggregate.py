@@ -97,7 +97,7 @@ class Tally:
         return self.groups if n <= 0 else self.groups[:n]
 
     def get(self, key: str) -> Group | None:
-        """The bucket labelled `key`, or `None` if the pattern never hit it."""
+        """The bucket labeled `key`, or `None` if the pattern never hit it."""
         return next((g for g in self.groups if g.key == key), None)
 
     def __iter__(self) -> Iterator[Group]:
