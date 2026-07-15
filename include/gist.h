@@ -2,9 +2,9 @@
  *
  * This C ABI is deliberately minimal: ABI/engine-version introspection plus
  * one allocation-free trigram primitive. It does not expose index open/build,
- * search, result, ownership, or error APIs. Search embedding uses the unified
- * search contract (ADR-352) over the certified gist binary; a resident
- * in-process session ABI is a planned graduation rung. */
+ * search, result, ownership, or error APIs. Search embedding is Zig-native
+ * (ADR-352 unified search over the certified binary; a resident in-process
+ * session ABI is a planned graduation rung). */
 #ifndef GIST_H
 #define GIST_H
 
