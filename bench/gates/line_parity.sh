@@ -186,6 +186,13 @@ run_suite() { # <engine label>
   same_exact "ignore-case -i (ASCII)" -i -e hello a.txt
   same_exact "line-regexp -x" -x -e 'foo bar' a.txt
   same_exact "empty-line ^\$" -e '^$' a.txt
+  echo "### Unicode parity (default-on, rg-default semantics) — byte-identical [${engine}] ###"
+  same_exact "Unicode word boundary on non-ASCII" -e 'é\b' utf8.txt
+  same_exact "Unicode case fold -i on non-ASCII" -i -e 'CAFÉ' utf8.txt
+  same_exact "Unicode \\w+ spans non-ASCII codepoints" -o -e '\w+' utf8.txt
+  same_exact "Unicode property class \\p{L}+" -o -e '\p{L}+' utf8.txt
+  same_exact "ASCII opt-out (?-u) reverts fold" -i -e '(?-u)CAFÉ' utf8.txt
+  same_exact "--no-unicode reverts \\w to ASCII" --no-unicode -o -e '\w+' utf8.txt
   same_exact "replace -r with capture" -r "X\$1X" -e 'f(o)o' a.txt
   same_exact "CRLF --crlf" --crlf -e 'foo$' crlf.txt
   same "hidden --hidden" --hidden -e foo .
@@ -212,8 +219,6 @@ run_suite() { # <engine label>
 
   echo "### tracked divergences — documented, do NOT fail the gate [${engine}] ###"
   track "trim + max-columns-preview + color" "known rgsuite FAIL f917: colored trimmed preview differs" --trim --max-columns 8 --max-columns-preview --color always -e foo longline.txt
-  track "Unicode word boundary on non-ASCII" "gist is a byte/ASCII (?-u) engine; rg default \\b is Unicode-aware" -e 'é\b' utf8.txt
-  track "Unicode case fold -i on non-ASCII" "gist folds ASCII only; rg default -i folds Unicode" -i -e 'CAFÉ' utf8.txt
 }
 
 unset GIST_NO_PARALLEL

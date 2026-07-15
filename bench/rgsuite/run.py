@@ -133,12 +133,6 @@ def _exercises_ignore(rec) -> bool:
     return any(a in UNSUPPORTED_IGNORE_FLAGS for a in rec["argv"])
 
 
-def _unicode_caseless(rec) -> bool:
-    if not any(a in ("-i", "--ignore-case", "-S", "--smart-case") for a in rec["argv"]):
-        return False
-    return any(not a.startswith("-") and not a.isascii() for a in rec["argv"])
-
-
 _ANSI = re.compile(rb"\x1b\[[0-9;]*m")
 
 
@@ -194,26 +188,23 @@ def score(rec, engine_env=None):
     #       .fdignore); the in-tree gitignore boundary IS implemented and FAILs.
     #   (b) text/source-oriented: gist skips binary files; it never emits
     #       ripgrep's "binary file matches" summary line.
-    #   (c) ASCII case-folding: `-i` folds ASCII only (no Unicode case folding).
-    #   (d) own type registry: `--type-list` is now rg-SORTED and rg-FRAMED
+    #   (c) own type registry: `--type-list` is now rg-SORTED and rg-FRAMED
     #       (`types.writeTypeList` — lexicographic names + globs), and gist's
     #       table is a strict SUPERSET of rg's (every rg type + glob present,
     #       plus gist-only types and per-type enrichments), so most rows are
     #       byte-identical to rg and the rest differ only by being richer. It
     #       is not byte-identical overall precisely because it covers more.
-    #   (e) own color palette: gist paints a deliberate scheme (bright-red
+    #   (d) own color palette: gist paints a deliberate scheme (bright-red
     #       underline matches, dim separators — color.zig). When the ONLY
     #       divergence is ANSI color codes (identical after stripping them), it's
     #       the documented palette, never an output-contract bug.
-    #   (f) `--crlf`+`--color`: ripgrep injects a `\r` in color mode that is
+    #   (e) `--crlf`+`--color`: ripgrep injects a `\r` in color mode that is
     #       absent from the file AND from rg's OWN plain output; gist matches rg's
     #       plain output and stays self-consistent, so it does not replicate it.
     if _exercises_ignore(rec):
         return "NA", "unsupported ignore source by design (global gitignore / .fdignore)"
     if b"binary file matches" in out_rg:
         return "NA", "text/source-oriented by design (skips binary)"
-    if _unicode_caseless(rec):
-        return "NA", "ASCII case-fold by design (no Unicode -i)"
     if "--type-list" in rec["argv"]:
         return "NA", "rg-sorted superset registry by design (scope/types.zig)"
     if _uses_color(rec) and _strip_ansi(out_g) == _strip_ansi(out_rg):

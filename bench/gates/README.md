@@ -10,6 +10,7 @@ any violation, so a regression can't ship silently. `scan_regress.sh` and
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `equality.sh`             | **correctness (index vs `rg`)**: gist ≡ `rg` over a byte-exact corpus snapshot — the soundness oracle                                                       |
 | `index_elision_parity.sh` | **correctness (index vs itself)**: the index-accelerated run ≡ the same query with `--no-index` — proves the index only elides reads, never changes results |
+| `unicode_parity.sh`       | **correctness (Unicode drop-in)**: `gist <pat>` ≡ `rg <pat>` at rg's default (Unicode) semantics over a multi-script fixture — fold, classes, `\b`/`-w`, and the `(?-u)`/`--no-unicode` opt-out, byte-identical on both engines |
 | `scan_regress.sh`         | **correctness (no-prefilter fallback) + race**: the live-tree full-read fallback ≡ `rg` (exits 1 on FN/FP) + min-of-N speed floor                           |
 | `streams.sh`              | **output contract**: results→stdout, diagnostics (`--rank`'s timing line / guidance)→stderr — the `rg`-conventional split that makes gist composable        |
 | `ci_order.sh`             | **orchestration**: correctness gates first, then performance (certificate + ratio floors)                                                                   |
@@ -48,6 +49,24 @@ Both must be zero.
 ```bash
 cd pkg/kernels/gist
 bench/gates/equality.sh 150 1      # gist ≡ rg over a byte-exact corpus snapshot, per needle
+```
+
+## `unicode_parity.sh` — the Unicode drop-in oracle
+
+gist is a pure byte automaton; it now folds case, tests word boundaries, and
+matches character/property classes over **Unicode codepoints by default**, the
+same as `rg`. This gate freezes a multi-script fixture (Latin diacritics with
+fold orbits like `café`/`CAFÉ` and `straße`, Greek including the final-sigma
+`Σ`/`σ`/`ς` orbit, Cyrillic, CJK, fullwidth digits, and a lone invalid-UTF-8
+byte) and asserts `gist rg <pat>` is stdout + exit-code byte-identical to
+`rg <pat>` across four surfaces — Unicode fold (`-i`/`-S`), classes
+(`\w \d \s . \p{...}`), word boundaries (`\b`/`-w`), and the `(?-u)` /
+`--no-unicode` ASCII opt-out that must reproduce the old byte behavior exactly.
+Runs once per engine (parallel `pipeline.zig` + serial `run.zig`).
+
+```bash
+cd pkg/kernels/gist
+bench/gates/unicode_parity.sh
 ```
 
 ## `scan_regress.sh` — the no-prefilter fallback oracle
