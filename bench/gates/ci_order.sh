@@ -61,7 +61,21 @@ fi
 # can never reach the perf phase. See `bench/rgsuite/modes.py`.
 run "multiline parity -U (modes.py)" python3 bench/rgsuite/modes.py run --mode multiline
 run "pcre parity -P (modes.py)" python3 bench/rgsuite/modes.py run --mode pcre
+# The walk/order/ignore flags the mined suite can't pin (results depend on file
+# timestamps, device ids, thread counts, and global git config): --sort/--sortr/
+# --sort-files, -j/--threads, --one-file-system, --no-ignore-global, and the
+# negation last-wins toggles. Hand-authored differential proof, ripgrep the
+# oracle, once per engine. Blocking here so an ordering/ignore regression can't
+# reach the perf phase. See `bench/rgsuite/flags.py`.
+run "flags parity (flags.py, both engines)" python3 bench/rgsuite/flags.py run --engine both
+# The content-transform flags rgsuite can't mine from plain source (-z decompress,
+# --pre preprocess, -E transcode, --binary NUL search): hand-authored differential
+# vs rg over minted fixtures, once per engine, each also asserting indexed ==
+# --no-index. Blocking so a transform regression can't reach the perf phase. See
+# `bench/rgsuite/transforms.py`.
+run "transforms parity -z/--pre/-E/--binary (transforms.py, both engines)" python3 bench/rgsuite/transforms.py run --engine both
 run "line-output parity (line_parity.sh)" bash bench/gates/line_parity.sh
+run "Unicode parity (unicode_parity.sh)" bash bench/gates/unicode_parity.sh
 run "index-elision parity (index_elision_parity.sh)" bash bench/gates/index_elision_parity.sh
 run "fail-closed contract (fail_closed.sh)" bash bench/gates/fail_closed.sh
 run "freshness (freshness_fs.sh)" bash bench/gates/freshness_fs.sh
@@ -110,6 +124,12 @@ if [[ -n "${missing}" ]]; then
   echo "needs the full field (rg/csearch/zoekt) + hyperfine. Install them to certify."
   exit 0
 fi
+# The -z decode-speed regression floor: gist's in-process `std.compress` decode
+# of the common formats must stay materially faster than rg's fork-a-decompressor-
+# per-file (blocking `--floor-rg`, conservative vs the real ~5-15x so jitter never
+# false-trips). Back-to-back over identical bytes, so hardware cancels. See
+# `bench/rgsuite/transforms.py` `do_bench`.
+run "-z decode speed floor (transforms.py bench)" python3 bench/rgsuite/transforms.py bench
 run "macro certificate (certify.sh)" bash bench/certify/certify.sh
 run "index-size accounting (index_size_accounting.py)" python3 bench/gates/index_size_accounting.py
 run "fresh certificate artifacts (check_artifacts.py)" python3 bench/certify/check_artifacts.py --artifacts --require-head

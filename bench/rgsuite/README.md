@@ -75,8 +75,11 @@ current boundaries:
 5. **ASCII case-folding** — `-i` folds ASCII only; no Unicode case folding, and
    no per-branch `(?i)` across multiple `-e` patterns.
 6. **RE2-style engine** — `-P`/pcre2, lookaround, backreferences (mostly SKIP).
-7. **ignore scope** — a _global_ gitignore (`core.excludesFile`) and fd's
-   `.fdignore` dialect aren't read; the in-repo hierarchy is (see below).
+7. **ignore scope** — the in-repo hierarchy **and** the _global_ gitignore
+   (`core.excludesFile`, resolved from `$HOME/.gitconfig` / `$XDG_CONFIG_HOME/git/config`
+   → default `$XDG_CONFIG_HOME/git/ignore`) are honored by default, disabled per
+   tier by `--no-ignore-global` (rg-parity proven in `flags.py`, below); fd's
+   `.fdignore` dialect is the one ignore source still not read.
 8. **type registry** — `--type-list` is now emitted in ripgrep's exact
    presentation (lexicographic names, one line per alias, lexicographically
    sorted globs); it differs only because gist's registry is a documented strict
@@ -216,6 +219,78 @@ pipeline deliberately does not, to protect its 30/30 parity — so a _common_
 lazy-dotstar (`[\s\S]*?`, "import block") query trails rg's lazy-DFA. Parallelizing
 the `-U` emit path is the tracked follow-up; correctness is not affected.
 
+## Flags companion (`flags.py`) — the `--sort`/`-j`/`--one-file-system`/global-ignore proof
+
+`run.py` mines ripgrep's suite, but almost nothing there pins the walk/order/
+ignore flags gist brought online: their answers depend on file **timestamps**,
+**device ids**, worker **thread counts**, and a user's **global git config** —
+none of which a self-contained mined replay can freeze. `flags.py` is the
+hand-authored companion for exactly those, same philosophy as `modes.py` (rg the
+oracle, generated fixtures, nothing large tracked):
+
+```bash
+python3 flags.py run                    # both engines (parallel + serial)
+python3 flags.py run --engine serial    # one engine
+python3 flags.py bench                   # parity-at-speed over services/backend (report-only)
+```
+
+- **Ordering** (`--sort`/`--sortr` × `path`/`modified`/`accessed`, `--sort-files`)
+  is proven **byte-for-byte** on a fixture whose modified/accessed stamps are
+  shuffled out of path order, so a comparator that ignored its key would diverge;
+  `created` pins the set (birthtime isn't settable portably). This is the exact
+  gate that caught gist byte-ordering paths where ripgrep orders them
+  component-wise (`Path::cmp`: `warroom/service.go` before `warroom.go`).
+- **Negation last-wins** (`--heading`/`--no-heading`, `-H`/`--no-filename`,
+  `-n`/`--no-line-number`, `--stats`/`--no-stats`) is pinned deterministic by
+  pairing with `--sort path`, so the assertion is byte-exact.
+- **`-j`/`--threads`** is proven order-invariant (`-j1` == `-jN`) and a set match
+  against rg (the parallel walk streams in worker-discovery order).
+- **`--no-ignore-global`** runs against a fixture `$HOME/.gitconfig` naming a
+  `core.excludesFile`: honored by default, disabled by the flag, byte-parity with
+  `rg` under the same env.
+
+Every non-thread case also asserts the indexed path equals `--no-index`
+(read-elision soundness), and the whole slate runs once per engine — so an
+ordering or ignore regression can never reach the perf phase. Wired into the
+correctness phase of `../gates/ci_order.sh`.
+
+## Transforms companion (`transforms.py`) — the `-z`/`--pre`/`-E`/`--binary` proof
+
+`run.py` replays ripgrep's mined suite over the repo's **plain** source bytes, so
+it never exercises the flags that reshape a file's content before matching. Those
+need fixtures a source tree can't supply — compressed blobs, UTF-16/Latin-1 text,
+a NUL-bearing file, a preprocessor script. `transforms.py` is the hand-authored
+companion, ripgrep the oracle (no hardcoded expected strings), same as `modes.py`:
+
+```bash
+python3 transforms.py run                 # both engines: -z/--pre/-E/--binary parity vs rg
+python3 transforms.py run --engine serial # one engine
+python3 transforms.py bench               # -z speed: pipeline vs serial vs rg (+ vs_rg floor)
+```
+
+- **`-z`** is proven **byte-for-byte** per container — gzip/bzip2/xz always (stdlib
+  mints them), plus zstd/lz4/brotli when the system encoder is present. gist
+  decodes gzip/zlib/zstd/xz **in-process** (`ingest.zig` native `std.compress`); rg
+  forks a decompressor. Output must be identical; speed need not.
+- **`-E`** transcoding is byte-exact on UTF-16 (LE/BE/BOM) and Latin-1.
+- **`--pre`/`--pre-glob`** (a `gzip -dc "$1"` wrapper, path-scoped) match rg exactly.
+- **`--binary`/`-uuu`** are gist's deliberate **superset** of rg's one-line summary
+  (search the NUL file in full), so `rg -a` is the oracle for that stdout; flag-free
+  binary detection is separately pinned equal to plain rg.
+
+Every case also asserts indexed == `--no-index` (a transform disables read-elision),
+and the slate runs once per **engine**. The `run` differential is wired into the
+correctness phase of `../gates/ci_order.sh`; `bench` into the perf phase with a
+**blocking `--floor-rg` (default 2.0×)** — gist's in-process-decode edge over rg
+is architectural (~4-15×), so a conservative floor never false-trips on jitter yet
+catches a real regression (e.g. a fork-per-file path). The `parallel_gain`
+(pipeline vs serial) it also prints is informational — the pipeline's
+directory-granular work-stealing makes it corpus-shape-sensitive; the deterministic
+guard that `-z`/`-E` still ride the parallel engine is the `transformsRidePipeline`
+unit test in `pipeline.zig`, not that wall-clock number. The `../races/searchzip_headtohead.sh`
+race adds ugrep to the `-z` field (gist beats both rg and ugrep on the in-process
+formats; bzip2 and the external-codec tail have no in-process Zig decoder).
+
 ## Files
 
 | File           | Role                                                                   |
@@ -224,5 +299,7 @@ the `-U` emit path is the tracked follow-up; correctness is not affected.
 | `mine.py`      | regenerates `spec.json` from a ripgrep checkout                        |
 | `run.py`       | differential runner + honest scoreboard (the gate)                     |
 | `modes.py`     | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers) |
+| `flags.py`     | hand-authored walk/order/ignore-flag differential proof (`--sort`/`--sortr`/`--sort-files`, `-j`/`--threads`, `--one-file-system`, `--no-ignore-global`, negation last-wins) — timestamp/device/thread/global-config dependent, so the mined suite can't pin them |
+| `transforms.py` | hand-authored `-z`/`--pre`/`-E`/`--binary` content-transform differential proof + the `-z` pipeline-vs-serial-vs-rg speed floor (the flags `run.py` can't mine from plain source) |
 | `dbg.py`       | single-test side-by-side inspector                                     |
 | `results.json` | last `run.py` per-test verdicts (regenerated each run)                 |
