@@ -14,7 +14,8 @@ ground truth (no hardcoded expected strings):
     gzip / bzip2 / xz always (Python stdlib mints the fixtures), plus zstd / lz4 /
     brotli when the system tool is installed to write them. gist decodes gzip and
     xz IN-PROCESS; rg forks a decompressor; the *output* must be identical.
-  * `-E` transcoding is byte-exact on UTF-16 (LE/BE/BOM) and Latin-1 fixtures.
+  * `-E` transcoding is byte-exact on UTF-16 (LE/BE/BOM), Latin-1, and the CJK /
+    legacy code pages (Shift_JIS, EUC-JP, GBK, Big5, EUC-KR) vs rg's encoding_rs.
   * `--pre` (a `gzip -dc "$1"` wrapper) and `--pre-glob` scoping match rg exactly.
   * `--binary`/`-uuu` are gist's deliberate **superset** of rg's one-line summary:
     they search a NUL-bearing file in full, so `rg -a` (ripgrep --text, "search it
@@ -61,6 +62,21 @@ GIST = ""  # resolved in main()
 # The line body every text fixture carries: two matching lines around filler, so
 # a comparator that mis-counts lines (or drops the tail after a NUL) diverges.
 BODY = "the needle is here\nplain filler line\nanother needle appears\n"
+
+# -E CJK / legacy fixtures: filename -> (python mint codec, content). Content pairs
+# an ASCII "needle" (stable across encodings) with encoding-appropriate multi-byte
+# text — two needle lines, matching BODY's shape. The `-E` label the run passes to
+# BOTH gist and rg is derived from the stem (sjis→shift_jis, …) in `_cases`.
+_CJK_FIXTURES: dict[str, tuple[str, str]] = {
+    "sjis.txt": ("shift_jis", "needle 日本語\nplain filler\nanother needle 東京\n"),
+    "eucjp.txt": ("euc_jp", "needle 日本語\nplain filler\nanother needle 東京\n"),
+    "gbk.txt": ("gbk", "needle 中文内容\nplain filler\nanother needle 北京\n"),
+    "big5.txt": ("big5", "needle 中文內容\nplain filler\nanother needle 台北\n"),
+    "euckr.txt": ("cp949", "needle 한국어\nplain filler\nanother needle 서울\n"),
+}
+# fixture stem -> the `-E` label handed to gist AND rg (encoding_rs canonical).
+_CJK_LABELS = {"sjis": "shift_jis", "eucjp": "euc-jp", "gbk": "gbk",
+               "big5": "big5", "euckr": "euc-kr"}
 
 # `-z` container formats. The stdlib trio is always minted; the rest are written
 # only when their system encoder exists (rg and gist both read all six).
@@ -152,6 +168,15 @@ def gen_fixtures(root: Path) -> list[str]:
     (enc / "u16bom.txt").write_bytes(BODY.encode("utf-16"))  # BOM-prefixed
     (enc / "latin1.txt").write_bytes(accented.encode("latin-1"))
 
+    # ── -E: the CJK / legacy code pages (the gap this suite closes). Each fixture
+    # carries an ASCII "needle" (encoding-invariant, so the match is stable) beside
+    # real multi-byte content, forcing gist's decoder onto the lead-byte path. rg
+    # (encoding_rs) is the oracle; the Python codec is only the fixture minter, so a
+    # Python↔encoding_rs nuance can't break parity as long as gist tracks rg. euc-kr
+    # mints via CP949/UHC — WHATWG "euc-kr" is UHC, which Python spells `cp949`.
+    for fname, (pycodec, text) in _CJK_FIXTURES.items():
+        (enc / fname).write_bytes(text.encode(pycodec))
+
     # ── binary: a NUL splits two matching lines; both must survive --binary/-a ──
     bind = root / "bin"
     bind.mkdir()
@@ -202,11 +227,19 @@ def _cases(exts: list[str]) -> list[Case]:
         Case("enc:u16be", ["-E", "utf-16be", *n, "enc/u16be.txt"],
              ["-E", "utf-16be", *n, "enc/u16be.txt"], FIX),
         Case("enc:u16-auto-bom", [*n, "enc/u16bom.txt"], [*n, "enc/u16bom.txt"], FIX),
+        # latin1 folds to windows-1252 in both gist and rg (WHATWG); 0xE9 (é) is
+        # identical in both pages, so the accented case still pins byte-exact.
         Case("enc:latin1", ["-E", "latin1", *n, "enc/latin1.txt"],
              ["-E", "latin1", *n, "enc/latin1.txt"], FIX),
         Case("enc:latin1-accent", ["-E", "latin1", "-n", "--no-heading", "caf", "enc/latin1.txt"],
              ["-E", "latin1", "-n", "--no-heading", "caf", "enc/latin1.txt"], FIX),
     ]
+
+    # ── -E: CJK / legacy code pages — gist ≡ rg (encoding_rs) on the ASCII needle
+    # AND the transcoded multi-byte lines around it (byte-exact, both `-n`). ──
+    for stem, label in _CJK_LABELS.items():
+        f = f"enc/{stem}.txt"
+        cs.append(Case(f"enc:{stem}", ["-E", label, *n, f], ["-E", label, *n, f], FIX))
 
     # ── --pre / --pre-glob: gist ≡ rg over the wrapper's stdout ──
     pre_sh = "pre/decompress.sh"

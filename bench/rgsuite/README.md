@@ -70,8 +70,12 @@ current boundaries:
 2. **no ANSI** — `--color=always` emits no color escapes (`path:line:text` only).
 3. **text/source-oriented** — gist skips binary files; no `--binary`/`-uuu`, and
    it never emits ripgrep's `binary file matches` summary line.
-4. **UTF-8 / byte engine** — `-E`/`--encoding` for a non-BOM charset (SJIS,
-   EUC-JP, explicit UTF-16) is refused; a **UTF-8/UTF-16 BOM is auto-detected**.
+4. **UTF-8 / byte engine** — matching runs over UTF-8 bytes, so `-E`/`--encoding`
+   **transcodes to UTF-8 up front** rather than matching in the source charset. It
+   now honors rg's full `encoding_rs` label table (the single-byte pages + CJK
+   gb18030/GBK, Big5, EUC-JP, Shift_JIS, EUC-KR, ISO-2022-JP), a **UTF-8/UTF-16 BOM
+   is auto-detected**, and an unrecognized label still **fails loud (exit 2)**.
+   Byte-exact vs rg — see `transforms.py`. (No longer an NA bucket.)
 5. **ASCII case-folding** — `-i` folds ASCII only; no Unicode case folding, and
    no per-branch `(?i)` across multiple `-e` patterns.
 6. **RE2-style engine** — `-P`/pcre2, lookaround, backreferences (mostly SKIP).
@@ -272,7 +276,9 @@ python3 transforms.py bench               # -z speed: pipeline vs serial vs rg (
   mints them), plus zstd/lz4/brotli when the system encoder is present. gist
   decodes gzip/zlib/zstd/xz **in-process** (`ingest.zig` native `std.compress`); rg
   forks a decompressor. Output must be identical; speed need not.
-- **`-E`** transcoding is byte-exact on UTF-16 (LE/BE/BOM) and Latin-1.
+- **`-E`** transcoding is byte-exact on UTF-16 (LE/BE/BOM), Latin-1, and the CJK /
+  legacy code pages (Shift_JIS, EUC-JP, GBK, Big5, EUC-KR) — rg's `encoding_rs` is
+  the oracle; an unrecognized label fails loud (exit 2) in both.
 - **`--pre`/`--pre-glob`** (a `gzip -dc "$1"` wrapper, path-scoped) match rg exactly.
 - **`--binary`/`-uuu`** are gist's deliberate **superset** of rg's one-line summary
   (search the NUL file in full), so `rg -a` is the oracle for that stdout; flag-free
