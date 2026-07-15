@@ -77,8 +77,11 @@ current boundaries:
 6. **RE2-style engine** — `-P`/pcre2, lookaround, backreferences (mostly SKIP).
 7. **ignore scope** — a _global_ gitignore (`core.excludesFile`) and fd's
    `.fdignore` dialect aren't read; the in-repo hierarchy is (see below).
-8. **type registry** — `--type-list` differs because gist's registry is a
-   documented _superset_ of ripgrep's.
+8. **type registry** — `--type-list` is now emitted in ripgrep's exact
+   presentation (lexicographic names, one line per alias, lexicographically
+   sorted globs); it differs only because gist's registry is a documented strict
+   _superset_ of ripgrep's — every rg type + glob present (most rows therefore
+   byte-identical), plus gist-only types and per-type enrichments.
 
 ### Surface gist matches ripgrep on (all PASS)
 

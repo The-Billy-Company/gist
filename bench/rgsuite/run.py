@@ -195,8 +195,12 @@ def score(rec, engine_env=None):
     #   (b) text/source-oriented: gist skips binary files; it never emits
     #       ripgrep's "binary file matches" summary line.
     #   (c) ASCII case-folding: `-i` folds ASCII only (no Unicode case folding).
-    #   (d) own type registry: `--type-list` reflects gist's deliberately broader
-    #       type table (scope/types.zig), not rg's set byte-for-byte.
+    #   (d) own type registry: `--type-list` is now rg-SORTED and rg-FRAMED
+    #       (`types.writeTypeList` — lexicographic names + globs), and gist's
+    #       table is a strict SUPERSET of rg's (every rg type + glob present,
+    #       plus gist-only types and per-type enrichments), so most rows are
+    #       byte-identical to rg and the rest differ only by being richer. It
+    #       is not byte-identical overall precisely because it covers more.
     #   (e) own color palette: gist paints a deliberate scheme (bright-red
     #       underline matches, dim separators — color.zig). When the ONLY
     #       divergence is ANSI color codes (identical after stripping them), it's
@@ -211,7 +215,7 @@ def score(rec, engine_env=None):
     if _unicode_caseless(rec):
         return "NA", "ASCII case-fold by design (no Unicode -i)"
     if "--type-list" in rec["argv"]:
-        return "NA", "own type registry by design (scope/types.zig)"
+        return "NA", "rg-sorted superset registry by design (scope/types.zig)"
     if _uses_color(rec) and _strip_ansi(out_g) == _strip_ansi(out_rg):
         return "NA", "own color palette by design (color.zig)"
     if _uses_color(rec) and "--crlf" in rec["argv"] and \
