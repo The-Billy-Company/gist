@@ -224,6 +224,42 @@ compete_rgx_cmd() {
   esac
 }
 
+# compete_pcre_cmd <tool> <pattern> → list-files command for a PCRE pattern
+# (lookaround / backreferences — the class RE2 engines cannot express AT ALL).
+# The indexed RE2 rivals csearch + zoekt are absent from this field by
+# construction: their engines have neither lookaround nor backreferences, so gist
+# is the ONLY indexed tool that can run this class. Every rival here re-walks and
+# re-scans the whole tree; gist prefilters on the pattern's required literal (the
+# same trigram index it uses for the linear engine) and PCRE2-JIT-matches only
+# the surviving candidates — the structural win no scanner can answer. gist's
+# `-P` defaults to PCRE2 UTF+UCP, exactly like rg `-P`, so their file sets match.
+compete_pcre_cmd() {
+  local tool="${1}" p="${2}" roots="${ROOTS[*]}" xd
+  xd="$(_xdir_flags)"
+  case "${tool}" in
+    rg) echo "rg -P '${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
+    ugrep) echo "ugrep -rl -P${xd} -- '${p}' ${roots}" ;;
+    ag) echo "ag -l -s --path-to-ignore ${REPO}/.gitignore -- '${p}' ${roots}" ;;
+    ggrep) echo "ggrep -rIlP${xd} -- '${p}' ${roots}" ;;
+    gitgrep) echo "git -C ${REPO} grep -lP -- '${p}' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} -P '${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
+    *) echo "false" ;;
+  esac
+}
+
+# compete_pcre_tools → the PCRE-capable field, indexed RE2 rivals excluded
+# (lookaround/backreferences are inexpressible in RE2). `gist` is printed by the
+# race script itself, so it's omitted here.
+compete_pcre_tools() {
+  local t=()
+  [[ "${HAVE_RG}" = 1 ]] && t+=(rg)
+  [[ "${HAVE_UGREP}" = 1 ]] && t+=(ugrep)
+  [[ "${HAVE_AG}" = 1 ]] && t+=(ag)
+  [[ "${HAVE_GGREP}" = 1 ]] && t+=(ggrep)
+  [[ "${HAVE_GITGREP}" = 1 ]] && t+=(gitgrep)
+  printf '%s\n' "${t[@]}"
+}
+
 # ── semantic + timing helpers (shared by every race script) ──────────────────
 need_hyperfine() { have hyperfine || {
   echo "need hyperfine (brew install hyperfine)"
