@@ -58,6 +58,7 @@ PROBES: tuple[tuple[str, str, str], ...] = (
     ("regex-alternation", "regex", r"return|continue|break"),
     ("regex-dense-scan", "regex", r"\w{3,8}"),
     ("regex-eol", "regex", r";$"),
+    ("regex-litalt", "regex", r"panic|0x"),
 )
 
 

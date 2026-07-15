@@ -15,6 +15,7 @@
   "regex-anchored": 1.8,
   "regex-classcount": 1.15,
   "regex-alternation": 1.6,
-  "regex-dense-scan": 1.6,
-  "regex-eol": 1.05
+ "regex-dense-scan": 1.6,
+ "regex-eol": 1.05,
+ "regex-litalt": 1.15
 }

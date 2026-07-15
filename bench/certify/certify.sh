@@ -9,7 +9,7 @@
 # not a single mean. The verdict is fail-closed (a WIN needs a lower median AND
 # p<0.05); every class is shown, losses included.
 #
-# The 11 classes are byte-identical to certify.zig's probes, so the macroscopic
+# The 12 classes are byte-identical to certify.zig's probes, so the macroscopic
 # table and the microscopic table in CERTIFICATE.md map 1:1 by class name.
 #
 # Field + fairness scoping come from _compete.sh (same roots, same ignore set,
@@ -68,6 +68,7 @@ PROBES=(
   "regex-alternation regex return|continue|break"
   "regex-dense-scan regex \\w{3,8}"
   "regex-eol regex ;\$"
+  "regex-litalt regex panic|0x"
 )
 
 echo "building gist + persisting the index once…"

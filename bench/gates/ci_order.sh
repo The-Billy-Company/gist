@@ -55,6 +55,12 @@ if [[ "${allow_known}" -eq 1 ]]; then
 else
   run "rgsuite parity (check_results.py)" python3 bench/rgsuite/check_results.py
 fi
+# The `-U`/`-P` modes rgsuite defers (mined-suite boundaries #1/#6): the
+# hand-authored differential proof for exactly those two, both fully green
+# (`run.py` marks them NA/SKIP). Blocking here so a multiline/PCRE2 regression
+# can never reach the perf phase. See `bench/rgsuite/modes.py`.
+run "multiline parity -U (modes.py)" python3 bench/rgsuite/modes.py run --mode multiline
+run "pcre parity -P (modes.py)" python3 bench/rgsuite/modes.py run --mode pcre
 run "line-output parity (line_parity.sh)" bash bench/gates/line_parity.sh
 run "index-elision parity (index_elision_parity.sh)" bash bench/gates/index_elision_parity.sh
 run "fail-closed contract (fail_closed.sh)" bash bench/gates/fail_closed.sh

@@ -158,12 +158,68 @@ tracked ripgrep:
 python3 mine.py [path/to/ripgrep/tests]   # default: <repo>/.etc/ripgrep/tests
 ```
 
+## Modes companion (`modes.py`) — the `-U`/`-P` proof
+
+`run.py` mines ripgrep's own suite, which by design defers `-U`/`--multiline`
+(boundary #1) and `-P`/`--pcre2` (boundary #6) to NA/SKIP. `modes.py` is the
+hand-authored differential proof for exactly those two modes now that gist
+implements them — same philosophy (ripgrep is the oracle, no hardcoded expected
+strings), a curated adversarial matrix instead of a mined one:
+
+```bash
+python3 modes.py run --mode multiline   # -U: cross-line spans, blank-line skip,
+                                        #     zero-width anchors, dotall, crlf, -o/-v/-c/-r/--json
+python3 modes.py run --mode pcre        # -P: lookaround, backrefs, negative lookaround,
+                                        #     possessive/atomic, unicode toggle, catastrophic→exit-2
+python3 modes.py run --mode all         # + a `core` regression slice and repo-scale gross queries
+python3 modes.py bench                  # acceleration hunt: gist-idx vs gist-noidx vs rg
+```
+
+Fixtures are generated into a temp dir each run (the generator in `modes.py` is
+the committed contract — nothing large is tracked). It asserts three things per
+case: stdout byte-parity vs `rg`, exit-code parity (0/1/2), and that gist's
+indexed path equals `--no-index` (read-elision soundness). `--mode multiline`
+and `--mode pcre` are both **fully green (30/30 each)** and are wired into the
+correctness phase of `../gates/ci_order.sh`, so a `-U`/`-P` regression can never
+reach the perf phase. (`--mode all` additionally runs a `core` regression slice
+that still carries the one pre-existing, unrelated `-tgo` type-registry
+divergence — boundary #8 — so it is not itself a blocking gate.)
+
+### Acceleration (`modes.py bench`) — the brag
+
+`-P`/`--pcre2` rides the same parallel work-stealing walk + index-backed
+read-elision as the linear default (PCRE2 with JIT, per-worker match scratch),
+so a lookaround/backreference query over a **selective** literal beats ripgrep's
+own `-P` outright — gist touches only the trigram candidates, rg walks and
+PCRE-matches the whole subtree. Median of 3, `gist rg <q> -c services/` vs
+`rg <q> -c services/` on one workstation (illustrative, machine-specific):
+
+| query                                          | gist-idx | gist-noidx |      rg |                 gist-idx vs rg |
+| ---------------------------------------------- | -------: | ---------: | ------: | -----------------------------: |
+| `WalletService` (rare literal)                 |   22.1ms |     80.1ms | 119.8ms |                **5.4× faster** |
+| `error` (common literal)                       |   61.8ms |     90.3ms | 148.9ms |                **2.4× faster** |
+| `func \w+\(` (anchored regex)                  |   51.3ms |     82.4ms | 148.9ms |                **2.9× faster** |
+| `-P func \w+\((?=.*ctx)` (lookahead, common)   |   53.4ms |     82.5ms | 114.2ms |                **2.1× faster** |
+| `-P WalletService(?=[\s\S]*ctx)` (rare)        |   22.3ms |     83.2ms | 120.2ms |                **5.4× faster** |
+| `-U WalletService[\s\S]{0,80}?\{` (rare)       |  154.7ms |    225.3ms | 117.1ms | 0.76× (index still elides 30%) |
+| `-U import \([\s\S]*?\)` (common lazy-dotstar) |    734ms |      733ms | 153.7ms | 0.21× (honest gap — see below) |
+
+The index win is the headline: a **rare-literal `-P` lookaround is 5.4× faster
+than `rg -P`**, and every literal/anchored/common-`-P` query is 2.1–2.9× faster.
+`-U`/`--multiline` is byte-for-byte correct and index-accelerated (30% read
+elision on a selective literal), but runs on the **serial** engine — the
+multiline emitter owns whole-buffer cross-line spans that the parallel per-file
+pipeline deliberately does not, to protect its 30/30 parity — so a _common_
+lazy-dotstar (`[\s\S]*?`, "import block") query trails rg's lazy-DFA. Parallelizing
+the `-U` emit path is the tracked follow-up; correctness is not affected.
+
 ## Files
 
-| File           | Role                                                          |
-| -------------- | ------------------------------------------------------------- |
-| `spec.json`    | frozen, self-contained mined spec (441 `rgtest!` invocations) |
-| `mine.py`      | regenerates `spec.json` from a ripgrep checkout               |
-| `run.py`       | differential runner + honest scoreboard (the gate)            |
-| `dbg.py`       | single-test side-by-side inspector                            |
-| `results.json` | last `run.py` per-test verdicts (regenerated each run)        |
+| File           | Role                                                                   |
+| -------------- | ---------------------------------------------------------------------- |
+| `spec.json`    | frozen, self-contained mined spec (441 `rgtest!` invocations)          |
+| `mine.py`      | regenerates `spec.json` from a ripgrep checkout                        |
+| `run.py`       | differential runner + honest scoreboard (the gate)                     |
+| `modes.py`     | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers) |
+| `dbg.py`       | single-test side-by-side inspector                                     |
+| `results.json` | last `run.py` per-test verdicts (regenerated each run)                 |

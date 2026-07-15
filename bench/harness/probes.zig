@@ -1,7 +1,7 @@
 //! gist bench — the single, shared probe registry for the Certificate of
 //! Optimality. Layer A (`certify.zig`, microscopic cycles/byte) and Layer D
 //! (`../lowerbound/lowerbound.zig`, the algorithmic floor) must speak about
-//! *exactly* the same eleven regex classes for the certificate to line up
+//! *exactly* the same regex classes for the certificate to line up
 //! class-for-class across layers — so both `@import` this file instead of
 //! keeping their own copy. Before this file existed the two arrays were
 //! independently hand-maintained "keep in sync" copies (a real drift risk
@@ -9,7 +9,7 @@
 //! risk structurally instead of documenting it as acceptable.
 //!
 //! `../certify/certify.sh` (the macroscopic bash race) necessarily keeps its
-//! own copy of these eleven rows — a shell script can't `@import` Zig data —
+//! own copy of these rows — a shell script can't `@import` Zig data —
 //! but it is a single, already-documented cross-language boundary, not
 //! open-ended drift between two Zig files.
 
@@ -31,4 +31,9 @@ pub const probes = [_]Probe{
     .{ .class = "regex-alternation", .kind = .regex, .pattern = "return|continue|break" },
     .{ .class = "regex-dense-scan", .kind = .regex, .pattern = "\\w{3,8}" },
     .{ .class = "regex-eol", .kind = .regex, .pattern = ";$" },
+    // Pure-literal alternation with a sub-trigram branch ("0x" is 2 B): the
+    // index can't prefilter it, so the whole tree is read — historically the
+    // one documented LOSS to rg (0.93x), now owned by the fused single-pass
+    // SIMD `containsAny` match-equivalence path (no regex engine run at all).
+    .{ .class = "regex-litalt", .kind = .regex, .pattern = "panic|0x" },
 };

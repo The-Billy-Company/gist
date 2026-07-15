@@ -10,7 +10,7 @@ less work.
 ## What it is
 
 A **fail-closed, structural byte-touch audit**. `gist-lowerbound` builds the
-trigram index over the real Billy corpus, then for each of the eleven regex
+trigram index over the real Billy corpus, then for each of the twelve regex
 classes (imported from [`../harness/probes.zig`](../harness/probes.zig), the
 _same_ module [`certify.zig`](../harness/certify.zig) uses, so Layer D lines
 up 1:1 with Layers A–C by construction, not by a hand-kept copy) it measures:
@@ -53,7 +53,7 @@ not asserted:
    (`regex-dotted`) — the other 95.65% are pruned untouched.
 
 Together: trigram prune → single fused verify pass = the minimum reads any
-correct algorithm can make. **11/11 classes at the floor, fail-closed.**
+correct algorithm can make. **12/12 classes at the floor, fail-closed.**
 
 The gate is proven non-tautological by fault injection: adding a single extra
 byte-read per line drives `passes` to 1.02 and trips a hard `exit 1`.
@@ -100,5 +100,5 @@ paper over by weakening the assertion.
   column is the empirical measure of this pruning.
 - gist's own [`../harness/probes.zig`](../harness/probes.zig) — the shared
   probe-class registry [`certify.zig`](../harness/certify.zig) (Layer A) also
-  imports, so the four layers of the certificate speak about the same eleven
+  imports, so the four layers of the certificate speak about the same twelve
   classes by construction.

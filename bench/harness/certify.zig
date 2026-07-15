@@ -33,7 +33,7 @@ const default_roots = corpus_mod.default_roots;
 const reps = 200;
 const warmup = 20;
 
-// Single source of truth for the eleven probe classes — Layer D
+// Single source of truth for the probe classes — Layer D
 // (`../lowerbound/lowerbound.zig`) imports the same file so the two layers
 // can never drift apart. See `probes.zig`'s header for why this used to be a
 // hand-duplicated array.

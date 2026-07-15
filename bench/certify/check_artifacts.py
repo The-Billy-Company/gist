@@ -70,6 +70,7 @@ CERT_CLASSES = {
     "regex-alternation",
     "regex-dense-scan",
     "regex-eol",
+    "regex-litalt",
 }
 SEMVER = re.compile(r"v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
 SHA256_ID = re.compile(r"sha256:[0-9a-f]{64}", re.I)
@@ -218,7 +219,7 @@ def _check_cells(d: Path, meta: dict[str, object], tools: set[str], problems: li
         f"{class_name}__{tool}.json" for class_name in CERT_CLASSES for tool in measured_tools
     }
     if classes != CERT_CLASSES:
-        problems.append("certify_macro.csv class set != the 11 certificate classes")
+        problems.append("certify_macro.csv class set != the certificate class registry")
     if macro_cells != expected:
         problems.append("certify_macro.csv cell matrix != certificate classes x timed tools")
     if not macro_cells:
@@ -229,7 +230,7 @@ def _check_cells(d: Path, meta: dict[str, object], tools: set[str], problems: li
         problems.append("certify.csv must contain a class column")
     micro_classes = {row.get("class", "") for row in micro}
     if micro_classes != CERT_CLASSES:
-        problems.append("certify.csv class set != the 11 certificate classes")
+        problems.append("certify.csv class set != the certificate class registry")
 
     raw = {path.name: path for path in (d / "raw").glob("*.json")}
     missing, extra = sorted(expected - raw.keys()), sorted(raw.keys() - expected)
