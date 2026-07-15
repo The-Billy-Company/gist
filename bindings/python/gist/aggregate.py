@@ -1,23 +1,4 @@
-"""Result-side aggregation over GIST matches (ADR-352).
-
-`search`/`files`/`count` answer *where* a pattern occurs; aggregation answers
-*how it is distributed* — the question an agent asks next: which files carry the
-most `TODO`s, which directories concentrate a `panic`, what distinct error codes
-match `apperr\\.\\w+`, which ADRs the tree cites most. It is a pure
-post-processing layer over the `Match` records the engine already returns: it
-never widens `SearchRequest` (the contract stays match-finding-only —
-presentation and stats are deliberately *not* request options) and never runs a
-second matcher.
-
-    from gist import search, tally
-
-    tally(search("TODO", paths=["services"]), by="dir").top(5)
-
-`by` selects the axis — a named one (`"file"` · `"dir"` · `"ext"` · `"match"`)
-or any `Callable[[Match], str]` for a custom bucketing. Only `MatchKind.MATCH`
-lines are counted; `-A/-B/-C` context lines are display neighborhood, not
-matches, so they never inflate a tally.
-"""
+r"""Result-side aggregation over GIST matches (ADR-352). `search`/`files`/`count` answer *where* a pattern occurs; aggregation answers *how it is distributed* — the question an agent asks next: which files carry the most `TODO`s, which directories concentrate a `panic`, what distinct error codes match `apperr\\.\\w+`, which ADRs the tree cites most. It is a pure post-processing layer over the `Match` records the engine already returns: it never widens `SearchRequest` (the contract stays match-finding-only — presentation and stats are deliberately *not* request options) and never runs a second matcher. from gist import search, tally tally(search("TODO", paths=["services"]), by="dir").top(5) `by` selects the axis — a named one (`"file"` · `"dir"` · `"ext"` · `"match"`) or any `Callable[[Match], str]` for a custom bucketing. Only `MatchKind.MATCH` lines are counted; `-A/-B/-C` context lines are display neighborhood, not matches, so they never inflate a tally."""
 
 from __future__ import annotations
 
@@ -53,9 +34,7 @@ def by_extension(m: Match) -> str:
 
 
 def by_match_text(m: Match) -> str:
-    """Bucket by the literal text that matched — the first submatch span, else
-    the stripped line (a match line always carries ≥1 submatch in `--json`).
-    This is the axis for "what distinct tokens did this pattern hit"."""
+    """Bucket by the literal text that matched — the first submatch span, else the stripped line (a match line always carries ≥1 submatch in `--json`). This is the axis for "what distinct tokens did this pattern hit"."""
     return m.submatches[0].text if m.submatches else m.text.strip()
 
 
@@ -68,9 +47,7 @@ _NAMED_AXES: dict[str, GroupKey] = {
 
 
 def resolve_axis(by: str | GroupKey) -> GroupKey:
-    """A named axis (`"file"`/`"dir"`/`"ext"`/`"match"`) or a custom callable.
-    An unknown name is a loud `ValueError` — a typo can't silently pick the
-    wrong grouping and misreport a distribution."""
+    """A named axis (`"file"`/`"dir"`/`"ext"`/`"match"`) or a custom callable. An unknown name is a loud `ValueError` — a typo can't silently pick the wrong grouping and misreport a distribution."""
     if callable(by):
         return by
     try:
@@ -95,15 +72,13 @@ class Group:
 
     @property
     def files(self) -> int:
-        """Distinct files this bucket spans (1 for a file-axis bucket, ≥1 for
-        a dir/ext/match axis)."""
+        """Distinct files this bucket spans (1 for a file-axis bucket, ≥1 for a dir/ext/match axis)."""
         return len({m.path for m in self.matches})
 
 
 @dataclass(frozen=True, slots=True)
 class Tally:
-    """Buckets ranked by descending match count (ties broken by key ascending)
-    — the shape a report or an agent reads top-down."""
+    """Buckets ranked by descending match count (ties broken by key ascending) — the shape a report or an agent reads top-down."""
 
     groups: tuple[Group, ...]
 
@@ -126,20 +101,16 @@ class Tally:
         return next((g for g in self.groups if g.key == key), None)
 
     def __iter__(self) -> Iterator[Group]:
+        """Iterate buckets in descending-count order."""
         return iter(self.groups)
 
     def __len__(self) -> int:
+        """Number of non-empty buckets."""
         return len(self.groups)
 
 
 def tally(matches: Iterable[Match], *, by: str | GroupKey = "file") -> Tally:
-    """Bucket `matches` along `by` and rank the buckets by descending count.
-
-    Pure and binary-free: it consumes `Match` records, so it composes with
-    `gist.search(...)` or any other source of them and is unit-testable without
-    the engine. Context lines (`MatchKind.CONTEXT`) are skipped, so a request
-    with `-A/-B/-C` context still tallies only the true matches.
-    """
+    """Bucket `matches` along `by` and rank the buckets by descending count. Pure and binary-free: it consumes `Match` records, so it composes with `gist.search(...)` or any other source of them and is unit-testable without the engine. Context lines (`MatchKind.CONTEXT`) are skipped, so a request with `-A/-B/-C` context still tallies only the true matches."""
     axis = resolve_axis(by)
     buckets: dict[str, list[Match]] = {}
     for m in matches:

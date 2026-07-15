@@ -1,18 +1,4 @@
-"""Persistent resident-session client (ADR-352 rung 2.5).
-
-A long-lived Unix-socket connection to a `gist serve` daemon, reused across many
-queries so an eligible request answers warm — without re-paying the cold
-subprocess's process + index-mmap + candidate-read startup on every call. This is
-the Python leg of the same wire protocol `src/session/protocol.zig` defines and
-the Zig CLI client speaks; the daemon is the single source of truth, so both
-clients frame-match by construction.
-
-Fail-open, always: a `Session` that cannot connect, whose request is ineligible,
-or that receives a `decline` transparently falls back to the certified cold
-subprocess (`engine.files`/`engine.count`) and returns the byte-identical answer.
-The daemon is a pure accelerator — it never adds a failure mode a caller must
-handle, only removes latency when one is listening.
-"""
+"""Persistent resident-session client (ADR-352 rung 2.5). A long-lived Unix-socket connection to a `gist serve` daemon, reused across many queries so an eligible request answers warm — without re-paying the cold subprocess's process + index-mmap + candidate-read startup on every call. This is the Python leg of the same wire protocol `src/session/protocol.zig` defines and the Zig CLI client speaks; the daemon is the single source of truth, so both clients frame-match by construction. Fail-open, always: a `Session` that cannot connect, whose request is ineligible, or that receives a `decline` transparently falls back to the certified cold subprocess (`engine.files`/`engine.count`) and returns the byte-identical answer. The daemon is a pure accelerator — it never adds a failure mode a caller must handle, only removes latency when one is listening."""
 
 from __future__ import annotations
 
@@ -54,8 +40,7 @@ def default_socket_path() -> str:
 
 
 def warm_eligible(request: SearchRequest) -> bool:
-    """True iff the resident daemon can answer `request` byte-identically to
-    cold: default roots, no rich flags, no extra argv, no glob/type scoping."""
+    """True iff the resident daemon can answer `request` byte-identically to cold: default roots, no rich flags, no extra argv, no glob/type scoping."""
     if request.paths or request.globs or request.iglobs or request.types or request.not_types:
         return False
     if request.extra_flags:
@@ -64,10 +49,10 @@ def warm_eligible(request: SearchRequest) -> bool:
 
 
 class Session:
-    """One reusable daemon connection. Not thread-safe: give each thread its own
-    `Session` (the connection carries one in-flight request at a time)."""
+    """One reusable daemon connection. Not thread-safe: give each thread its own `Session` (the connection carries one in-flight request at a time)."""
 
     def __init__(self, socket_path: str | None = None, *, cwd: str | os.PathLike[str] | None = None) -> None:
+        """Bind to ``socket_path`` (or the default) under optional ``cwd``."""
         self._path = socket_path or default_socket_path()
         self._cwd = cwd
         self._sock: socket.socket | None = None
@@ -87,7 +72,7 @@ class Session:
             if op != _OP_READY or not payload or payload[0] != PROTOCOL_VERSION:
                 s.close()
                 return None
-        except (OSError, _WireError):
+        except (OSError, _WireError) as _:
             s.close()
             return None
         return s
@@ -110,16 +95,17 @@ class Session:
         self._drop()
 
     def __enter__(self) -> Session:
+        """Context-manager enter — returns self."""
         return self
 
     def __exit__(self, *_exc: object) -> None:
+        """Context-manager exit — closes the connection."""
         self.close()
 
     # ── queries (warm, fail-open to cold) ──
 
     def files(self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT) -> list[str]:
-        """Paths of files with ≥1 matching line (`-l`), sorted — warm if the
-        daemon serves it, else the byte-identical cold answer."""
+        """Paths of files with ≥1 matching line (`-l`), sorted — warm if the daemon serves it, else the byte-identical cold answer."""
         warm = self._query(request, _MODE_FILES) if warm_eligible(request) else None
         if warm is not None:
             return sorted(warm)
@@ -133,9 +119,7 @@ class Session:
         return engine.count(request, cwd=self._cwd, timeout=timeout)
 
     def _query(self, request: SearchRequest, mode: int) -> list[str] | int | None:
-        """One request/response over the (reconnecting) connection. None on any
-        miss — no daemon, `decline`/`err`, or a wire hiccup — so the caller runs
-        cold. A dropped connection is retried once (a daemon may have restarted)."""
+        """One request/response over the (reconnecting) connection. None on any miss — no daemon, `decline`/`err`, or a wire hiccup — so the caller runs cold. A dropped connection is retried once (a daemon may have restarted)."""
         for _ in range(2):
             s = self._ensure()
             if s is None:
@@ -145,7 +129,7 @@ class Session:
                 body = bytes([mode, flags]) + request.pattern.encode()
                 _send(s, _OP_QUERY, body)
                 op, payload = _recv(s)
-            except (OSError, _WireError):
+            except (OSError, _WireError) as _:
                 self._drop()
                 continue  # stale connection → reconnect + retry once
             if op != _OP_RESULT:

@@ -14,7 +14,7 @@ place-routed caller ships the identical request to the owning machine.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .contract import ALIASES, REQUEST_OPTIONS, ROUTING_KEYS
 from .request import SearchRequest
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 _LIST_FIELDS = frozenset({"paths", "globs", "iglobs", "types", "not_types"})
 
 
-def request_from_tool(payload: Mapping[str, Any]) -> SearchRequest:
+def request_from_tool(payload: Mapping[str, object]) -> SearchRequest:
     """Build a `SearchRequest` from an agent / code-place tool payload.
 
     Billy's `fs_search(place, query, glob, context_lines, semantic, at)` and a
@@ -44,7 +44,7 @@ def request_from_tool(payload: Mapping[str, Any]) -> SearchRequest:
 
     List-valued options accept a single string or an iterable of strings.
     """
-    normalized: dict[str, Any] = {}
+    normalized: dict[str, object] = {}
     for raw_key, value in payload.items():
         if raw_key in ROUTING_KEYS:
             continue  # place/transport routing lives outside GIST
@@ -59,7 +59,7 @@ def request_from_tool(payload: Mapping[str, Any]) -> SearchRequest:
         msg = f"unknown search option(s): {sorted(unknown)}"
         raise ValueError(msg)
 
-    kwargs: dict[str, Any] = {}
+    kwargs: dict[str, object] = {}
     for key, value in normalized.items():
         if key in _LIST_FIELDS:
             kwargs[key] = (value,) if isinstance(value, str) else tuple(value)

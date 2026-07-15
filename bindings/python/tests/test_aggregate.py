@@ -131,7 +131,7 @@ def test_empty_input_is_an_empty_tally() -> None:
 def test_group_and_tally_are_frozen() -> None:
     g = Group(key="k", matches=())
     with pytest.raises((AttributeError, TypeError)):
-        g.key = "other"  # type: ignore[misc]
+        object.__setattr__(g, "key", "other")
 
 
 # ─────────────────────────── integration (real engine) ───────────────────────────
@@ -152,7 +152,8 @@ def corpus(tmp_path):
 def test_summary_by_file_agrees_with_flat_search(corpus) -> None:
     """The aggregate is derived from `search`, so the two must agree exactly:
     every bucket's count sums to the flat match total, and the ranking puts the
-    busiest file first."""
+    busiest file first.
+    """
     flat = gist.search("TODO", cwd=corpus)
     t = gist.summary("TODO", by="file", cwd=corpus)
     assert t.total == len(flat)
@@ -171,7 +172,8 @@ def test_summary_by_dir_concentrates_the_root(corpus) -> None:
 def test_summary_forwards_search_options(corpus) -> None:
     """`types=` scoping flows through summary into the underlying request: the
     `.py` files match and the `.txt` file is pruned before it can enter the
-    tally, so the ext axis has exactly one `.py` bucket."""
+    tally, so the ext axis has exactly one `.py` bucket.
+    """
     t = gist.summary("TODO", by="ext", types=["py"], cwd=corpus)
     assert [g.key for g in t.groups] == [".py"]
     assert t.total == 4  # a.py x2, b.py x1, pkg/d.py x1
