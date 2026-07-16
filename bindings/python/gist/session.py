@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import socket
 import struct
 
 from . import engine
-from .request import SearchRequest
+from .request import Match, Ranked, SearchEngine, SearchRequest
 
 
 PROTOCOL_VERSION = 1
@@ -30,8 +32,22 @@ _MAX_FRAME = 16 << 20  # matches `protocol.max_frame`; a hostile/looping peer ca
 # Any of these set → cold. Mirrors `session/request.zig::classify`.
 _INELIGIBLE_FIELDS = (
     "smart_case", "word", "invert", "hidden", "no_ignore", "follow", "no_index",
-    "before", "after", "context", "max_count", "max_depth",
+    "before", "after", "context", "max_count", "max_depth", "multiline",
+    "multiline_dotall",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class SessionGeneration:
+    """Identity of the daemon, connection, and resident index generation."""
+
+    daemon: int
+    session: int
+    index: str
+
+    def same_resident_index(self, other: SessionGeneration) -> bool:
+        """Whether two handshakes address the same daemon/index snapshot."""
+        return (self.daemon, self.index) == (other.daemon, other.index)
 
 
 def default_socket_path() -> str:
@@ -45,7 +61,11 @@ def warm_eligible(request: SearchRequest) -> bool:
         return False
     if request.extra_flags:
         return False
-    return not any(getattr(request, f) for f in _INELIGIBLE_FIELDS)
+    return (
+        request.engine is SearchEngine.LINEAR
+        and request.unicode is None
+        and not any(getattr(request, f) for f in _INELIGIBLE_FIELDS)
+    )
 
 
 class Session:
@@ -56,25 +76,33 @@ class Session:
         self._path = socket_path or default_socket_path()
         self._cwd = cwd
         self._sock: socket.socket | None = None
+        self._generation: SessionGeneration | None = None
+        self._last_generation: SessionGeneration | None = None
+        self._generation_changed = False
 
     # ── connection lifecycle ──
 
     def _connect(self) -> socket.socket | None:
         """Open + handshake, or None if no daemon / a version mismatch (→ cold)."""
-        path = self._path
-        if not os.path.isabs(path):
-            path = str(Path(self._cwd or Path.cwd()) / path)
+        path = Path(self._path)
+        if not path.is_absolute():
+            path = Path(self._cwd or Path.cwd()) / path
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         try:
-            s.connect(path)
+            s.connect(str(path))
             _send(s, _OP_HELLO, bytes([PROTOCOL_VERSION]))
             op, payload = _recv(s)
-            if op != _OP_READY or not payload or payload[0] != PROTOCOL_VERSION:
+            generation = _decode_ready(payload) if op == _OP_READY else None
+            if generation is None:
                 s.close()
                 return None
         except (OSError, _WireError) as _:
             s.close()
             return None
+        previous = self._last_generation
+        self._generation = generation
+        self._last_generation = generation
+        self._generation_changed = previous is not None and generation != previous
         return s
 
     def _ensure(self) -> socket.socket | None:
@@ -84,11 +112,45 @@ class Session:
 
     def _drop(self) -> None:
         if self._sock is not None:
-            try:
+            with suppress(OSError):
                 self._sock.close()
-            except OSError:
-                pass
             self._sock = None
+            self._generation = None
+
+    @property
+    def generation(self) -> SessionGeneration | None:
+        """Generation from the active daemon handshake, if connected."""
+        return self._generation
+
+    @property
+    def generation_changed(self) -> bool:
+        """Whether the latest handshake/status observed a new daemon or index."""
+        return self._generation_changed
+
+    def connect(self) -> bool:
+        """Connect eagerly and capture the daemon/index generation."""
+        return self._ensure() is not None
+
+    def refresh_generation(self) -> SessionGeneration | None:
+        """Ask the daemon for its current generation, dropping a broken peer."""
+        s = self._ensure()
+        if s is None:
+            return None
+        try:
+            _send(s, _OP_STATUS, b"")
+            op, payload = _recv(s)
+            current = _decode_ready(payload) if op == _OP_READY else None
+        except (OSError, _WireError):
+            self._drop()
+            return None
+        if current is None:
+            self._drop()
+            return None
+        previous = self._generation
+        self._generation = current
+        self._last_generation = current
+        self._generation_changed = previous is not None and current != previous
+        return current
 
     def close(self) -> None:
         """Close the connection (the daemon keeps running; only `shutdown` stops it)."""
@@ -104,19 +166,38 @@ class Session:
 
     # ── queries (warm, fail-open to cold) ──
 
+    def run(
+        self,
+        request: SearchRequest,
+        *,
+        timeout: float = engine.DEFAULT_TIMEOUT,
+    ) -> list[Match]:
+        """Return full structured matches through the authoritative cold path."""
+        return engine.run(request, cwd=self._cwd, timeout=timeout)
+
     def files(self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT) -> list[str]:
         """Paths of files with ≥1 matching line (`-l`), sorted — warm if the daemon serves it, else the byte-identical cold answer."""
         warm = self._query(request, _MODE_FILES) if warm_eligible(request) else None
-        if warm is not None:
+        if isinstance(warm, list):
             return sorted(warm)
         return engine.files(request, cwd=self._cwd, timeout=timeout)
 
     def count(self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT) -> int:
         """Total matching lines across the tree — warm if served, else cold."""
         warm = self._query(request, _MODE_COUNT) if warm_eligible(request) else None
-        if warm is not None:
+        if isinstance(warm, int):
             return warm
         return engine.count(request, cwd=self._cwd, timeout=timeout)
+
+    def rank(
+        self,
+        request: SearchRequest,
+        *,
+        limit: int = 20,
+        timeout: float = engine.DEFAULT_TIMEOUT,
+    ) -> list[Ranked]:
+        """Return the engine's ranked view through the authoritative cold path."""
+        return engine.rank(request, limit=limit, cwd=self._cwd, timeout=timeout)
 
     def _query(self, request: SearchRequest, mode: int) -> list[str] | int | None:
         """One request/response over the (reconnecting) connection. None on any miss — no daemon, `decline`/`err`, or a wire hiccup — so the caller runs cold. A dropped connection is retried once (a daemon may have restarted)."""
@@ -155,7 +236,7 @@ def _recv_exact(s: socket.socket, n: int) -> bytes:
     while len(buf) < n:
         chunk = s.recv(n - len(buf))
         if not chunk:
-            raise _WireError("connection closed")
+            raise _WireError
         buf += chunk
     return bytes(buf)
 
@@ -163,9 +244,22 @@ def _recv_exact(s: socket.socket, n: int) -> bytes:
 def _recv(s: socket.socket) -> tuple[int, bytes]:
     (length,) = struct.unpack("<I", _recv_exact(s, 4))
     if length == 0 or length > _MAX_FRAME:
-        raise _WireError(f"bad frame length {length}")
+        raise _WireError
     body = _recv_exact(s, length)
     return body[0], body[1:]
+
+
+def _decode_ready(payload: bytes) -> SessionGeneration | None:
+    if len(payload) < 21 or payload[0] != PROTOCOL_VERSION:
+        return None
+    daemon, session, length = struct.unpack("<QQI", payload[1:21])
+    if len(payload) != 21 + length:
+        return None
+    return SessionGeneration(
+        daemon=daemon,
+        session=session,
+        index=payload[21:].decode(errors="surrogateescape"),
+    )
 
 
 def _decode_result(payload: bytes, expect_mode: int) -> list[str] | int | None:

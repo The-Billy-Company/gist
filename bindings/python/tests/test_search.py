@@ -8,6 +8,7 @@ contract the whole kernel rests on.
 
 from __future__ import annotations
 
+from dataclasses import replace
 import shutil
 import subprocess
 
@@ -15,7 +16,8 @@ import pytest
 
 import gist
 from gist.errors import UnsupportedPatternError
-from gist.request import MatchKind, SearchRequest
+from gist.engine import _parse_json
+from gist.request import MatchKind, SearchEngine, SearchRequest
 
 
 def _binary_available() -> bool:
@@ -37,6 +39,7 @@ def corpus(tmp_path):
     (tmp_path / "a.py").write_text("def alpha():\n    return TODO\n")
     (tmp_path / "b.py").write_text("class Beta:\n    pass  # TODO later\n")
     (tmp_path / "c.txt").write_text("no marker here\nplain text\n")
+    (tmp_path / "unicode.txt").write_text("CAFÉ\ncafé\n")
     sub = tmp_path / "pkg"
     sub.mkdir()
     (sub / "d.py").write_text("x = 1  # todo lowercase\nTODO upper\n")
@@ -81,10 +84,20 @@ def test_no_match_is_empty_not_error(corpus) -> None:
 
 @needs_gist
 def test_unsupported_pattern_raises_not_kills(corpus) -> None:
-    # PCRE2 lookaround is outside GIST's linear-time engine → typed error,
-    # never a dead host process.
+    pattern = r"(?<=return )TODO"
     with pytest.raises(UnsupportedPatternError):
-        gist.run(SearchRequest(pattern="foo", extra_flags=("-P",)), cwd=corpus)
+        gist.search(pattern, cwd=corpus)
+    assert gist.search(pattern, engine=SearchEngine.PCRE2, cwd=corpus)
+    assert gist.search(pattern, engine="auto", cwd=corpus)
+
+
+@needs_gist
+def test_multiline_dotall_and_unicode_semantics_are_first_class(corpus) -> None:
+    matches = gist.search(r"def alpha.*TODO", multiline_dotall=True, cwd=corpus)
+    assert len(matches) == 1
+    assert "\n" in matches[0].text
+    assert gist.count("CAFÉ", ignore_case=True, unicode=True, cwd=corpus) == 2
+    assert gist.count("CAFÉ", ignore_case=True, unicode=False, cwd=corpus) == 1
 
 
 @needs_gist
@@ -108,3 +121,28 @@ def test_files_parity_with_ripgrep(corpus) -> None:
         rg_hits = {ln.removeprefix("./") for ln in proc.stdout.splitlines() if ln}
         gist_norm = {p.removeprefix("./") for p in gist_hits}
         assert gist_norm == rg_hits, f"discovery drift on {pattern!r}"
+
+
+@needs_gist
+@needs_rg
+def test_full_structured_match_parity_with_ripgrep(corpus) -> None:
+    request = SearchRequest(pattern="TODO", paths=(".",), before=1, after=1)
+    gist_matches = gist.run(request, cwd=corpus)
+    proc = subprocess.run(  # noqa: S603 — fixed argv
+        [shutil.which("rg"), *request.to_argv(), "--json", "--regexp", request.pattern, "."],
+        capture_output=True,
+        text=True,
+        cwd=corpus,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    rg_matches = _parse_json(proc.stdout)
+    normalized = sorted([
+        replace(match, path=match.path.removeprefix("./"))
+        for match in gist_matches
+    ], key=lambda match: (match.path, match.line_number, match.kind, match.text))
+    oracle = sorted([
+        replace(match, path=match.path.removeprefix("./"))
+        for match in rg_matches
+    ], key=lambda match: (match.path, match.line_number, match.kind, match.text))
+    assert normalized == oracle

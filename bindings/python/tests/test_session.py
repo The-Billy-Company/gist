@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+import struct
 import subprocess
 import tempfile
 import time
@@ -19,7 +20,8 @@ import time
 import pytest
 
 import gist
-from gist.request import SearchRequest
+from gist.request import SearchEngine, SearchRequest
+from gist.session import PROTOCOL_VERSION, SessionGeneration, _decode_ready
 
 
 def _binary_available() -> bool:
@@ -69,10 +71,23 @@ def test_warm_eligible_accepts_default_roots_literal() -> None:
         SearchRequest(pattern="x", invert=True),
         SearchRequest(pattern="x", max_count=3),
         SearchRequest(pattern="x", extra_flags=("-P",)),  # raw argv
+        SearchRequest(pattern="x", engine=SearchEngine.AUTO),
+        SearchRequest(pattern="x", multiline=True),
+        SearchRequest(pattern="x", unicode=False),
     ],
 )
 def test_warm_eligible_rejects_rich_requests(req: SearchRequest) -> None:
     assert not gist.warm_eligible(req)
+
+
+def test_ready_frame_decodes_all_generations() -> None:
+    payload = (
+        bytes([PROTOCOL_VERSION])
+        + struct.pack("<QQI", 7, 42, len(b"gen-abc"))
+        + b"gen-abc"
+    )
+    assert _decode_ready(payload) == SessionGeneration(7, 42, "gen-abc")
+    assert _decode_ready(payload[:-1]) is None
 
 
 # ─────────────────────────── fail-open (no daemon) ───────────────────────────
@@ -126,6 +141,14 @@ def test_round_trip_matches_cold(corpus) -> None:
         if not _wait_for_socket(sock, proc):
             pytest.skip("daemon did not come up")
         with gist.Session(sock, cwd=corpus) as s:
+            assert s.connect()
+            initial = s.generation
+            assert initial is not None
+            assert initial.daemon > 0
+            assert initial.session > 0
+            assert isinstance(initial.index, str)
+            assert s.refresh_generation() == initial
+            assert not s.generation_changed
             # Warm files/count over default roots (the daemon serves ".").
             warm_files = s.files(SearchRequest(pattern="TODO"))
             warm_count = s.count(SearchRequest(pattern="TODO"))

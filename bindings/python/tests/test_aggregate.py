@@ -131,7 +131,7 @@ def test_empty_input_is_an_empty_tally() -> None:
 def test_group_and_tally_are_frozen() -> None:
     g = Group(key="k", matches=())
     with pytest.raises((AttributeError, TypeError)):
-        object.__setattr__(g, "key", "other")
+        setattr(g, "key", "other")
 
 
 # ─────────────────────────── integration (real engine) ───────────────────────────

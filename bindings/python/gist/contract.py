@@ -1,10 +1,4 @@
-"""Runtime mirror of `contract/search_api.toml` (ADR-352).
-
-The package embeds the contract's load-bearing constants so it has no runtime
-dependency on the repo file (a wheel ships without it); the package's parity
-test reads the canonical TOML and asserts this mirror matches it — the standard
-mirror-plus-parity-test shape, so the two cannot silently drift.
-"""
+"""Runtime mirror of `contract/search_api.toml` (ADR-352). The package embeds the contract's load-bearing constants so it has no runtime dependency on the repo file (a wheel ships without it); the package's parity test reads the canonical TOML and asserts this mirror matches it — the standard mirror-plus-parity-test shape, so the two cannot silently drift."""
 
 from __future__ import annotations
 
@@ -40,6 +34,10 @@ REQUEST_OPTIONS: frozenset[str] = frozenset(
         "no_ignore",
         "follow",
         "no_index",
+        "engine",
+        "multiline",
+        "multiline_dotall",
+        "unicode",
     }
 )
 
@@ -61,6 +59,5 @@ ROUTING_KEYS: frozenset[str] = frozenset({"place", "at", "semantic"})
 
 
 def contract_path() -> Path:
-    """Path to the canonical `search_api.toml` in the repo (for the parity
-    test); may not exist in an installed wheel."""
+    """Path to the canonical `search_api.toml` in the repo (for the parity test); may not exist in an installed wheel."""
     return Path(__file__).resolve().parents[3] / "contract" / "search_api.toml"

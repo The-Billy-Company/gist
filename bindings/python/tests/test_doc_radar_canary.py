@@ -40,7 +40,8 @@ def test_canary_findings_are_byte_equivalent() -> None:
 @needs_engines
 def test_canary_measures_the_warm_path() -> None:
     """The whole point of the canary (step 6) is a warm-vs-cold-vs-rg number;
-    fail if the corpus is so empty we never timed the repeated-query path."""
+    fail if the corpus is so empty we never timed the repeated-query path.
+    """
     root = _find_root()
     _, counts = collect_queries(root)
     if not counts:
@@ -54,7 +55,8 @@ def test_canary_measures_the_warm_path() -> None:
 def test_no_pattern_is_unsupported_in_the_radar_corpus() -> None:
     """Every pattern the radar uses lives inside GIST's linear-time engine — a
     regression here (a new PCRE-only still_here pin) is a real graduation
-    blocker, surfaced loud rather than silently falling back."""
+    blocker, surfaced loud rather than silently falling back.
+    """
     report = run_canary()
     assert report.unsupported == [], (
         f"patterns outside GIST's engine: {[(u.origin, u.pattern) for u in report.unsupported]}"

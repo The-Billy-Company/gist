@@ -1,3 +1,11 @@
+---
+doc_radar:
+  sentinels:
+    - file: pkg/kernels/gist/contract/search_api.toml
+      contains: ["engine =", "multiline =", "unicode ="]
+      description: The documented matcher controls remain canonical request options.
+---
+
 # billy-gist — the importable search API
 
 ## What it is
@@ -15,6 +23,7 @@ for m in gist.search(r"func\s+\w+\(", paths=["services/backend"]):
 
 hits  = gist.files("TODO", types=["py"])         # files-with-matches (-l)
 total = gist.count("panic", paths=["services"])  # total matching lines
+refs  = gist.search(r"(?<=class )\w+", engine="auto")  # PCRE2 when needed
 ```
 
 Distribution name is `billy-gist`; it imports as `gist`.
@@ -41,10 +50,15 @@ The alias + routing-key map is pinned in the contract
 ([`contract/search_api.toml`](../../contract/search_api.toml) `[tool_boundary]`)
 and parity-tested, so the seam can't drift.
 
+Matching semantics belong in that deep request contract, not in raw argv:
+`engine` selects `"linear"`, `"auto"`, or `"pcre2"`; `multiline` and
+`multiline_dotall` control cross-line matching; and `unicode=True|False`
+explicitly selects Unicode or byte/ASCII semantics across the chosen backend.
+
 ## Find, then aggregate
 
-`search`/`files`/`count` answer *where* a pattern occurs. `summary` answers *how
-it is distributed* — the question an agent asks next — by searching, then
+`search`/`files`/`count` answer _where_ a pattern occurs. `summary` answers _how
+it is distributed_ — the question an agent asks next — by searching, then
 grouping the matches into buckets ranked by count:
 
 ```python
@@ -84,9 +98,8 @@ authored = [r for r in gist.rank("apperr.New") if not r.generated]  # skip codeg
 Each `Ranked` row carries the engine's own `def`/`use`/`gen` classification
 (`RankKind`) — read straight from `--rank`, **never reclassified in Python**, so
 "what is generated" can't fork from the engine (`src/rank/signals.zig`). Ranking
-reads the persisted index, so it needs one built (`make install-gist`); with no
-index there is nothing to rank and the result is empty. `limit` caps the rows
-(default 20).
+uses the persisted index when available and live-ranks the searched files when
+it is absent or disabled. `limit` caps the rows (default 20).
 
 ## Why it exists
 
@@ -100,12 +113,12 @@ and Billy's agent code-search tool — **one** request shape (`SearchRequest`) o
 It is a **pure-Python wrapper** over the certified `gist` binary: a
 `SearchRequest` lowers into the exact rg-parity argv the CLI accepts, the binary
 runs with `--json`, and the JSON-lines stream is parsed into `Match` records — so
-results come from the *same* engine the CLI uses, never a second matcher.
+results come from the _same_ engine the CLI uses, never a second matcher.
 
-Subprocess is the authoritative transport (ADR-352): a pattern outside GIST's
-linear-time syntax exits the child with code 2 and surfaces as a typed
-`UnsupportedPatternError` — it never terminates the host the way an in-process
-`die()`/exit would.
+Subprocess is the authoritative transport (ADR-352): a pattern outside the
+selected matcher exits the child with code 2 and surfaces as a typed
+`UnsupportedPatternError`. Use `engine="auto"` for safe linear-first escalation
+or `engine="pcre2"` for explicit PCRE2 JIT.
 
 The binary is resolved at call time: env `GIST_BIN`, then `gist` on PATH, then
 the repo's `zig-out/bin/gist`. Build it with `make install-gist`.
@@ -119,8 +132,11 @@ candidate-read startup entirely:
 
 ```python
 with gist.Session() as s:                      # dials $GIST_SESSION_SOCK / the repo default
+    s.connect()
+    generation = s.generation                 # daemon/session/index identity
     hot   = s.files(gist.SearchRequest("TODO"))       # -l, warm
     total = s.count(gist.SearchRequest("panic"))      # --count-matches, warm
+    rich  = s.run(gist.SearchRequest("TODO", context=2))  # authoritative cold path
 ```
 
 It is **fail-open by construction**: no daemon listening, an ineligible request
@@ -129,6 +145,24 @@ any rich flag), or a wire hiccup transparently falls back to the byte-identical
 cold subprocess — the daemon is a pure accelerator, never a new failure mode.
 The wire protocol is the same one `src/session/protocol.zig` defines and the Zig
 CLI + Rust clients speak, so all three frame-match against the one daemon.
+`refresh_generation()` reads the daemon's current three-part generation; a
+reconnect, daemon restart, or index publication is visible through
+`generation_changed`. Sessions are deliberately not thread-safe.
+
+## Lifecycle and capabilities
+
+`status()` returns an immutable `IndexStatus`, `index()` builds then returns the
+observed status, and `capabilities()`/`schema()` parse the binary-generated
+`--schema` manifest into typed, queryable records:
+
+```python
+state = gist.status()
+if not state.ready:
+    state = gist.index()
+
+if gist.capabilities().supports("-P"):
+    print("PCRE2 available")
+```
 
 ## Prior art
 

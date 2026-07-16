@@ -46,7 +46,8 @@ if TYPE_CHECKING:
 
 def _find_root(start: Path | None = None) -> Path:
     """Walk upward from here (or `start`) to the repo root (the dir holding
-    `.git`), so the canary resolves the corpus regardless of CWD."""
+    `.git`), so the canary resolves the corpus regardless of CWD.
+    """
     here = (start or Path(__file__)).resolve()
     for parent in (here, *here.parents):
         if (parent / ".git").exists():
@@ -66,7 +67,8 @@ MARKER_GLOBS: tuple[str, ...] = ("*.md", "*.mdc")
 @dataclass(frozen=True, slots=True)
 class CountQuery:
     """A `ripgrep`-shaped count query: matching lines of `pattern` under
-    `paths` (repo-relative)."""
+    `paths` (repo-relative).
+    """
 
     pattern: str
     paths: tuple[str, ...]
@@ -76,7 +78,8 @@ class CountQuery:
 def _collect_still_here(root: Path) -> list[CountQuery]:
     """Every `still_here` pin across all ADRs, via doc_radar's own loaders so
     the corpus is genuinely the radar's — falls back to an empty list when the
-    radar package can't be imported (it is stdlib-only, so this is rare)."""
+    radar package can't be imported (it is stdlib-only, so this is rare).
+    """
     scripts = root / "scripts"
     added = str(scripts) not in sys.path
     if added:
@@ -109,7 +112,8 @@ def _collect_still_here(root: Path) -> list[CountQuery]:
 
 def collect_queries(root: Path) -> tuple[tuple[str, tuple[str, ...]], list[CountQuery]]:
     """The radar's real query corpus: the (marker pattern, globs) discovery
-    query and every `still_here` count query."""
+    query and every `still_here` count query.
+    """
     return (MARKER_PATTERN, MARKER_GLOBS), _collect_still_here(root)
 
 
@@ -165,7 +169,8 @@ def _rg_files(root: Path, pattern: str, globs: Sequence[str]) -> list[str]:
 
 def _gist_count(root: Path, query: CountQuery, *, warm: bool) -> int | None:
     """Matching lines via the GIST package; `None` when the pattern is outside
-    GIST's engine (the live radar would fall back to `rg` for it)."""
+    GIST's engine (the live radar would fall back to `rg` for it).
+    """
     existing = tuple(p for p in query.paths if (root / p).exists())
     if not existing:
         return 0
@@ -229,7 +234,8 @@ class CanaryReport:
     @property
     def equivalent(self) -> bool:
         """Byte-equivalent wherever GIST can answer — the plan's correctness
-        contract. Unsupported patterns are a known fallback, not a divergence."""
+        contract. Unsupported patterns are a known fallback, not a divergence.
+        """
         return bool(self.compared) and not self.mismatches
 
     @property
@@ -278,7 +284,8 @@ def _time_batch(fn, queries: Iterable[CountQuery]) -> float:
 
 def run_canary(root: Path | None = None, *, limit: int | None = None) -> CanaryReport:
     """Run the full canary: equivalence over the whole corpus, then time the
-    count batch three ways (rg / GIST warm / GIST cold)."""
+    count batch three ways (rg / GIST warm / GIST cold).
+    """
     root = root or _find_root()
     report = CanaryReport(
         gist_available=_gist_available(),

@@ -1,14 +1,4 @@
-"""The unified `SearchRequest` → `Match` contract (ADR-352).
-
-One request shape for every face — the importable package, the CLI, and Billy's
-agent code-search tool. It carries only match-finding *intent*; presentation,
-ranking, stats, replace, and stdin stay CLI-only surfaces. `to_argv()` lowers a
-request into the exact rg-parity argv the certified `gist` binary accepts, so
-the package never reimplements search — it drives the same engine.
-
-The field set mirrors `contract/search_api.toml`'s `[request_options]`; the
-package's parity test asserts the two never drift.
-"""
+"""The unified `SearchRequest` → `Match` contract (ADR-352). One request shape for every face — the importable package, the CLI, and Billy's agent code-search tool. It carries only match-finding *intent*; presentation, ranking, stats, replace, and stdin stay CLI-only surfaces. `to_argv()` lowers a request into the exact rg-parity argv the certified `gist` binary accepts, so the package never reimplements search — it drives the same engine. The field set mirrors `contract/search_api.toml`'s `[request_options]`; the package's parity test asserts the two never drift."""
 
 from __future__ import annotations
 
@@ -21,6 +11,14 @@ class MatchKind(StrEnum):
 
     MATCH = "match"  # a line with ≥1 submatch
     CONTEXT = "context"  # an -A/-B/-C neighborhood line (no submatches)
+
+
+class SearchEngine(StrEnum):
+    """Matcher backend used to realize the request."""
+
+    LINEAR = "linear"
+    AUTO = "auto"
+    PCRE2 = "pcre2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,8 +47,7 @@ class Match:
 
 
 class RankKind(StrEnum):
-    """How the engine's `--rank` view classified a file — the property `grep`
-    can't express (`src/rank/signals.zig`)."""
+    """How the engine's `--rank` view classified a file — the property `grep` can't express (`src/rank/signals.zig`)."""
 
     DEF = "def"  # a match on this file's line defines the symbol
     USE = "use"  # only call sites / references
@@ -59,11 +56,7 @@ class RankKind(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class Ranked:
-    """One row of the engine's `--rank` view: a file ranked definition-first by
-    the RRF kernel, tagged with the engine's own class. This is gist's native
-    ranked shape (no rg equivalent) — a *presentation* result, deliberately not
-    a wire-contract match kind, so it lives beside `Match` but outside the
-    `SearchRequest` contract."""
+    """One row of the engine's `--rank` view: a file ranked definition-first by the RRF kernel, tagged with the engine's own class. This is gist's native ranked shape (no rg equivalent) — a *presentation* result, deliberately not a wire-contract match kind, so it lives beside `Match` but outside the `SearchRequest` contract."""
 
     path: str
     line_number: int  # the best line to surface (the definition, if the file has one)
@@ -79,9 +72,7 @@ class Ranked:
 
 @dataclass(frozen=True, slots=True)
 class SearchRequest:
-    """A search expressed once, runnable on any face. Only `pattern` is
-    required; `paths` empty means the engine's default roots (or CWD for the
-    live walk). Every other field maps to a single rg-parity flag."""
+    """A search expressed once, runnable on any face. Only `pattern` is required; `paths` empty means the engine's default roots (or CWD for the live walk). Every other field maps to a single rg-parity flag."""
 
     pattern: str
     paths: tuple[str, ...] = ()
@@ -103,13 +94,21 @@ class SearchRequest:
     no_ignore: bool = False
     follow: bool = False
     no_index: bool = False
+    engine: SearchEngine = SearchEngine.LINEAR
+    multiline: bool = False
+    multiline_dotall: bool = False
+    unicode: bool | None = None
     # Extra raw argv flags an advanced caller needs before the package grows a
     # first-class option for them — kept last so they never shadow the contract.
     extra_flags: tuple[str, ...] = field(default_factory=tuple)
 
+    def __post_init__(self) -> None:
+        """Normalize the JSON/tool-boundary spelling of the engine enum."""
+        if isinstance(self.engine, str):
+            object.__setattr__(self, "engine", SearchEngine(self.engine))
+
     def to_argv(self) -> list[str]:
-        """Lower this request into the flag argv (without the pattern/paths,
-        which the engine adapter positions). Order is deterministic."""
+        """Lower this request into the flag argv (without the pattern/paths, which the engine adapter positions). Order is deterministic."""
         argv: list[str] = []
         if self.fixed:
             argv.append("-F")
@@ -129,6 +128,17 @@ class SearchRequest:
             argv.append("-L")
         if self.no_index:
             argv.append("--no-index")
+        if self.engine is SearchEngine.AUTO:
+            argv += ["--engine", "auto"]
+        elif self.engine is SearchEngine.PCRE2:
+            argv.append("-P")
+        if self.multiline or self.multiline_dotall:
+            argv.append("-U")
+        if self.multiline_dotall:
+            argv.append("--multiline-dotall")
+        if self.unicode is not None:
+            prefix = "" if self.unicode else "no-"
+            argv += [f"--{prefix}unicode", f"--{prefix}pcre2-unicode"]
         for g in self.globs:
             argv += ["-g", g]
         for g in self.iglobs:

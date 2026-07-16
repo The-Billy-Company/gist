@@ -1,5 +1,6 @@
 """The contract mirror in `gist.contract` must not drift from the canonical
-`contract/search_api.toml`, nor from the driven binary (ADR-352)."""
+`contract/search_api.toml`, nor from the driven binary (ADR-352).
+"""
 
 from __future__ import annotations
 
@@ -49,7 +50,8 @@ def test_request_options_mirror_matches_toml() -> None:
 
 def test_request_options_match_dataclass_fields() -> None:
     """Every contract option is a real `SearchRequest` field, and every request
-    field (bar the escape hatch) is a contract option."""
+    field (bar the escape hatch) is a contract option.
+    """
     fields = set(SearchRequest.__dataclass_fields__) - {"extra_flags"}
     assert fields == contract.REQUEST_OPTIONS
 

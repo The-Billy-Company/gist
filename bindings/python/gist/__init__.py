@@ -13,8 +13,28 @@ from .errors import (
     SearchFailedError,
     UnsupportedPatternError,
 )
-from .request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
-from .session import Session, warm_eligible
+from .introspection import (
+    Capabilities,
+    FlagCapability,
+    IndexState,
+    IndexStatus,
+    capabilities,
+    index,
+    status,
+)
+from .request import (
+    Match,
+    MatchKind,
+    Ranked,
+    RankKind,
+    SearchEngine,
+    SearchRequest,
+    Submatch,
+)
+from .session import Session, SessionGeneration, warm_eligible
+
+
+schema = capabilities
 
 
 if TYPE_CHECKING:
@@ -28,24 +48,33 @@ __all__ = [
     "GistError",
     "GistNotFoundError",
     "Group",
+    "Capabilities",
+    "FlagCapability",
+    "IndexState",
+    "IndexStatus",
     "Match",
     "MatchKind",
     "RankKind",
     "Ranked",
     "SearchFailedError",
+    "SearchEngine",
     "SearchRequest",
     "Session",
+    "SessionGeneration",
     "Submatch",
     "Tally",
     "UnsupportedPatternError",
     "aggregate",
     "binary",
+    "capabilities",
     "count",
     "files",
+    "index",
     "rank",
     "request_from_tool",
     "run",
     "search",
+    "schema",
     "status",
     "summary",
     "tally",
@@ -118,7 +147,7 @@ def rank(
     timeout: float = engine.DEFAULT_TIMEOUT,
     **options: object,
 ) -> list[Ranked]:
-    """The engine's definition-first ranked view: the top-`limit` files for `pattern`, each tagged `def`/`use`/`gen` by the engine itself — a symbol's definition ahead of its call sites, generated files demoted. Needs a persisted index (empty without one). Keyword options are `SearchRequest` fields (`paths`, `fixed`, `ignore_case`, …)."""
+    """The engine's definition-first ranked view: the top-`limit` files for `pattern`, each tagged `def`/`use`/`gen` by the engine itself — a symbol's definition ahead of its call sites, generated files demoted. Uses the persisted index when available and live-ranks otherwise."""
     return engine.rank(SearchRequest(pattern=pattern, **options), limit=limit, cwd=cwd, timeout=timeout)
 
 
@@ -127,11 +156,6 @@ def request_from_tool(payload: Mapping[str, object]) -> SearchRequest:
     from .agent import request_from_tool as _rft
 
     return _rft(payload)
-
-
-def status(*, cwd: str | os.PathLike[str] | None = None) -> str:
-    """The persisted-index freshness report (`gist status`)."""
-    return engine.status(cwd=cwd)
 
 
 def version() -> str:

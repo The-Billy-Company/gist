@@ -68,7 +68,8 @@ def test_generated_property_flags_only_gen() -> None:
 
 def test_parse_rank_ignores_the_stderr_timing_and_blanks() -> None:
     """Timing goes to stderr; stdout is rows only, but a defensive parse must
-    still skip any non-row line rather than mis-parse it."""
+    still skip any non-row line rather than mis-parse it.
+    """
     noisy = _SAMPLE + "\n— 3 ranked matches (top 3) · read 24/26456 candidates · total 48.4 ms\n"
     assert len(_parse_rank(noisy)) == 3
 
@@ -79,7 +80,8 @@ def test_parse_rank_ignores_the_stderr_timing_and_blanks() -> None:
 @pytest.fixture
 def indexed_corpus(tmp_path):
     """A corpus under a real default root (`libs/`) with a freshly built index,
-    so `--rank` has the structure it reads. Returns the cwd to search from."""
+    so `--rank` has the structure it reads. Returns the cwd to search from.
+    """
     lib = tmp_path / "libs" / "pkg"
     lib.mkdir(parents=True)
     (tmp_path / "libs" / "a.py").write_text("def widget():\n    return TODO\n")
@@ -111,8 +113,12 @@ def test_rank_forwards_search_options(indexed_corpus) -> None:
 
 
 @needs_gist
-def test_rank_without_index_is_empty_not_error(tmp_path) -> None:
-    """No persisted index ⇒ nothing to rank ⇒ an empty list, never a raise."""
+def test_rank_without_index_live_ranks(tmp_path) -> None:
+    """No persisted index falls back to the same live corpus, never emptiness."""
     (tmp_path / "libs").mkdir()
     (tmp_path / "libs" / "a.py").write_text("TODO here\n")
-    assert gist.rank("TODO", cwd=tmp_path, limit=5) == []
+    rows = gist.rank("TODO", cwd=tmp_path, limit=5)
+    assert len(rows) == 1
+    assert rows[0].path == "libs/a.py"
+    assert rows[0].count == 1
+    assert rows[0].snippet == "TODO here"

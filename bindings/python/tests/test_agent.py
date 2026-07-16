@@ -21,7 +21,8 @@ def test_canonical_fields_pass_through() -> None:
 
 def test_fs_search_vocabulary_is_aliased() -> None:
     """`query`/`glob`/`context_lines` are fs_search's names for the canonical
-    `pattern`/`globs`/`context` options."""
+    `pattern`/`globs`/`context` options.
+    """
     req = request_from_tool({"query": "panic", "glob": "*.go", "context_lines": 2})
     assert req.pattern == "panic"
     assert req.globs == ("*.go",)
@@ -30,7 +31,8 @@ def test_fs_search_vocabulary_is_aliased() -> None:
 
 def test_routing_keys_are_dropped_not_errors() -> None:
     """place/at/semantic select the transport + ranking — the place adapter's
-    call, not GIST's. The mapper recognizes and ignores them."""
+    call, not GIST's. The mapper recognizes and ignores them.
+    """
     req = request_from_tool({"query": "foo", "place": "machine", "at": "home", "semantic": True})
     assert req == SearchRequest(pattern="foo")
 
