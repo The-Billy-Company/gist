@@ -140,7 +140,7 @@ class Session:
             _send(s, _OP_STATUS, b"")
             op, payload = _recv(s)
             current = _decode_ready(payload) if op == _OP_READY else None
-        except (OSError, _WireError):
+        except OSError, _WireError:
             self._drop()
             return None
         if current is None:
