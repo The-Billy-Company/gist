@@ -31,7 +31,7 @@ results come from the same engine the CLI uses, never a second matcher.
 
 Subprocess is the authoritative transport (ADR-352): the engine fails loud on
 unsupported input via `die()` → `process::exit(2)`, which would terminate a host
-that linked it in-process. Here a bad pattern exits the *child* and surfaces as a
+that linked it in-process. Here a bad pattern exits the _child_ and surfaces as a
 typed `Error::UnsupportedPattern` — the host is never touched.
 
 The binary is resolved at call time: env `GIST_BIN`, then `gist` on `PATH`, then
@@ -58,8 +58,8 @@ three frame-match against the one daemon.
 
 ## Find, then aggregate
 
-`search`/`files`/`count` answer *where* a pattern occurs. `summary` answers *how
-it is distributed* — the question an agent asks next — by searching, then
+`search`/`files`/`count` answer _where_ a pattern occurs. `summary` answers _how
+it is distributed_ — the question an agent asks next — by searching, then
 grouping the matches into buckets ranked by count:
 
 ```rust

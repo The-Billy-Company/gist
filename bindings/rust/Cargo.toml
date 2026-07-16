@@ -7,7 +7,7 @@
 # `Cargo.lock` + toolchain, never dragging the workspace graph along.
 [package]
 name = "gist"
-version = "0.1.0"                                                                    # x-release-please-version
+version = "0.1.0"                                                                                                  # x-release-please-version
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"

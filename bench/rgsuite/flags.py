@@ -238,7 +238,7 @@ def _thread_invariance(*, serial: bool) -> list[str]:
         got = _norm(run(GIST, [*argv, "-j", j, "--no-index"], FIX, env).data, True)
         if got != ref:
             fails.append(f"threads:j{j}: gist -j{j} != gist -j1")
-    rg_set = _norm(run(RG, argv, FIX, os.environ).data, True)  # type: ignore[arg-type]
+    rg_set = _norm(run(RG, argv, FIX, {**os.environ}).data, True)
     if ref != rg_set:
         fails.append("threads: gist -j1 set != rg set")
     return fails

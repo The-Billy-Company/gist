@@ -36,4 +36,10 @@ pub const probes = [_]Probe{
     // one documented LOSS to rg (0.93x), now owned by the fused single-pass
     // SIMD `containsAny` match-equivalence path (no regex engine run at all).
     .{ .class = "regex-litalt", .kind = .regex, .pattern = "panic|0x" },
+    // Unicode classes (`\w+`, `(?i)fold`, `\bfunc\b`, `\p{L}+`) are proven at
+    // parity fail-closed by `bench/gates/unicode_parity.sh` and the Zig Unicode
+    // differential fuzz; they fold into this certificate at the next clean-tree
+    // republish (the published artifact is minted only on a clean tree —
+    // `bench/certify/artifact/README.md`), keeping the 12-class snapshot
+    // internally consistent until then.
 };

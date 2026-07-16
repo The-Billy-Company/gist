@@ -4,15 +4,15 @@
 # runtime dependencies. The binary is resolved at call time (env `GIST_BIN`,
 # PATH, or the repo's `zig-out/bin/gist`; `make install-gist` builds it).
 #
-# Standalone (not a //pyproject.toml uv workspace member): it needs no
-# third-party deps and formal workspace registration is an ADR-352 follow-up.
+# Root uv workspace member: local consumers resolve this source editably.
+# Runtime engine availability remains separate (GIST_BIN/PATH/in-repo build).
 
 [project]
 name = "billy-gist"
-version = "0.1.0" # x-release-please-version
+version = "0.1.0"                                                                                 # x-release-please-version
 description = "Importable search API over GIST — Billy's rg-parity code-search kernel (ADR-352)."
 requires-python = ">=3.14,<3.15"
-dependencies = []
+dependencies = [  ]
 
 [project.scripts]
 # Convenience shim mirroring the CLI; `python -m gist` also works.

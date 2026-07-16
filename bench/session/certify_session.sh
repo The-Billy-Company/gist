@@ -17,10 +17,10 @@
 #     like-for-like set. Exact warm==cold==oracle correctness is gated
 #     hermetically by the Zig suite (serve/resident/freshness tests), not here.
 #   * The warm fast path is only armed where a filesystem watcher can prove
-#     quiescence (Linux inotify today). Without one — macOS until FSEvents lands —
-#     every query reconciles (a full metadata walk): correct, but it pays the
-#     freshness tax. We measure and label whatever THIS platform delivers, and the
-#     latency gate (`gate_session.py`) enforces a floor ONLY on the armed path.
+#     quiescence (Linux inotify + macOS FSEvents today). Without one, every query
+#     reconciles (a full metadata walk): correct, but it pays the freshness tax.
+#     We measure and label whatever THIS platform delivers, and the latency gate
+#     (`gate_session.py`) enforces a floor ONLY on the armed path.
 #
 # Usage:  cd pkg/kernels/gist && bench/session/certify_session.sh
 #         RUNS=12 WARMUP=3 bench/session/certify_session.sh   # tune rg timing
@@ -33,26 +33,39 @@ need_hyperfine
 RUNS="${RUNS:-10}"
 WARMUP="${WARMUP:-2}"
 BENCH_EXE="${KERNEL}/zig-out/bin/gist-bench"
-SESSION_CSV="${OUT}/session.csv"           # (needle, warm_p50_ns, daemon_files) — emitted by gist-bench
-MACRO="${HERE}/session_macro.csv"          # (needle, daemon_files, rg_files, warm_p50_ms, rg_ms, speedup)
+SESSION_CSV="${OUT}/session.csv"  # (needle, warm_p50_ns, daemon_files) — emitted by gist-bench
+MACRO="${HERE}/session_macro.csv" # (needle, daemon_files, rg_files, warm_p50_ms, rg_ms, speedup)
 CERT="${OUT}/CERTIFICATE_SESSION.md"
 
 sys="$(uname -s)"
 uname_sm="$(uname -sm)"
-armed="no"; watcher="reconcile-always (no watcher backend)"
+armed="no"
+watcher="reconcile-always (no watcher backend)"
 case "${sys}" in
-  Linux) armed="yes"; watcher="inotify (recursive)" ;;
-  Darwin) watcher="reconcile-always (FSEvents TODO — ADR-352)" ;;
+  Linux)
+    armed="yes"
+    watcher="inotify (recursive)"
+    ;;
+  Darwin)
+    armed="yes"
+    watcher="FSEvents (recursive stream)"
+    ;;
   *) ;;
 esac
 
 echo "building gist + gist-bench + index…"
 compete_build_gist_index || exit 1
-[[ -x "${BENCH_EXE}" ]] || { echo "no gist-bench at ${BENCH_EXE}" >&2; exit 1; }
+[[ -x "${BENCH_EXE}" ]] || {
+  echo "no gist-bench at ${BENCH_EXE}" >&2
+  exit 1
+}
 
 echo "measuring the persistent client → daemon path (warm p50 per needle)…"
-( cd "${REPO}" && "${BENCH_EXE}" session ) || exit 1
-[[ -s "${SESSION_CSV}" ]] || { echo "gist-bench session emitted no ${SESSION_CSV}" >&2; exit 1; }
+(cd "${REPO}" && "${BENCH_EXE}" session) || exit 1
+[[ -s "${SESSION_CSV}" ]] || {
+  echo "gist-bench session emitted no ${SESSION_CSV}" >&2
+  exit 1
+}
 
 echo
 echo "warm persistent-client latency vs ripgrep cold (fresh process), runs=${RUNS}:"
@@ -61,14 +74,16 @@ printf '%-16s %8s %8s %12s %12s %9s\n' ---------------- ------- ------- --------
 
 cd "${REPO}" || exit 1
 : > "${MACRO}"
-logsum=0; n=0
+logsum=0
+n=0
 while IFS=$'\t' read -r needle p50_ns dfiles; do
   [[ -n "${needle}" ]] || continue
   warm_ms="$(python3 -c "print('%.4f'%(${p50_ns}/1e6))")"
   rcmd="$(compete_lit_cmd rg "${needle}")"
-  rg_files="$(bash -c "${rcmd}" 2>/dev/null | LC_ALL=C sort -u | wc -l | tr -d ' ')"
+  rg_files="$(bash -c "${rcmd}" 2> /dev/null | LC_ALL=C sort -u | wc -l | tr -d ' ')"
   if ! rg_ms="$(hf_mean "${WARMUP}" "${RUNS}" "${rcmd}")"; then
-    echo "  rg hard-failed on '${needle}'" >&2; exit 1
+    echo "  rg hard-failed on '${needle}'" >&2
+    exit 1
   fi
   spd="$(ratio "${rg_ms}" "${warm_ms}")"
   printf '%-16s %8s %8s %10s ms %10s ms %9s\n' "${needle}" "${dfiles}" "${rg_files}" "${warm_ms}" "${rg_ms}" "${spd}"
@@ -116,7 +131,7 @@ PY
     printf '| `%s` | %s | %s | %s | %s | %s× |\n' "${needle}" "${dfiles}" "${rgf}" "${warm}" "${rg}" "${spd}"
   done < "${MACRO}"
 } > "${CERT}"
-cp "${SESSION_CSV}" "${HERE}/session.csv" 2>/dev/null || true
+cp "${SESSION_CSV}" "${HERE}/session.csv" 2> /dev/null || true
 
 echo "certificate → ${CERT}"
 echo "macro csv   → ${MACRO}"

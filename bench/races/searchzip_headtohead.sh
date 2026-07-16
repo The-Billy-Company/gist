@@ -95,7 +95,11 @@ csv="${COMPETE_DIR}/searchzip.csv"
 echo "format,tool,ms,gist_ms,ratio" > "${csv}"
 
 declare -A SUM CNT WINS
-for t in "${tools[@]}"; do SUM[${t}]=0; CNT[${t}]=0; WINS[${t}]=0; done
+for t in "${tools[@]}"; do
+  SUM[${t}]=0
+  CNT[${t}]=0
+  WINS[${t}]=0
+done
 
 for spec in "${FORMATS[@]}"; do
   ext="${spec%%:*}"

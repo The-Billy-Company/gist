@@ -299,13 +299,13 @@ formats; bzip2 and the external-codec tail have no in-process Zig decoder).
 
 ## Files
 
-| File           | Role                                                                   |
-| -------------- | ---------------------------------------------------------------------- |
-| `spec.json`    | frozen, self-contained mined spec (441 `rgtest!` invocations)          |
-| `mine.py`      | regenerates `spec.json` from a ripgrep checkout                        |
-| `run.py`       | differential runner + honest scoreboard (the gate)                     |
-| `modes.py`     | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers) |
-| `flags.py`     | hand-authored walk/order/ignore-flag differential proof (`--sort`/`--sortr`/`--sort-files`, `-j`/`--threads`, `--one-file-system`, `--no-ignore-global`, negation last-wins) — timestamp/device/thread/global-config dependent, so the mined suite can't pin them |
-| `transforms.py` | hand-authored `-z`/`--pre`/`-E`/`--binary` content-transform differential proof + the `-z` pipeline-vs-serial-vs-rg speed floor (the flags `run.py` can't mine from plain source) |
-| `dbg.py`       | single-test side-by-side inspector                                     |
-| `results.json` | last `run.py` per-test verdicts (regenerated each run)                 |
+| File            | Role                                                                                                                                                                                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spec.json`     | frozen, self-contained mined spec (441 `rgtest!` invocations)                                                                                                                                                                                                     |
+| `mine.py`       | regenerates `spec.json` from a ripgrep checkout                                                                                                                                                                                                                   |
+| `run.py`        | differential runner + honest scoreboard (the gate)                                                                                                                                                                                                                |
+| `modes.py`      | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers)                                                                                                                                                                                            |
+| `flags.py`      | hand-authored walk/order/ignore-flag differential proof (`--sort`/`--sortr`/`--sort-files`, `-j`/`--threads`, `--one-file-system`, `--no-ignore-global`, negation last-wins) — timestamp/device/thread/global-config dependent, so the mined suite can't pin them |
+| `transforms.py` | hand-authored `-z`/`--pre`/`-E`/`--binary` content-transform differential proof + the `-z` pipeline-vs-serial-vs-rg speed floor (the flags `run.py` can't mine from plain source)                                                                                 |
+| `dbg.py`        | single-test side-by-side inspector                                                                                                                                                                                                                                |
+| `results.json`  | last `run.py` per-test verdicts (regenerated each run)                                                                                                                                                                                                            |

@@ -48,6 +48,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -80,7 +81,7 @@ _CJK_LABELS = {"sjis": "shift_jis", "eucjp": "euc-jp", "gbk": "gbk",
 
 # `-z` container formats. The stdlib trio is always minted; the rest are written
 # only when their system encoder exists (rg and gist both read all six).
-_STDLIB_CODECS = {
+_STDLIB_CODECS: dict[str, Callable[[bytes], bytes]] = {
     "gz": lambda b: gzip.compress(b, mtime=0),
     "bz2": bz2.compress,
     "xz": lambda b: lzma.compress(b, format=lzma.FORMAT_XZ),
@@ -127,9 +128,9 @@ def run(bin_: str, args: list[str], cwd: Path, env: dict[str, str] | None = None
 
 # ───────────────────────── fixtures ─────────────────────────
 
-def _avail_codecs() -> dict[str, object]:
+def _avail_codecs() -> dict[str, Callable[[bytes], bytes] | list[str]]:
     """The container formats writable on this host: stdlib trio + any present tools."""
-    codecs: dict[str, object] = dict(_STDLIB_CODECS)
+    codecs: dict[str, Callable[[bytes], bytes] | list[str]] = dict(_STDLIB_CODECS)
     for ext, argv in _TOOL_CODECS.items():
         if shutil.which(argv[0]):
             codecs[ext] = argv
@@ -156,7 +157,7 @@ def gen_fixtures(root: Path) -> list[str]:
             blob = subprocess.run([*codec, "-c"], input=raw, stdout=subprocess.PIPE, check=True).stdout
             dst.write_bytes(blob)
         else:
-            dst.write_bytes(codec(raw))  # type: ignore[operator]
+            dst.write_bytes(codec(raw))
         exts.append(ext)
 
     # ── -E: UTF-16 (LE/BE/with-BOM) + Latin-1, the accented byte forcing a transcode ──

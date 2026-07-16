@@ -10,9 +10,9 @@ fail-closed regression check, with one principled asymmetry:
     hermetically by the Zig suite (`serve_test`, `resident_test`,
     `freshness_test`); a live-tree file-count race is the wrong place to assert it.
   * **Latency** is gated — but only on the *armed* fast path. Where a filesystem
-    watcher arms the microsecond path (Linux inotify today; macOS FSEvents is the
-    next rung), the geomean warm speedup vs ripgrep-cold must clear the committed
-    floor. Where no watcher exists, every query reconciles (the freshness tax):
+    watcher arms the microsecond path (Linux inotify + macOS FSEvents), the geomean
+    warm speedup vs ripgrep-cold must clear the committed floor. Where no watcher
+    exists, every query reconciles (the freshness tax):
     the certificate reports that number honestly and the gate is report-only,
     because gating a platform's freshness tax against an armed-path floor would be
     a lie, not a regression.

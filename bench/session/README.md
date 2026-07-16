@@ -12,11 +12,11 @@ doc_radar:
 The **resident-session** certificate — the honest warm-product half of gist's
 performance story (ADR-352 rung 2.5). It is the third leg of a triangle:
 
-| Harness | Path measured | The number it earns |
-| --- | --- | --- |
-| [`../certify/`](../certify/README.md) | cold fresh-process query vs the field | gist is at parity-or-faster than `rg` on every regex class |
-| [`../races/headtohead.sh`](../races/headtohead.sh) | gist's **in-process** engine | the microsecond ceiling (no transport, no spawn) |
-| **`bench/session/`** | **persistent client → `gist serve` daemon over a Unix socket** | the number a long-lived client actually sees |
+| Harness                                            | Path measured                                                  | The number it earns                                        |
+| -------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------- |
+| [`../certify/`](../certify/README.md)              | cold fresh-process query vs the field                          | gist is at parity-or-faster than `rg` on every regex class |
+| [`../races/headtohead.sh`](../races/headtohead.sh) | gist's **in-process** engine                                   | the microsecond ceiling (no transport, no spawn)           |
+| **`bench/session/`**                               | **persistent client → `gist serve` daemon over a Unix socket** | the number a long-lived client actually sees               |
 
 The cold certificate re-pays process + index-mmap + candidate-read startup on
 **every** query; that startup is exactly what made the old "thousands× faster"
@@ -31,33 +31,35 @@ path — the only honest basis for a warm-speedup claim — and gates it fail-cl
   each with a ripgrep-cold timing and reports the geomean speedup.
 - **Two honest caveats, printed not hidden:**
   1. gist's matched-file set is a systematic **subset** of `rg`'s (a corpus-walker
-     difference owned by the *cold* certificate); the daemon tracks the *cold gist*
+     difference owned by the _cold_ certificate); the daemon tracks the _cold gist_
      set, not `rg`'s. Both counts (`d_files`, `rg_files`) sit in the table so the
      speedup is never mistaken for like-for-like. Exact warm==cold==oracle parity
      is gated **hermetically** by the Zig suite (`serve_test`, `resident_test`,
      [`freshness_test`](../../src/session/freshness_test.zig)) — not by a live-tree
      count race.
   2. The microsecond fast path is armed only where a filesystem watcher proves
-     quiescence (**Linux inotify** today; **macOS FSEvents** is the next rung —
-     until then macOS reconciles every query and pays the *freshness tax*). The
-     certificate labels whatever the platform delivers, and the gate enforces the
-     floor **only on the armed path**.
+     quiescence (**Linux inotify** and **macOS FSEvents** today; every other
+     target reconciles each query and pays the _freshness tax_). The certificate
+     labels whatever the platform delivers, and the gate enforces the floor
+     **only on the armed path**.
 
-Even unarmed, the resident path wins: the committed macOS certificate measures a
-**7.2× geomean** over `rg` cold — because `rg` re-walks and re-scans the whole
-monorepo (~350 ms) every call while the daemon pays only the reconcile walk
-(~45 ms) plus an in-RAM index query. On an armed platform the reconcile vanishes
-and the number approaches the in-process ceiling.
+Even unarmed, the resident path wins: the committed macOS certificate — captured
+before the FSEvents backend landed — measures a **7.2× geomean** over `rg` cold,
+because `rg` re-walks and re-scans the whole monorepo (~350 ms) every call while
+the daemon pays only the reconcile walk (~45 ms) plus an in-RAM index query. Now
+that macOS arms via FSEvents (as Linux does via inotify) the reconcile vanishes
+on a quiescent tree and the number approaches the in-process ceiling; re-run
+`certify_session.sh` to republish the armed figure.
 
 ## Files
 
-| File | Role |
-| --- | --- |
-| `certify_session.sh` | build → run the daemon slate → time `rg` cold → write the certificate + `session_macro.csv` + `session_meta.json` |
-| `gate_session.py` | fail-closed latency gate: committed floor (armed only) + opt-in `--live` remeasure |
-| `session_baseline.json` | `armed_geomean_floor` — the armed-path speedup floor (theorem-backed; see the file's comment) |
-| `session_macro.csv` | committed per-needle medians (`needle · d_files · rg_files · warm_ms · rg_ms · speedup`) |
-| `session_meta.json` | provenance the gate reads (`armed`, `watcher`, `platform`, `geomean_speedup`) |
+| File                    | Role                                                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `certify_session.sh`    | build → run the daemon slate → time `rg` cold → write the certificate + `session_macro.csv` + `session_meta.json` |
+| `gate_session.py`       | fail-closed latency gate: committed floor (armed only) + opt-in `--live` remeasure                                |
+| `session_baseline.json` | `armed_geomean_floor` — the armed-path speedup floor (theorem-backed; see the file's comment)                     |
+| `session_macro.csv`     | committed per-needle medians (`needle · d_files · rg_files · warm_ms · rg_ms · speedup`)                          |
+| `session_meta.json`     | provenance the gate reads (`armed`, `watcher`, `platform`, `geomean_speedup`)                                     |
 
 ```bash
 cd pkg/kernels/gist

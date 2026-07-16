@@ -6,14 +6,14 @@ any violation, so a regression can't ship silently. `scan_regress.sh` and
 [`../races/_compete.sh`](../races/_compete.sh); `equality.sh` and
 `index_elision_parity.sh` are pure two-way oracles and need no field registry.
 
-| File                      | Gate                                                                                                                                                        |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `equality.sh`             | **correctness (index vs `rg`)**: gist ≡ `rg` over a byte-exact corpus snapshot — the soundness oracle                                                       |
-| `index_elision_parity.sh` | **correctness (index vs itself)**: the index-accelerated run ≡ the same query with `--no-index` — proves the index only elides reads, never changes results |
+| File                      | Gate                                                                                                                                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `equality.sh`             | **correctness (index vs `rg`)**: gist ≡ `rg` over a byte-exact corpus snapshot — the soundness oracle                                                                                                                           |
+| `index_elision_parity.sh` | **correctness (index vs itself)**: the index-accelerated run ≡ the same query with `--no-index` — proves the index only elides reads, never changes results                                                                     |
 | `unicode_parity.sh`       | **correctness (Unicode drop-in)**: `gist <pat>` ≡ `rg <pat>` at rg's default (Unicode) semantics over a multi-script fixture — fold, classes, `\b`/`-w`, and the `(?-u)`/`--no-unicode` opt-out, byte-identical on both engines |
-| `scan_regress.sh`         | **correctness (no-prefilter fallback) + race**: the live-tree full-read fallback ≡ `rg` (exits 1 on FN/FP) + min-of-N speed floor                           |
-| `streams.sh`              | **output contract**: results→stdout, diagnostics (`--rank`'s timing line / guidance)→stderr — the `rg`-conventional split that makes gist composable        |
-| `ci_order.sh`             | **orchestration**: correctness gates first, then performance (certificate + ratio floors)                                                                   |
+| `scan_regress.sh`         | **correctness (no-prefilter fallback) + race**: the live-tree full-read fallback ≡ `rg` (exits 1 on FN/FP) + min-of-N speed floor                                                                                               |
+| `streams.sh`              | **output contract**: results→stdout, diagnostics (`--rank`'s timing line / guidance)→stderr — the `rg`-conventional split that makes gist composable                                                                            |
+| `ci_order.sh`             | **orchestration**: correctness gates first, then performance (certificate + ratio floors)                                                                                                                                       |
 
 ## `index_elision_parity.sh` — the index is acceleration-only
 

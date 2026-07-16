@@ -182,8 +182,9 @@ _compete_humansize() { python3 -c "b=${1:-0};print(('%.0f B'%b) if b<1024 else (
 # ── per-tool command builders ────────────────────────────────────────────────
 # compete_lit_cmd <tool> <needle>  → a shell command (list matching files) for a
 #                                    fixed-string needle, each tool's fastest honest path.
-# compete_rgx_cmd <tool> <pattern> → same for an RE2/(?-u)-byte regex, or "" if
-#                                    the tool can't run that class.
+# compete_rgx_cmd <tool> <pattern> → same for an RE2 regex at rg's DEFAULT
+#                                    (Unicode) semantics — gist is Unicode-default
+#                                    too now — or "" if the tool can't run it.
 # ROOTS is expanded inline; needle/pattern are single-quoted (our slate has no
 # single quotes). XDIRS is expanded to --exclude-dir flags for the no-gitignore tools.
 _xdir_flags() {
@@ -212,7 +213,7 @@ compete_rgx_cmd() {
   local tool="${1}" p="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg '(?-u)${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
+    rg) echo "rg '${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
     ugrep) echo "ugrep -rl -P${xd} -- '${p}' ${roots}" ;;
     ag) echo "ag -l -s --path-to-ignore ${REPO}/.gitignore -- '${p}' ${roots}" ;;
     ggrep) echo "ggrep -rIlP${xd} -- '${p}' ${roots}" ;;

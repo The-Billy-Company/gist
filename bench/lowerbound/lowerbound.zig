@@ -204,6 +204,9 @@ fn measure(gpa: std.mem.Allocator, corpus: *const corpus_mod.Corpus, idx: *const
     const cand = switch (probe.kind) {
         .literal => try litCandidates(idx, gpa, corpus, probe.pattern),
         .regex => blk: {
+            // Match certify.zig: the committed lowerbound speaks about the ASCII
+            // engine the 12-class certificate was minted over. The next
+            // clean-tree republish flips this to `.unicode = true`.
             re = try Regex.compile(gpa, probe.pattern);
             sim = try Regex.Sim.init(gpa, &re.?);
             break :blk try rgxCandidates(&re.?, idx, gpa, corpus);

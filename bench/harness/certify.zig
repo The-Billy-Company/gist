@@ -122,6 +122,11 @@ fn measure(
     const cand = switch (probe.kind) {
         .literal => try litCandidates(idx, gpa, corpus, probe.pattern),
         .regex => blk: {
+            // The committed 12-class certificate was minted over the ASCII
+            // engine; keep measuring it here so the microscopic numbers stay
+            // byte-consistent with the published artifact. The next clean-tree
+            // republish flips this to `.unicode = true` alongside the new
+            // Unicode probe classes atomically.
             re = try Regex.compile(gpa, probe.pattern);
             sim = try Regex.Sim.init(gpa, &re.?);
             break :blk try rgxCandidates(&re.?, idx, gpa, corpus);
