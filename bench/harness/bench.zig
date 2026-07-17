@@ -428,6 +428,7 @@ fn sessionQuery(gpa: std.mem.Allocator, fd: std.posix.fd_t, qbytes: []const u8) 
             while (try it.next()) |_| n += 1;
         },
         .count => {},
+        .lines => {}, // bench probes files mode only
     }
     return n;
 }
