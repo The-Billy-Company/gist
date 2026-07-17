@@ -11,7 +11,7 @@ use serde::Deserialize;
 
 // ── `[meta]` ─────────────────────────────────────────────────────────────
 /// C-ABI compatibility integer (tracks `src/root.zig` `abi()`).
-pub const ABI_VERSION: u32 = 1;
+pub const ABI_VERSION: u32 = 2;
 /// Engine semver (tracks `src/root.zig` `version_string`).
 pub const ENGINE_VERSION: &str = "0.1.0";
 /// The Python distribution name (this crate is the Rust face of the same contract).

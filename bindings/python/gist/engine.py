@@ -178,8 +178,16 @@ def count(
     cwd: str | os.PathLike[str] | None = None,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> int:
-    """Total matching lines across the searched tree (`--count-matches`)."""
-    proc = _invoke(["--count-matches", "--no-filename"], request, cwd=cwd, timeout=timeout)
+    """Total matching lines across the searched tree.
+
+    rg `-c`/`--count`, one line counted once regardless of how many times the
+    pattern hits it — the semantic every other count surface shares
+    (`gist.count`/`Session.count` docstrings, the resident daemon's
+    `countLines`, the in-process FFI's per-line stream). Was
+    `--count-matches` (per-occurrence), which over-counted a line with
+    repeated hits and silently diverged from the warm transports.
+    """
+    proc = _invoke(["--count", "--no-filename"], request, cwd=cwd, timeout=timeout)
     return sum(int(x) for x in proc.stdout.splitlines() if x.strip().isdigit())
 
 

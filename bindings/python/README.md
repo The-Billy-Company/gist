@@ -135,8 +135,9 @@ with gist.Session() as s:                      # dials $GIST_SESSION_SOCK / the 
     s.connect()
     generation = s.generation                 # daemon/session/index identity
     hot   = s.files(gist.SearchRequest("TODO"))       # -l, warm
-    total = s.count(gist.SearchRequest("panic"))      # --count-matches, warm
-    rich  = s.run(gist.SearchRequest("TODO", context=2))  # authoritative cold path
+    total = s.count(gist.SearchRequest("panic"))      # -c matching lines, warm
+    rich  = s.run(gist.SearchRequest("TODO"))         # full Match records, warm in-process (FFI)
+    cold  = s.run(gist.SearchRequest("TODO", context=2))  # rich flag → cold subprocess
 ```
 
 It is **fail-open by construction**: no daemon listening, an ineligible request
@@ -148,6 +149,24 @@ CLI + Rust clients speak, so all three frame-match against the one daemon.
 `refresh_generation()` reads the daemon's current three-part generation; a
 reconnect, daemon restart, or index publication is visible through
 `generation_changed`. Sessions are deliberately not thread-safe.
+
+## In-process warm path — cffi (ADR-352 rung 3)
+
+When the host process already holds the shared library and `cffi` (e.g. the AI
+service, which depends on `cffi` via the sibling kernels), a `Session`
+transparently serves eligible queries **in-process** over the
+`gist_open`/`gist_search`/`gist_close` C ABI (`gist/_ffi.py` over
+`libgist.{dylib,so}`) — no subprocess, no socket. Unlike the UDS transport
+(files/count only), it streams full `Match` records, so `Session.run` gains a
+warm path for the first time; `files`/`count`/`absent` prefer it too. Its answer
+is byte-identical to the cold `gist --json` stream (records, `-l`, `-c` — a line
+with repeated hits still counts once), proven by `tests/test_ffi_parity.py`.
+
+`cffi` is **never required**: `_ffi` fails open to the UDS daemon, then the cold
+subprocess, when the library or `cffi` is absent — so the shipped wheel stays
+pure-Python and dependency-free. Opt out with `GIST_NO_FFI`; point at a specific
+library with `GIST_LIB`. A bad pattern surfaces as a decline (`GIST_STALE`), so
+the in-process path can never abort the host — the property rung 3 gated on.
 
 A batch caller need not manage the daemon itself: `gist.opening_session()`
 wraps `gist.ensure_serve()` (best-effort detached `gist serve` spawn — herd-safe
@@ -177,5 +196,6 @@ if gist.capabilities().supports("-P"):
 ## Prior art
 
 Wraps the same engine as `rg` (the tool it is a drop-in for); the request/result
-contract mirrors ripgrep's `--json` record stream. The cffi graduation rung
-follows the sibling kernel bindings (`lamina`, `principia`, `billog`).
+contract mirrors ripgrep's `--json` record stream. The cffi transport
+(`gist/_ffi.py`) follows the sibling kernel bindings' ABI-mode `dlopen` loader
+(`lamina`, `principia`, `billog`).

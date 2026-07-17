@@ -94,14 +94,16 @@ def ensure_serve(
     socket_path: str | None = None,
     timeout: float = 3.0,
 ) -> bool:
-    """Guarantee a `gist serve` daemon is listening on the session socket under
-    ``cwd`` — spawning a detached one if none is — and return whether one is
-    (now) reachable. Fail-open by construction: a missing binary, a spawn error,
-    or a daemon that never binds within ``timeout`` returns ``False``, and the
-    caller's `Session` still answers cold. Mirrors the Zig auto-spawn
-    (`src/commands/client/spawn.zig`): opt out with ``GIST_NO_AUTOSERVE``, and it
-    is herd-safe because the daemon's advisory `flock` admits exactly one racer
-    (the losers exit at once without touching the winner's live socket)."""
+    """Guarantee a `gist serve` daemon is listening on the session socket under ``cwd``.
+
+    Spawns a detached one if none is listening, and returns whether one is
+    (now) reachable. Fail-open by construction: a missing binary, a spawn
+    error, or a daemon that never binds within ``timeout`` returns ``False``,
+    and the caller's `Session` still answers cold. Mirrors the Zig auto-spawn
+    (`src/commands/client/spawn.zig`): opt out with ``GIST_NO_AUTOSERVE``, and
+    it is herd-safe because the daemon's advisory `flock` admits exactly one
+    racer (the losers exit at once without touching the winner's live socket).
+    """
     base = Path(cwd) if cwd is not None else Path.cwd()
     sock = Path(socket_path or default_socket_path())
     if not sock.is_absolute():
@@ -243,18 +245,24 @@ class Session:
         *,
         timeout: float = engine.DEFAULT_TIMEOUT,
     ) -> list[Match]:
-        """Full structured matches — served WARM in-process over the FFI (ADR-352
-        rung 3, no subprocess/socket) when eligible, else the byte-identical cold
-        path. Unlike the UDS transport (files/count only), the in-process session
-        answers full `Match` records, so this is the first warm `run`."""
+        """Full structured matches — served WARM in-process over the FFI when eligible.
+
+        ADR-352 rung 3, no subprocess/socket; else the byte-identical cold
+        path. Unlike the UDS transport (files/count only), the in-process
+        session answers full `Match` records, so this is the first warm
+        `run`.
+        """
         ffi_matches = _ffi.run(request, cwd=self._cwd)
         if ffi_matches is not None:
             return ffi_matches
         return engine.run(request, cwd=self._cwd, timeout=timeout)
 
     def files(self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT) -> list[str]:
-        """Paths of files with ≥1 matching line (`-l`), sorted — in-process FFI if
-        eligible, else the UDS daemon, else the byte-identical cold answer."""
+        """Paths of files with ≥1 matching line (`-l`), sorted.
+
+        In-process FFI if eligible, else the UDS daemon, else the
+        byte-identical cold answer.
+        """
         ffi_files = _ffi.files(request, cwd=self._cwd)
         if ffi_files is not None:
             return ffi_files
@@ -264,8 +272,10 @@ class Session:
         return engine.files(request, cwd=self._cwd, timeout=timeout)
 
     def count(self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT) -> int:
-        """Total matching lines across the tree — in-process FFI if eligible, else
-        the UDS daemon, else cold."""
+        """Total matching lines across the tree.
+
+        In-process FFI if eligible, else the UDS daemon, else cold.
+        """
         ffi_count = _ffi.count(request, cwd=self._cwd)
         if ffi_count is not None:
             return ffi_count
@@ -275,17 +285,21 @@ class Session:
         return engine.count(request, cwd=self._cwd, timeout=timeout)
 
     def absent(self, pattern: str, *, fixed: bool = False, ignore_case: bool = False) -> bool:
-        """Prefilter for a broad scoped scan: ``True`` only when the warm daemon
-        proves ``pattern`` matches **nowhere** in the served rootless tree — so
-        any narrower scoped form of the same pattern (extra roots, globs, types,
-        exempt paths) is empty too, and the caller may skip its authoritative
-        scan. ``False`` whenever the pattern is present, no daemon is listening,
-        or the daemon declines — so ``False`` always means "run your own scan":
-        the accelerator can only *skip provably-empty work*, never change an
-        answer. Sound only when the caller's scoped query is a pure narrowing of
-        ``(pattern, fixed, ignore_case)`` — no match-semantics flags (word,
-        invert, context, multiline, …) — which is exactly the shape of the
-        first-party tree-walking lints (ADR-352 rung 2.5)."""
+        """Prefilter for a broad scoped scan.
+
+        ``True`` only when the warm daemon proves ``pattern`` matches
+        **nowhere** in the served rootless tree — so any narrower scoped
+        form of the same pattern (extra roots, globs, types, exempt paths)
+        is empty too, and the caller may skip its authoritative scan.
+        ``False`` whenever the pattern is present, no daemon is listening,
+        or the daemon declines — so ``False`` always means "run your own
+        scan": the accelerator can only *skip provably-empty work*, never
+        change an answer. Sound only when the caller's scoped query is a
+        pure narrowing of ``(pattern, fixed, ignore_case)`` — no
+        match-semantics flags (word, invert, context, multiline, …) — which
+        is exactly the shape of the first-party tree-walking lints (ADR-352
+        rung 2.5).
+        """
         probe = SearchRequest(pattern=pattern, fixed=fixed, ignore_case=ignore_case)
         ffi_count = _ffi.count(probe, cwd=self._cwd)
         if ffi_count is not None:
@@ -330,11 +344,14 @@ def opening_session(
     cwd: str | os.PathLike[str] | None = None,
     socket_path: str | None = None,
 ) -> Iterator[Session]:
-    """Yield a connected `Session` for a batch caller, auto-spawning `gist serve`
-    (via `ensure_serve`) when none is listening. The session is fail-open: if the
-    daemon never comes up the yielded `Session` transparently answers every query
-    cold, so a caller writes its loop against one object either way. Closes the
-    connection on exit; the daemon keeps running warm for the next batch."""
+    """Yield a connected `Session` for a batch caller, auto-spawning `gist serve`.
+
+    Spawns via `ensure_serve` when none is listening. The session is
+    fail-open: if the daemon never comes up the yielded `Session`
+    transparently answers every query cold, so a caller writes its loop
+    against one object either way. Closes the connection on exit; the
+    daemon keeps running warm for the next batch.
+    """
     ensure_serve(cwd=cwd, socket_path=socket_path)
     session = Session(socket_path, cwd=cwd)
     session.connect()

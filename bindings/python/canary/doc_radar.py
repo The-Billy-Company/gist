@@ -78,7 +78,7 @@ class CountQuery:
     origin: str  # e.g. "ADR-352 still_here" — for report attribution
 
 
-def _radar_lib(root: Path):  # noqa: ANN202 — dynamically-imported module
+def _radar_lib(root: Path):
     """doc_radar's `lib` module imported off `root/scripts` (its stdlib-only
     package), or None when unavailable — so the canary drives the radar's own
     loaders + count batch rather than re-implementing them."""
@@ -142,8 +142,11 @@ def _rg_count(root: Path, query: CountQuery) -> int:
     if not targets:
         return 0
     proc = subprocess.run(  # noqa: S603 — fixed argv, trusted binary
-        # `-e` mirrors lib.ripgrep's leading-dash-safe argv (ADR-352).
-        [_rg(), "--count-matches", "--no-heading", "--no-filename", "-e", query.pattern, *targets],
+        # `--count` (matching LINES, rg's `-c`), not `--count-matches`
+        # (per-occurrence): the semantic doc_radar's own `count_matches`
+        # (lib.py) and `gist.count` both carry, so the oracle checks the real
+        # line contract. `-e` mirrors lib.ripgrep's leading-dash-safe argv.
+        [_rg(), "--count", "--no-heading", "--no-filename", "-e", query.pattern, *targets],
         capture_output=True,
         text=True,
         timeout=30,

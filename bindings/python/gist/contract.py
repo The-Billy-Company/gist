@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 # Mirrors `[meta]` in contract/search_api.toml.
-ABI_VERSION = 1
+ABI_VERSION = 2
 ENGINE_VERSION = "0.1.0"
 PACKAGE_DIST = "billy-gist"
 PACKAGE_IMPORT = "gist"

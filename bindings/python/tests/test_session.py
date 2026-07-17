@@ -139,7 +139,7 @@ def test_round_trip_matches_cold(corpus) -> None:
     )
     try:
         if not _wait_for_socket(sock, proc):
-            pytest.skip("daemon did not come up")
+            pytest.fail("daemon did not come up within the wait budget")
         with gist.Session(sock, cwd=corpus) as s:
             assert s.connect()
             initial = s.generation
@@ -210,7 +210,7 @@ def test_opening_session_spawns_and_serves_warm(corpus) -> None:
     try:
         with gist.opening_session(cwd=corpus, socket_path=sock) as s:
             if s.generation is None:
-                pytest.skip("daemon did not come up")
+                pytest.fail("daemon did not come up within the wait budget")
             warm_files = s.files(SearchRequest(pattern="TODO"))
             warm_count = s.count(SearchRequest(pattern="TODO"))
         cold_files = gist.files("TODO", paths=(".",), cwd=corpus)
@@ -248,7 +248,7 @@ def test_absent_matches_broad_tree(corpus) -> None:
     )
     try:
         if not _wait_for_socket(sock, proc):
-            pytest.skip("daemon did not come up")
+            pytest.fail("daemon did not come up within the wait budget")
         with gist.Session(sock, cwd=corpus) as s:
             assert s.connect()
             # Present tree-wide → not absent; genuinely missing → absent.
