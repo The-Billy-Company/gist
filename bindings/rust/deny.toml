@@ -37,6 +37,22 @@ reason = "Workspace policy: rustls-ring is the default TLS backend (rust-service
 name = "openssl-sys"
 reason = "Workspace policy: rustls-ring is the default TLS backend (rust-services.mdc)."
 
+# Workspace test-double policy: fakes over mocks (ADR-327). No Rust mock
+# framework enters the dependency graph — reusable fakes live in the catalogued
+# rs-common/fakes platform (+ per-crate fakes modules), each with a parity suite
+# that breaks on drift.
+[[bans.deny]]
+name = "mockall"
+reason = "ADR-327 fakes over mocks: use the catalogued rs-common/fakes platform, not a generated mock framework."
+
+[[bans.deny]]
+name = "mockito"
+reason = "ADR-327 fakes over mocks: use an in-process axum/reqwest fake (rs-common FakeHttpEndpoint), not a mock HTTP server crate."
+
+[[bans.deny]]
+name = "wiremock"
+reason = "ADR-327 fakes over mocks: use an in-process axum/reqwest fake (rs-common FakeHttpEndpoint), not a mock HTTP server crate."
+
 [sources]
 unknown-registry = "warn"
 unknown-git = "warn"
