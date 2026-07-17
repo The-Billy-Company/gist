@@ -19,7 +19,10 @@ the ADR frontmatter — never a synthetic stand-in:
 - **Warm-path benefit.** It times the whole count batch three ways — `rg`,
   GIST warm (riding the persisted `.local/gist-verify/index.gist`), and GIST
   cold (`--no-index`, a fresh walk) — so the graduation decision rests on
-  measured numbers, not the plan's assumption.
+  measured numbers, not the plan's assumption. When a `gist serve` daemon is
+  serving the tree it also times a fourth, report-only leg (`gist_session`):
+  doc_radar's real resident-Session count batch (ADR-352 rung 2.5). This leg
+  never gates the canary — it is present only as evidence.
 
 Run it: `python -m canary.doc_radar [--json] [--root PATH] [--limit N]`.
 """
@@ -75,11 +78,10 @@ class CountQuery:
     origin: str  # e.g. "ADR-352 still_here" — for report attribution
 
 
-def _collect_still_here(root: Path) -> list[CountQuery]:
-    """Every `still_here` pin across all ADRs, via doc_radar's own loaders so
-    the corpus is genuinely the radar's — falls back to an empty list when the
-    radar package can't be imported (it is stdlib-only, so this is rare).
-    """
+def _radar_lib(root: Path):  # noqa: ANN202 — dynamically-imported module
+    """doc_radar's `lib` module imported off `root/scripts` (its stdlib-only
+    package), or None when unavailable — so the canary drives the radar's own
+    loaders + count batch rather than re-implementing them."""
     scripts = root / "scripts"
     added = str(scripts) not in sys.path
     if added:
@@ -87,11 +89,21 @@ def _collect_still_here(root: Path) -> list[CountQuery]:
     try:
         from observe.trust.doc_radar import lib
     except ImportError:
-        return []
+        return None
     finally:
         if added and str(scripts) in sys.path:
             sys.path.remove(str(scripts))
+    return lib
 
+
+def _collect_still_here(root: Path) -> list[CountQuery]:
+    """Every `still_here` pin across all ADRs, via doc_radar's own loaders so
+    the corpus is genuinely the radar's — falls back to an empty list when the
+    radar package can't be imported (it is stdlib-only, so this is rare).
+    """
+    lib = _radar_lib(root)
+    if lib is None:
+        return []
     out: list[CountQuery] = []
     for adr in lib.load_adrs():
         for entry in adr.radar.get("still_here", []) or []:
@@ -282,6 +294,28 @@ def _time_batch(fn, queries: Iterable[CountQuery]) -> float:
     return (time.perf_counter() - start) * 1000.0
 
 
+def _time_session_batch(root: Path, counts: list[CountQuery]) -> float | None:
+    """Wall-clock ms for doc_radar's real warm-Session count batch — reported
+    only when a `gist serve` daemon serves `root` (else None; the leg is
+    omitted). Never gates the canary; it measures the resident path the live
+    radar takes once the stop hook has warmed a daemon."""
+    probe = gist.Session(cwd=str(root))
+    up = probe.connect()
+    probe.close()
+    if not up:
+        return None
+    lib = _radar_lib(root)
+    if lib is None:
+        return None
+    tasks = [(q.pattern, list(q.paths)) for q in counts]
+    lib.reset_file_index_cache()  # fresh shared session for a clean measurement
+    start = time.perf_counter()
+    lib.count_matches_batch(tasks)
+    elapsed = (time.perf_counter() - start) * 1000.0
+    lib.reset_file_index_cache()  # close the session this leg opened
+    return elapsed
+
+
 def run_canary(root: Path | None = None, *, limit: int | None = None) -> CanaryReport:
     """Run the full canary: equivalence over the whole corpus, then time the
     count batch three ways (rg / GIST warm / GIST cold).
@@ -326,6 +360,9 @@ def run_canary(root: Path | None = None, *, limit: int | None = None) -> CanaryR
         report.timings_ms["gist_cold"] = _time_batch(
             lambda q: _gist_count(root, q, warm=False), counts
         )
+        session_ms = _time_session_batch(root, counts)
+        if session_ms is not None:
+            report.timings_ms["gist_session"] = session_ms
     return report
 
 
@@ -366,6 +403,11 @@ def _render(report: CanaryReport) -> str:
         if report.warm_speedup is not None:
             verdict = "GIST warm wins" if report.warm_speedup > 1 else "rg wins"
             lines.append(f"  warm speedup   : {report.warm_speedup:.2f}x ({verdict})")
+        if "gist_session" in t:
+            lines.append(
+                f"  session (ms)   : gist_session={t['gist_session']:.1f} "
+                "(resident daemon, report-only)"
+            )
     return "\n".join(lines)
 
 

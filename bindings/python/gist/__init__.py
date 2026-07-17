@@ -31,7 +31,13 @@ from .request import (
     SearchRequest,
     Submatch,
 )
-from .session import Session, SessionGeneration, warm_eligible
+from .session import (
+    Session,
+    SessionGeneration,
+    ensure_serve,
+    opening_session,
+    warm_eligible,
+)
 
 
 schema = capabilities
@@ -68,8 +74,10 @@ __all__ = [
     "binary",
     "capabilities",
     "count",
+    "ensure_serve",
     "files",
     "index",
+    "opening_session",
     "rank",
     "request_from_tool",
     "run",

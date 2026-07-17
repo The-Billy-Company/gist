@@ -149,6 +149,16 @@ CLI + Rust clients speak, so all three frame-match against the one daemon.
 reconnect, daemon restart, or index publication is visible through
 `generation_changed`. Sessions are deliberately not thread-safe.
 
+A batch caller need not manage the daemon itself: `gist.opening_session()`
+wraps `gist.ensure_serve()` (best-effort detached `gist serve` spawn — herd-safe
+via the daemon `flock`, opt-out with `GIST_NO_AUTOSERVE`, fail-open to cold) and
+yields a connected `Session`. First consumers: the doc-radar `still_here` count
+batch prunes tree-absent sentinels with a warm `Session.absent()` before any cold
+count, and the codegen/trust lints (`identity`, `fronts`, `boundary_gates`,
+`policy`) ride warm rootless `files`/`absent` prefilters. Callers that need
+`--hidden`, multi-`-e`, or `--null` records (e.g. `relocator`) stay cold by
+design until a hidden-aware daemon rung lands.
+
 ## Lifecycle and capabilities
 
 `status()` returns an immutable `IndexStatus`, `index()` builds then returns the

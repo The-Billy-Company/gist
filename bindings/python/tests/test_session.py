@@ -165,3 +165,96 @@ def test_round_trip_matches_cold(corpus) -> None:
         proc.terminate()
         proc.wait(timeout=10)
         shutil.rmtree(sock_dir, ignore_errors=True)
+
+
+# ─────────────────────────── ensure_serve / opening_session ───────────────────────────
+
+
+def test_ensure_serve_no_op_when_daemon_up(corpus, monkeypatch) -> None:
+    # A socket that already accepts must short-circuit: no spawn, returns True.
+    sock_dir = tempfile.mkdtemp(prefix="gistd-")
+    sock = os.path.join(sock_dir, "g.sock")
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(sock)
+    srv.listen(1)
+
+    def _boom(*_a, **_k):  # spawning would be a bug — the daemon is already up
+        raise AssertionError("ensure_serve spawned despite a live socket")
+
+    monkeypatch.setattr(subprocess, "Popen", _boom)
+    try:
+        assert gist.ensure_serve(cwd=corpus, socket_path=sock) is True
+    finally:
+        srv.close()
+        shutil.rmtree(sock_dir, ignore_errors=True)
+
+
+def test_ensure_serve_respects_opt_out(corpus, monkeypatch) -> None:
+    # GIST_NO_AUTOSERVE → never spawn, and (no daemon) → False.
+    sock = str(corpus / "unused.sock")
+    monkeypatch.setenv("GIST_NO_AUTOSERVE", "1")
+
+    def _boom(*_a, **_k):
+        raise AssertionError("ensure_serve spawned despite GIST_NO_AUTOSERVE")
+
+    monkeypatch.setattr(subprocess, "Popen", _boom)
+    assert gist.ensure_serve(cwd=corpus, socket_path=sock) is False
+
+
+@needs_gist
+def test_opening_session_spawns_and_serves_warm(corpus) -> None:
+    # End-to-end: no daemon listening → opening_session spawns one, connects, and
+    # a rootless eligible query answers, agreeing with the cold oracle.
+    sock_dir = tempfile.mkdtemp(prefix="gistd-")
+    sock = os.path.join(sock_dir, "g.sock")
+    try:
+        with gist.opening_session(cwd=corpus, socket_path=sock) as s:
+            if s.generation is None:
+                pytest.skip("daemon did not come up")
+            warm_files = s.files(SearchRequest(pattern="TODO"))
+            warm_count = s.count(SearchRequest(pattern="TODO"))
+        cold_files = gist.files("TODO", paths=(".",), cwd=corpus)
+        cold_count = gist.count("TODO", paths=(".",), cwd=corpus)
+        assert _norm(warm_files) == _norm(cold_files)
+        assert warm_count == cold_count
+    finally:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+            try:
+                c.connect(sock)
+                c.sendall(struct.pack("<I", 1) + bytes([7]))  # _OP_SHUTDOWN
+            except OSError:
+                pass
+        shutil.rmtree(sock_dir, ignore_errors=True)
+
+
+def test_absent_false_without_daemon(corpus) -> None:
+    # No daemon → absent must be False (fail-open: "run your own scan"), never a
+    # spurious True that would skip an authoritative scan.
+    with gist.Session(str(corpus / "nope.sock"), cwd=corpus) as s:
+        assert s.absent("TODO") is False
+        assert s.absent("this_string_is_nowhere_xyzzy") is False
+
+
+@needs_gist
+def test_absent_matches_broad_tree(corpus) -> None:
+    sock_dir = tempfile.mkdtemp(prefix="gistd-")
+    sock = os.path.join(sock_dir, "g.sock")
+    proc = subprocess.Popen(  # noqa: S603 — fixed argv, no shell
+        [gist.binary(), "serve", "."],
+        cwd=corpus,
+        env={**os.environ, "GIST_SESSION_SOCK": sock},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        if not _wait_for_socket(sock, proc):
+            pytest.skip("daemon did not come up")
+        with gist.Session(sock, cwd=corpus) as s:
+            assert s.connect()
+            # Present tree-wide → not absent; genuinely missing → absent.
+            assert s.absent("TODO") is False
+            assert s.absent("this_string_is_nowhere_xyzzy") is True
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+        shutil.rmtree(sock_dir, ignore_errors=True)
