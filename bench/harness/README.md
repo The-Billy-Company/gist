@@ -1,3 +1,14 @@
+---
+doc_radar:
+  sentinels:
+    - description: "PMU state is a first-class, fail-closed certificate fact with host provenance"
+      file: pkg/kernels/gist/bench/harness/certify.zig
+      contains: ["NOT measured on this machine", "cpuBrand", "requestPerformanceQos"]
+    - description: "pmu.zig carries the provenance primitives the layers stamp"
+      file: pkg/kernels/gist/bench/harness/pmu.zig
+      contains: ["pub fn cpuBrand", "pub fn requestPerformanceQos"]
+---
+
 # bench/harness
 
 The native `gist-bench` Zig binary (`build.zig`'s `bench_exe`) — a separate
@@ -47,6 +58,15 @@ RAM-resident corpus and records retired **cycles + instructions per byte**
 95% bootstrap-CI median (200 reps, seeded). Hardware counters come from
 `pmu.zig`'s `kperf` binding — **run under `sudo` for cycles**; without root it
 degrades to wall-clock and says so, never failing.
+
+**PMU state is a first-class, fail-closed certificate fact.** The emitted
+`CERTIFICATE.md` carries a provenance line stamped from the host — CPU brand
+(`machdep.cpu.brand_string`), the P-core note (USER_INTERACTIVE QoS request),
+and the meter source. With the PMU it reads *"cycles/byte: measured on this
+machine"*; without it, *"NOT measured on this machine — cross-checked against
+Layer B's reference-core static bounds only"*, plus the exact `sudo` rerun
+command. Blank cyc/byte columns can never be mistaken for measured-but-small,
+and wall-clock is never dressed up as cycles.
 
 ```bash
 sudo pkg/kernels/gist/zig-out/bin/gist-bench certify   # cycles/byte (run from repo root)

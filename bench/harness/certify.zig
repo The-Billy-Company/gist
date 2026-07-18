@@ -192,12 +192,21 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
     var meter = pmu.Meter.init();
     defer meter.deinit();
 
+    // Host provenance + P-core bias — both once, strictly before any timed
+    // window, so nothing new ever executes inside a measured region.
+    var brand_buf: [64]u8 = undefined;
+    const brand = pmu.cpuBrand(&brand_buf);
+    const qos: []const u8 = if (pmu.requestPerformanceQos())
+        "USER_INTERACTIVE QoS (P-core-biased)"
+    else
+        "default QoS (no core bias)";
+
     var prng = std.Random.DefaultPrng.init(0x6e15);
     const rng = prng.random();
 
     const mib = @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20);
     std.debug.print("gist certify · Layer A (microscopic) · abi v{d}\n", .{gist.abi()});
-    std.debug.print("machine: {s} · zig {s}\n", .{ @tagName(builtin.target.cpu.arch), builtin.zig_version_string });
+    std.debug.print("machine: {s} ({s}) · zig {s} · {s}\n", .{ brand, @tagName(builtin.target.cpu.arch), builtin.zig_version_string, qos });
     std.debug.print("meter:   {s}\n", .{meter.note});
     std.debug.print("corpus:  {d} files · {d:.1} MiB · single-thread verify · {d} reps (+{d} warmup)\n\n", .{ corpus.docs.len, mib, reps, warmup });
 
@@ -221,9 +230,9 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
         });
     }
 
-    try writeArtifacts(gpa, io, &corpus, &meter, rows.items, mib);
+    try writeArtifacts(gpa, io, &corpus, &meter, rows.items, mib, brand, qos);
     std.debug.print("\nwrote {s}/CERTIFICATE.md + certify.csv\n", .{out_dir});
-    if (!meter.has_pmu) std.debug.print("note: cycles unavailable — re-run `sudo zig build certify` for the cycle/byte certificate.\n", .{});
+    if (!meter.has_pmu) std.debug.print("note: cycles NOT measured on this machine (no PMU) — the certificate says so. Re-run `sudo pkg/kernels/gist/zig-out/bin/gist-bench certify` from the repo root for measured cycles/byte.\n", .{});
 }
 
 var cyc_buf: [32]u8 = undefined;
@@ -239,7 +248,7 @@ fn fmtIpc(row: Row) []const u8 {
     return std.fmt.bufPrint(&ipc_buf, "{d:>6.2}", .{row.ipc}) catch "?";
 }
 
-fn writeArtifacts(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mod.Corpus, meter: *pmu.Meter, rows: []const Row, mib: f64) !void {
+fn writeArtifacts(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mod.Corpus, meter: *pmu.Meter, rows: []const Row, mib: f64, brand: []const u8, qos: []const u8) !void {
     try Dir.cwd().createDirPath(io, out_dir);
     var csv: std.ArrayList(u8) = .empty;
     defer csv.deinit(gpa);
@@ -265,8 +274,16 @@ fn writeArtifacts(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mod.
     try md.appendSlice(gpa, "- **Layer D — algorithmic lower bound.** the algorithm matches the\n  information-theoretic floor for the operation. See `bench/lowerbound/` — run `zig build lowerbound` then `bench/lowerbound/lowerbound_report.py` to (re)populate its section below.\n\n");
     try md.appendSlice(gpa, "Honesty rule: this is a *fit + dominance* certificate. Every claim above is\n  a **measured number with a provenance**, never asserted. Note the layering:\n  this run (`zig build certify`) rewrites the WHOLE file, so Layers B-D's\n  sections below only exist if you re-splice them afterward — see each\n  layer's own `bench/<layer>/README.md` for its one-line rerun command.\n\n");
     try md.appendSlice(gpa, "## Layer A — empirical, microscopic (single-thread kernel)\n\n");
-    try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- machine: `{s}` · zig `{s}`\n", .{ @tagName(builtin.target.cpu.arch), builtin.zig_version_string }));
+    try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- machine: **{s}** (`{s}`) · zig `{s}` · {s}\n", .{ brand, @tagName(builtin.target.cpu.arch), builtin.zig_version_string, qos }));
     try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- meter: {s}\n", .{meter.note}));
+    // PMU state is a first-class certificate fact — fail-closed. A blank cycles
+    // column must never read as "measured but small"; the provenance line below
+    // says exactly which machine (if any) the cyc/byte numbers were minted on.
+    if (meter.has_pmu) {
+        try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- cycles/byte provenance: **measured on this machine** ({s}, {s})\n", .{ brand, qos }));
+    } else {
+        try md.appendSlice(gpa, "- cycles/byte provenance: **NOT measured on this machine** — cross-checked against Layer B's reference-core static bounds only. Re-run `sudo pkg/kernels/gist/zig-out/bin/gist-bench certify` (repo root) for the measured certificate.\n");
+    }
     try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- corpus: {d} files · {d:.1} MiB · {d} reps (+{d} warmup) · seeded bootstrap (10k)\n", .{ corpus.docs.len, mib, reps, warmup }));
     try md.appendSlice(gpa, "- method: each class times gist's **real** verify path single-threaded over the\n  RAM-resident corpus; `cyc/byte` = retired cycles ÷ candidate bytes crunched,\n  `IPC` = instructions ÷ cycles, `cand%` = fraction of the corpus the trigram\n  prefilter admits. Lower `median` / `cyc/byte` is better.\n\n");
     try md.appendSlice(gpa, "| class | files | cand% | median (95% CI) | cyc/byte | IPC | outliers |\n");
@@ -278,7 +295,7 @@ fn writeArtifacts(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mod.
             r.class, r.files, r.cand_frac * 100.0, r.ns.median / 1e3, r.ns.ci_lo / 1e3, r.ns.ci_hi / 1e3, cyc, ipc, r.ns.outliers_mild + r.ns.outliers_severe,
         }));
     }
-    if (!meter.has_pmu) try md.appendSlice(gpa, "\n> ⚠ cycles unavailable (no PMU permission). Re-run under `sudo` on Apple Silicon for the cycle/byte certificate.\n");
+    if (!meter.has_pmu) try md.appendSlice(gpa, "\n> ⚠ **cyc/byte + IPC are blank, not zero — NOT measured on this machine** (xnu\n> gates the PMU to root). Until a `sudo` run mints them, the cycles/byte claim\n> rests on the reference-core cross-check (Layer B) alone. Re-run\n> `sudo pkg/kernels/gist/zig-out/bin/gist-bench certify` from the repo root\n> for measured cycles + IPC.\n");
     try md.appendSlice(gpa, "\n## Layer A — macroscopic dominance vs the field\n\n_Populated by `bench/certify.sh` (process-vs-process, bootstrap CI + Mann-Whitney)._\n");
     try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/CERTIFICATE.md", .data = md.items });
 }

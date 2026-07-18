@@ -14,12 +14,17 @@
 //!     non-root cycle count on Apple Silicon.
 //!   * **everything else** — `has_pmu = false`; `counters()` returns zero and the
 //!     caller falls back to its monotonic `std.time.Timer` (ns/byte). The Linux
-//!     `perf_event_open` backend lands in pass 2 (see `linuxInit`).
+//!     `perf_event_open` backend lands in pass 2 (see `Meter.init`).
 //!
 //! Design rule: **never fail the run.** If the PMU can't be opened (not root,
 //! not macOS, framework missing) `init` degrades to wall-clock and reports it.
 //! kperf is driven purely through opaque pointers + dlsym'd C functions — no
 //! reverse-engineered struct layouts — so it can't silently read garbage.
+//!
+//! The file also carries the two host-provenance primitives every certificate
+//! layer stamps next to a measured number: `cpuBrand` (which silicon produced
+//! it) and `requestPerformanceQos` (P-core-biased scheduling on Apple Silicon).
+//! Both run strictly outside any timed window.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -73,10 +78,55 @@ pub const Meter = struct {
     }
 };
 
+// ── host provenance (certificate stamps; never inside a timed window) ─────────
+
+extern "c" fn sysctlbyname(name: [*:0]const u8, oldp: ?*anyopaque, oldlenp: *usize, newp: ?*anyopaque, newlen: usize) c_int;
+extern "c" fn pthread_set_qos_class_self_np(qos_class: c_uint, relative_priority: c_int) c_int;
+
+/// QOS_CLASS_USER_INTERACTIVE (sys/qos.h) — the highest scheduling tier.
+const qos_user_interactive: c_uint = 0x21;
+
+/// The marketing CPU name (`machdep.cpu.brand_string`) — a measured number must
+/// name the silicon that produced it. Falls back to the compile-time arch tag
+/// when the sysctl is unavailable (non-macOS, or a denied read).
+pub fn cpuBrand(buf: []u8) []const u8 {
+    if (builtin.target.os.tag == .macos) {
+        var len: usize = buf.len;
+        if (sysctlbyname("machdep.cpu.brand_string", buf.ptr, &len, null, 0) == 0 and len > 0) {
+            return std.mem.sliceTo(buf[0..len], 0);
+        }
+    }
+    const tag = @tagName(builtin.target.cpu.arch);
+    const n = @min(tag.len, buf.len);
+    @memcpy(buf[0..n], tag[0..n]);
+    return buf[0..n];
+}
+
+/// Ask the scheduler to run the calling thread at USER_INTERACTIVE QoS — on
+/// Apple Silicon that biases placement onto a **P-core** (macOS exposes no
+/// public hard core pin; QoS is the honest lever). Call once before measuring.
+/// Returns whether the hint was accepted, so the caller can stamp it as
+/// provenance rather than silently assuming a P-core.
+pub fn requestPerformanceQos() bool {
+    if (builtin.target.os.tag != .macos) return false;
+    return pthread_set_qos_class_self_np(qos_user_interactive, 0) == 0;
+}
+
 // ── macOS kperf/kperfdata backend ────────────────────────────────────────────
 
 const KPC_MAX_COUNTERS = 32;
 const KPC_CLASS_CONFIGURABLE_MASK: u32 = 1 << 1;
+
+/// Resolve every field of `T` from `lib` as `<prefix><field name>` — one loop
+/// instead of a lookup line per symbol. Fails loud on the first missing symbol
+/// (a partial resolve must never half-configure the kernel's counters).
+fn resolve(comptime T: type, lib: *std.DynLib, comptime prefix: []const u8) !T {
+    var t: T = undefined;
+    inline for (@typeInfo(T).@"struct".fields) |f| {
+        @field(t, f.name) = lib.lookup(f.type, prefix ++ f.name) orelse return error.SymbolMissing;
+    }
+    return t;
+}
 
 const KPerf = struct {
     kperf: std.DynLib,
@@ -84,14 +134,34 @@ const KPerf = struct {
     classes: u32,
     counter_map: [KPC_MAX_COUNTERS]usize, // event index → thread-counter slot
     note: []const u8,
+    kpc: Kpc,
 
-    // kperf (the counting engine; root-gated)
-    force_get: *const fn (*c_int) callconv(.c) c_int,
-    force_set: *const fn (c_int) callconv(.c) c_int,
-    set_config: *const fn (u32, [*]u64) callconv(.c) c_int,
-    set_counting: *const fn (u32) callconv(.c) c_int,
-    set_thread_counting: *const fn (u32) callconv(.c) c_int,
-    get_thread_counters: *const fn (u32, u32, [*]u64) callconv(.c) c_int,
+    const Opaque = ?*anyopaque;
+
+    /// kperf — the counting engine (root-gated). Field names are the `kpc_`
+    /// symbol suffixes; `resolve` binds them all in one loop.
+    const Kpc = struct {
+        force_all_ctrs_get: *const fn (*c_int) callconv(.c) c_int,
+        force_all_ctrs_set: *const fn (c_int) callconv(.c) c_int,
+        set_config: *const fn (u32, [*]u64) callconv(.c) c_int,
+        set_counting: *const fn (u32) callconv(.c) c_int,
+        set_thread_counting: *const fn (u32) callconv(.c) c_int,
+        get_thread_counters: *const fn (u32, u32, [*]u64) callconv(.c) c_int,
+    };
+
+    /// kperfdata — the kpep event-database/config builder. Field names are the
+    /// `kpep_` symbol suffixes. All pointers stay opaque (no struct layouts).
+    const Kpep = struct {
+        db_create: *const fn (?[*:0]const u8, *Opaque) callconv(.c) c_int,
+        config_create: *const fn (Opaque, *Opaque) callconv(.c) c_int,
+        config_force_counters: *const fn (Opaque) callconv(.c) c_int,
+        db_event: *const fn (Opaque, [*:0]const u8, *Opaque) callconv(.c) c_int,
+        config_add_event: *const fn (Opaque, *Opaque, u32, ?*u32) callconv(.c) c_int,
+        config_kpc_classes: *const fn (Opaque, *u32) callconv(.c) c_int,
+        config_kpc_count: *const fn (Opaque, *usize) callconv(.c) c_int,
+        config_kpc_map: *const fn (Opaque, [*]usize, usize) callconv(.c) c_int,
+        config_kpc: *const fn (Opaque, [*]u64, usize) callconv(.c) c_int,
+    };
 
     const kperf_path = "/System/Library/PrivateFrameworks/kperf.framework/kperf";
     const kperfdata_path = "/System/Library/PrivateFrameworks/kperfdata.framework/kperfdata";
@@ -107,21 +177,18 @@ const KPerf = struct {
         var kperfdata = try std.DynLib.open(kperfdata_path);
         errdefer kperfdata.close();
 
-        var self: KPerf = undefined;
-        self.kperf = kperf;
-        self.kperfdata = kperfdata;
-        self.counter_map = std.mem.zeroes([KPC_MAX_COUNTERS]usize);
-
-        self.force_get = kperf.lookup(@TypeOf(self.force_get), "kpc_force_all_ctrs_get") orelse return error.SymbolMissing;
-        self.force_set = kperf.lookup(@TypeOf(self.force_set), "kpc_force_all_ctrs_set") orelse return error.SymbolMissing;
-        self.set_config = kperf.lookup(@TypeOf(self.set_config), "kpc_set_config") orelse return error.SymbolMissing;
-        self.set_counting = kperf.lookup(@TypeOf(self.set_counting), "kpc_set_counting") orelse return error.SymbolMissing;
-        self.set_thread_counting = kperf.lookup(@TypeOf(self.set_thread_counting), "kpc_set_thread_counting") orelse return error.SymbolMissing;
-        self.get_thread_counters = kperf.lookup(@TypeOf(self.get_thread_counters), "kpc_get_thread_counters") orelse return error.SymbolMissing;
+        var self: KPerf = .{
+            .kperf = kperf,
+            .kperfdata = kperfdata,
+            .classes = 0,
+            .counter_map = std.mem.zeroes([KPC_MAX_COUNTERS]usize),
+            .note = "",
+            .kpc = try resolve(Kpc, &kperf, "kpc_"),
+        };
 
         // Permission gate: force_all_ctrs_get fails (non-zero) without root.
         var force: c_int = 0;
-        if (self.force_get(&force) != 0) return error.PermissionDenied;
+        if (self.kpc.force_all_ctrs_get(&force) != 0) return error.PermissionDenied;
 
         try self.configure();
         self.note = "kperf · FIXED_CYCLES + FIXED_INSTRUCTIONS (root)";
@@ -132,54 +199,40 @@ const KPerf = struct {
     // kpc class mask + register set + event→counter map, push it to the kernel,
     // and start per-thread counting. All pointers stay opaque.
     fn configure(self: *KPerf) !void {
-        const data = &self.kperfdata;
-        const Opaque = ?*anyopaque;
-        const db_create = data.lookup(*const fn (?[*:0]const u8, *Opaque) callconv(.c) c_int, "kpep_db_create") orelse return error.SymbolMissing;
-        const cfg_create = data.lookup(*const fn (Opaque, *Opaque) callconv(.c) c_int, "kpep_config_create") orelse return error.SymbolMissing;
-        const cfg_force = data.lookup(*const fn (Opaque) callconv(.c) c_int, "kpep_config_force_counters") orelse return error.SymbolMissing;
-        const db_event = data.lookup(*const fn (Opaque, [*:0]const u8, *Opaque) callconv(.c) c_int, "kpep_db_event") orelse return error.SymbolMissing;
-        const cfg_add = data.lookup(*const fn (Opaque, *Opaque, u32, ?*u32) callconv(.c) c_int, "kpep_config_add_event") orelse return error.SymbolMissing;
-        const cfg_classes = data.lookup(*const fn (Opaque, *u32) callconv(.c) c_int, "kpep_config_kpc_classes") orelse return error.SymbolMissing;
-        const cfg_count = data.lookup(*const fn (Opaque, *usize) callconv(.c) c_int, "kpep_config_kpc_count") orelse return error.SymbolMissing;
-        const cfg_map = data.lookup(*const fn (Opaque, [*]usize, usize) callconv(.c) c_int, "kpep_config_kpc_map") orelse return error.SymbolMissing;
-        const cfg_regs = data.lookup(*const fn (Opaque, [*]u64, usize) callconv(.c) c_int, "kpep_config_kpc") orelse return error.SymbolMissing;
+        const kpep = try resolve(Kpep, &self.kperfdata, "kpep_");
 
         var db: Opaque = null;
-        if (db_create(null, &db) != 0) return error.DbCreate;
+        if (kpep.db_create(null, &db) != 0) return error.DbCreate;
         var cfg: Opaque = null;
-        if (cfg_create(db, &cfg) != 0) return error.CfgCreate;
-        if (cfg_force(cfg) != 0) return error.ForceCounters;
+        if (kpep.config_create(db, &cfg) != 0) return error.CfgCreate;
+        if (kpep.config_force_counters(cfg) != 0) return error.ForceCounters;
 
-        try addEvent(db, cfg, db_event, cfg_add, &cycle_names);
-        try addEvent(db, cfg, db_event, cfg_add, &inst_names);
+        try addEvent(&kpep, db, cfg, &cycle_names);
+        try addEvent(&kpep, db, cfg, &inst_names);
 
-        if (cfg_classes(cfg, &self.classes) != 0) return error.KpcClasses;
+        if (kpep.config_kpc_classes(cfg, &self.classes) != 0) return error.KpcClasses;
         var reg_count: usize = 0;
-        if (cfg_count(cfg, &reg_count) != 0) return error.KpcCount;
-        if (cfg_map(cfg, &self.counter_map, @sizeOf(@TypeOf(self.counter_map))) != 0) return error.KpcMap;
+        if (kpep.config_kpc_count(cfg, &reg_count) != 0) return error.KpcCount;
+        if (kpep.config_kpc_map(cfg, &self.counter_map, @sizeOf(@TypeOf(self.counter_map))) != 0) return error.KpcMap;
 
         var regs: [KPC_MAX_COUNTERS]u64 = std.mem.zeroes([KPC_MAX_COUNTERS]u64);
-        if (cfg_regs(cfg, &regs, @sizeOf(@TypeOf(regs))) != 0) return error.KpcRegs;
+        if (kpep.config_kpc(cfg, &regs, @sizeOf(@TypeOf(regs))) != 0) return error.KpcRegs;
 
-        if (self.force_set(1) != 0) return error.ForceSet;
+        if (self.kpc.force_all_ctrs_set(1) != 0) return error.ForceSet;
         if ((self.classes & KPC_CLASS_CONFIGURABLE_MASK) != 0 and reg_count != 0) {
-            if (self.set_config(self.classes, &regs) != 0) return error.SetConfig;
+            if (self.kpc.set_config(self.classes, &regs) != 0) return error.SetConfig;
         }
-        if (self.set_counting(self.classes) != 0) return error.SetCounting;
-        if (self.set_thread_counting(self.classes) != 0) return error.SetThreadCounting;
+        if (self.kpc.set_counting(self.classes) != 0) return error.SetCounting;
+        if (self.kpc.set_thread_counting(self.classes) != 0) return error.SetThreadCounting;
     }
 
-    fn addEvent(
-        db: ?*anyopaque,
-        cfg: ?*anyopaque,
-        db_event: *const fn (?*anyopaque, [*:0]const u8, *?*anyopaque) callconv(.c) c_int,
-        cfg_add: *const fn (?*anyopaque, *?*anyopaque, u32, ?*u32) callconv(.c) c_int,
-        names: []const [:0]const u8,
-    ) !void {
+    /// Register the first event name the kpep database recognizes (Apple-Silicon
+    /// fixed-counter name first, then Intel/alias fallbacks).
+    fn addEvent(kpep: *const Kpep, db: Opaque, cfg: Opaque, names: []const [:0]const u8) !void {
         for (names) |name| {
-            var ev: ?*anyopaque = null;
-            if (db_event(db, name.ptr, &ev) == 0 and ev != null) {
-                if (cfg_add(cfg, &ev, 0, null) == 0) return;
+            var ev: Opaque = null;
+            if (kpep.db_event(db, name.ptr, &ev) == 0 and ev != null) {
+                if (kpep.config_add_event(cfg, &ev, 0, null) == 0) return;
             }
         }
         return error.EventNotFound;
@@ -187,7 +240,7 @@ const KPerf = struct {
 
     fn read(self: *KPerf) Counters {
         var buf: [KPC_MAX_COUNTERS]u64 = std.mem.zeroes([KPC_MAX_COUNTERS]u64);
-        if (self.get_thread_counters(0, KPC_MAX_COUNTERS, &buf) != 0) return .{};
+        if (self.kpc.get_thread_counters(0, KPC_MAX_COUNTERS, &buf) != 0) return .{};
         return .{
             .cycles = buf[self.counter_map[0]],
             .instructions = buf[self.counter_map[1]],
@@ -196,9 +249,9 @@ const KPerf = struct {
     }
 
     fn close(self: *KPerf) void {
-        _ = self.set_counting(0);
-        _ = self.set_thread_counting(0);
-        _ = self.force_set(0);
+        _ = self.kpc.set_counting(0);
+        _ = self.kpc.set_thread_counting(0);
+        _ = self.kpc.force_all_ctrs_set(0);
         self.kperfdata.close();
         self.kperf.close();
     }

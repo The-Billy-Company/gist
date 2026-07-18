@@ -6,6 +6,16 @@ microarchitecture: Block RThroughput, bytes/iter, cycles/byte) and renders a
 `## Layer B — port-optimality (static µarch bound)` markdown section, then
 splices it into `.local/gist-verify/CERTIFICATE.md`.
 
+The section also carries **Layer B′ — the port bound measured on this
+machine**: if a sibling `portbound.json` exists (written by
+`zig build portbound` / `sudo zig-out/bin/gist-portbound`, which times the
+same drift-guarded probes natively under the PMU), its measured cycles/byte +
+cycles/step are rendered with full provenance (CPU brand, QoS, meter). This is
+fail-closed: without that file — or when it says `"pmu": false` — the
+certificate states plainly that cycles are cross-checked against reference
+cores only, NOT measured here, and names the sudo rung that mints the measured
+figure. Wall-clock is never converted to cycles via an assumed frequency.
+
 Splice discipline (mirrors bench/certify/certify_stats.py): replace any existing
 `## Layer B` section (from that heading to the next `## Layer` heading or EOF),
 and insert a fresh one *before* the macroscopic Layer-A header so re-running
@@ -52,7 +62,97 @@ BOUND_NOTE = (
 )
 
 
-def render(doc: dict) -> str:
+MEASURED_HEADER = "### Layer B′ — port bound, measured on this machine"
+
+# The rung an operator climbs to mint the measured-on-this-machine bound.
+MEASURED_RUNG = (
+    "`cd pkg/kernels/gist && zig build -Doptimize=ReleaseFast portbound` "
+    "(wall-clock), then from the repo root "
+    "`sudo pkg/kernels/gist/zig-out/bin/gist-portbound` for cycles (xnu gates "
+    "the PMU to root), then re-run `bench/portcert/portcert.sh` to splice."
+)
+
+
+def render_measured(measured: dict | None) -> list[str]:
+    """Render the Layer B′ subsection — fail-closed when cycles were not
+    measured on this machine (no portbound.json, or PMU unavailable)."""
+    lines = [MEASURED_HEADER, ""]
+    if measured is None:
+        lines.append(
+            "**cycles/byte: cross-checked (reference cores), NOT measured on this "
+            "machine.** The empirical runner has not been run here. Rung: "
+            + MEASURED_RUNG
+        )
+        lines.append("")
+        return lines
+
+    brand = measured.get("cpu_brand", "?")
+    qos = measured.get("qos", "?")
+    meter = measured.get("meter", "?")
+    results = measured.get("results", [])
+    prov = (
+        f"_Provenance: **{brand}** (`{measured.get('arch', '?')}`) · {qos} · "
+        f"meter: {meter} · best-of-{measured.get('trials', '?')} trials · same "
+        "drift-guarded probes as the static bound above (`probes_test.zig`)._"
+    )
+
+    if not measured.get("pmu", False):
+        lines.append(
+            "**cycles/byte: cross-checked (reference cores), NOT measured on this "
+            "machine.** The runner executed here but the PMU was unavailable "
+            "(kperf needs root), so only wall-clock ns are recorded below — never "
+            "converted to cycles via an assumed frequency. Rerun under `sudo` for "
+            "measured: " + MEASURED_RUNG
+        )
+        lines.append("")
+        lines.append(prov)
+        lines.append("")
+        lines.append("| probe | bound | working set | wall ns/unit (aux only) |")
+        lines.append("|---|---|--:|--:|")
+        lines.extend(
+            f"| `{r['probe']}` | {r['bound']} | {r['working_set_bytes'] >> 10} KiB "
+            f"| {r['ns_per_unit']:.4f} ns/{r['unit']} |"
+            for r in results
+        )
+        lines.append("")
+        return lines
+
+    lines.append(
+        "**cycles: measured on this machine.** The same drift-guarded probes, "
+        "run natively as timed kernels under the PMU on cache-resident working "
+        "sets (ports bind, memory never does) — the on-machine empirical "
+        "counterpart to the static reference-core bound above."
+    )
+    lines.append("")
+    lines.append(prov)
+    lines.append("")
+    lines.append("| probe | bound | working set | measured cyc/unit | IPC | eff GHz | wall ns/unit |")
+    lines.append("|---|---|--:|--:|--:|--:|--:|")
+    lines.extend(
+        f"| `{r['probe']}` | {r['bound']} | {r['working_set_bytes'] >> 10} KiB "
+        f"| **{r['cyc_per_unit']:.4f} cyc/{r['unit']}** | {r['ipc']:.2f} "
+        f"| {r['eff_ghz']:.2f} | {r['ns_per_unit']:.4f} |"
+        for r in results
+    )
+    lines.append("")
+    by_name = {r["probe"]: r for r in results}
+    probe, prod = by_name.get("simd_contains"), by_name.get("simd_contains_production")
+    if probe and prod and prod.get("cyc_per_unit", 0) > 0:
+        ratio = probe["cyc_per_unit"] / prod["cyc_per_unit"]
+        lines.append(
+            "> **Marker-overhead cross-check.** The probe carries the `LLVM-MCA` "
+            "region markers (assembly comments, zero instructions, but their "
+            "operand constraints pin instruction scheduling); the unmarked "
+            f"production `simd.contains` timed alongside runs {ratio:.2f}× "
+            "cheaper per byte. The probe figure is therefore a **conservative "
+            "(upper) bound** on the production loop's on-machine cost — the "
+            "production row is the loop as shipped."
+        )
+        lines.append("")
+    return lines
+
+
+def render(doc: dict, measured: dict | None = None) -> str:
     """Render generated source artifacts."""
     ver = doc.get("llvm_mca_version", "?")
     results = doc.get("results", [])
@@ -74,6 +174,7 @@ def render(doc: dict) -> str:
         lines.append("")
         lines.append(APPLE_NOTE)
         lines.append("")
+        lines.extend(render_measured(measured))
         return "\n".join(lines)
 
     lines.append(
@@ -98,6 +199,7 @@ def render(doc: dict) -> str:
     lines.append("")
     lines.append(APPLE_NOTE)
     lines.append("")
+    lines.extend(render_measured(measured))
     return "\n".join(lines)
 
 
@@ -133,7 +235,18 @@ def main() -> int:
         print(f"portcert_report: {args.json} not found — did portcert.sh run?")
         return 1
     doc = json.loads(args.json.read_text())
-    section = render(doc)
+
+    # Layer B′ auto-discovery: a sibling portbound.json (from `gist-portbound`)
+    # carries the measured-on-this-machine bound. Absent or unreadable ⇒ the
+    # section fail-closed labels cycles as cross-checked-only.
+    measured: dict | None = None
+    portbound = args.json.parent / "portbound.json"
+    if portbound.exists():
+        try:
+            measured = json.loads(portbound.read_text())
+        except (json.JSONDecodeError, OSError):
+            measured = None
+    section = render(doc, measured)
 
     if not args.certificate.exists():
         sidecar = args.certificate.parent / "portcert.section.md"

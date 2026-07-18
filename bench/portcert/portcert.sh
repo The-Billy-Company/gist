@@ -186,7 +186,20 @@ echo "wrote ${CSV}"
 echo "wrote ${JSON}"
 
 # Splice the Layer B section into CERTIFICATE.md (idempotent; degrades if the
-# report tool or the file is missing).
+# report tool or the file is missing). The splicer auto-discovers a sibling
+# portbound.json (Layer B′ — the port bound MEASURED on this machine, from
+# `gist-portbound`) and renders it fail-closed: absent or PMU-less, the
+# certificate says cycles are cross-checked-only, never a fabricated number.
 if python3 "${HERE}/portcert_report.py" --json "${JSON}" --certificate "${CERT}"; then
   echo "spliced Layer B section into ${CERT}"
+fi
+if [[ -f "${OUT}/portbound.json" ]]; then
+  echo "Layer B′ (measured on this machine): spliced from ${OUT}/portbound.json"
+else
+  cat << 'EOF'
+Layer B′ (measured on this machine): not yet run. Mint it with
+  (cd pkg/kernels/gist && zig build -Doptimize=ReleaseFast portbound)  # wall-clock
+  sudo pkg/kernels/gist/zig-out/bin/gist-portbound                     # cycles (kpc is root-gated; run from repo root)
+then re-run this script to splice the measured subsection.
+EOF
 fi
