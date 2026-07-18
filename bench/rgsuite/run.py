@@ -7,8 +7,13 @@ stdout + exit-class. ripgrep is the ground truth — we never trust a hardcoded
 expected string, we diff against what the installed `rg` actually prints.
 
 Buckets:
-  PASS     gist stdout == rg stdout (+ matching exit-class)
-  ORDER    differ only in line order (dir-walk nondeterminism) → soft pass
+  PASS     gist stdout == rg stdout (+ matching exit-class). When the mined
+           test's own assertion is order-agnostic (`cmp == "sort"` — ripgrep's
+           `eqnice_sorted!`, used exactly where rg's parallel walk output is
+           nondeterministic), sorted-line equality IS the oracle's bar and
+           scores PASS too.
+  ORDER    a `cmp == "plain"` case differing only in line order — rg's own
+           output is deterministic there, so gist must match it byte-for-byte
   FAIL     gist differs on a surface it claims to support → a real bug to fix
   NA       feature unsupported by gist's design (gist exits 2, OR the diff is
            attributable to a documented scope boundary — see below)
@@ -178,6 +183,14 @@ def score(rec, engine_env=None):
     if out_g == out_rg:
         return "PASS", ""
     if sort_lines(out_g) == sort_lines(out_rg):
+        # ripgrep's own assertion for this test: `eqnice!` (cmp=plain) pins the
+        # exact bytes, `eqnice_sorted!` (cmp=sort) compares sorted lines because
+        # rg's parallel dir walk is genuinely nondeterministic there (empirically:
+        # `rg --files` on these fixtures yields many distinct orders across runs).
+        # Meeting the oracle's own bar is a PASS; falling short of a plain
+        # assertion on order alone is the real parity hole ORDER exists to name.
+        if rec.get("cmp") == "sort":
+            return "PASS", "order-agnostic oracle (eqnice_sorted)"
         return "ORDER", "line-order only"
 
     # Honest design-boundary re-bucketing — applied ONLY to a case that would

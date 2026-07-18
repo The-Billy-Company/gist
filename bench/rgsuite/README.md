@@ -26,22 +26,29 @@ mines one case per command), replayed against **both** engines:
 
 | Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                  |
 | --------- | ------------------------: | -----------------: | ------------------------------------------------------------------------ |
-| **PASS**  |                       264 |                276 | `gist rg` stdout == `rg` stdout, byte-for-byte                           |
-| **ORDER** |                        15 |                  3 | identical set, worker-discovery order only (see below) → soft pass       |
+| **PASS**  |                       306 |                306 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below) |
+| **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole  |
 | **FAIL**  |                         0 |                  0 | a supported-surface divergence (a real bug)                              |
-| NA        |                        41 |                 41 | unsupported **by design** (see boundaries below)                         |
+| NA        |                        14 |                 14 | unsupported **by design** (see boundaries below)                         |
 | SKIP      |                       121 |                121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal) |
 
-**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 279/279 = 100.0%
-on both engines — genuinely zero-FAIL**, not just on whichever engine a given
-case happens to dispatch to.
+**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 306/306 = 100.0%
+on both engines — genuinely zero-FAIL, zero-ORDER**, not just on whichever
+engine a given case happens to dispatch to.
 
-ORDER is higher on the parallel engine because it streams each hit to stdout
-the instant a worker finds it — the same EPIPE-triggered cooperative
-cancellation ripgrep's own printer uses, so `gist foo | head` can abort the
-walk instead of finishing the whole tree. The trade is worker-discovery order
-instead of global path-sort order on any multi-file query; the serial engine
-keeps ripgrep's own effective order more often, hence its smaller ORDER count.
+Each mined case carries its upstream assertion mode (`cmp` in `spec.json`):
+ripgrep's own suite pins most cases byte-exact (`eqnice!`, `cmp=plain`) but
+compares **sorted lines** (`eqnice_sorted!`, `cmp=sort`) exactly where rg's
+parallel dir walk makes its own output genuinely nondeterministic (empirically:
+`rg --files` on those fixtures yields many distinct orders across repeated
+runs). `run.py` scores each case at its oracle's own bar — sorted-line equality
+is a full PASS for a `cmp=sort` case (5 such cases today), while a `cmp=plain`
+case that matches only after sorting stays ORDER: a real parity hole, and the
+bucket is empty. The parallel engine still streams each hit the instant a
+worker finds it (the same EPIPE-triggered cooperative cancellation ripgrep's
+printer uses, so `gist foo | head` aborts the walk) — wherever rg's own output
+IS deterministic (single-dir walks, `--sort*` modes, `--files` under one root),
+gist reproduces it byte-for-byte.
 
 ### Two engines, one suite (why this isn't redundant)
 
@@ -65,26 +72,29 @@ excuse an in-scope bug. gist **fails loud (exit 2)** on features it can't honor,
 so an NA is a deliberate, announced refusal, not a silent wrong answer. The
 current boundaries:
 
-1. **line-oriented** — `-U`/`--multiline`/`--multiline-dotall` (a match may not
-   span line boundaries). The largest NA bucket.
-2. **no ANSI** — `--color=always` emits no color escapes (`path:line:text` only).
-3. **text/source-oriented** — gist skips binary files; no `--binary`/`-uuu`, and
+1. **own color palette** — `--color=always` paints gist's deliberate scheme
+   (bright-red underline matches, dim separators — `color.zig`), not rg's
+   default; a case whose ONLY divergence is the ANSI codes is NA, and rg's
+   `--crlf`+color `\r` injection artifact is deliberately not replicated.
+   (`-U`/`--multiline` is no longer a boundary — the mined multiline cases run
+   and PASS; see the `modes.py` companion for the deeper `-U` proof.)
+2. **text/source-oriented** — gist skips binary files; no `--binary`/`-uuu`, and
    it never emits ripgrep's `binary file matches` summary line.
-4. **UTF-8 / byte engine** — matching runs over UTF-8 bytes, so `-E`/`--encoding`
+3. **UTF-8 / byte engine** — matching runs over UTF-8 bytes, so `-E`/`--encoding`
    **transcodes to UTF-8 up front** rather than matching in the source charset. It
    now honors rg's full `encoding_rs` label table (the single-byte pages + CJK
    gb18030/GBK, Big5, EUC-JP, Shift_JIS, EUC-KR, ISO-2022-JP), a **UTF-8/UTF-16 BOM
    is auto-detected**, and an unrecognized label still **fails loud (exit 2)**.
    Byte-exact vs rg — see `transforms.py`. (No longer an NA bucket.)
-5. **ASCII case-folding** — `-i` folds ASCII only; no Unicode case folding, and
+4. **ASCII case-folding** — `-i` folds ASCII only; no Unicode case folding, and
    no per-branch `(?i)` across multiple `-e` patterns.
-6. **RE2-style engine** — `-P`/pcre2, lookaround, backreferences (mostly SKIP).
-7. **ignore scope** — the in-repo hierarchy **and** the _global_ gitignore
+5. **RE2-style engine** — `-P`/pcre2, lookaround, backreferences (mostly SKIP).
+6. **ignore scope** — the in-repo hierarchy **and** the _global_ gitignore
    (`core.excludesFile`, resolved from `$HOME/.gitconfig` / `$XDG_CONFIG_HOME/git/config`
    → default `$XDG_CONFIG_HOME/git/ignore`) are honored by default, disabled per
    tier by `--no-ignore-global` (rg-parity proven in `flags.py`, below); fd's
    `.fdignore` dialect is the one ignore source still not read.
-8. **type registry** — `--type-list` is now emitted in ripgrep's exact
+7. **type registry** — `--type-list` is now emitted in ripgrep's exact
    presentation (lexicographic names, one line per alias, lexicographically
    sorted globs); it differs only because gist's registry is a documented strict
    _superset_ of ripgrep's — every rg type + glob present (most rows therefore
@@ -107,7 +117,11 @@ stream), the **git ignore hierarchy** (`.gitignore`/`.ignore`/`.rgignore`,
 `--ignore-file` precedence, and every `--ignore-file`/`--no-ignore*`/`-u`/`-uu`/
 `--require-git` tier), `--path-separator`, **UTF-8/UTF-16 BOM auto-detection**,
 **stdin search** (rg's `is_readable_stdin` rule: pipe/regular-file yes,
-tty/`/dev/null` no), and rg exit codes (0 match / 1 no-match / 2 error).
+tty/`/dev/null` no), **`-U`/`--multiline` frames** (cross-line spans, `--crlf`'s
+CRLF-aware `$`, `--vimgrep`'s one-line-per-match rule (rg #1866), `-r` block
+replacement that preserves the block's non-matching bytes (rg #1311),
+`--passthru`, `--trim`+`-M` per-fragment placeholders), `--vimgrep`'s forced
+filename, and rg exit codes (0 match / 1 no-match / 2 error).
 
 ## Track B — performance (18,635 files · 155.9 MiB corpus)
 

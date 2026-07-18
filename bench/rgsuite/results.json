@@ -72,7 +72,7 @@
    "-g",
    "hay"
   ],
-  "detail": "--binary unsupported by design \u2014 use ripgrep for this\n"
+  "detail": "text/source-oriented by design (skips binary)"
  },
  {
   "name": "mmap_text_flag",
@@ -148,7 +148,7 @@
    "-g",
    "hay"
   ],
-  "detail": "--binary unsupported by design \u2014 use ripgrep for this\n"
+  "detail": "text/source-oriented by design (skips binary)"
  },
  {
   "name": "after_match1_implicit_text",
@@ -219,7 +219,7 @@
  {
   "name": "after_match1_implicit_count_binary",
   "file": "binary.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--no-mmap",
    "-c",
@@ -228,7 +228,7 @@
    "-g",
    "hay"
   ],
-  "detail": "--binary unsupported by design \u2014 use ripgrep for this\n"
+  "detail": ""
  },
  {
   "name": "after_match1_explicit_count",
@@ -306,7 +306,7 @@
    "-g",
    "hay"
   ],
-  "detail": "--binary unsupported by design \u2014 use ripgrep for this\n"
+  "detail": "text/source-oriented by design (skips binary)"
  },
  {
   "name": "before_match1_implicit_text",
@@ -371,12 +371,12 @@
  {
   "name": "f1_sjis",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-Esjis",
    "\u0428\u0435\u0440\u043b\u043e\u043a \u0425\u043e\u043b\u043c\u0441"
   ],
-  "detail": "unknown flag -E\n"
+  "detail": ""
  },
  {
   "name": "f1_utf16_auto",
@@ -390,22 +390,22 @@
  {
   "name": "f1_utf16_explicit",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-Eutf-16le",
    "\u0428\u0435\u0440\u043b\u043e\u043a \u0425\u043e\u043b\u043c\u0441"
   ],
-  "detail": "unknown flag -E\n"
+  "detail": ""
  },
  {
   "name": "f1_eucjp",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-Eeuc-jp",
    "\u0428\u0435\u0440\u043b\u043e\u043a \u0425\u043e\u043b\u043c\u0441"
   ],
-  "detail": "unknown flag -E\n"
+  "detail": ""
  },
  {
   "name": "f1_unknown_encoding",
@@ -480,36 +480,36 @@
  {
   "name": "f45_relative_cwd#1",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "-l",
    "test"
   ],
-  "detail": "line-order only"
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "f45_relative_cwd#2",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "-l",
    "test",
    "--ignore-file",
    ".not-an-ignore"
   ],
-  "detail": "line-order only"
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "f45_relative_cwd#3",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--ignore-file",
    "../.not-an-ignore",
    "-l",
    "test"
   ],
-  "detail": "line-order only"
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "f45_precedence_with_others",
@@ -727,22 +727,22 @@
  {
   "name": "f263_sort_files",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--sort-files",
    "test"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f263_sort_files_reverse",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--sortr=path",
    "test"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f275_pathsep",
@@ -849,14 +849,14 @@
  {
   "name": "f416_crlf_multiline",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--crlf",
    "-U",
    "Sherlock$",
    "sherlock"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "f416_crlf_only_matching",
@@ -1019,7 +1019,7 @@
  {
   "name": "f917_trim_multi_standard",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--multiline",
    "--trim",
@@ -1027,7 +1027,7 @@
    "--no-filename",
    "a\\n?bc"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "f917_trim_max_columns_normal",
@@ -1060,7 +1060,7 @@
  {
   "name": "f917_trim_max_columns_multi_standard",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--multiline",
    "--trim",
@@ -1071,12 +1071,12 @@
    "--no-filename",
    "a\\n?bc"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "f917_trim_max_columns_multi_only_matching",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--multiline",
    "--trim",
@@ -1086,12 +1086,12 @@
    "--no-filename",
    ".*a\\n?bc.*"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "f917_trim_max_columns_multi_per_match",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--multiline",
    "--trim",
@@ -1101,7 +1101,7 @@
    "--no-filename",
    ".*a\\n?bc.*"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "f993_null_data",
@@ -1151,14 +1151,14 @@
  {
   "name": "f1138_no_ignore_dot#2",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--sort",
    "path",
    "--files",
    "--no-ignore-dot"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f1138_no_ignore_dot#3",
@@ -1199,7 +1199,7 @@
  {
   "name": "f1207_ignore_encoding",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--encoding",
    "none",
@@ -1207,18 +1207,18 @@
    "\\x00",
    "foo"
   ],
-  "detail": "--encoding unsupported by design \u2014 use ripgrep for this\n"
+  "detail": ""
  },
  {
   "name": "f1414_no_require_git#1",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--sort",
    "path",
    "--files"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f1414_no_require_git#2",
@@ -1238,7 +1238,7 @@
  {
   "name": "f1414_no_require_git#3",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--sort",
    "path",
@@ -1253,7 +1253,7 @@
    "--no-require-git",
    "--require-git"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f1420_no_ignore_exclude#1",
@@ -1269,25 +1269,25 @@
  {
   "name": "f1420_no_ignore_exclude#2",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--sort",
    "path",
    "--files",
    "--no-ignore-exclude"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f1466_no_ignore_files#1",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--sort",
    "path",
    "--files"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f1466_no_ignore_files#2",
@@ -1305,7 +1305,7 @@
  {
   "name": "f1466_no_ignore_files#3",
   "file": "feature.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--sort",
    "path",
@@ -1314,7 +1314,7 @@
    ".myignore",
    "--no-ignore-files"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "f1466_no_ignore_files#4",
@@ -1745,25 +1745,25 @@
  {
   "name": "r1095_crlf_empty_match#1",
   "file": "json.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--json",
    "\n"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r1095_crlf_empty_match#2",
   "file": "json.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--json",
    "\n",
    "--crlf"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r1412_look_behind_match_missing",
@@ -2062,7 +2062,7 @@
  {
   "name": "file_type_add_compose",
   "file": "misc.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--type-add",
    "wat:*.wat",
@@ -2072,7 +2072,7 @@
    "combo",
    "Sherlock"
   ],
-  "detail": "line-order only"
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "glob",
@@ -2537,7 +2537,7 @@
    "-uuu",
    "foo"
   ],
-  "detail": "-uuu (--binary) unsupported \u2014 gist is text/source-oriented\n"
+  "detail": "text/source-oriented by design (skips binary)"
  },
  {
   "name": "vimgrep",
@@ -2720,11 +2720,11 @@
  {
   "name": "files",
   "file": "misc.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--files"
   ],
-  "detail": "line-order only"
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "type_list",
@@ -2733,7 +2733,7 @@
   "argv": [
    "--type-list"
   ],
-  "detail": "own type registry by design (scope/types.zig)"
+  "detail": "rg-sorted superset registry by design (scope/types.zig)"
  },
  {
   "name": "sort_files",
@@ -2759,26 +2759,26 @@
  {
   "name": "overlap1",
   "file": "multiline.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-n",
    "-U",
    "abc\ndef",
    "test"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "overlap2",
   "file": "multiline.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-n",
    "-U",
    "abc\ndef",
    "test"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "dot_no_newline",
@@ -2795,7 +2795,7 @@
  {
   "name": "dot_all",
   "file": "multiline.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-n",
    "-U",
@@ -2803,12 +2803,12 @@
    "of this world.+detective work",
    "sherlock"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "only_matching",
   "file": "multiline.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-n",
    "-U",
@@ -2816,12 +2816,12 @@
    "Watson|Sherlock\\p{Any}+?Holmes",
    "sherlock"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "vimgrep",
   "file": "multiline.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-n",
    "-U",
@@ -2829,23 +2829,23 @@
    "Watson|Sherlock\\p{Any}+?Holmes",
    "sherlock"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "stdin",
   "file": "multiline.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-n",
    "-U",
    "of this world\\p{Any}+?detective work"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "context",
   "file": "multiline.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-n",
    "-U",
@@ -2853,7 +2853,7 @@
    "detective work\\p{Any}+?result of luck",
    "sherlock"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r16",
@@ -3117,12 +3117,12 @@
  {
   "name": "r251",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-i",
    "\u043f\u0440\u0438\u0432\u0435\u0442"
   ],
-  "detail": "ASCII case-fold by design (no Unicode -i)"
+  "detail": ""
  },
  {
   "name": "r256",
@@ -3405,14 +3405,14 @@
  {
   "name": "r693_context_in_contextless_mode",
   "file": "regression.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "-C1",
    "-c",
    "--sort-files",
    "xyz"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "r807",
@@ -3931,7 +3931,7 @@
  {
   "name": "r1311_multi_line_term_replace",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "-r?",
@@ -3939,7 +3939,7 @@
    "\n",
    "input"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r1319",
@@ -4230,14 +4230,14 @@
  {
   "name": "r1866",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--multiline",
    "--vimgrep",
    "foobar\\nfoobar\\nfoo|quux",
    "test"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r1868_context_passthru_override#1",
@@ -4336,26 +4336,26 @@
  {
   "name": "r1878#1",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--no-mmap",
    "^baz",
    "test"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r1878#2",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--mmap",
    "^baz",
    "test"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r1878#3",
@@ -4419,7 +4419,7 @@
  {
   "name": "r2094",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--no-line-number",
    "--no-filename",
@@ -4430,7 +4430,7 @@
    "b",
    "haystack"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r2095",
@@ -4445,7 +4445,7 @@
    "^(?P<indent>\\s*)a=(?P<value>(?ms:[(].*?[)])|.*?)$",
    "test"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": "bad pattern '^(?P<indent>\\s*)a=(?P<value>(?ms:[(].*?[)])|.*?)$' \u2014 outside gist's linear-time syntax: no lookaround, no b"
  },
  {
   "name": "r2198#1",
@@ -4461,19 +4461,19 @@
  {
   "name": "r2198#2",
   "file": "regression.rs",
-  "bucket": "ORDER",
+  "bucket": "PASS",
   "argv": [
    "--files",
    "--sort",
    "path",
    "--no-ignore-dot"
   ],
-  "detail": "line-order only"
+  "detail": ""
  },
  {
   "name": "r2208",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "-N",
    "-U",
@@ -4482,7 +4482,7 @@
    "^(?P<predoc>\\n?(# .*\\n)*)(alias (?P<aname>pipc)=\"[^\"]+\"|(?P<fname>pipc) \\(\\) \\{)(  #(?P<usage> .+))?",
    "test"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  },
  {
   "name": "r2236",
@@ -4893,13 +4893,13 @@
  {
   "name": "r3180_look_around_panic",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "(^|[^a-z])((([a-z]+)?)\\s)?b(\\s([a-z]+)?)($|[^a-z])",
    "haystack",
    "-U",
    "-rx"
   ],
-  "detail": "-U/--multiline not yet implemented in gist rg-compat\n"
+  "detail": ""
  }
 ]
