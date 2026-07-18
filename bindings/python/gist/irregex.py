@@ -1,4 +1,4 @@
-"""The irregex face — gist's irregular-expression verbs, importable (ADR-352 shape). Three native engine surfaces with no rg equivalent, driven through the same certified binary as every other face (never a second matcher): `similar` (nearest files by compression kinship — LZ78 dictionary sketches, LZJD distance), `dups` (near-duplicate pairs, closest first), and `patterns` (one walk, N patterns, exact per-pattern attribution, optionally grouped into counts engine-side). Each function shells the verb with `--json` and parses its NDJSON rows into typed records; distances and attribution are computed in the kernel, never re-derived here. Corpus policy is the verbs' own (the index corpus: non-binary files under the roots minus VCS/build subtrees) — see `contract/search_api.toml` `[irregex]`."""
+"""The hydra face — the irregular-expression verbs, importable (ADR-352 shape). Three native engine surfaces with no rg equivalent, driven through the certified `hydra` binary (same kernel as `gist`, never a second matcher): `similar` (nearest files by compression kinship — LZ78 dictionary sketches, LZJD distance), `dups` (near-duplicate pairs, closest first), and `patterns` (one walk, N patterns, exact per-pattern attribution, optionally grouped into counts engine-side). Each function shells the verb with `--json` and parses its NDJSON rows into typed records; distances and attribution are computed in the kernel, never re-derived here. Corpus policy is the verbs' own (the index corpus: non-binary files under the roots minus VCS/build subtrees) — see `contract/search_api.toml` `[irregex]`."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
-from .engine import DEFAULT_TIMEOUT, binary
+from .engine import DEFAULT_TIMEOUT, hydra_binary
 from .errors import GistNotFoundError, SearchFailedError
 
 
@@ -52,10 +52,10 @@ class PatternCount:
 
 
 def _run(argv: list[str], *, cwd: str | os.PathLike[str] | None, timeout: float) -> str:
-    """Run one irregex verb; NDJSON rows on stdout, diagnostics on stderr."""
+    """Run one hydra verb; NDJSON rows on stdout, diagnostics on stderr."""
     try:
         proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-            [binary(), *argv],
+            [hydra_binary(), *argv],
             capture_output=True,
             text=True,
             cwd=cwd,
@@ -66,10 +66,10 @@ def _run(argv: list[str], *, cwd: str | os.PathLike[str] | None, timeout: float)
     except FileNotFoundError as e:  # binary vanished between resolution and run
         raise GistNotFoundError(str(e)) from e
     except subprocess.TimeoutExpired as e:
-        msg = f"gist timed out after {timeout}s"
+        msg = f"hydra timed out after {timeout}s"
         raise SearchFailedError(msg) from e
     if proc.returncode != 0:
-        msg = proc.stderr.strip() or f"gist exited {proc.returncode}"
+        msg = proc.stderr.strip() or f"hydra exited {proc.returncode}"
         raise SearchFailedError(msg)
     return proc.stdout
 

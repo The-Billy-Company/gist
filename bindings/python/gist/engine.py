@@ -29,21 +29,21 @@ _UNSUPPORTED_MARKERS = (
 
 
 @functools.cache
-def binary() -> str:
-    """Absolute path to the `gist` binary. Resolution order: env `GIST_BIN`, then `gist` on PATH, then the repo's built `zig-out/bin/gist`. As an *in-repo* last resort — never in a distributed wheel — build the CLI once from source when the kernel's `build.zig` is present and `zig` is on PATH, so any repo consumer (a lint gate, `gen-verify`, an ad-hoc script) drives the engine without pre-installing it. A missing engine is **fail-closed** (`GistNotFoundError`), never a silent fallback to a second matcher."""
-    env = os.environ.get("GIST_BIN")
+def _resolve(name: str, env_var: str) -> str:
+    """Absolute path to one of the kernel's product binaries. Resolution order: the env override, then `name` on PATH, then the repo's built `zig-out/bin/<name>`. As an *in-repo* last resort — never in a distributed wheel — build the CLIs once from source when the kernel's `build.zig` is present and `zig` is on PATH, so any repo consumer (a lint gate, `gen-verify`, an ad-hoc script) drives the engine without pre-installing it. A missing engine is **fail-closed** (`GistNotFoundError`), never a silent fallback to a second matcher."""
+    env = os.environ.get(env_var)
     if env:
         p = Path(env).expanduser()
         if p.is_file():
             return str(p)
-        msg = f"GIST_BIN={env!r} is not a file"
+        msg = f"{env_var}={env!r} is not a file"
         raise GistNotFoundError(msg)
-    on_path = shutil.which("gist")
+    on_path = shutil.which(name)
     if on_path:
         return on_path
     # pkg/kernels/irregex/bindings/python/gist/engine.py → kernel root is parents[3]
     kernel = Path(__file__).resolve().parents[3]
-    built = kernel / "zig-out" / "bin" / "gist"
+    built = kernel / "zig-out" / "bin" / name
     if built.is_file():
         return str(built)
     # In-repo bootstrap: the kernel source (`build.zig`) is only present in the
@@ -53,10 +53,20 @@ def binary() -> str:
         if built.is_file():
             return str(built)
     msg = (
-        "no `gist` binary found — set GIST_BIN, put `gist` on PATH, "
+        f"no `{name}` binary found — set {env_var}, put `{name}` on PATH, "
         "or build it with `make install-gist`"
     )
     raise GistNotFoundError(msg)
+
+
+def binary() -> str:
+    """The `gist` binary (search face). Env override: `GIST_BIN`."""
+    return _resolve("gist", "GIST_BIN")
+
+
+def hydra_binary() -> str:
+    """The `hydra` binary (compression-search face: similar/dups/patterns). Env override: `HYDRA_BIN`."""
+    return _resolve("hydra", "HYDRA_BIN")
 
 
 def _build_cli(zig: str, kernel: Path) -> None:
