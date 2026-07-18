@@ -1,7 +1,7 @@
 {
-  "armed": false,
-  "watcher": "reconcile-always (FSEvents TODO \u2014 ADR-352)",
+  "armed": true,
+  "watcher": "FSEvents (recursive stream)",
   "platform": "Darwin arm64",
-  "geomean_speedup": 7.2,
+  "geomean_speedup": 474.3,
   "needles": 20
 }
