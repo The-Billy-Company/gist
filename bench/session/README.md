@@ -1,9 +1,9 @@
 <!--
 doc_radar:
   sentinels:
-    - file: pkg/kernels/gist/bench/session/session_baseline.json
+    - file: pkg/kernels/irregex/bench/session/session_baseline.json
       contains: ["armed_geomean_floor"]
-    - file: pkg/kernels/gist/bench/session/gate_session.py
+    - file: pkg/kernels/irregex/bench/session/gate_session.py
       contains: ["--committed", "--live", "report-only"]
 -->
 
@@ -62,7 +62,7 @@ on a quiescent tree and the number approaches the in-process ceiling; re-run
 | `session_meta.json`     | provenance the gate reads (`armed`, `watcher`, `platform`, `geomean_speedup`)                                     |
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 bench/session/certify_session.sh              # remeasure + republish (RUNS=8 WARMUP=2 default)
 python3 bench/session/gate_session.py         # committed floor (hermetic)
 GIST_BENCH=1 python3 bench/session/gate_session.py --live   # + live remeasure on this box

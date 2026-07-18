@@ -17,7 +17,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const gist = @import("gist");
+const gist = @import("irregex");
 const corpus_mod = gist.corpus;
 const simd = gist.simd;
 const pmu = @import("pmu.zig");
@@ -232,7 +232,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
 
     try writeArtifacts(gpa, io, &corpus, &meter, rows.items, mib, brand, qos);
     std.debug.print("\nwrote {s}/CERTIFICATE.md + certify.csv\n", .{out_dir});
-    if (!meter.has_pmu) std.debug.print("note: cycles NOT measured on this machine (no PMU) — the certificate says so. Re-run `sudo pkg/kernels/gist/zig-out/bin/gist-bench certify` from the repo root for measured cycles/byte.\n", .{});
+    if (!meter.has_pmu) std.debug.print("note: cycles NOT measured on this machine (no PMU) — the certificate says so. Re-run `sudo pkg/kernels/irregex/zig-out/bin/gist-bench certify` from the repo root for measured cycles/byte.\n", .{});
 }
 
 var cyc_buf: [32]u8 = undefined;
@@ -282,7 +282,7 @@ fn writeArtifacts(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mod.
     if (meter.has_pmu) {
         try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- cycles/byte provenance: **measured on this machine** ({s}, {s})\n", .{ brand, qos }));
     } else {
-        try md.appendSlice(gpa, "- cycles/byte provenance: **NOT measured on this machine** — cross-checked against Layer B's reference-core static bounds only. Re-run `sudo pkg/kernels/gist/zig-out/bin/gist-bench certify` (repo root) for the measured certificate.\n");
+        try md.appendSlice(gpa, "- cycles/byte provenance: **NOT measured on this machine** — cross-checked against Layer B's reference-core static bounds only. Re-run `sudo pkg/kernels/irregex/zig-out/bin/gist-bench certify` (repo root) for the measured certificate.\n");
     }
     try md.appendSlice(gpa, try std.fmt.bufPrint(&line, "- corpus: {d} files · {d:.1} MiB · {d} reps (+{d} warmup) · seeded bootstrap (10k)\n", .{ corpus.docs.len, mib, reps, warmup }));
     try md.appendSlice(gpa, "- method: each class times gist's **real** verify path single-threaded over the\n  RAM-resident corpus; `cyc/byte` = retired cycles ÷ candidate bytes crunched,\n  `IPC` = instructions ÷ cycles, `cand%` = fraction of the corpus the trigram\n  prefilter admits. Lower `median` / `cyc/byte` is better.\n\n");
@@ -295,7 +295,7 @@ fn writeArtifacts(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mod.
             r.class, r.files, r.cand_frac * 100.0, r.ns.median / 1e3, r.ns.ci_lo / 1e3, r.ns.ci_hi / 1e3, cyc, ipc, r.ns.outliers_mild + r.ns.outliers_severe,
         }));
     }
-    if (!meter.has_pmu) try md.appendSlice(gpa, "\n> ⚠ **cyc/byte + IPC are blank, not zero — NOT measured on this machine** (xnu\n> gates the PMU to root). Until a `sudo` run mints them, the cycles/byte claim\n> rests on the reference-core cross-check (Layer B) alone. Re-run\n> `sudo pkg/kernels/gist/zig-out/bin/gist-bench certify` from the repo root\n> for measured cycles + IPC.\n");
+    if (!meter.has_pmu) try md.appendSlice(gpa, "\n> ⚠ **cyc/byte + IPC are blank, not zero — NOT measured on this machine** (xnu\n> gates the PMU to root). Until a `sudo` run mints them, the cycles/byte claim\n> rests on the reference-core cross-check (Layer B) alone. Re-run\n> `sudo pkg/kernels/irregex/zig-out/bin/gist-bench certify` from the repo root\n> for measured cycles + IPC.\n");
     try md.appendSlice(gpa, "\n## Layer A — macroscopic dominance vs the field\n\n_Populated by `bench/certify.sh` (process-vs-process, bootstrap CI + Mann-Whitney)._\n");
     try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/CERTIFICATE.md", .data = md.items });
 }

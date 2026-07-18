@@ -28,7 +28,7 @@ altering _results_, not just skipping reads, which breaks gist's core safety
 claim.
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 bench/gates/index_elision_parity.sh
 ```
 
@@ -47,7 +47,7 @@ diff can't race), then runs `rg` over that identical snapshot and diffs:
 Both must be zero.
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 bench/gates/equality.sh 150 1      # gist ≡ rg over a byte-exact corpus snapshot, per needle
 ```
 
@@ -65,7 +65,7 @@ byte) and asserts `gist rg <pat>` is stdout + exit-code byte-identical to
 Runs once per engine (parallel `pipeline.zig` + serial `run.zig`).
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 bench/gates/unicode_parity.sh
 ```
 
@@ -88,7 +88,7 @@ doesn't cover it — this script is the companion oracle:
 Built ReleaseFast (release-vs-release with `rg`).
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 bench/gates/scan_regress.sh         # gate + race, default runs=12
 bench/gates/scan_regress.sh 20      # tighter timing
 ```
@@ -103,6 +103,6 @@ checked for (a) results present on stdout and (b) no diagnostic leaking onto
 stdout, with a distinct stderr budget for `--rank`'s timing line.
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 bench/gates/streams.sh
 ```

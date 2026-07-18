@@ -23,7 +23,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const gist = @import("gist");
+const gist = @import("irregex");
 const pmu = @import("pmu"); // bench/harness/pmu.zig, wired as a module in build.zig
 
 const corpus_mod = gist.corpus;

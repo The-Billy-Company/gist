@@ -7,11 +7,16 @@ Usage:  python3 dbg.py <name> [<name>…].
 import base64
 import contextlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 
+
+# gist caps its own output by default (agent-context guard); rg has no such cap,
+# so lift the soft ceiling for byte-exact side-by-side diffing. Hard OOM ceiling stays on.
+os.environ.setdefault("GIST_UNCAP", "1")
 
 HERE = Path(__file__).resolve().parent
 GIST = HERE.parents[1] / "zig-out" / "bin" / "gist"  # the CLI (`rg` verb), not the bench harness

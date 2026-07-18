@@ -69,7 +69,7 @@ zig build certify                       # or: gist-bench certify
 zig build lowerbound                    # → .local/gist-verify/lowerbound.csv
 
 # 3. splice the Layer D section into the certificate:
-python3 pkg/kernels/gist/bench/lowerbound/lowerbound_report.py \
+python3 pkg/kernels/irregex/bench/lowerbound/lowerbound_report.py \
     --csv .local/gist-verify/lowerbound.csv \
     --certificate .local/gist-verify/CERTIFICATE.md
 ```

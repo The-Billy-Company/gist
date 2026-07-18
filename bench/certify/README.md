@@ -28,7 +28,7 @@ alternation `panic|0x`) where the trigram prefilter admits _every_ file — the
 cases the competition is built to win.
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 RUNS=20 bench/certify/certify.sh        # default RUNS=20 WARMUP=3; raise RUNS to tighten CIs
 # publish a committed bundle (requires a clean git tree — or an isolated worktree):
 CERT_PUBLISH_DIR=bench/certify/artifact bash bench/certify/certify.sh

@@ -42,7 +42,7 @@ exact.
 ## How to run
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 zig build roofline                      # → .local/gist-verify/roofline.json
 bench/roofline/roofline_report.py       # splices Layer C into CERTIFICATE.md
 sudo zig build roofline && bench/roofline/roofline_report.py   # measured clock

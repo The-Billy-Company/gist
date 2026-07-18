@@ -315,8 +315,8 @@ mod rank_parse {
     // A captured `--rank` stdout block (rank.zig's exact
     // ` N. path:line  [kind]  ×count  snippet`; × is U+00D7).
     const SAMPLE: &str = concat!(
-        " 1. pkg/kernels/gist/bindings/rust/src/request.rs:33  [def]  \u{00d7}11  pub struct SearchRequest {\n",
-        " 2. pkg/kernels/gist/bindings/rust/tests/session.rs:15  [use]  \u{00d7}19  use gist::{SearchRequest};\n",
+        " 1. pkg/kernels/irregex/bindings/rust/src/request.rs:33  [def]  \u{00d7}11  pub struct SearchRequest {\n",
+        " 2. pkg/kernels/irregex/bindings/rust/tests/session.rs:15  [use]  \u{00d7}19  use gist::{SearchRequest};\n",
         " 3. services/backend/api/internal/pb/grpc/atelierpb/atelier.pb.go:2227  [gen]  \u{00d7}52  type SearchRequest struct {\n",
     );
 
@@ -327,7 +327,7 @@ mod rank_parse {
         assert_eq!(
             rows[0],
             Ranked {
-                path: "pkg/kernels/gist/bindings/rust/src/request.rs".to_owned(),
+                path: "pkg/kernels/irregex/bindings/rust/src/request.rs".to_owned(),
                 line_number: 33,
                 kind: RankKind::Def,
                 count: 11,

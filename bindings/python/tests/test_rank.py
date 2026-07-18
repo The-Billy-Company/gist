@@ -34,8 +34,8 @@ needs_gist = pytest.mark.skipif(not _binary_available(), reason="no gist binary"
 
 # A captured `--rank` stdout block (rank.zig's exact ` N. path:line  [kind]  <count>  snippet`).
 _SAMPLE = (
-    " 1. pkg/kernels/gist/bindings/rust/src/request.rs:33  [def]  \u00d711  pub struct SearchRequest {\n"
-    " 2. pkg/kernels/gist/bindings/rust/tests/session.rs:15  [use]  \u00d719  use gist::{SearchRequest};\n"
+    " 1. pkg/kernels/irregex/bindings/rust/src/request.rs:33  [def]  \u00d711  pub struct SearchRequest {\n"
+    " 2. pkg/kernels/irregex/bindings/rust/tests/session.rs:15  [use]  \u00d719  use gist::{SearchRequest};\n"
     " 3. services/backend/api/internal/pb/grpc/atelierpb/atelier.pb.go:2227  [gen]  \u00d752  type SearchRequest struct {\n"
 )
 
@@ -48,7 +48,7 @@ def test_parse_rank_reads_every_field() -> None:
     assert len(rows) == 3
     first = rows[0]
     assert first == Ranked(
-        path="pkg/kernels/gist/bindings/rust/src/request.rs",
+        path="pkg/kernels/irregex/bindings/rust/src/request.rs",
         line_number=33,
         kind=RankKind.DEF,
         count=11,

@@ -10,7 +10,7 @@
 //! code path, not a re-derivation of the probe, so a shared bug can't hide.
 
 const std = @import("std");
-const gist = @import("gist");
+const gist = @import("irregex");
 
 const simd_probe = @import("probes/simd_contains.zig");
 const dfa_probe = @import("probes/dfa_step.zig");

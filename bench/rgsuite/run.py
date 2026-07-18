@@ -46,6 +46,12 @@ GIST = HERE.parents[1] / "zig-out" / "bin" / "gist"  # …/gist/zig-out/bin — 
 RG = "rg"
 spec = json.loads((HERE / "spec.json").read_text())
 
+# gist's default soft output cap (the agent-context guard, corpus.zig) would clip
+# a high-hit case and diverge from ripgrep's uncapped output; this differential
+# oracle needs the full stream, so lift the soft cap for every gist child (both
+# engines inherit os.environ). The hard OOM ceiling stays on.
+os.environ.setdefault("GIST_UNCAP", "1")
+
 
 def materialize(rec, root: Path):
     """Perform materialize."""

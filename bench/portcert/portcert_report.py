@@ -65,9 +65,9 @@ MEASURED_HEADER = "### Layer B′ — port bound, measured on this machine"
 
 # The rung an operator climbs to mint the measured-on-this-machine bound.
 MEASURED_RUNG = (
-    "`cd pkg/kernels/gist && zig build -Doptimize=ReleaseFast portbound` "
+    "`cd pkg/kernels/irregex && zig build -Doptimize=ReleaseFast portbound` "
     "(wall-clock), then from the repo root "
-    "`sudo pkg/kernels/gist/zig-out/bin/gist-portbound` for cycles (xnu gates "
+    "`sudo pkg/kernels/irregex/zig-out/bin/gist-portbound` for cycles (xnu gates "
     "the PMU to root), then re-run `bench/portcert/portcert.sh` to splice."
 )
 

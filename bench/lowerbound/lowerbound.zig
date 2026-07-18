@@ -38,7 +38,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const gist = @import("gist");
+const gist = @import("irregex");
 
 const corpus_mod = gist.corpus;
 const simd = gist.simd;
@@ -312,7 +312,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
 
     try writeCsv(gpa, io, &corpus, rows.items);
     std.debug.print("\nwrote {s}/lowerbound.csv\n", .{out_dir});
-    std.debug.print("run: python3 pkg/kernels/gist/bench/lowerbound/lowerbound_report.py --certificate {s}/CERTIFICATE.md --csv {s}/lowerbound.csv\n", .{ out_dir, out_dir });
+    std.debug.print("run: python3 pkg/kernels/irregex/bench/lowerbound/lowerbound_report.py --certificate {s}/CERTIFICATE.md --csv {s}/lowerbound.csv\n", .{ out_dir, out_dir });
 
     if (violations > 0) {
         std.debug.print("\nFAILED: {d} floor invariant violation(s) — gist read more than the Ω(candidate-bytes) one-pass floor, or the single-pass reference disagreed with production. Investigate; do NOT weaken the assertion.\n", .{violations});

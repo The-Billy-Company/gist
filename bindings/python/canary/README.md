@@ -10,7 +10,7 @@ synthetic stand-in): the one marker-discovery `ripgrep_files` pass plus every
 `still_here` count pin declared across all ADRs.
 
 ```bash
-# from pkg/kernels/gist/bindings/python
+# from pkg/kernels/irregex/bindings/python
 uv run --with pyyaml python -m canary.doc_radar          # human summary
 uv run --with pyyaml python -m canary.doc_radar --json   # machine evidence
 ```

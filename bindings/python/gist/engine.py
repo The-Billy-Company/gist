@@ -41,7 +41,7 @@ def binary() -> str:
     on_path = shutil.which("gist")
     if on_path:
         return on_path
-    # pkg/kernels/gist/bindings/python/gist/engine.py → kernel root is parents[3]
+    # pkg/kernels/irregex/bindings/python/gist/engine.py → kernel root is parents[3]
     kernel = Path(__file__).resolve().parents[3]
     built = kernel / "zig-out" / "bin" / "gist"
     if built.is_file():

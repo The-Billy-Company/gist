@@ -17,7 +17,7 @@
 //! run step sets cwd to the repo root so dir + output paths resolve there.
 
 const std = @import("std");
-const gist = @import("gist");
+const gist = @import("irregex");
 const verify = gist.verify; // data-parallel candidate verify (scan/verify.zig)
 const simd = gist.simd; // SIMD substring `contains` (scan/simd.zig)
 const certify = @import("certify.zig");

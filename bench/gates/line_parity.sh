@@ -22,6 +22,10 @@
 #           an unexpected exact match is flagged as "promotable".
 set -uo pipefail
 
+# gist's default soft output cap (the agent-context guard) would clip a big line
+# class and break the byte-for-byte rg oracle; lift it (hard OOM ceiling stays on).
+export GIST_UNCAP=1
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 KERNEL="$(cd "${HERE}/../.." && pwd)"
 GIST="${GIST:-${KERNEL}/zig-out/bin/gist}"

@@ -23,5 +23,5 @@ the same certified `gist` binary, so both faces prove parity against one engine.
   `rank` reads it back with the engine's own classification.
 
 ```bash
-cd pkg/kernels/gist/bindings/rust && cargo test        # skips cleanly without gist/rg
+cd pkg/kernels/irregex/bindings/rust && cargo test        # skips cleanly without gist/rg
 ```

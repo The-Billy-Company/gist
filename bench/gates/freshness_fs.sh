@@ -12,6 +12,10 @@
 # mtime, same-size overwrite, an exact anchor boundary, and traversal failure.
 set -uo pipefail
 
+# Lift gist's default soft output cap so a large `-l` set can't clip the rg
+# oracle comparison (the hard OOM ceiling stays on).
+export GIST_UNCAP=1
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 KERNEL="$(cd "${HERE}/../.." && pwd)"
 command -v rg > /dev/null || {

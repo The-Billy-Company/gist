@@ -42,12 +42,17 @@ import time
 
 
 HERE = Path(__file__).resolve().parent
-KERNEL = HERE.parents[1]  # bench/rgsuite -> pkg/kernels/gist
+KERNEL = HERE.parents[1]  # bench/rgsuite -> pkg/kernels/irregex
 REPO = HERE.parents[4]  # -> repo root
 FIX = Path()  # temp fixture root, set in main()
 
 RG = os.environ.get("RG_BIN", "rg")
 GIST = ""  # resolved in main()
+
+# gist caps its own output by default (agent-context guard); rg has no such cap,
+# so lift the soft ceiling for byte-exact parity (children inherit os.environ).
+# The hard OOM ceiling stays on.
+os.environ.setdefault("GIST_UNCAP", "1")
 
 # Fixture file set: created in lexicographic order (so birthtime order == path
 # order) but with modified/accessed stamps shuffled into distinct non-path

@@ -198,8 +198,8 @@ if [[ -f "${OUT}/portbound.json" ]]; then
 else
   cat << 'EOF'
 Layer B′ (measured on this machine): not yet run. Mint it with
-  (cd pkg/kernels/gist && zig build -Doptimize=ReleaseFast portbound)  # wall-clock
-  sudo pkg/kernels/gist/zig-out/bin/gist-portbound                     # cycles (kpc is root-gated; run from repo root)
+  (cd pkg/kernels/irregex && zig build -Doptimize=ReleaseFast portbound)  # wall-clock
+  sudo pkg/kernels/irregex/zig-out/bin/gist-portbound                     # cycles (kpc is root-gated; run from repo root)
 then re-run this script to splice the measured subsection.
 EOF
 fi

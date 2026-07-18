@@ -1,7 +1,7 @@
 ---
 doc_radar:
   sentinels:
-    - file: pkg/kernels/gist/contract/search_api.toml
+    - file: pkg/kernels/irregex/contract/search_api.toml
       contains: ["engine =", "multiline =", "unicode ="]
       description: The documented matcher controls remain canonical request options.
 ---
@@ -155,8 +155,8 @@ reconnect, daemon restart, or index publication is visible through
 When the host process already holds the shared library and `cffi` (e.g. the AI
 service, which depends on `cffi` via the sibling kernels), a `Session`
 transparently serves eligible queries **in-process** over the
-`gist_open`/`gist_search`/`gist_close` C ABI (`gist/_ffi.py` over
-`libgist.{dylib,so}`) — no subprocess, no socket. Unlike the UDS transport
+`irregex_open`/`irregex_search`/`irregex_close` C ABI (`gist/_ffi.py` over
+`libirregex.{dylib,so}`) — no subprocess, no socket. Unlike the UDS transport
 (files/count only), it streams full `Match` records, so `Session.run` gains a
 warm path for the first time; `files`/`count`/`absent` prefer it too. Its answer
 is byte-identical to the cold `gist --json` stream (records, `-l`, `-c` — a line
@@ -165,7 +165,7 @@ with repeated hits still counts once), proven by `tests/test_ffi_parity.py`.
 `cffi` is **never required**: `_ffi` fails open to the UDS daemon, then the cold
 subprocess, when the library or `cffi` is absent — so the shipped wheel stays
 pure-Python and dependency-free. Opt out with `GIST_NO_FFI`; point at a specific
-library with `GIST_LIB`. A bad pattern surfaces as a decline (`GIST_STALE`), so
+library with `GIST_LIB`. A bad pattern surfaces as a decline (`IRREGEX_STALE`), so
 the in-process path can never abort the host — the property rung 3 gated on.
 
 A batch caller need not manage the daemon itself: `gist.opening_session()`

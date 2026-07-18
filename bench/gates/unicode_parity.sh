@@ -16,6 +16,10 @@
 # GIST_NO_PARALLEL knob) since Unicode lowering flows through both.
 set -uo pipefail
 
+# Lift gist's default soft output cap so a match-dense fixture can't clip the
+# byte-for-byte rg oracle (the hard OOM ceiling stays on).
+export GIST_UNCAP=1
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 KERNEL="$(cd "${HERE}/../.." && pwd)"
 GIST="${GIST:-${KERNEL}/zig-out/bin/gist}"

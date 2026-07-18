@@ -22,7 +22,7 @@
 #     We measure and label whatever THIS platform delivers, and the latency gate
 #     (`gate_session.py`) enforces a floor ONLY on the armed path.
 #
-# Usage:  cd pkg/kernels/gist && bench/session/certify_session.sh
+# Usage:  cd pkg/kernels/irregex && bench/session/certify_session.sh
 #         RUNS=12 WARMUP=3 bench/session/certify_session.sh   # tune rg timing
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"

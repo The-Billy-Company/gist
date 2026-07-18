@@ -20,8 +20,11 @@
 #
 # Usage: bench/gates/index_elision_parity.sh
 set -uo pipefail
+# Lift gist's default soft output cap so the auto-index vs --no-index diff sees
+# identical full output (the hard OOM ceiling stays on).
+export GIST_UNCAP=1
 HERE="$(cd "$(dirname "$0")" && pwd)"
-KERNEL="$(cd "${HERE}/../.." && pwd)" # pkg/kernels/gist
+KERNEL="$(cd "${HERE}/../.." && pwd)" # pkg/kernels/irregex
 
 echo "building gist (ReleaseFast)…"
 (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || {

@@ -40,7 +40,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const gist = @import("gist");
+const gist = @import("irregex");
 const pmu = @import("pmu"); // bench/harness/pmu.zig, wired as a module in build.zig
 
 const simd_probe = @import("probes/simd_contains.zig");
@@ -253,7 +253,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
     std.debug.print("\nwrote {s}/portbound.json — re-run bench/portcert/portcert.sh to splice Layer B′ into CERTIFICATE.md\n", .{out_dir});
     if (!meter.has_pmu) {
         std.debug.print("note: cycles NOT measured on this machine (PMU needs root) — the artifact says so.\n", .{});
-        std.debug.print("      Re-run `sudo pkg/kernels/gist/zig-out/bin/gist-portbound` from the repo root for the measured bound.\n", .{});
+        std.debug.print("      Re-run `sudo pkg/kernels/irregex/zig-out/bin/gist-portbound` from the repo root for the measured bound.\n", .{});
     }
 }
 

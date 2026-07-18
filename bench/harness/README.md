@@ -2,10 +2,10 @@
 doc_radar:
   sentinels:
     - description: "PMU state is a first-class, fail-closed certificate fact with host provenance"
-      file: pkg/kernels/gist/bench/harness/certify.zig
+      file: pkg/kernels/irregex/bench/harness/certify.zig
       contains: ["NOT measured on this machine", "cpuBrand", "requestPerformanceQos"]
     - description: "pmu.zig carries the provenance primitives the layers stamp"
-      file: pkg/kernels/gist/bench/harness/pmu.zig
+      file: pkg/kernels/irregex/bench/harness/pmu.zig
       contains: ["pub fn cpuBrand", "pub fn requestPerformanceQos"]
 ---
 
@@ -35,7 +35,7 @@ guaranteed miss, repeated-char pathological, cross-language keywords) + 30
 regex shapes spanning every feature tier.
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 zig build -Doptimize=ReleaseFast bench                  # default Billy source roots
 zig build -Doptimize=ReleaseFast bench -- services libs  # scope to specific dirs
 ```
@@ -69,7 +69,7 @@ command. Blank cyc/byte columns can never be mistaken for measured-but-small,
 and wall-clock is never dressed up as cycles.
 
 ```bash
-sudo pkg/kernels/gist/zig-out/bin/gist-bench certify   # cycles/byte (run from repo root)
+sudo pkg/kernels/irregex/zig-out/bin/gist-bench certify   # cycles/byte (run from repo root)
 zig build certify                                        # wall-clock fallback (no sudo)
 ```
 

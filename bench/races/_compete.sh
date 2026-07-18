@@ -42,6 +42,12 @@
 #   csearch: go install github.com/google/codesearch/cmd/{cindex,csearch}@latest
 #   zoekt:   go install github.com/sourcegraph/zoekt/cmd/{zoekt-index,zoekt}@latest
 
+# gist's default output budget (the ~25k-token agent-context guard) would clip a
+# repo-wide result and perturb the ripgrep oracle; every race/gate here diffs or
+# times gist against rg's uncapped output, so lift the soft cap process-wide. The
+# hard OOM ceiling stays on. (corpus.zig::initOutputBudget honors this env.)
+export GIST_UNCAP=1
+
 # ── locations ────────────────────────────────────────────────────────────────
 COMPETE_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KERNEL="$(cd "${COMPETE_HERE}/../.." && pwd)" # races/ → bench/ → gist root

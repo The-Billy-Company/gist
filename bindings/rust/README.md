@@ -120,7 +120,7 @@ links **no** native archive — it drives a process — so it needs neither
 dragging the workspace graph along.
 
 ```bash
-cd pkg/kernels/gist/bindings/rust
+cd pkg/kernels/irregex/bindings/rust
 cargo test           # behavioral + rg-parity (skips cleanly without gist/rg)
 cargo clippy         # -D warnings clean
 ```

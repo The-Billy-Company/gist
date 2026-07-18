@@ -1,6 +1,6 @@
 """In-process FFI transport parity (ADR-352 rung 3).
 
-Proves the cffi transport (`gist/_ffi.py` over `libgist`) is byte-identical to
+Proves the cffi transport (`gist/_ffi.py` over `libirregex`) is byte-identical to
 the certified cold subprocess — same `run`/`files`/`count` answers, same record
 ORDER, same submatch offsets — and that it reconciles writes (read-your-writes)
 and declines an unsupported pattern to cold instead of aborting. Since the cold
@@ -22,7 +22,7 @@ from gist import _ffi, engine
 from gist.request import SearchRequest
 
 
-pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libgist/cffi unavailable")
+pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirregex/cffi unavailable")
 
 
 @pytest.fixture
@@ -80,7 +80,7 @@ def test_abi_version_parity() -> None:
     loaded = _ffi._load()
     assert loaded is not None
     _ffi_mod, lib = loaded
-    assert lib.gist_abi_version() == _ffi._ABI_VERSION
+    assert lib.irregex_abi_version() == _ffi._ABI_VERSION
 
 
 def test_read_your_writes(corpus) -> None:
@@ -104,7 +104,7 @@ def test_deletion_is_reconciled(corpus) -> None:
 
 
 def test_unsupported_pattern_declines_to_cold(corpus) -> None:
-    # A pattern outside gist's linear-time syntax → GIST_STALE → None (the caller
+    # A pattern outside gist's linear-time syntax → IRREGEX_STALE → None (the caller
     # answers cold), never a crashed host. This is the property ADR-352 gated on.
     assert _ffi.run(SearchRequest(pattern=r"(?=lookahead)"), cwd=None) is None
     # The Session fails open: it still returns the cold answer for such a pattern.

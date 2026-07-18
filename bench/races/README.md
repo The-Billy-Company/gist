@@ -38,7 +38,7 @@ speedup and win-rate per tool**, split indexed vs unindexed. Raw rows land in
 `.local/gist-compete/{cold,regex,warm}.csv`.
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 bench/races/headtohead.sh          # WARM: gist resident p50 vs the unindexed scanners
 bench/races/coldquery.sh           # COLD literal: gist vs csearch/zoekt + rg/ugrep/ag/ggrep/git-grep
 bench/races/regex_headtohead.sh    # COLD regex: same field, per feature tier

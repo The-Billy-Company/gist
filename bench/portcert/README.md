@@ -2,13 +2,13 @@
 doc_radar:
   sentinels:
     - description: "the Layer B′ measured runner is wired as a build step + installed exe"
-      file: pkg/kernels/gist/build.zig
+      file: pkg/kernels/irregex/build.zig
       contains: ['b.step("portbound"', '.name = "gist-portbound"']
     - description: "portcert.sh splices the measured subsection and names the sudo rung"
-      file: pkg/kernels/gist/bench/portcert/portcert.sh
-      contains: ["portbound.json", "sudo pkg/kernels/gist/zig-out/bin/gist-portbound"]
+      file: pkg/kernels/irregex/bench/portcert/portcert.sh
+      contains: ["portbound.json", "sudo pkg/kernels/irregex/zig-out/bin/gist-portbound"]
     - description: "the splicer fail-closed labels cycles when not measured here"
-      file: pkg/kernels/gist/bench/portcert/portcert_report.py
+      file: pkg/kernels/irregex/bench/portcert/portcert_report.py
       contains: "NOT measured on this "
 ---
 
@@ -94,15 +94,15 @@ frequency.
 ## How to run
 
 ```bash
-cd pkg/kernels/gist
+cd pkg/kernels/irregex
 bench/portcert/portcert.sh              # static leg: portcert.csv/.json + splice Layer B (+B′ if present)
 ITERS=200 bench/portcert/portcert.sh    # more llvm-mca simulation iterations
 
 # Layer B′ — measured on this machine:
 zig build -Doptimize=ReleaseFast portbound         # wall-clock only (labels cycles NOT measured)
 cd ../../..                                        # the binary resolves .local/ at the CWD — run from repo root
-sudo pkg/kernels/gist/zig-out/bin/gist-portbound  # measured cycles (kpc is root-gated)
-pkg/kernels/gist/bench/portcert/portcert.sh       # re-splice: the measured subsection lands in the cert
+sudo pkg/kernels/irregex/zig-out/bin/gist-portbound  # measured cycles (kpc is root-gated)
+pkg/kernels/irregex/bench/portcert/portcert.sh       # re-splice: the measured subsection lands in the cert
 ```
 
 Install `llvm-mca` opt-in with `brew install llvm` (lands at

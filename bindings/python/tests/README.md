@@ -17,5 +17,5 @@
   the engine's own classification.
 
 ```bash
-cd pkg/kernels/gist/bindings/python && uv run pytest        # or: python -m pytest
+cd pkg/kernels/irregex/bindings/python && uv run pytest        # or: python -m pytest
 ```
