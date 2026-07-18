@@ -78,6 +78,35 @@ def _rows(stdout: str) -> list[dict[str, object]]:
     return [json.loads(line) for line in stdout.splitlines() if line]
 
 
+def _field_str(row: dict[str, object], key: str) -> str:
+    match row.get(key):
+        case str(value):
+            return value
+        case _:
+            msg = f"hydra row missing string {key!r}"
+            raise SearchFailedError(msg)
+
+
+def _field_int(row: dict[str, object], key: str) -> int:
+    match row.get(key):
+        case int(value):
+            return value
+        case float(value):
+            return int(value)
+        case _:
+            msg = f"hydra row missing integer {key!r}"
+            raise SearchFailedError(msg)
+
+
+def _field_float(row: dict[str, object], key: str) -> float:
+    match row.get(key):
+        case int(value) | float(value):
+            return float(value)
+        case _:
+            msg = f"hydra row missing number {key!r}"
+            raise SearchFailedError(msg)
+
+
 def similar(
     path: str | os.PathLike[str],
     *,
@@ -89,7 +118,7 @@ def similar(
     """The `top` nearest files to `path` by compression kinship, ascending distance (the target itself excluded)."""
     argv = ["similar", os.fspath(path), "--top", str(top), "--json", *roots]
     return [
-        Similar(path=str(r["path"]), distance=float(r["distance"]))  # type: ignore[arg-type]
+        Similar(path=_field_str(r, "path"), distance=_field_float(r, "distance"))
         for r in _rows(_run(argv, cwd=cwd, timeout=timeout))
     ]
 
@@ -105,7 +134,11 @@ def dups(
     """Near-duplicate pairs across the corpus at distance ≤ `max_distance`, closest first."""
     argv = ["dups", "--max-distance", str(max_distance), "--top", str(top), "--json", *roots]
     return [
-        DupPair(a=str(r["a"]), b=str(r["b"]), distance=float(r["distance"]))  # type: ignore[arg-type]
+        DupPair(
+            a=_field_str(r, "a"),
+            b=_field_str(r, "b"),
+            distance=_field_float(r, "distance"),
+        )
         for r in _rows(_run(argv, cwd=cwd, timeout=timeout))
     ]
 
@@ -125,10 +158,10 @@ def patterns(
     argv = ["patterns", *_pattern_argv(specs, fixed, ignore_case, under, top), "--json", *roots]
     return [
         PatternHit(
-            path=str(r["path"]),
-            line=int(r["line"]),  # type: ignore[arg-type]
-            pattern_id=int(r["pattern_id"]),  # type: ignore[arg-type]
-            pattern=str(r["pattern"]),
+            path=_field_str(r, "path"),
+            line=_field_int(r, "line"),
+            pattern_id=_field_int(r, "pattern_id"),
+            pattern=_field_str(r, "pattern"),
         )
         for r in _rows(_run(argv, cwd=cwd, timeout=timeout))
     ]
@@ -156,7 +189,7 @@ def pattern_counts(
         *roots,
     ]
     return [
-        PatternCount(label=str(r["label"]), count=int(r["count"]))  # type: ignore[arg-type]
+        PatternCount(label=_field_str(r, "label"), count=_field_int(r, "count"))
         for r in _rows(_run(argv, cwd=cwd, timeout=timeout))
     ]
 

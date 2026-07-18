@@ -31,11 +31,11 @@ keeps its own fatal shell; this path does not touch it.
 
 ## Shape
 
-| Symbol                                         | Role                                                                                                                                               |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `irregex_open(roots, nroots, out)`                | Stand up a warm session (its own `std.Io.Threaded` I/O + corpus + index).                                                                          |
+| Symbol                                            | Role                                                                                                                                                        |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `irregex_open(roots, nroots, out)`                | Stand up a warm session (its own `std.Io.Threaded` I/O + corpus + index).                                                                                   |
 | `irregex_search(s, pattern, len, flags, cb, ctx)` | Stream one `irregex_match` per matching line to `cb` (which returns 0 to continue / non-zero to stop early); returns `IRREGEX_MATCH`/`IRREGEX_OK`/negative. |
-| `irregex_close(s)`                                | Tear down the corpus, index, I/O pool, and handle.                                                                                                 |
+| `irregex_close(s)`                                | Tear down the corpus, index, I/O pool, and handle.                                                                                                          |
 
 The three `export fn` shims live in `../root.zig` (the ABI's single export
 surface); `session.zig` owns the handle, the `Match`/`Submatch` `extern`
