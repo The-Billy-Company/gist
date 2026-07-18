@@ -60,7 +60,11 @@ def readme_counts(readme_path: Path) -> tuple[dict[str, int], tuple[int, int, fl
 def main() -> int:
     """CLI entry point."""
     ap = argparse.ArgumentParser()
-    ap.add_argument("--allow-fail", action="store_true", help="tolerate FAIL > 0 (still requires every FAIL to be documented)")
+    ap.add_argument(
+        "--allow-fail",
+        action="store_true",
+        help="tolerate FAIL > 0 (still requires every FAIL to be documented)",
+    )
     ap.add_argument("--results", type=Path, default=HERE / "results.json")
     ap.add_argument("--readme", type=Path, default=HERE / "README.md")
     args = ap.parse_args()
@@ -91,12 +95,18 @@ def main() -> int:
         if abs(rpct - pct) > 0.1:
             problems.append(f"README parity {rpct}% != computed {pct}%")
 
-    undocumented = [r["name"] for r in rows if r.get("bucket") == "FAIL" and not (r.get("detail") or "").strip()]
+    undocumented = [
+        r["name"] for r in rows if r.get("bucket") == "FAIL" and not (r.get("detail") or "").strip()
+    ]
     if undocumented:
-        problems.append(f"{len(undocumented)} FAIL case(s) have an empty/null detail (document the divergence or reclassify NA): {', '.join(undocumented)}")
+        problems.append(
+            f"{len(undocumented)} FAIL case(s) have an empty/null detail (document the divergence or reclassify NA): {', '.join(undocumented)}"
+        )
 
     if counts["FAIL"] > 0 and not args.allow_fail:
-        problems.append(f"{counts['FAIL']} FAIL case(s) present (supported-surface is not zero-FAIL) — fix, reclassify NA, or pass --allow-fail")
+        problems.append(
+            f"{counts['FAIL']} FAIL case(s) present (supported-surface is not zero-FAIL) — fix, reclassify NA, or pass --allow-fail"
+        )
 
     if problems:
         print("\nFAIL:")

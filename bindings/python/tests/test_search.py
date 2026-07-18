@@ -15,8 +15,8 @@ import subprocess
 import pytest
 
 import gist
-from gist.errors import UnsupportedPatternError
 from gist.engine import _parse_json
+from gist.errors import UnsupportedPatternError
 from gist.request import MatchKind, SearchEngine, SearchRequest
 
 
@@ -137,12 +137,12 @@ def test_full_structured_match_parity_with_ripgrep(corpus) -> None:
     )
     assert proc.returncode == 0, proc.stderr
     rg_matches = _parse_json(proc.stdout)
-    normalized = sorted([
-        replace(match, path=match.path.removeprefix("./"))
-        for match in gist_matches
-    ], key=lambda match: (match.path, match.line_number, match.kind, match.text))
-    oracle = sorted([
-        replace(match, path=match.path.removeprefix("./"))
-        for match in rg_matches
-    ], key=lambda match: (match.path, match.line_number, match.kind, match.text))
+    normalized = sorted(
+        [replace(match, path=match.path.removeprefix("./")) for match in gist_matches],
+        key=lambda match: (match.path, match.line_number, match.kind, match.text),
+    )
+    oracle = sorted(
+        [replace(match, path=match.path.removeprefix("./")) for match in rg_matches],
+        key=lambda match: (match.path, match.line_number, match.kind, match.text),
+    )
     assert normalized == oracle

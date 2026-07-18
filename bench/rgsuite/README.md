@@ -24,13 +24,13 @@ code path, and a single-engine run has already once missed a real regression
 `rg 15.1.0`, 441 mined `rgtest!` cases (invocations; a multi-command `rgtest!`
 mines one case per command), replayed against **both** engines:
 
-| Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                  |
-| --------- | ------------------------: | -----------------: | ------------------------------------------------------------------------ |
+| Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                     |
+| --------- | ------------------------: | -----------------: | --------------------------------------------------------------------------- |
 | **PASS**  |                       306 |                306 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below) |
-| **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole  |
-| **FAIL**  |                         0 |                  0 | a supported-surface divergence (a real bug)                              |
-| NA        |                        14 |                 14 | unsupported **by design** (see boundaries below)                         |
-| SKIP      |                       121 |                121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal) |
+| **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole    |
+| **FAIL**  |                         0 |                  0 | a supported-surface divergence (a real bug)                                 |
+| NA        |                        14 |                 14 | unsupported **by design** (see boundaries below)                            |
+| SKIP      |                       121 |                121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal)    |
 
 **Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 306/306 = 100.0%
 on both engines — genuinely zero-FAIL, zero-ORDER**, not just on whichever

@@ -146,8 +146,9 @@ def _strip_ansi(b: bytes) -> bytes:
 
 
 def _uses_color(rec) -> bool:
-    return any(a in ("--color", "--colors") or a.startswith(("--color=", "--colors="))
-               for a in rec["argv"])
+    return any(
+        a in ("--color", "--colors") or a.startswith(("--color=", "--colors=")) for a in rec["argv"]
+    )
 
 
 def score(rec, engine_env=None):
@@ -222,8 +223,12 @@ def score(rec, engine_env=None):
         return "NA", "rg-sorted superset registry by design (scope/types.zig)"
     if _uses_color(rec) and _strip_ansi(out_g) == _strip_ansi(out_rg):
         return "NA", "own color palette by design (color.zig)"
-    if _uses_color(rec) and "--crlf" in rec["argv"] and \
-            _strip_ansi(out_g).replace(b"\r\n", b"\n") == _strip_ansi(out_rg).replace(b"\r\n", b"\n"):
+    if (
+        _uses_color(rec)
+        and "--crlf" in rec["argv"]
+        and _strip_ansi(out_g).replace(b"\r\n", b"\n")
+        == _strip_ansi(out_rg).replace(b"\r\n", b"\n")
+    ):
         return "NA", "ripgrep --crlf+color \\r artifact not replicated (matches rg plain)"
     return "FAIL", None
 
@@ -242,12 +247,20 @@ _ENGINES = [("parallel", None), ("serial", {"GIST_NO_PARALLEL": "1"})]
 
 def _run_engine(engine_env):
     from collections import Counter
+
     buckets, fails, nas, results = Counter(), [], [], []
     for rec in spec:
         b, detail = score(rec, engine_env)
         buckets[b] += 1
-        results.append({"name": rec["name"], "file": rec["file"], "bucket": b,
-                        "argv": rec["argv"], "detail": detail})
+        results.append(
+            {
+                "name": rec["name"],
+                "file": rec["file"],
+                "bucket": b,
+                "argv": rec["argv"],
+                "detail": detail,
+            }
+        )
         if b == "FAIL":
             fails.append(rec)
         elif b == "NA":
@@ -274,7 +287,9 @@ def main():
         inscope = buckets["PASS"] + buckets["ORDER"] + buckets["FAIL"]
         if inscope:
             pct = 100 * (buckets["PASS"] + buckets["ORDER"]) / inscope
-            print(f"\nsupported-surface parity [{label}]: {buckets['PASS']+buckets['ORDER']}/{inscope} = {pct:.1f}%")
+            print(
+                f"\nsupported-surface parity [{label}]: {buckets['PASS'] + buckets['ORDER']}/{inscope} = {pct:.1f}%"
+            )
         if fails:
             any_fails = True
             print(f"\n=== {len(fails)} FAILs [{label}] ===")

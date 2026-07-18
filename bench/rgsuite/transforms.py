@@ -35,22 +35,24 @@ Subcommands:
   run   [--engine both|parallel|serial]        differential parity vs rg
   bench [--floor-rg N] [--floor-parallel N]    -z pipeline-vs-serial-vs-rg speed
 """
+
 from __future__ import annotations
 
 import argparse
 import atexit
 import bz2
+from collections.abc import Callable
+from dataclasses import dataclass, field
 import gzip
 import lzma
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from pathlib import Path
+
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[1]  # bench/rgsuite -> pkg/kernels/gist
@@ -76,8 +78,13 @@ _CJK_FIXTURES: dict[str, tuple[str, str]] = {
     "euckr.txt": ("cp949", "needle 한국어\nplain filler\nanother needle 서울\n"),
 }
 # fixture stem -> the `-E` label handed to gist AND rg (encoding_rs canonical).
-_CJK_LABELS = {"sjis": "shift_jis", "eucjp": "euc-jp", "gbk": "gbk",
-               "big5": "big5", "euckr": "euc-kr"}
+_CJK_LABELS = {
+    "sjis": "shift_jis",
+    "eucjp": "euc-jp",
+    "gbk": "gbk",
+    "big5": "big5",
+    "euckr": "euc-kr",
+}
 
 # `-z` container formats. The stdlib trio is always minted; the rest are written
 # only when their system encoder exists (rg and gist both read all six).
@@ -99,12 +106,18 @@ def _find_gist() -> str:
     if env := os.environ.get("GIST_BIN"):
         return env
     out = KERNEL / "zig-out" / "bin" / "gist"
-    subprocess.run(["zig", "build", "-Doptimize=ReleaseFast"], cwd=KERNEL, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    subprocess.run(
+        ["zig", "build", "-Doptimize=ReleaseFast"],
+        cwd=KERNEL,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
     if out.exists():
         return str(out)
-    cands = sorted(KERNEL.glob(".zig-cache/o/*/gist"),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
+    cands = sorted(
+        KERNEL.glob(".zig-cache/o/*/gist"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
     if not cands:
         sys.exit("no gist binary found after `zig build`")
     return str(cands[0])
@@ -112,21 +125,30 @@ def _find_gist() -> str:
 
 # ───────────────────────── process runner ─────────────────────────
 
+
 @dataclass
 class Out:
     """One command run: exit code and captured stdout bytes."""
+
     rc: int
     data: bytes
 
 
 def run(bin_: str, args: list[str], cwd: Path, env: dict[str, str] | None = None) -> Out:
     """Run `bin_ args` in `cwd` (stderr suppressed), capturing stdout + rc."""
-    p = subprocess.run([bin_, *args], cwd=str(cwd), env=env,
-                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=90)
+    p = subprocess.run(
+        [bin_, *args],
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=90,
+    )
     return Out(p.returncode, p.stdout)
 
 
 # ───────────────────────── fixtures ─────────────────────────
+
 
 def _avail_codecs() -> dict[str, Callable[[bytes], bytes] | list[str]]:
     """The container formats writable on this host: stdlib trio + any present tools."""
@@ -154,7 +176,9 @@ def gen_fixtures(root: Path) -> list[str]:
     for ext, codec in _avail_codecs().items():
         dst = zip_dir / f"doc.txt.{ext}"
         if isinstance(codec, list):  # external tool: stdin → stdout → file
-            blob = subprocess.run([*codec, "-c"], input=raw, stdout=subprocess.PIPE, check=True).stdout
+            blob = subprocess.run(
+                [*codec, "-c"], input=raw, stdout=subprocess.PIPE, check=True
+            ).stdout
             dst.write_bytes(blob)
         else:
             dst.write_bytes(codec(raw))
@@ -189,7 +213,7 @@ def gen_fixtures(root: Path) -> list[str]:
     (pre / "doc.txt.gz").write_bytes(gzip.compress(raw, mtime=0))
     (pre / "plain.txt").write_bytes(raw)
     script = pre / "decompress.sh"
-    script.write_text("#!/bin/sh\nexec gzip -dc \"$1\"\n")
+    script.write_text('#!/bin/sh\nexec gzip -dc "$1"\n')
     script.chmod(0o755)
 
     return exts
@@ -197,9 +221,11 @@ def gen_fixtures(root: Path) -> list[str]:
 
 # ───────────────────────── case matrix ─────────────────────────
 
+
 @dataclass
 class Case:
     """One differential case: gist argv, the rg oracle argv, cwd + comparison knobs."""
+
     name: str
     gist_args: list[str]
     rg_args: list[str]
@@ -218,22 +244,45 @@ def _cases(exts: list[str]) -> list[Case]:
         f = f"zip/doc.txt.{ext}"
         cs.append(Case(f"zip:{ext}", ["-z", *n, f], ["-z", *n, f], FIX))
     # -z over a directory walk (set-equality; both must decode every member)
-    cs.append(Case("zip:walk", ["-z", "-l", "needle", "zip"],
-                   ["-z", "-l", "needle", "zip"], FIX, sort_lines=True))
+    cs.append(
+        Case(
+            "zip:walk",
+            ["-z", "-l", "needle", "zip"],
+            ["-z", "-l", "needle", "zip"],
+            FIX,
+            sort_lines=True,
+        )
+    )
 
     # ── -E: rg is the oracle for every transcode ──
     cs += [
-        Case("enc:u16le", ["-E", "utf-16le", *n, "enc/u16le.txt"],
-             ["-E", "utf-16le", *n, "enc/u16le.txt"], FIX),
-        Case("enc:u16be", ["-E", "utf-16be", *n, "enc/u16be.txt"],
-             ["-E", "utf-16be", *n, "enc/u16be.txt"], FIX),
+        Case(
+            "enc:u16le",
+            ["-E", "utf-16le", *n, "enc/u16le.txt"],
+            ["-E", "utf-16le", *n, "enc/u16le.txt"],
+            FIX,
+        ),
+        Case(
+            "enc:u16be",
+            ["-E", "utf-16be", *n, "enc/u16be.txt"],
+            ["-E", "utf-16be", *n, "enc/u16be.txt"],
+            FIX,
+        ),
         Case("enc:u16-auto-bom", [*n, "enc/u16bom.txt"], [*n, "enc/u16bom.txt"], FIX),
         # latin1 folds to windows-1252 in both gist and rg (WHATWG); 0xE9 (é) is
         # identical in both pages, so the accented case still pins byte-exact.
-        Case("enc:latin1", ["-E", "latin1", *n, "enc/latin1.txt"],
-             ["-E", "latin1", *n, "enc/latin1.txt"], FIX),
-        Case("enc:latin1-accent", ["-E", "latin1", "-n", "--no-heading", "caf", "enc/latin1.txt"],
-             ["-E", "latin1", "-n", "--no-heading", "caf", "enc/latin1.txt"], FIX),
+        Case(
+            "enc:latin1",
+            ["-E", "latin1", *n, "enc/latin1.txt"],
+            ["-E", "latin1", *n, "enc/latin1.txt"],
+            FIX,
+        ),
+        Case(
+            "enc:latin1-accent",
+            ["-E", "latin1", "-n", "--no-heading", "caf", "enc/latin1.txt"],
+            ["-E", "latin1", "-n", "--no-heading", "caf", "enc/latin1.txt"],
+            FIX,
+        ),
     ]
 
     # ── -E: CJK / legacy code pages — gist ≡ rg (encoding_rs) on the ASCII needle
@@ -245,26 +294,47 @@ def _cases(exts: list[str]) -> list[Case]:
     # ── --pre / --pre-glob: gist ≡ rg over the wrapper's stdout ──
     pre_sh = "pre/decompress.sh"
     cs += [
-        Case("pre:basic", ["--pre", pre_sh, *n, "pre/doc.txt.gz"],
-             ["--pre", pre_sh, *n, "pre/doc.txt.gz"], FIX),
-        Case("pre:glob-scoped", ["--pre", pre_sh, "--pre-glob", "*.gz", "-l", "needle", "pre"],
-             ["--pre", pre_sh, "--pre-glob", "*.gz", "-l", "needle", "pre"], FIX, sort_lines=True),
+        Case(
+            "pre:basic",
+            ["--pre", pre_sh, *n, "pre/doc.txt.gz"],
+            ["--pre", pre_sh, *n, "pre/doc.txt.gz"],
+            FIX,
+        ),
+        Case(
+            "pre:glob-scoped",
+            ["--pre", pre_sh, "--pre-glob", "*.gz", "-l", "needle", "pre"],
+            ["--pre", pre_sh, "--pre-glob", "*.gz", "-l", "needle", "pre"],
+            FIX,
+            sort_lines=True,
+        ),
     ]
 
     # ── --binary / -uuu: gist's superset ≡ `rg -a` (search the NUL file as text) ──
     cs += [
-        Case("bin:--binary", ["--binary", *n, "bin/blob.dat"], ["-a", *n, "bin/blob.dat"], FIX,
-             index_safe=False),
-        Case("bin:-uuu", ["-uuu", *n, "bin/blob.dat"], ["-a", *n, "bin/blob.dat"], FIX,
-             index_safe=False),
+        Case(
+            "bin:--binary",
+            ["--binary", *n, "bin/blob.dat"],
+            ["-a", *n, "bin/blob.dat"],
+            FIX,
+            index_safe=False,
+        ),
+        Case(
+            "bin:-uuu",
+            ["-uuu", *n, "bin/blob.dat"],
+            ["-a", *n, "bin/blob.dat"],
+            FIX,
+            index_safe=False,
+        ),
         # flag-free: gist's default binary detection matches rg's (both summarize)
-        Case("bin:default-detect", [*n, "bin/blob.dat"], [*n, "bin/blob.dat"], FIX,
-             index_safe=False),
+        Case(
+            "bin:default-detect", [*n, "bin/blob.dat"], [*n, "bin/blob.dat"], FIX, index_safe=False
+        ),
     ]
     return cs
 
 
 # ───────────────────────── differential run ─────────────────────────
+
 
 def _norm(data: bytes, sort_lines: bool) -> bytes:
     """Canonicalize stdout: line-sorted set (order-agnostic) or raw bytes."""
@@ -292,8 +362,10 @@ def _diff_engine(cases: list[Case], *, serial: bool) -> tuple[list[str], list[st
         if g.rc != r.rc:
             fails.append(f"{c.name}: EXIT gist={g.rc} rg={r.rc}  gist={c.gist_args} rg={c.rg_args}")
         if gn != rn:
-            fails.append(f"{c.name}: STDOUT diverges  gist={c.gist_args} rg={c.rg_args}\n"
-                         + _mini_diff(gn, rn))
+            fails.append(
+                f"{c.name}: STDOUT diverges  gist={c.gist_args} rg={c.rg_args}\n"
+                + _mini_diff(gn, rn)
+            )
         if c.index_safe:
             gi = run(GIST, c.gist_args, c.cwd, env)
             if _norm(gi.data, c.sort_lines) != gn:
@@ -305,13 +377,18 @@ def do_run(engine: str) -> int:
     """Run the differential slate on the requested engine(s); 1 on any failure."""
     exts = gen_fixtures(FIX)
     cases = _cases(exts)
-    engines = [("parallel", False), ("serial", True)] if engine == "both" \
+    engines = (
+        [("parallel", False), ("serial", True)]
+        if engine == "both"
         else [(engine, engine == "serial")]
+    )
     total = 0
     for label, serial in engines:
         fails, idx_fails = _diff_engine(cases, serial=serial)
-        print(f"\n=== transforms differential [{label}]: {len(cases)} cases "
-              f"(-z formats: {' '.join(exts)}) ===")
+        print(
+            f"\n=== transforms differential [{label}]: {len(cases)} cases "
+            f"(-z formats: {' '.join(exts)}) ==="
+        )
         if not fails and not idx_fails:
             print("✓ ALL PASS — gist == rg (stdout + exit) and indexed == --no-index")
         else:
@@ -327,8 +404,14 @@ def do_run(engine: str) -> int:
 def _mini_diff(a: bytes, b: bytes, ctx: int = 2) -> str:
     """Render the first stdout divergence between gist and rg with a little context."""
     al, bl = a.split(b"\n"), b.split(b"\n")
-    i = next((k for k in range(max(len(al), len(bl)))
-              if (al[k] if k < len(al) else None) != (bl[k] if k < len(bl) else None)), None)
+    i = next(
+        (
+            k
+            for k in range(max(len(al), len(bl)))
+            if (al[k] if k < len(al) else None) != (bl[k] if k < len(bl) else None)
+        ),
+        None,
+    )
     if i is None:
         return f"  (equal after normalization; len gist={len(al)} rg={len(bl)})"
     dec = lambda xs, k: xs[k].decode("utf-8", "replace") if k < len(xs) else "<EOF>"
@@ -356,8 +439,11 @@ _BENCH_LINES = 3000
 
 def _mint_corpus(ext: str, encode) -> Path:
     """Write the nested compressed corpus for one format; return its root dir."""
-    raw = ("".join(f"line {j} of source with an occasional needle {j % 37}\n"
-                    for j in range(_BENCH_LINES))).encode()
+    raw = (
+        "".join(
+            f"line {j} of source with an occasional needle {j % 37}\n" for j in range(_BENCH_LINES)
+        )
+    ).encode()
     blob = encode(raw)  # one compressed image, fanned out across the nested tree
     root = FIX / "corpus" / ext
     for s in range(_BENCH_SUBDIRS):
@@ -390,17 +476,21 @@ def do_bench(floor_rg: float, floor_parallel: float) -> int:
         unit test, not this wall-clock number.
     """
     cores = os.cpu_count() or 1
-    native = {"gz": lambda b: gzip.compress(b, mtime=0),
-              "xz": lambda b: lzma.compress(b, format=lzma.FORMAT_XZ)}
+    native = {
+        "gz": lambda b: gzip.compress(b, mtime=0),
+        "xz": lambda b: lzma.compress(b, format=lzma.FORMAT_XZ),
+    }
     if shutil.which("zstd"):
-        native["zst"] = lambda b: subprocess.run(
-            ["zstd", "-q", "-c"], input=b, stdout=subprocess.PIPE, check=True).stdout
+        native["zst"] = lambda b: (
+            subprocess.run(["zstd", "-q", "-c"], input=b, stdout=subprocess.PIPE, check=True).stdout
+        )
     n_files = _BENCH_SUBDIRS * _BENCH_PER_SUBDIR
     have_rg = shutil.which(RG) is not None
-    print(f"\n=== -z race: gist pipeline vs serial vs rg — {n_files} files/format, "
-          f"nested {_BENCH_SUBDIRS}x{_BENCH_PER_SUBDIR}, {cores} cores, min of 6 ===")
-    print(f"{'format':<7} {'par_ms':>8} {'ser_ms':>8} {'rg_ms':>8} "
-          f"{'vs_rg':>7} {'par_gain':>9}")
+    print(
+        f"\n=== -z race: gist pipeline vs serial vs rg — {n_files} files/format, "
+        f"nested {_BENCH_SUBDIRS}x{_BENCH_PER_SUBDIR}, {cores} cores, min of 6 ==="
+    )
+    print(f"{'format':<7} {'par_ms':>8} {'ser_ms':>8} {'rg_ms':>8} {'vs_rg':>7} {'par_gain':>9}")
     par_env = _engine_env(serial=False)
     ser_env = _engine_env(serial=True)
     worst_rg, worst_parallel = float("inf"), float("inf")
@@ -415,8 +505,10 @@ def do_bench(floor_rg: float, floor_parallel: float) -> int:
         vs = rm / par if have_rg and par > 0 else float("nan")
         if have_rg:
             worst_rg = min(worst_rg, vs)
-        print(f"{ext:<7} {par*1e3:>7.1f}m {ser*1e3:>7.1f}m "
-              f"{rm*1e3:>7.1f}m {vs:>6.2f}x {gain:>8.2f}x")
+        print(
+            f"{ext:<7} {par * 1e3:>7.1f}m {ser * 1e3:>7.1f}m "
+            f"{rm * 1e3:>7.1f}m {vs:>6.2f}x {gain:>8.2f}x"
+        )
 
     if have_rg:
         print(f"worst vs_rg:         {worst_rg:.2f}x  (floor {floor_rg:.2f}x, BLOCKING)")
@@ -425,9 +517,11 @@ def do_bench(floor_rg: float, floor_parallel: float) -> int:
     print(f"worst parallel_gain: {worst_parallel:.2f}x  (informational)")
     rc = 0
     if have_rg and floor_rg > 0 and worst_rg < floor_rg:
-        print(f"✗ REGRESSION: -z vs_rg {worst_rg:.2f}x < floor {floor_rg:.2f}x — gist "
-              f"lost its in-process-decode edge over ripgrep (check ingest.zig's native "
-              f"decoders / a fork-per-file path)")
+        print(
+            f"✗ REGRESSION: -z vs_rg {worst_rg:.2f}x < floor {floor_rg:.2f}x — gist "
+            f"lost its in-process-decode edge over ripgrep (check ingest.zig's native "
+            f"decoders / a fork-per-file path)"
+        )
         rc = 1
     if floor_parallel > 0 and cores >= 2 and worst_parallel < floor_parallel:
         print(f"✗ REGRESSION: -z parallel_gain {worst_parallel:.2f}x < floor {floor_parallel:.2f}x")
@@ -435,8 +529,7 @@ def do_bench(floor_rg: float, floor_parallel: float) -> int:
     return rc
 
 
-def _min_time(bin_: str, args: list[str], n: int = 6,
-              env: dict[str, str] | None = None) -> float:
+def _min_time(bin_: str, args: list[str], n: int = 6, env: dict[str, str] | None = None) -> float:
     """Min of N wall-clock timings of `bin_ args` from the fixture root (inf on timeout)."""
     best = float("inf")
     for _ in range(n):
@@ -457,12 +550,20 @@ def main() -> int:
     pr = sub.add_parser("run")
     pr.add_argument("--engine", default="both", choices=["both", "parallel", "serial"])
     pb = sub.add_parser("bench")
-    pb.add_argument("--floor-rg", type=float, default=2.0,
-                    help="fail if the worst gist-vs-rg -z speedup drops below this "
-                         "(blocking; the architectural in-process-decode edge, ~4-9x)")
-    pb.add_argument("--floor-parallel", type=float, default=0.0,
-                    help="fail if the worst pipeline-vs-serial -z gain drops below this "
-                         "(informational by default; corpus-shape-sensitive)")
+    pb.add_argument(
+        "--floor-rg",
+        type=float,
+        default=2.0,
+        help="fail if the worst gist-vs-rg -z speedup drops below this "
+        "(blocking; the architectural in-process-decode edge, ~4-9x)",
+    )
+    pb.add_argument(
+        "--floor-parallel",
+        type=float,
+        default=0.0,
+        help="fail if the worst pipeline-vs-serial -z gain drops below this "
+        "(informational by default; corpus-shape-sensitive)",
+    )
     a = ap.parse_args()
 
     FIX = Path(tempfile.mkdtemp(prefix="gist-rgtransforms-"))

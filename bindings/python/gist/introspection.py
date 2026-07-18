@@ -209,10 +209,7 @@ def parse_capabilities(payload: str) -> Capabilities:
     buckets = tuple(
         (
             name,
-            tuple(
-                FlagCapability(tuple(row["spellings"]), row.get("note"))
-                for row in rows
-            ),
+            tuple(FlagCapability(tuple(row["spellings"]), row.get("note")) for row in rows),
         )
         for name, rows in compat.items()
     )

@@ -67,7 +67,10 @@ def main() -> int:
 
     idir: Path = args.index_dir
     if not idir.is_dir():
-        print(f"no index dir at {idir} — run `gist index` first (writes .local/gist-verify/)", file=sys.stderr)
+        print(
+            f"no index dir at {idir} — run `gist index` first (writes .local/gist-verify/)",
+            file=sys.stderr,
+        )
         return 2
 
     all_files: dict[str, int] = {}

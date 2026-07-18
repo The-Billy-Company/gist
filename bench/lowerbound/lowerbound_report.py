@@ -31,7 +31,6 @@ stdlib only. Mirrors `bench/certify/certify_stats.py`'s splice technique.
 # silence them file-wide (repo precedent: services/ai, taskrunner, entrain all
 # ignore RUF001/002/003 for intentional glyphs).
 
-
 import argparse
 import csv
 from dataclasses import dataclass
@@ -44,6 +43,7 @@ LAYER_D_HEADER = "## Layer D — algorithmic lower bound (information-theoretic 
 @dataclass
 class Row:
     """One lower-bound benchmark measurement row."""
+
     cls: str
     kind: str
     cand_docs: int
@@ -116,8 +116,8 @@ def render(rows: list[Row]) -> str:
     lines.append(
         "2. **The trigram filter makes total work sublinear.** gist reads far fewer "
         "than the corpus's bytes because the trigram index prunes the candidate set "
-        "*before* verify runs — the technique of Russ Cox, *\"Regular Expression "
-        "Matching with a Trigram Index, or How Google Code Search Worked\"* (2012), "
+        '*before* verify runs — the technique of Russ Cox, *"Regular Expression '
+        'Matching with a Trigram Index, or How Google Code Search Worked"* (2012), '
         "gist's direct ancestor. `cand%` below is the fraction of corpus bytes "
         "admitted; `100% - cand%` is pruned away untouched."
     )
@@ -132,9 +132,7 @@ def render(rows: list[Row]) -> str:
 
     corpus_bytes = rows[0].corpus_bytes if rows else 0
     corpus_docs = rows[0].corpus_docs if rows else 0
-    lines.append(
-        f"- corpus: {corpus_docs} files · {_mib(corpus_bytes)} · single-thread verify"
-    )
+    lines.append(f"- corpus: {corpus_docs} files · {_mib(corpus_bytes)} · single-thread verify")
     lines.append(
         "- method: `candidate bytes` = Σ lengths of the docs the trigram filter "
         "admits (the full-scan verify floor); `passes` = bytes an independent "
@@ -191,9 +189,7 @@ def splice(cert: Path, section: str) -> None:
             f"{cert} not found — run `zig build certify` (or `gist-bench certify`) "
             "first to create CERTIFICATE.md, then re-run this splicer."
         )
-        raise SystemExit(
-            msg
-        )
+        raise SystemExit(msg)
     text = cert.read_text()
     start = text.find(LAYER_D_HEADER)
     if start == -1:
@@ -216,11 +212,15 @@ def main() -> int:
     out_dir = Path(__file__).resolve().parents[5] / ".local/gist-verify"
     ap = argparse.ArgumentParser(description="gist Layer D lower-bound certificate splicer")
     ap.add_argument(
-        "--csv", type=Path, default=out_dir / "lowerbound.csv",
+        "--csv",
+        type=Path,
+        default=out_dir / "lowerbound.csv",
         help="lowerbound.csv from gist-lowerbound",
     )
     ap.add_argument(
-        "--certificate", type=Path, default=out_dir / "CERTIFICATE.md",
+        "--certificate",
+        type=Path,
+        default=out_dir / "CERTIFICATE.md",
         help="CERTIFICATE.md to splice into",
     )
     args = ap.parse_args()

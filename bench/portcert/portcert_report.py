@@ -26,7 +26,6 @@ operator to run `zig build certify` first.
 stdlib only. Idempotent.
 """
 
-
 import argparse
 import json
 from pathlib import Path
@@ -74,14 +73,16 @@ MEASURED_RUNG = (
 
 
 def render_measured(measured: dict | None) -> list[str]:
-    """Render the Layer B′ subsection — fail-closed when cycles were not
-    measured on this machine (no portbound.json, or PMU unavailable)."""
+    """Render the Layer B′ subsection.
+
+    Fail-closed when cycles were not measured on this machine (no
+    portbound.json, or PMU unavailable).
+    """
     lines = [MEASURED_HEADER, ""]
     if measured is None:
         lines.append(
             "**cycles/byte: cross-checked (reference cores), NOT measured on this "
-            "machine.** The empirical runner has not been run here. Rung: "
-            + MEASURED_RUNG
+            "machine.** The empirical runner has not been run here. Rung: " + MEASURED_RUNG
         )
         lines.append("")
         return lines
@@ -126,7 +127,9 @@ def render_measured(measured: dict | None) -> list[str]:
     lines.append("")
     lines.append(prov)
     lines.append("")
-    lines.append("| probe | bound | working set | measured cyc/unit | IPC | eff GHz | wall ns/unit |")
+    lines.append(
+        "| probe | bound | working set | measured cyc/unit | IPC | eff GHz | wall ns/unit |"
+    )
     lines.append("|---|---|--:|--:|--:|--:|--:|")
     lines.extend(
         f"| `{r['probe']}` | {r['bound']} | {r['working_set_bytes'] >> 10} KiB "
@@ -244,7 +247,7 @@ def main() -> int:
     if portbound.exists():
         try:
             measured = json.loads(portbound.read_text())
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             measured = None
     section = render(doc, measured)
 

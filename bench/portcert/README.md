@@ -25,14 +25,14 @@ cross-machine cross-check.
 
 ## What it is
 
-| File                       | Role                                                                                                                                               |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `portcert.sh`              | cross-compiles the two probes to two reference microarchitectures, runs `llvm-mca`, writes `portcert.csv`/`portcert.json`, splices the certificate |
-| `portcert_report.py`       | renders the `## Layer B` markdown section (static + the Layer B′ measured subsection) from `portcert.json` + `portbound.json` and splices it into `.local/gist-verify/CERTIFICATE.md` |
+| File                       | Role                                                                                                                                                                                                     |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `portcert.sh`              | cross-compiles the two probes to two reference microarchitectures, runs `llvm-mca`, writes `portcert.csv`/`portcert.json`, splices the certificate                                                       |
+| `portcert_report.py`       | renders the `## Layer B` markdown section (static + the Layer B′ measured subsection) from `portcert.json` + `portbound.json` and splices it into `.local/gist-verify/CERTIFICATE.md`                    |
 | `portbound.zig`            | **Layer B′** — `gist-portbound`: times the same drift-guarded probes natively under the PMU (`bench/harness/pmu.zig`), writing `portbound.json` (measured cyc/byte + cyc/step; fail-closed without root) |
-| `probes/simd_contains.zig` | byte-faithful copy of the hot loop in [`../../src/scan/simd.zig`](../../src/scan/simd.zig)'s `contains` — throughput-bound                         |
-| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/regex/dfa.zig`](../../src/regex/dfa.zig)'s `docMatch` — latency-bound                            |
-| `probes_test.zig`          | the drift guard — asserts each probe is bit-identical to the real production function it copies, over adversarial random inputs (`zig build test`) |
+| `probes/simd_contains.zig` | byte-faithful copy of the hot loop in [`../../src/scan/simd.zig`](../../src/scan/simd.zig)'s `contains` — throughput-bound                                                                               |
+| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/regex/dfa.zig`](../../src/regex/dfa.zig)'s `docMatch` — latency-bound                                                                                  |
+| `probes_test.zig`          | the drift guard — asserts each probe is bit-identical to the real production function it copies, over adversarial random inputs (`zig build test`)                                                       |
 
 **Why cross-compiled reference cores, not this machine.** This dev box is
 Apple Silicon, and LLVM ships **no real scheduling model for any Apple CPU** —
@@ -70,7 +70,7 @@ certificate.
 
 ## Layer B′ — port bound, measured on this machine (the sudo rung)
 
-The static leg is honest about its gap: it bounds *reference* cores because
+The static leg is honest about its gap: it bounds _reference_ cores because
 LLVM models no Apple core (below). `portbound.zig` closes the gap empirically —
 it runs the **same drift-guarded probe functions** as timed kernels on this
 machine, over cache-resident, guaranteed-miss inputs (the steady-state hot
@@ -84,11 +84,11 @@ loop; ports bind, memory never does), and reports:
 
 Provenance is stamped in `portbound.json` and the spliced section: CPU brand
 (`machdep.cpu.brand_string`), the P-core note (USER_INTERACTIVE QoS request
-plus the *measured* effective GHz, which itself tells a P-core from an
+plus the _measured_ effective GHz, which itself tells a P-core from an
 E-core), and the PMU source. **Fail-closed:** without root the PMU is
 unavailable (xnu gates `kpc`), so the run records wall-clock ns only and the
-certificate says *"cycles/byte: cross-checked (reference cores), NOT measured
-on this machine"* — it never converts wall-clock to cycles via an assumed
+certificate says _"cycles/byte: cross-checked (reference cores), NOT measured
+on this machine"_ — it never converts wall-clock to cycles via an assumed
 frequency.
 
 ## How to run

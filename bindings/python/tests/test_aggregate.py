@@ -31,7 +31,9 @@ def _binary_available() -> bool:
 needs_gist = pytest.mark.skipif(not _binary_available(), reason="no gist binary")
 
 
-def _m(path: str, line: int, text: str, *, hit: str | None = None, kind: MatchKind = MatchKind.MATCH) -> Match:
+def _m(
+    path: str, line: int, text: str, *, hit: str | None = None, kind: MatchKind = MatchKind.MATCH
+) -> Match:
     """A synthetic match; `hit` (a substring of `text`) becomes its submatch."""
     subs: tuple[Submatch, ...] = ()
     if hit is not None:
@@ -85,7 +87,10 @@ def test_by_dir_groups_across_files() -> None:
 
 
 def test_by_extension_axis() -> None:
-    t = tally([_m("a.py", 1, "p", hit="p"), _m("b.go", 1, "p", hit="p"), _m("c.py", 1, "p", hit="p")], by="ext")
+    t = tally(
+        [_m("a.py", 1, "p", hit="p"), _m("b.go", 1, "p", hit="p"), _m("c.py", 1, "p", hit="p")],
+        by="ext",
+    )
     assert t.groups[0].key == ".py"
     assert t.groups[0].count == 2
 
@@ -102,7 +107,10 @@ def test_by_match_text_groups_distinct_tokens() -> None:
 
 
 def test_custom_callable_axis() -> None:
-    t = tally([_m("a.py", 1, "p", hit="p"), _m("b.py", 2, "p", hit="p")], by=lambda m: "even" if m.line_number % 2 == 0 else "odd")
+    t = tally(
+        [_m("a.py", 1, "p", hit="p"), _m("b.py", 2, "p", hit="p")],
+        by=lambda m: "even" if m.line_number % 2 == 0 else "odd",
+    )
     assert {g.key for g in t} == {"odd", "even"}
 
 

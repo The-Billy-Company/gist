@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import aggregate, engine
+from . import aggregate, engine, irregex
 from .aggregate import Group, Tally, tally
 from .contract import ABI_VERSION, ENGINE_VERSION
 from .errors import (
@@ -31,6 +31,16 @@ from .request import (
     SearchRequest,
     Submatch,
 )
+from .irregex import (
+    DupPair,
+    PatternCount,
+    PatternHit,
+    Similar,
+    dups,
+    pattern_counts,
+    patterns,
+    similar,
+)
 from .session import (
     Session,
     SessionGeneration,
@@ -51,6 +61,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ABI_VERSION",
     "ENGINE_VERSION",
+    "DupPair",
     "GistError",
     "GistNotFoundError",
     "Group",
@@ -60,8 +71,11 @@ __all__ = [
     "IndexStatus",
     "Match",
     "MatchKind",
+    "PatternCount",
+    "PatternHit",
     "RankKind",
     "Ranked",
+    "Similar",
     "SearchFailedError",
     "SearchEngine",
     "SearchRequest",
@@ -74,11 +88,16 @@ __all__ = [
     "binary",
     "capabilities",
     "count",
+    "dups",
     "ensure_serve",
     "files",
     "index",
+    "irregex",
     "opening_session",
+    "pattern_counts",
+    "patterns",
     "rank",
+    "similar",
     "request_from_tool",
     "run",
     "search",
@@ -156,7 +175,9 @@ def rank(
     **options: object,
 ) -> list[Ranked]:
     """The engine's definition-first ranked view: the top-`limit` files for `pattern`, each tagged `def`/`use`/`gen` by the engine itself — a symbol's definition ahead of its call sites, generated files demoted. Uses the persisted index when available and live-ranks otherwise."""
-    return engine.rank(SearchRequest(pattern=pattern, **options), limit=limit, cwd=cwd, timeout=timeout)
+    return engine.rank(
+        SearchRequest(pattern=pattern, **options), limit=limit, cwd=cwd, timeout=timeout
+    )
 
 
 def request_from_tool(payload: Mapping[str, object]) -> SearchRequest:

@@ -62,9 +62,9 @@ degrades to wall-clock and says so, never failing.
 **PMU state is a first-class, fail-closed certificate fact.** The emitted
 `CERTIFICATE.md` carries a provenance line stamped from the host — CPU brand
 (`machdep.cpu.brand_string`), the P-core note (USER_INTERACTIVE QoS request),
-and the meter source. With the PMU it reads *"cycles/byte: measured on this
-machine"*; without it, *"NOT measured on this machine — cross-checked against
-Layer B's reference-core static bounds only"*, plus the exact `sudo` rerun
+and the meter source. With the PMU it reads _"cycles/byte: measured on this
+machine"_; without it, _"NOT measured on this machine — cross-checked against
+Layer B's reference-core static bounds only"_, plus the exact `sudo` rerun
 command. Blank cyc/byte columns can never be mistaken for measured-but-small,
 and wall-clock is never dressed up as cycles.
 

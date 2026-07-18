@@ -20,7 +20,6 @@ microscopic section written by `zig build certify` untouched.
 stdlib only. Deterministic: the bootstrap RNG is seeded.
 """
 
-
 import argparse
 from dataclasses import dataclass
 import json
@@ -70,6 +69,7 @@ def _normal_cdf(x: float) -> float:
 @dataclass
 class Dominance:
     """Dominance value object."""
+
     verdict: str  # "win" | "parity" | "loss"
     speedup: float  # median(b) / median(a) — >1 means A (gist) faster
     p: float
@@ -132,6 +132,7 @@ def load_times_ms(path: Path) -> list[float]:
 @dataclass
 class ClassResult:
     """ClassResult value object."""
+
     name: str
     kind: str
     pattern: str
@@ -179,14 +180,12 @@ def render(results: list[ClassResult], meta: dict, rng: random.Random) -> str:
     lines: list[str] = [MACRO_HEADER, ""]
     lines.append(
         "_Process-vs-process, fresh-process cold query over the same roots "
-        f"({meta.get('roots','?')}). hyperfine: {runs} runs (+{warmup} warmup). "
+        f"({meta.get('roots', '?')}). hyperfine: {runs} runs (+{warmup} warmup). "
         "Verdict is gist vs ripgrep: a WIN needs a lower median **and** "
         "Mann-Whitney p < {:.2f} — fail-closed. Other tools shown for context._".format(ALPHA)
     )
     lines.append("")
-    lines.append(
-        "| class | pattern | gist ms (95% CI) | rg ms (95% CI) | speedup | p | verdict |"
-    )
+    lines.append("| class | pattern | gist ms (95% CI) | rg ms (95% CI) | speedup | p | verdict |")
     lines.append("|---|---|--:|--:|--:|--:|:--|")
 
     wins = parity = loss = 0
@@ -225,8 +224,7 @@ def render(results: list[ClassResult], meta: dict, rng: random.Random) -> str:
     total = wins + parity + loss
     lines.append("")
     lines.append(
-        f"**gist vs ripgrep across {total} classes: "
-        f"{wins} win · {parity} parity · {loss} loss.**"
+        f"**gist vs ripgrep across {total} classes: {wins} win · {parity} parity · {loss} loss.**"
     )
     if loss == 0 and total > 0:
         lines.append("")

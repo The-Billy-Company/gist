@@ -29,7 +29,6 @@ It splices a `## Layer C — roofline (hardware ceiling)` section into
 # so silence them file-wide (repo precedent: services/ai, taskrunner, entrain all
 # ignore RUF001/002/003 for intentional glyphs).
 
-
 import argparse
 from dataclasses import dataclass
 import json
@@ -56,6 +55,7 @@ L2_BYTES = 16 * 1024 * 1024
 @dataclass
 class ClassPoint:
     """ClassPoint value object."""
+
     name: str
     bytes: int
     median_ns: float

@@ -116,8 +116,14 @@ def _run_live(*, force: bool) -> int:
 def main() -> int:
     """CLI entry: committed and/or live session-latency regression."""
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--committed", action="store_true", help="assert the published certificate (default)")
-    ap.add_argument("--live", action="store_true", help="re-run certify_session.sh then assert (needs GIST_BENCH=1)")
+    ap.add_argument(
+        "--committed", action="store_true", help="assert the published certificate (default)"
+    )
+    ap.add_argument(
+        "--live",
+        action="store_true",
+        help="re-run certify_session.sh then assert (needs GIST_BENCH=1)",
+    )
     ap.add_argument("--force", action="store_true", help="run --live without GIST_BENCH=1")
     args = ap.parse_args()
     rc = 0

@@ -174,9 +174,13 @@ class Handle:
         if not self._session:
             return None
         pattern = request.pattern.encode()
-        flags = (_FLAG_FIXED if request.fixed else 0) | (_FLAG_IGNORE_CASE if request.ignore_case else 0)
+        flags = (_FLAG_FIXED if request.fixed else 0) | (
+            _FLAG_IGNORE_CASE if request.ignore_case else 0
+        )
         with self._lock:
-            return self._lib.gist_search(self._session, pattern, len(pattern), flags, callback, self._ffi.NULL)
+            return self._lib.gist_search(
+                self._session, pattern, len(pattern), flags, callback, self._ffi.NULL
+            )
 
     def search(self, request: SearchRequest) -> list[Match] | None:
         """Full `Match` records for `request` over the warm corpus, in cold `--json` order.
@@ -196,13 +200,15 @@ class Handle:
             # The Zig line view excludes `\n` but may keep a trailing `\r`; strip
             # it to match the cold parser's `.removesuffix("\n").removesuffix("\r")`.
             text = _decode(ffi.buffer(m.line, m.line_len)).removesuffix("\r")
-            out.append(Match(
-                path=_decode(ffi.buffer(m.path, m.path_len)),
-                line_number=m.line_number,
-                text=text,
-                kind=MatchKind.MATCH,
-                submatches=subs,
-            ))
+            out.append(
+                Match(
+                    path=_decode(ffi.buffer(m.path, m.path_len)),
+                    line_number=m.line_number,
+                    text=text,
+                    kind=MatchKind.MATCH,
+                    submatches=subs,
+                )
+            )
             return _CONTINUE
 
         rc = self._invoke(request, on_match)

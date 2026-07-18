@@ -81,11 +81,7 @@ def test_warm_eligible_rejects_rich_requests(req: SearchRequest) -> None:
 
 
 def test_ready_frame_decodes_all_generations() -> None:
-    payload = (
-        bytes([PROTOCOL_VERSION])
-        + struct.pack("<QQI", 7, 42, len(b"gen-abc"))
-        + b"gen-abc"
-    )
+    payload = bytes([PROTOCOL_VERSION]) + struct.pack("<QQI", 7, 42, len(b"gen-abc")) + b"gen-abc"
     assert _decode_ready(payload) == SessionGeneration(7, 42, "gen-abc")
     assert _decode_ready(payload[:-1]) is None
 

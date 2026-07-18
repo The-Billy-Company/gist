@@ -26,18 +26,20 @@ is the committed contract), so nothing large or machine-specific is tracked.
 
 Subcommands: run [--engine both|parallel|serial] | bench
 """
+
 from __future__ import annotations
 
 import argparse
 import atexit
+from dataclasses import dataclass, field
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
+
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[1]  # bench/rgsuite -> pkg/kernels/gist
@@ -52,8 +54,20 @@ GIST = ""  # resolved in main()
 # permutations, so an ascending-time sort lands a provably different order than a
 # path sort — a comparator that dropped its key could not accidentally pass.
 TREE_FILES = ("a_apple.txt", "b_banana.txt", "c_cherry.txt", "d_date.txt", "e_elder.txt")
-_MTIME_RANK = {"c_cherry.txt": 1, "a_apple.txt": 2, "e_elder.txt": 3, "b_banana.txt": 4, "d_date.txt": 5}
-_ATIME_RANK = {"e_elder.txt": 1, "d_date.txt": 2, "a_apple.txt": 3, "c_cherry.txt": 4, "b_banana.txt": 5}
+_MTIME_RANK = {
+    "c_cherry.txt": 1,
+    "a_apple.txt": 2,
+    "e_elder.txt": 3,
+    "b_banana.txt": 4,
+    "d_date.txt": 5,
+}
+_ATIME_RANK = {
+    "e_elder.txt": 1,
+    "d_date.txt": 2,
+    "a_apple.txt": 3,
+    "c_cherry.txt": 4,
+    "b_banana.txt": 5,
+}
 _EPOCH = 1_600_000_000
 
 
@@ -62,12 +76,18 @@ def _find_gist() -> str:
     if env := os.environ.get("GIST_BIN"):
         return env
     out = KERNEL / "zig-out" / "bin" / "gist"
-    subprocess.run(["zig", "build", "-Doptimize=ReleaseFast"], cwd=KERNEL, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    subprocess.run(
+        ["zig", "build", "-Doptimize=ReleaseFast"],
+        cwd=KERNEL,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
     if out.exists():
         return str(out)
-    cands = sorted(KERNEL.glob(".zig-cache/o/*/gist"),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
+    cands = sorted(
+        KERNEL.glob(".zig-cache/o/*/gist"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
     if not cands:
         sys.exit("no gist binary found after `zig build`")
     return str(cands[0])
@@ -75,17 +95,25 @@ def _find_gist() -> str:
 
 # ───────────────────────── process runner ─────────────────────────
 
+
 @dataclass
 class Out:
     """One command run: exit code and captured stdout bytes."""
+
     rc: int
     data: bytes
 
 
 def run(bin_: str, args: list[str], cwd: Path, env: dict[str, str] | None = None) -> Out:
     """Run `bin_ args` in `cwd` (stderr suppressed), capturing stdout + rc."""
-    p = subprocess.run([bin_, *args], cwd=str(cwd), env=env,
-                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=90)
+    p = subprocess.run(
+        [bin_, *args],
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=90,
+    )
     return Out(p.returncode, p.stdout)
 
 
@@ -95,6 +123,7 @@ def _norm(data: bytes, sort_lines: bool) -> bytes:
 
 
 # ───────────────────────── fixtures ─────────────────────────
+
 
 def gen_fixtures(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     """Build the tree/, repo/ + home/ fixtures; return (base_env, global_ignore_env).
@@ -129,9 +158,11 @@ def gen_fixtures(root: Path) -> tuple[dict[str, str], dict[str, str]]:
 
 # ───────────────────────── case matrix ─────────────────────────
 
+
 @dataclass
 class Case:
     """One differential case: shared argv (path appended) + comparison knobs."""
+
     name: str
     args: list[str]
     path: str
@@ -189,14 +220,28 @@ def _repo_cases() -> list[Case]:
     """Repo-scale ordering over a real subtree — exercises the persisted index."""
     env = {**os.environ}
     return [
-        Case("repo:sort-path", ["--sort", "path", "-n", "-H", "TODO"], "services/backend", REPO, env=env),
-        Case("repo:sortr-path", ["--sortr", "path", "-l", "func"], "services/backend", REPO, env=env),
-        Case("repo:sort-modified", ["--sort", "modified", "-l", "WalletService"],
-             "services/backend/api", REPO, env=env),
+        Case(
+            "repo:sort-path",
+            ["--sort", "path", "-n", "-H", "TODO"],
+            "services/backend",
+            REPO,
+            env=env,
+        ),
+        Case(
+            "repo:sortr-path", ["--sortr", "path", "-l", "func"], "services/backend", REPO, env=env
+        ),
+        Case(
+            "repo:sort-modified",
+            ["--sort", "modified", "-l", "WalletService"],
+            "services/backend/api",
+            REPO,
+            env=env,
+        ),
     ]
 
 
 # ───────────────────────── differential run ─────────────────────────
+
 
 def _engine_env(env: dict[str, str], serial: bool) -> dict[str, str]:
     e = {**env}
@@ -248,8 +293,11 @@ def do_run(engine: str) -> int:
     """Run the differential slate on the requested engine(s); 1 on any failure."""
     base_env, gi_env = gen_fixtures(FIX)
     cases = _cases(base_env, gi_env) + _repo_cases()
-    engines = [("parallel", False), ("serial", True)] if engine == "both" \
+    engines = (
+        [("parallel", False), ("serial", True)]
+        if engine == "both"
         else [(engine, engine == "serial")]
+    )
     total = 0
     for label, serial in engines:
         fails, idx_fails = _diff_engine(cases, serial=serial)
@@ -271,8 +319,14 @@ def do_run(engine: str) -> int:
 def _mini_diff(a: bytes, b: bytes, ctx: int = 3) -> str:
     """Render the first stdout divergence between gist and rg with a little context."""
     al, bl = a.split(b"\n"), b.split(b"\n")
-    i = next((k for k in range(max(len(al), len(bl)))
-              if (al[k] if k < len(al) else None) != (bl[k] if k < len(bl) else None)), None)
+    i = next(
+        (
+            k
+            for k in range(max(len(al), len(bl)))
+            if (al[k] if k < len(al) else None) != (bl[k] if k < len(bl) else None)
+        ),
+        None,
+    )
     if i is None:
         return f"  (equal after normalization; len gist={len(al)} rg={len(bl)})"
 
@@ -289,6 +343,7 @@ def _mini_diff(a: bytes, b: bytes, ctx: int = 3) -> str:
 
 # ───────────────────────── bench (parity-at-speed hunt) ─────────────────────────
 
+
 def do_bench() -> int:
     """Time gist-idx vs gist-noidx vs rg for the ordering + threading paths (report-only)."""
     sub = "services/backend"
@@ -304,7 +359,7 @@ def do_bench() -> int:
         gi = _median(GIST, args)
         gn = _median(GIST, [*args, "--no-index"])
         rr = _median(RG, args)
-        print(f"{name:<26} {gi*1e3:>9.1f}m {gn*1e3:>10.1f}m {rr*1e3:>7.1f}m")
+        print(f"{name:<26} {gi * 1e3:>9.1f}m {gn * 1e3:>10.1f}m {rr * 1e3:>7.1f}m")
     return 0
 
 

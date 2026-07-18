@@ -213,9 +213,11 @@ run_suite() { # <engine label>
   same "glob -g overrides hidden AND ignore" -g '*.txt' -e foo .
   same "iglob --iglob overrides too (case-insensitive)" --iglob '*.TXT' -e foo .
 
-  echo "### unsupported flags — must fail loud (never silently differ) [${engine}] ###"
-  loud "multiline -U" -U -e 'foo.bar' .
-  loud "pcre2 -P" -P -e foo .
+  echo "### natively supported since the -U/-P engines landed — byte-identical [${engine}] ###"
+  same "multiline -U" -U -e 'foo.bar' .
+  same_exact "multiline -U spans a line boundary" -U -e 'bar\nHELLO' a.txt
+  same "pcre2 -P" -P -e foo .
+  same_exact "pcre2 -P backreference" -P -e 'f(o)\1' a.txt
 
   echo "### tracked divergences — documented, do NOT fail the gate [${engine}] ###"
   track "trim + max-columns-preview + color" "known rgsuite FAIL f917: colored trimmed preview differs" --trim --max-columns 8 --max-columns-preview --color always -e foo longline.txt

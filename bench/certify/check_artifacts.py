@@ -80,6 +80,7 @@ CSV_READ = re.compile(
     r"read_csv|DictReader|loadtxt|genfromtxt|csv\.reader|json\.load|open\([^)]*\.(csv|json)"
 )
 
+
 def _git_output(*args: str) -> str | None:
     """Return stripped stdout from git -C REPO, or None on failure."""
     try:
@@ -118,8 +119,6 @@ def _check_clean_head(meta: dict, problems: list[str]) -> None:
             "worktree is dirty — certificate requires a clean HEAD "
             f"({len(porcelain.splitlines())} dirty path(s))"
         )
-
-
 
 
 def _json(path: Path, problems: list[str]) -> object | None:

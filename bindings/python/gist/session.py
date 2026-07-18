@@ -39,8 +39,19 @@ _MAX_FRAME = 16 << 20  # matches `protocol.max_frame`; a hostile/looping peer ca
 # (the daemon serves only default-roots `-l`/`-c`, literal/plain-regex, ±case).
 # Any of these set → cold. Mirrors `session/request.zig::classify`.
 _INELIGIBLE_FIELDS = (
-    "smart_case", "word", "invert", "hidden", "no_ignore", "follow", "no_index",
-    "before", "after", "context", "max_count", "max_depth", "multiline",
+    "smart_case",
+    "word",
+    "invert",
+    "hidden",
+    "no_ignore",
+    "follow",
+    "no_index",
+    "before",
+    "after",
+    "context",
+    "max_count",
+    "max_depth",
+    "multiline",
     "multiline_dotall",
 )
 
@@ -144,7 +155,9 @@ def ensure_serve(
 class Session:
     """One reusable daemon connection. Not thread-safe: give each thread its own `Session` (the connection carries one in-flight request at a time)."""
 
-    def __init__(self, socket_path: str | None = None, *, cwd: str | os.PathLike[str] | None = None) -> None:
+    def __init__(
+        self, socket_path: str | None = None, *, cwd: str | os.PathLike[str] | None = None
+    ) -> None:
         """Bind to ``socket_path`` (or the default) under optional ``cwd``."""
         self._path = socket_path or default_socket_path()
         self._cwd = cwd
@@ -257,7 +270,9 @@ class Session:
             return ffi_matches
         return engine.run(request, cwd=self._cwd, timeout=timeout)
 
-    def files(self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT) -> list[str]:
+    def files(
+        self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT
+    ) -> list[str]:
         """Paths of files with ≥1 matching line (`-l`), sorted.
 
         In-process FFI if eligible, else the UDS daemon, else the
@@ -325,7 +340,9 @@ class Session:
             if s is None:
                 return None
             try:
-                flags = (_FLAG_FIXED if request.fixed else 0) | (_FLAG_IGNORE_CASE if request.ignore_case else 0)
+                flags = (_FLAG_FIXED if request.fixed else 0) | (
+                    _FLAG_IGNORE_CASE if request.ignore_case else 0
+                )
                 body = bytes([mode, flags]) + request.pattern.encode()
                 _send(s, _OP_QUERY, body)
                 op, payload = _recv(s)

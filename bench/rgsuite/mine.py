@@ -37,16 +37,16 @@ FILES = ["binary.rs", "feature.rs", "json.rs", "misc.rs", "multiline.rs", "regre
 # ---------------------------------------------------------------- string literals
 def parse_str(src: str, i: int):
     """src[i] is a quote or the 'r' of a raw string. Return (bytes, end_idx_after)."""
-    if src[i] == 'r':
+    if src[i] == "r":
         j = i + 1
         hashes = 0
-        while src[j] == '#':
+        while src[j] == "#":
             hashes += 1
             j += 1
         if src[j] != '"':
             raise AssertionError
         j += 1
-        close = '"' + '#' * hashes
+        close = '"' + "#" * hashes
         end = src.index(close, j)
         return src[j:end].encode(), end + len(close)
     if src[i] != '"':
@@ -55,23 +55,30 @@ def parse_str(src: str, i: int):
     j = i + 1
     while True:
         c = src[j]
-        if c == '\\':
-            n = src[j+1]
-            simple = {'n': b'\n', 't': b'\t', 'r': b'\r', '"': b'"', '\\': b'\\',
-                      '0': b'\x00', "'": b"'"}
+        if c == "\\":
+            n = src[j + 1]
+            simple = {
+                "n": b"\n",
+                "t": b"\t",
+                "r": b"\r",
+                '"': b'"',
+                "\\": b"\\",
+                "0": b"\x00",
+                "'": b"'",
+            }
             if n in simple:
                 out += simple[n]
                 j += 2
-            elif n == 'x':
-                out.append(int(src[j+2:j+4], 16))
+            elif n == "x":
+                out.append(int(src[j + 2 : j + 4], 16))
                 j += 4
-            elif n == 'u':
-                k = src.index('}', j)
-                out += chr(int(src[j+3:k], 16)).encode()
+            elif n == "u":
+                k = src.index("}", j)
+                out += chr(int(src[j + 3 : k], 16)).encode()
                 j = k + 1
-            elif n == '\n':  # line continuation
+            elif n == "\n":  # line continuation
                 j += 2
-                while src[j] in ' \t':
+                while src[j] in " \t":
                     j += 1
             else:
                 out += n.encode()
@@ -95,27 +102,29 @@ def strip_comments(src: str) -> str:
     n = len(src)
     while j < n:
         c = src[j]
-        if c == 'b' and (src[j+1:j+2] == '"' or (src[j+1:j+2] == 'r' and src[j+2:j+3] in '"#')):
-            out.append('b')
+        if c == "b" and (
+            src[j + 1 : j + 2] == '"' or (src[j + 1 : j + 2] == "r" and src[j + 2 : j + 3] in '"#')
+        ):
+            out.append("b")
             j += 1
             c = src[j]
-        if c == '"' or (c == 'r' and src[j+1:j+2] in '"#'):
+        if c == '"' or (c == "r" and src[j + 1 : j + 2] in '"#'):
             with contextlib.suppress(Exception):
                 _, end = parse_str(src, j)
                 out.append(src[j:end])
                 j = end
                 continue
-        if c == '/' and src[j+1:j+2] == '/':
-            while j < n and src[j] != '\n':
+        if c == "/" and src[j + 1 : j + 2] == "/":
+            while j < n and src[j] != "\n":
                 j += 1
             continue
-        if c == '/' and src[j+1:j+2] == '*':
-            end = src.find('*/', j + 2)
+        if c == "/" and src[j + 1 : j + 2] == "*":
+            end = src.find("*/", j + 2)
             j = (end + 2) if end != -1 else n
             continue
         out.append(c)
         j += 1
-    return ''.join(out)
+    return "".join(out)
 
 
 def blank_strings(src: str) -> str:
@@ -130,10 +139,12 @@ def blank_strings(src: str) -> str:
     n = len(src)
     while j < n:
         c = src[j]
-        if c == 'b' and (src[j+1:j+2] == '"' or (src[j+1:j+2] == 'r' and src[j+2:j+3] in '"#')):
+        if c == "b" and (
+            src[j + 1 : j + 2] == '"' or (src[j + 1 : j + 2] == "r" and src[j + 2 : j + 3] in '"#')
+        ):
             j += 1
             c = src[j]
-        if c == '"' or (c == 'r' and src[j+1:j+2] in '"#'):
+        if c == '"' or (c == "r" and src[j + 1 : j + 2] in '"#'):
             with contextlib.suppress(Exception):
                 _, end = parse_str(src, j)
                 out.append('""')
@@ -141,7 +152,7 @@ def blank_strings(src: str) -> str:
                 continue
         out.append(c)
         j += 1
-    return ''.join(out)
+    return "".join(out)
 
 
 def read_stmt(src: str, i: int):
@@ -154,15 +165,15 @@ def read_stmt(src: str, i: int):
     j = i
     while j < len(src):
         c = src[j]
-        if c == '"' or (c == 'r' and src[j+1:j+2] in ('"', '#')):
+        if c == '"' or (c == "r" and src[j + 1 : j + 2] in ('"', "#")):
             with contextlib.suppress(Exception):
                 _, j = parse_str(src, j)
                 continue
-        if c in '([{':
+        if c in "([{":
             depth += 1
-        elif c in ')]}':
+        elif c in ")]}":
             depth -= 1
-        elif c == ';' and depth == 0:
+        elif c == ";" and depth == 0:
             return src[i:j], j
         j += 1
     return src[i:], len(src)
@@ -178,19 +189,19 @@ def resolve_value(expr: str, consts: dict, binds: list, pos: int):
     most recent binding textually before `pos`).
     """
     expr = expr.strip()
-    if expr.startswith('&'):
+    if expr.startswith("&"):
         expr = expr[1:].strip()
-    expr = re.sub(r'\.as_bytes\(\)\s*$', '', expr).strip()
+    expr = re.sub(r"\.as_bytes\(\)\s*$", "", expr).strip()
 
     # byte string: b"…", br"…", br#"…"#  → parse from the leading quote/'r'.
-    if expr.startswith(('b"', 'br"', 'br#')):
+    if expr.startswith(('b"', 'br"', "br#")):
         try:
             b, _ = parse_str(expr[1:], 0)
         except Exception:
             return None
         else:
             return b
-    if expr.startswith(('"', 'r"', 'r#')):
+    if expr.startswith(('"', 'r"', "r#")):
         try:
             b, _ = parse_str(expr, 0)
         except Exception:
@@ -198,7 +209,7 @@ def resolve_value(expr: str, consts: dict, binds: list, pos: int):
         else:
             return b
 
-    m = re.match(r'include_(?:bytes|str)!\s*\(\s*(.*?)\s*,?\s*\)\s*$', expr, re.DOTALL)
+    m = re.match(r"include_(?:bytes|str)!\s*\(\s*(.*?)\s*,?\s*\)\s*$", expr, re.DOTALL)
     if m:
         try:
             rel, _ = parse_str(m.group(1).strip(), 0)
@@ -209,10 +220,10 @@ def resolve_value(expr: str, consts: dict, binds: list, pos: int):
         except Exception:
             return None
 
-    if re.fullmatch(r'[A-Z_][A-Z0-9_]*', expr):
+    if re.fullmatch(r"[A-Z_][A-Z0-9_]*", expr):
         return consts.get(expr)
-    if re.fullmatch(r'[a-z_]\w*', expr):
-        return _latest(binds, expr, pos, 'bytes')
+    if re.fullmatch(r"[a-z_]\w*", expr):
+        return _latest(binds, expr, pos, "bytes")
     return None
 
 
@@ -232,10 +243,10 @@ def resolve_array(expr: str, consts: dict, binds: list, pos: int):
     toks = _array_tokens(expr)
     if toks is None:
         e = expr.strip()
-        if e.startswith('&'):
+        if e.startswith("&"):
             e = e[1:].strip()
-        if re.fullmatch(r'[a-z_]\w*', e):
-            toks = _latest(binds, e, pos, 'array')
+        if re.fullmatch(r"[a-z_]\w*", e):
+            toks = _latest(binds, e, pos, "array")
         if toks is None:
             return None
     out = []
@@ -263,7 +274,8 @@ def load_consts():
     for f in ["hay.rs", *FILES]:
         src = strip_comments((TESTS / f).read_text())
         for m in re.finditer(
-            r'\bconst\s+([A-Z_][A-Z0-9_]*)\s*:\s*&(?:\'static\s+)?(?:\[u8\]|str)\s*=\s*', src):
+            r"\bconst\s+([A-Z_][A-Z0-9_]*)\s*:\s*&(?:\'static\s+)?(?:\[u8\]|str)\s*=\s*", src
+        ):
             val, _ = read_stmt(src, m.end())
             b = resolve_value(val.strip(), consts, [], 0)
             if b is not None:
@@ -274,14 +286,14 @@ def load_consts():
 def _array_tokens(expr: str):
     """`&[…]` / `[…]` / `vec![…]` literal → list of raw element exprs, or None."""
     e = expr.strip()
-    if e.startswith('&'):
+    if e.startswith("&"):
         e = e[1:].strip()
-    if e.startswith('vec!'):
+    if e.startswith("vec!"):
         e = e[4:].strip()
-    if not e.startswith('['):
+    if not e.startswith("["):
         return None
     try:
-        return split_top(e[1:e.rindex(']')])
+        return split_top(e[1 : e.rindex("]")])
     except ValueError:
         return None
 
@@ -294,22 +306,22 @@ def parse_bindings(body: str, consts: dict):
 
     """
     binds = []
-    for m in re.finditer(r'\blet\s+(?:mut\s+)?([a-z_]\w*)\s*=\s*', body):
+    for m in re.finditer(r"\blet\s+(?:mut\s+)?([a-z_]\w*)\s*=\s*", body):
         val, _ = read_stmt(body, m.end())
         toks = _array_tokens(val)
         if toks is not None:
-            binds.append((m.start(), m.group(1), 'array', toks))
+            binds.append((m.start(), m.group(1), "array", toks))
         else:
             b = resolve_value(val.strip(), consts, binds, m.start())
             if b is not None:
-                binds.append((m.start(), m.group(1), 'bytes', b))
-    for m in re.finditer(r'\b([a-z_]\w*)\.extend\s*\(', body):
+                binds.append((m.start(), m.group(1), "bytes", b))
+    for m in re.finditer(r"\b([a-z_]\w*)\.extend\s*\(", body):
         name = m.group(1)
         inner, _ = match_paren(body, m.end() - 1)
-        add = _array_tokens(inner) or _latest(binds, inner.strip(), m.start(), 'array')
-        prev = _latest(binds, name, m.start(), 'array')
+        add = _array_tokens(inner) or _latest(binds, inner.strip(), m.start(), "array")
+        prev = _latest(binds, name, m.start(), "array")
         if add is not None and prev is not None:
-            binds.append((m.start(), name, 'array', prev + add))
+            binds.append((m.start(), name, "array", prev + add))
     return binds
 
 
@@ -320,41 +332,41 @@ def match_paren(src: str, i: int):
     j = i
     while j < len(src):
         c = src[j]
-        if c == '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
+        if c == '"' or (c == "r" and j + 1 < len(src) and src[j + 1] in '#"'):
             with contextlib.suppress(Exception):
                 _, j = parse_str(src, j)
                 continue
-        if c == '(':
+        if c == "(":
             depth += 1
-        elif c == ')':
+        elif c == ")":
             depth -= 1
             if depth == 0:
-                return src[i+1:j], j + 1
+                return src[i + 1 : j], j + 1
         j += 1
-    return src[i+1:], len(src)
+    return src[i + 1 :], len(src)
 
 
 def split_top(inner: str):
     """Split a call arg list on top-level commas (string+bracket aware)."""
     parts = []
     depth = 0
-    buf = ''
+    buf = ""
     j = 0
     while j < len(inner):
         c = inner[j]
-        if c == '"' or (c == 'r' and j+1 < len(inner) and inner[j+1] in '#"'):
+        if c == '"' or (c == "r" and j + 1 < len(inner) and inner[j + 1] in '#"'):
             with contextlib.suppress(Exception):
                 _, nj = parse_str(inner, j)
                 buf += inner[j:nj]
                 j = nj
                 continue
-        if c in '([{':
+        if c in "([{":
             depth += 1
-        elif c in ')]}':
+        elif c in ")]}":
             depth -= 1
-        if c == ',' and depth == 0:
+        if c == "," and depth == 0:
             parts.append(buf.strip())
-            buf = ''
+            buf = ""
         else:
             buf += c
         j += 1
@@ -366,68 +378,92 @@ def split_top(inner: str):
 # ---------------------------------------------------------------- block extract
 def extract_blocks(src: str):
     """Yield (name, body) for each rgtest! block."""
-    for m in re.finditer(r'rgtest!\(\s*([a-zA-Z0-9_]+)\s*,', src):
-        i = src.index('|', m.end())
-        i = src.index('|', i + 1)  # end of closure params
-        b = src.index('{', i)
+    for m in re.finditer(r"rgtest!\(\s*([a-zA-Z0-9_]+)\s*,", src):
+        i = src.index("|", m.end())
+        i = src.index("|", i + 1)  # end of closure params
+        b = src.index("{", i)
         depth = 0
         j = b
         while j < len(src):
             c = src[j]
-            if c == '"' or (c == 'r' and j+1 < len(src) and src[j+1] in '#"'):
+            if c == '"' or (c == "r" and j + 1 < len(src) and src[j + 1] in '#"'):
                 with contextlib.suppress(Exception):
                     _, j = parse_str(src, j)
                     continue
-            if c == '{':
+            if c == "{":
                 depth += 1
-            elif c == '}':
+            elif c == "}":
                 depth -= 1
                 if depth == 0:
                     break
             j += 1
-        yield m.group(1), src[b+1:j]
+        yield m.group(1), src[b + 1 : j]
 
 
 # Fixture-building calls (shared by every invocation in the body) and the
 # command/run-point calls that delimit invocations. Each is matched with a
 # trailing '(' so `.arg(` never swallows `.args(`, nor `dir.create(` the
 # `dir.create_bytes(` etc.
-FIXTURE_HEADS = ['dir.create_bytes', 'dir.try_create_bytes', 'dir.create_dir',
-                 'dir.create_size', 'dir.create', 'dir.try_create',
-                 'dir.link_dir', 'dir.link_file', 'dir.remove']
-RUN_HEADS = ['.stdout', '.assert_err', '.assert_exit_code',
-             '.assert_non_empty_stderr', '.output', '.raw_output']
-CMD_HEADS = ['.args', '.arg', '.current_dir', '.pipe', '.command']
+FIXTURE_HEADS = [
+    "dir.create_bytes",
+    "dir.try_create_bytes",
+    "dir.create_dir",
+    "dir.create_size",
+    "dir.create",
+    "dir.try_create",
+    "dir.link_dir",
+    "dir.link_file",
+    "dir.remove",
+]
+RUN_HEADS = [
+    ".stdout",
+    ".assert_err",
+    ".assert_exit_code",
+    ".assert_non_empty_stderr",
+    ".output",
+    ".raw_output",
+]
+CMD_HEADS = [".args", ".arg", ".current_dir", ".pipe", ".command"]
 ALL_HEADS = FIXTURE_HEADS + RUN_HEADS + CMD_HEADS
 
-_PCRE2_GUARD = re.compile(r'if\s*(!?)\s*dir\.is_pcre2\(\)\s*\{\s*return\s*;?\s*\}')
+_PCRE2_GUARD = re.compile(r"if\s*(!?)\s*dir\.is_pcre2\(\)\s*\{\s*return\s*;?\s*\}")
 
 
 def _fresh():
-    return {'argv': [], 'current_dir': None, 'stdin': None,
-            'terminal': 'stdout', 'exit_code': None, 'pending': False, 'skip': []}
+    return {
+        "argv": [],
+        "current_dir": None,
+        "stdin": None,
+        "terminal": "stdout",
+        "exit_code": None,
+        "pending": False,
+        "skip": [],
+    }
 
 
 def mine_block(name, body, consts, srcfile):
     """Return a list of one-or-more spec records (one per rg invocation)."""
-    pcre2 = bool(_PCRE2_GUARD.search(body) and re.search(r'if\s*!\s*dir\.is_pcre2', body)) \
-        or 'setup_pcre2' in body or 'dir.pcre2' in body
-    cmp = 'sort' if 'sort_lines' in body else 'plain'
+    pcre2 = (
+        bool(_PCRE2_GUARD.search(body) and re.search(r"if\s*!\s*dir\.is_pcre2", body))
+        or "setup_pcre2" in body
+        or "dir.pcre2" in body
+    )
+    cmp = "sort" if "sort_lines" in body else "plain"
     # Scan code only (string bodies blanked) so keywords inside expected-output
     # blocks — e.g. the word "match" in a binary-warning string — don't masquerade
     # as control flow.
-    code = blank_strings(_PCRE2_GUARD.sub(' ', body))
-    if re.search(r'\bfor\b|\bwhile\b|\bif\b|\bmatch\b|\.lines\(\)|cmd_exists|is_cross', code):
+    code = blank_strings(_PCRE2_GUARD.sub(" ", body))
+    if re.search(r"\bfor\b|\bwhile\b|\bif\b|\bmatch\b|\.lines\(\)|cmd_exists|is_cross", code):
         base = _rec(name, srcfile, [], [], [], [], _fresh(), pcre2, cmp)
-        base['status'] = 'skip'
-        base['skip'] = ['control-flow']
+        base["status"] = "skip"
+        base["skip"] = ["control-flow"]
         return [base]
     # A `helper(dir)` call builds fixtures we can't see (e.g. sort_setup, which
     # also uses PathBuf::join'd paths + access-time ordering) → honest skip.
-    if re.search(r'\b\w+\(\s*dir\s*\)', code):
+    if re.search(r"\b\w+\(\s*dir\s*\)", code):
         base = _rec(name, srcfile, [], [], [], [], _fresh(), pcre2, cmp)
-        base['status'] = 'skip'
-        base['skip'] = ['fixture-helper']
+        base["status"] = "skip"
+        base["skip"] = ["fixture-helper"]
         return [base]
 
     binds = parse_bindings(body, consts)
@@ -438,7 +474,7 @@ def mine_block(name, body, consts, srcfile):
     for h in ALL_HEADS:
         start = 0
         while True:
-            p = body.find(h + '(', start)
+            p = body.find(h + "(", start)
             if p < 0:
                 break
             occ.append((p, h))
@@ -457,111 +493,144 @@ def mine_block(name, body, consts, srcfile):
         cur = _fresh()
 
     def emit(term, exit_code=None):
-        cur['pending'] = False
-        invs.append({'argv': list(cur['argv']), 'current_dir': cur['current_dir'],
-                     'stdin': cur['stdin'], 'terminal': term, 'exit_code': exit_code,
-                     'skip': list(cur['skip'])})
-        cur['stdin'] = None
+        cur["pending"] = False
+        invs.append(
+            {
+                "argv": list(cur["argv"]),
+                "current_dir": cur["current_dir"],
+                "stdin": cur["stdin"],
+                "terminal": term,
+                "exit_code": exit_code,
+                "skip": list(cur["skip"]),
+            }
+        )
+        cur["stdin"] = None
 
     for pos, head in occ:
         inner, _ = match_paren(body, pos + len(head))
         args = split_top(inner)
 
-        if head in ('dir.create', 'dir.try_create', 'dir.create_bytes', 'dir.try_create_bytes'):
+        if head in ("dir.create", "dir.try_create", "dir.create_bytes", "dir.try_create_bytes"):
             if len(args) < 2:
-                block_skip.append(f'{head}:argc')
+                block_skip.append(f"{head}:argc")
                 continue
             path = resolve_token(args[0], consts, binds, pos)
             content = resolve_value(args[1], consts, binds, pos)
             if path is None or content is None:
-                block_skip.append(f'{head}:unresolved')
+                block_skip.append(f"{head}:unresolved")
                 continue
-            files.append({'path': path, 'b64': base64.b64encode(content).decode()})
-        elif head == 'dir.create_dir':
+            files.append({"path": path, "b64": base64.b64encode(content).decode()})
+        elif head == "dir.create_dir":
             p = resolve_token(args[0], consts, binds, pos)
-            (dirs.append(p) if p else block_skip.append('create_dir:unresolved'))
-        elif head == 'dir.create_size':
+            (dirs.append(p) if p else block_skip.append("create_dir:unresolved"))
+        elif head == "dir.create_size":
             path = resolve_token(args[0], consts, binds, pos)
-            m = re.match(r'(\d[\d_]*)', args[1].strip()) if len(args) > 1 else None  # drop suffix
-            size = int(m.group(1).replace('_', '')) if m else None
-            (sized.append({'path': path, 'size': size}) if path is not None and size is not None
-             else block_skip.append('create_size:unresolved'))
-        elif head in ('dir.link_dir', 'dir.link_file'):
+            m = re.match(r"(\d[\d_]*)", args[1].strip()) if len(args) > 1 else None  # drop suffix
+            size = int(m.group(1).replace("_", "")) if m else None
+            (
+                sized.append({"path": path, "size": size})
+                if path is not None and size is not None
+                else block_skip.append("create_size:unresolved")
+            )
+        elif head in ("dir.link_dir", "dir.link_file"):
             if len(args) < 2:
-                block_skip.append(f'{head}:argc')
+                block_skip.append(f"{head}:argc")
                 continue
             src = resolve_token(args[0], consts, binds, pos)
             tgt = resolve_token(args[1], consts, binds, pos)
-            (symlinks.append({'path': tgt, 'target': src})
-             if src and tgt else block_skip.append('symlink:unresolved'))
-        elif head == 'dir.remove':
+            (
+                symlinks.append({"path": tgt, "target": src})
+                if src and tgt
+                else block_skip.append("symlink:unresolved")
+            )
+        elif head == "dir.remove":
             p = resolve_token(args[0], consts, binds, pos)
             if p:
                 removed.add(p)
-        elif head == '.command':
+        elif head == ".command":
             new_cmd()
-        elif head == '.arg':
+        elif head == ".arg":
             t = resolve_token(args[0], consts, binds, pos)
-            cur['pending'] = True
-            (cur['argv'].append(t) if t is not None else cur['skip'].append('arg:unresolved'))
-        elif head == '.args':
+            cur["pending"] = True
+            (cur["argv"].append(t) if t is not None else cur["skip"].append("arg:unresolved"))
+        elif head == ".args":
             arr = resolve_array(args[0], consts, binds, pos)
-            cur['pending'] = True
-            (cur['argv'].extend(arr) if arr is not None else cur['skip'].append('args:unresolved'))
-        elif head == '.current_dir':
-            cur['current_dir'] = resolve_token(args[0], consts, binds, pos)
-            cur['pending'] = True
-        elif head == '.pipe':
+            cur["pending"] = True
+            (cur["argv"].extend(arr) if arr is not None else cur["skip"].append("args:unresolved"))
+        elif head == ".current_dir":
+            cur["current_dir"] = resolve_token(args[0], consts, binds, pos)
+            cur["pending"] = True
+        elif head == ".pipe":
             b = resolve_value(args[0], consts, binds, pos)
             if b is None:
-                cur['skip'].append('pipe:unresolved')
+                cur["skip"].append("pipe:unresolved")
             else:
-                cur['stdin'] = base64.b64encode(b).decode()
-            emit('stdout')
-        elif head == '.stdout':
-            emit('stdout')
-        elif head == '.assert_err':
-            emit('err')
-        elif head == '.assert_exit_code':
+                cur["stdin"] = base64.b64encode(b).decode()
+            emit("stdout")
+        elif head == ".stdout":
+            emit("stdout")
+        elif head == ".assert_err":
+            emit("err")
+        elif head == ".assert_exit_code":
             code = None
             with contextlib.suppress(ValueError, IndexError):
                 code = int(args[0])
-            emit('exit', code)
-        elif head == '.assert_non_empty_stderr':
-            emit('stderr')
-        elif head in ('.output', '.raw_output'):
-            emit('output')  # full-Output inspection (usually stderr/status) — not a stdout diff
+            emit("exit", code)
+        elif head == ".assert_non_empty_stderr":
+            emit("stderr")
+        elif head in (".output", ".raw_output"):
+            emit("output")  # full-Output inspection (usually stderr/status) — not a stdout diff
 
-    if cur['pending'] and cur['argv']:  # trailing args never closed by an explicit run-point
-        emit('stdout')
+    if cur["pending"] and cur["argv"]:  # trailing args never closed by an explicit run-point
+        emit("stdout")
 
     # Files created then removed before any run never exist on disk.
-    files = [f for f in files if f['path'] not in removed]
+    files = [f for f in files if f["path"] not in removed]
 
     if not invs:
         base = _rec(name, srcfile, files, dirs, symlinks, sized, _fresh(), pcre2, cmp)
-        base['status'] = 'skip'
-        base['skip'] = block_skip or ['no-invocation']
+        base["status"] = "skip"
+        base["skip"] = block_skip or ["no-invocation"]
         return [base]
 
     recs = []
     multi = len(invs) > 1
     for k, inv in enumerate(invs, 1):
-        rec = _rec(name if not multi else f'{name}#{k}', srcfile,
-                   files, dirs, symlinks, sized, inv, pcre2, cmp)
-        rec['skip'] = block_skip + inv['skip']
-        rec['status'] = 'skip' if (inv['skip'] or not inv['argv']) else 'ok'
+        rec = _rec(
+            name if not multi else f"{name}#{k}",
+            srcfile,
+            files,
+            dirs,
+            symlinks,
+            sized,
+            inv,
+            pcre2,
+            cmp,
+        )
+        rec["skip"] = block_skip + inv["skip"]
+        rec["status"] = "skip" if (inv["skip"] or not inv["argv"]) else "ok"
         recs.append(rec)
     return recs
 
 
 def _rec(name, srcfile, files, dirs, symlinks, sized, inv, pcre2, cmp):
-    return {'file': srcfile, 'name': name,
-            'files': files, 'dirs': dirs, 'symlinks': symlinks, 'sized': sized,
-            'argv': inv['argv'], 'stdin': inv['stdin'], 'cmp': cmp,
-            'terminal': inv['terminal'], 'exit_code': inv['exit_code'],
-            'current_dir': inv['current_dir'], 'pcre2': pcre2,
-            'status': 'ok', 'skip': []}
+    return {
+        "file": srcfile,
+        "name": name,
+        "files": files,
+        "dirs": dirs,
+        "symlinks": symlinks,
+        "sized": sized,
+        "argv": inv["argv"],
+        "stdin": inv["stdin"],
+        "cmp": cmp,
+        "terminal": inv["terminal"],
+        "exit_code": inv["exit_code"],
+        "current_dir": inv["current_dir"],
+        "pcre2": pcre2,
+        "status": "ok",
+        "skip": [],
+    }
 
 
 def main():
@@ -573,13 +642,14 @@ def main():
     for f in FILES:
         for name, body in extract_blocks(strip_comments((TESTS / f).read_text())):
             out.extend(mine_block(name, body, consts, f))
-    (HERE / 'spec.json').write_text(json.dumps(out, indent=1))
+    (HERE / "spec.json").write_text(json.dumps(out, indent=1))
     from collections import Counter
-    st = Counter(r['status'] for r in out)
+
+    st = Counter(r["status"] for r in out)
     print(f"mined {len(out)} records → status {dict(st)}")
-    sk = Counter(s for r in out for s in r['skip'])
+    sk = Counter(s for r in out for s in r["skip"])
     print("skip reasons:", dict(sk.most_common()))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

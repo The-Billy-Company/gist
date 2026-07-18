@@ -42,11 +42,13 @@ def show(n):
                     p.unlink()
             p.symlink_to(root / link["target"])
         cwd = str(root / r["current_dir"]) if r["current_dir"] else str(root)
-        kw = {"input": base64.b64decode(r["stdin"])} if r["stdin"] else {"stdin": subprocess.DEVNULL}
-        rr = subprocess.run(["rg", "--path-separator", "/"] + r["argv"], cwd=cwd,
-                            capture_output=True, **kw)
-        gg = subprocess.run([str(GIST), "rg"] + r["argv"], cwd=cwd,
-                            capture_output=True, **kw)
+        kw = (
+            {"input": base64.b64decode(r["stdin"])} if r["stdin"] else {"stdin": subprocess.DEVNULL}
+        )
+        rr = subprocess.run(
+            ["rg", "--path-separator", "/"] + r["argv"], cwd=cwd, capture_output=True, **kw
+        )
+        gg = subprocess.run([str(GIST), "rg"] + r["argv"], cwd=cwd, capture_output=True, **kw)
     print(f"### {n}  argv={r['argv']}  files={[f['path'] for f in r['files']]} dirs={r['dirs']}")
     print(f"  rc rg={rr.returncode} gist={gg.returncode}")
     print("  --- rg stdout ---")

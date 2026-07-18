@@ -63,7 +63,9 @@ def test_parse_rank_classifies_kinds() -> None:
 def test_generated_property_flags_only_gen() -> None:
     rows = _parse_rank(_SAMPLE)
     assert [r.generated for r in rows] == [False, False, True]
-    assert [r.path for r in rows if not r.generated] == [r.path for r in rows if r.kind is not RankKind.GEN]
+    assert [r.path for r in rows if not r.generated] == [
+        r.path for r in rows if r.kind is not RankKind.GEN
+    ]
 
 
 def test_parse_rank_ignores_the_stderr_timing_and_blanks() -> None:

@@ -15,19 +15,21 @@ committed contract), so nothing large or machine-specific is tracked.
 
 Subcommands: run [--mode all|multiline|pcre|core] | bench
 """
+
 from __future__ import annotations
 
 import argparse
 import atexit
+from dataclasses import dataclass
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
-from pathlib import Path
+
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[1]  # bench/rgsuite -> pkg/kernels/gist
@@ -44,12 +46,18 @@ def _find_gist() -> str:
         return env
     # The suite drives the ReleaseFast CLI (matching bench/gates/line_parity.sh).
     out = KERNEL / "zig-out" / "bin" / "gist"
-    subprocess.run(["zig", "build", "-Doptimize=ReleaseFast"], cwd=KERNEL, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    subprocess.run(
+        ["zig", "build", "-Doptimize=ReleaseFast"],
+        cwd=KERNEL,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
     if out.exists():
         return str(out)
-    cands = sorted(KERNEL.glob(".zig-cache/o/*/gist"),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
+    cands = sorted(
+        KERNEL.glob(".zig-cache/o/*/gist"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
     if not cands:
         sys.exit("no gist binary found after `zig build`")
     return str(cands[0])
@@ -57,9 +65,11 @@ def _find_gist() -> str:
 
 # ───────────────────────── process runner ─────────────────────────
 
+
 @dataclass
 class Out:
     """One command run: exit code, captured stdout bytes, and wall-clock time."""
+
     rc: int
     data: bytes
     secs: float
@@ -68,13 +78,19 @@ class Out:
 def run(bin_: str, args: list[str], cwd: Path, stdin: bytes | None = None) -> Out:
     """Run `bin_ args` in `cwd` (stderr suppressed), capturing stdout + rc + secs."""
     t0 = time.perf_counter()
-    p = subprocess.run([bin_, *args], cwd=str(cwd), input=stdin,
-                       stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                       timeout=90)
+    p = subprocess.run(
+        [bin_, *args],
+        cwd=str(cwd),
+        input=stdin,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        timeout=90,
+    )
     return Out(p.returncode, p.stdout, time.perf_counter() - t0)
 
 
 # ───────────────────────── output normalization ─────────────────────────
+
 
 def _canon_json(data: bytes) -> bytes:
     """Parse rg/gist JSON-lines, drop nondeterministic timing, sort records."""
@@ -118,16 +134,17 @@ def normalize(o: Out, *, is_json: bool, sort_lines: bool) -> bytes:
 
 # ───────────────────────── fixtures ─────────────────────────
 
+
 def gen_fixtures(root: Path) -> None:
     """Write the synthetic edge-case fixtures (this generator is the committed contract)."""
     root.mkdir(parents=True, exist_ok=True)
+
     def w(name: str, b: bytes) -> None:
         (root / name).write_bytes(b)
 
     w("simple.txt", b"alpha\nbeta gamma\ndelta\nEPSILON zeta\n")
     # cross-line spans
-    w("multi.txt", b"start here\nfoo\nbar\nEND here\nfoo again END\n"
-                   b"open{\n  body line\n}close\n")
+    w("multi.txt", b"start here\nfoo\nbar\nEND here\nfoo again END\nopen{\n  body line\n}close\n")
     w("blocks.txt", b"BEGIN\nx\ny\nEND\nBEGIN\nz\nEND\nBEGIN no end\n")
     # CRLF
     w("crlf.txt", b"one\r\ntwo\r\nthree END\r\nfour\r\n")
@@ -145,9 +162,12 @@ def gen_fixtures(root: Path) -> None:
     w("zw.txt", b"\n\naaa\n\nbbb\n\n")
     # a large-ish file to exercise the read cap + timing (>1 MiB, many hits)
     chunk = b"".join(
-        (f"needle line {i} filler filler filler\n"
-         f"otherwise plain {i} lorem ipsum dolor sit amet\n").encode()
-        for i in range(40000))
+        (
+            f"needle line {i} filler filler filler\n"
+            f"otherwise plain {i} lorem ipsum dolor sit amet\n"
+        ).encode()
+        for i in range(40000)
+    )
     w("big.txt", chunk)
     # dotall target: braces spanning many lines
     w("json_like.txt", b'{\n  "a": 1,\n  "b": [1,2,3],\n  "c": {"d": 4}\n}\ntrailer\n')
@@ -160,12 +180,14 @@ def gen_fixtures(root: Path) -> None:
 
 # ───────────────────────── case matrix ─────────────────────────
 
+
 @dataclass
 class Case:
     """One differential case: shared argv + fixture path + comparison knobs."""
+
     name: str
-    args: list[str]          # argv shared by gist + rg (pattern + flags), path appended
-    path: str                # relative to cwd
+    args: list[str]  # argv shared by gist + rg (pattern + flags), path appended
+    path: str  # relative to cwd
     cwd: Path = REPO
     stdin: bytes | None = None
     sort_lines: bool = False
@@ -174,16 +196,33 @@ class Case:
 
 # presentation flags applied on top of a base (pattern, path) case
 PRESENT = [
-    [], ["-n"], ["-H"], ["-n", "-H"], ["-o"], ["-c"], ["--count-matches"],
-    ["-l"], ["--files-without-match"], ["-w"], ["-v"], ["-i"],
-    ["-A", "1"], ["-B", "1"], ["-C", "2"], ["--column"], ["-b"], ["-m", "2"],
-    ["-n", "--column", "-b"], ["--json"],
+    [],
+    ["-n"],
+    ["-H"],
+    ["-n", "-H"],
+    ["-o"],
+    ["-c"],
+    ["--count-matches"],
+    ["-l"],
+    ["--files-without-match"],
+    ["-w"],
+    ["-v"],
+    ["-i"],
+    ["-A", "1"],
+    ["-B", "1"],
+    ["-C", "2"],
+    ["--column"],
+    ["-b"],
+    ["-m", "2"],
+    ["-n", "--column", "-b"],
+    ["--json"],
 ]
 
 
 def _fix_cases(mode: str) -> list[Case]:
     """The curated adversarial fixture cases for `mode` (multiline/pcre/core)."""
     cs: list[Case] = []
+
     def add(name, args, path, **kw):
         cs.append(Case(name, args, path, cwd=FIX, **kw))
 
@@ -198,12 +237,26 @@ def _fix_cases(mode: str) -> list[Case]:
         add("core:nuldata", ["--null-data", "-o", "match"], "nuldata.txt")
         add("core:unicode", ["-n", "Ω"], "unicode.txt")
         add("core:replace", ["-r", "R[$0]", "match"], "simple.txt")
-        cs.append(Case("core:stdin", ["-n", "beta"], "-", cwd=FIX,
-                       stdin=(FIX / "simple.txt").read_bytes()))
+        cs.append(
+            Case(
+                "core:stdin", ["-n", "beta"], "-", cwd=FIX, stdin=(FIX / "simple.txt").read_bytes()
+            )
+        )
 
     if mode in ("all", "multiline"):
-        for pf in [[], ["-n"], ["-H", "-n"], ["-o"], ["-c"], ["--count-matches"],
-                   ["-b"], ["--column"], ["-A", "1"], ["--json"], ["-v"]]:
+        for pf in [
+            [],
+            ["-n"],
+            ["-H", "-n"],
+            ["-o"],
+            ["-c"],
+            ["--count-matches"],
+            ["-b"],
+            ["--column"],
+            ["-A", "1"],
+            ["--json"],
+            ["-v"],
+        ]:
             j = "--json" in pf
             add(f"ml:span{pf}", ["-U", r"foo\nbar", *pf], "multi.txt", is_json=j)
             add(f"ml:block{pf}", ["-U", r"BEGIN[\s\S]*?END", *pf], "blocks.txt", is_json=j)
@@ -247,6 +300,7 @@ def _repo_cases(mode: str) -> list[Case]:
     """Large, gross recursive queries over real subtrees (order-normalized)."""
     cs: list[Case] = []
     subtree = "services/backend"
+
     def add(name, args, **kw):
         cs.append(Case(name, args, subtree, cwd=REPO, sort_lines=True, **kw))
 
@@ -266,6 +320,7 @@ def _repo_cases(mode: str) -> list[Case]:
 
 
 # ───────────────────────── differential run ─────────────────────────
+
 
 def do_run(mode: str) -> int:
     """Run the differential slice for `mode`; return 1 on any parity/index-safety fail."""
@@ -288,8 +343,7 @@ def do_run(mode: str) -> int:
         if g.rc != r.rc:
             fails.append(f"{c.name}: EXIT gist={g.rc} rg={r.rc}  argv={argv}")
         if gn != rn:
-            fails.append(f"{c.name}: STDOUT diverges  argv={argv}\n"
-                         + _mini_diff(gn, rn))
+            fails.append(f"{c.name}: STDOUT diverges  argv={argv}\n" + _mini_diff(gn, rn))
         # index-safety: indexed must equal --no-index (skip stdin cases).
         if c.path != "-":
             gi = run(GIST, argv, c.cwd, c.stdin)
@@ -314,9 +368,14 @@ def _mini_diff(a: bytes, b: bytes, ctx: int = 4) -> str:
     al = a.split(b"\n")
     bl = b.split(b"\n")
     # first differing index (the actionable point), with a little context.
-    i = next((k for k in range(max(len(al), len(bl)))
-              if (al[k] if k < len(al) else None) != (bl[k] if k < len(bl) else None)),
-             None)
+    i = next(
+        (
+            k
+            for k in range(max(len(al), len(bl)))
+            if (al[k] if k < len(al) else None) != (bl[k] if k < len(bl) else None)
+        ),
+        None,
+    )
     if i is None:
         return f"  (equal after normalization; len gist={len(al)} rg={len(bl)})"
     lo = max(0, i - ctx)
@@ -330,6 +389,7 @@ def _mini_diff(a: bytes, b: bytes, ctx: int = 4) -> str:
 
 
 # ───────────────────────── bench (acceleration hunt) ─────────────────────────
+
 
 def do_bench() -> int:
     """Time gist-idx vs gist-noidx vs rg across the acceleration query matrix."""
@@ -354,7 +414,7 @@ def do_bench() -> int:
         gi = _median(GIST, [*args, "-c", subtree])
         gn = _median(GIST, [*args, "-c", "--no-index", subtree])
         rr = _median(RG, [*args, "-c", subtree])
-        print(f"{name:<20} {gi*1e3:>9.1f}m {gn*1e3:>10.1f}m {rr*1e3:>7.1f}m")
+        print(f"{name:<20} {gi * 1e3:>9.1f}m {gn * 1e3:>10.1f}m {rr * 1e3:>7.1f}m")
     return 0
 
 
