@@ -3,7 +3,7 @@
 //! A long-lived Unix-socket connection to a `gist serve` daemon, reused across
 //! many queries so an eligible request answers warm — without re-paying the cold
 //! subprocess's process + index-mmap + candidate-read startup on every call. This
-//! is the Rust leg of the same wire protocol `src/session/protocol.zig` defines
+//! is the Rust leg of the same wire protocol `src/gist/session/protocol.zig` defines
 //! and the Zig CLI + Python clients speak; the daemon is the single source of
 //! truth, so all three clients frame-match by construction.
 //!

@@ -223,6 +223,30 @@ def test_opening_session_spawns_and_serves_warm(corpus) -> None:
         shutil.rmtree(sock_dir, ignore_errors=True)
 
 
+def test_connect_deadline_against_unresponsive_daemon(corpus) -> None:
+    # A socket that ACCEPTS the TCP-level connect but never answers the HELLO
+    # (the exact shape of the pre-multiplex daemon busy with another client, or
+    # a wedged one) must cost at most ~SESSION_IO_TIMEOUT before failing open —
+    # never park the caller indefinitely on the handshake recv.
+    from gist.session import SESSION_IO_TIMEOUT
+
+    sock_dir = tempfile.mkdtemp(prefix="gistd-")
+    sock = os.path.join(sock_dir, "g.sock")
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(sock)
+    srv.listen(4)  # backlog admits the connect; nothing ever reads the HELLO
+    try:
+        with gist.Session(sock, cwd=corpus) as s:
+            t0 = time.monotonic()
+            ok = s.connect()
+            elapsed = time.monotonic() - t0
+        assert ok is False
+        assert elapsed < SESSION_IO_TIMEOUT + 2.0
+    finally:
+        srv.close()
+        shutil.rmtree(sock_dir, ignore_errors=True)
+
+
 def test_absent_false_without_daemon(corpus) -> None:
     # No daemon → absent must be False (fail-open: "run your own scan"), never a
     # spurious True that would skip an authoritative scan.

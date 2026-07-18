@@ -9,8 +9,8 @@ loop header gets stranded by LLVM's loop rotation/versioning).
 
 | File                | Copies                                                                                      | Bound kind                                 |
 | ------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `simd_contains.zig` | [`../../../src/scan/simd.zig`](../../../src/scan/simd.zig)'s `contains` vector filter       | throughput-bound (independent iterations)  |
-| `dfa_step.zig`      | [`../../../src/regex/dfa.zig`](../../../src/regex/dfa.zig)'s `Dfa.docMatch` transition loop | latency-bound (loop-carried pointer chase) |
+| `simd_contains.zig` | [`../../../src/gist/kernel/scan/simd.zig`](../../../src/gist/kernel/scan/simd.zig)'s `contains` vector filter       | throughput-bound (independent iterations)  |
+| `dfa_step.zig`      | [`../../../src/gist/kernel/regex/dfa.zig`](../../../src/gist/kernel/regex/dfa.zig)'s `Dfa.docMatch` transition loop | latency-bound (loop-carried pointer chase) |
 
 Neither file is a source of truth — [`../probes_test.zig`](../probes_test.zig)
 is what makes a copy trustworthy: it asserts each probe is bit-identical to

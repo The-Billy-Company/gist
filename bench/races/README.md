@@ -15,6 +15,7 @@ and the per-tool invocation helpers (`compete_lit_cmd`, `compete_rgx_cmd`,
 | `regex_headtohead.sh`     | **cold regex**: same field, gist's byte-class DFA vs RE2 (csearch/zoekt) and PCRE (`-P`) / `(?-u)`                                                                                                                                 |
 | `pcre_headtohead.sh`      | **cold PCRE**: gist's `-P` (vendored PCRE2 JIT, trigram-prefiltered) vs `rg -P` / `ugrep -P` on lookaround/backref queries                                                                                                         |
 | `searchzip_headtohead.sh` | **cold `-z`**: gist vs rg vs ugrep over a compressed corpus — in-process `std.compress` decode vs a fork-a-decompressor-per-file (gist beats both on gzip/zstd/xz; bzip2 + the external-codec tail have no in-process Zig decoder) |
+| `relate_headtohead.sh`    | **relate**: `hydra search` (paraphrase retrieval by conditional description length) vs the exact-search field — gist proves 0 hits on the class (capability line), then hydra one-pass vs the K-token gist emulation; doubles as the relate quality gate (planted source must rank top-1, else exit 1)      |
 
 ## Scenarios
 
@@ -32,6 +33,11 @@ and the per-tool invocation helpers (`compete_lit_cmd`, `compete_rgx_cmd`,
   `COUNT` compressed files per format (`COUNT=400 RUNS=8` default), each tool on
   its transparent-`-z` path. The corpus is nested (not flat) because gist's
   pipeline steals work per directory — a flat archive would pin it to one worker.
+- **Relate slate** (`relate_headtohead.sh`): a synthetic deterministic corpus of
+  boilerplate-heavy files with per-file topical vocabulary; queries are
+  paraphrases of planted files (verbatim in no file). hydra must retrieve each
+  planted source top-1 (hard gate), gist must find 0 exact hits, and the timing
+  lane races hydra's one pass against the one-gist-per-token emulation.
 
 Each race prints per-query times with gist's speedup, then a summary: **geomean
 speedup and win-rate per tool**, split indexed vs unindexed. Raw rows land in
@@ -44,4 +50,5 @@ bench/races/coldquery.sh           # COLD literal: gist vs csearch/zoekt + rg/ug
 bench/races/regex_headtohead.sh    # COLD regex: same field, per feature tier
 bench/races/pcre_headtohead.sh     # COLD PCRE: gist -P vs rg -P / ugrep -P
 bench/races/searchzip_headtohead.sh # COLD -z: gist vs rg vs ugrep over compressed files
+bench/races/relate_headtohead.sh   # RELATE: hydra paraphrase retrieval + quality gate
 ```

@@ -53,7 +53,7 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 (`gist::warm_eligible(&req)` is `false` for scoped roots, globs/types, context,
 or any rich flag), or a wire hiccup transparently falls back to the
 byte-identical cold subprocess. The wire protocol is the same one
-`src/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
+`src/gist/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
 three frame-match against the one daemon.
 
 ## Find, then aggregate

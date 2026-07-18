@@ -35,7 +35,7 @@ path — the only honest basis for a warm-speedup claim — and gates it fail-cl
      set, not `rg`'s. Both counts (`d_files`, `rg_files`) sit in the table so the
      speedup is never mistaken for like-for-like. Exact warm==cold==oracle parity
      is gated **hermetically** by the Zig suite (`serve_test`, `resident_test`,
-     [`freshness_test`](../../src/session/freshness_test.zig)) — not by a live-tree
+     [`freshness_test`](../../src/gist/session/freshness_test.zig)) — not by a live-tree
      count race.
   2. The microsecond fast path is armed only where a filesystem watcher proves
      quiescence (**Linux inotify** and **macOS FSEvents** today; every other

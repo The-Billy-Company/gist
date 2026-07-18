@@ -1,10 +1,13 @@
 //! hydra — the compression-search CLI (the `hydra` binary).
 //!
 //! What if compression was a text search algorithm? hydra is that question as
-//! a product: three verbs over the irregex primitives (match ∪ relate ∪
-//! weave), riding the same kernel, corpus policy, and persisted trigram index
-//! as the `gist` binary — one engine, two faces:
+//! a product: four verbs over the hydra engine + irregex primitives (relate ∪
+//! match ∪ weave), riding the same corpus policy as the `gist` binary:
 //!
+//!   hydra search <text> [--top N] [--json] [ROOT...]
+//!       which files would describe this text most cheaply? — the two-stage
+//!       compression retrieval (fingerprint lexicon → suffix-automaton
+//!       cross-parse; engine/lexicon.zig + engine/zipper.zig)
 //!   hydra similar <path> [--top N] [--json] [ROOT...]
 //!       nearest files by compression kinship (LZ dictionary distance) —
 //!       "what else in this tree is LIKE this file?"
@@ -17,12 +20,13 @@
 //! (a JSON capability manifest for agents/codegen).
 //!
 //! This is the thin dispatch shell only: the verbs' real work lives in
-//! `faces/hydra/irregex.zig`, reached through the `irregex` module.
+//! `src/hydra/engine/`, reached through the `irregex` module.
 
 const std = @import("std");
 const irregex = @import("irregex");
 
 const verbs = irregex.commands.irregex; // similar / dups / patterns drivers
+const search = irregex.commands.hydra_search; // the compression-retrieval verb
 const schema = irregex.commands.hydra_schema; // `--schema` JSON manifest
 
 fn usage() void {
@@ -30,6 +34,9 @@ fn usage() void {
         \\hydra — compression-as-search over the irregex primitives
         \\
         \\usage:
+        \\  hydra search <text> [--top N] [--json] [ROOT...]
+        \\      which files would describe this text most cheaply?
+        \\      (two-stage compression retrieval; score = coding gain in [0,1])
         \\  hydra similar <path> [--top N] [--json] [ROOT...]
         \\      nearest files by compression kinship (LZ dictionary distance)
         \\  hydra dups [--max-distance T] [--top N] [--json] [ROOT...]
@@ -75,11 +82,15 @@ pub fn main(init: std.process.Init) !void {
     // so a grouped `patterns --by` answer is never silently clipped differently.
     irregex.corpus.initOutputBudget(false);
 
-    if (std.mem.eql(u8, mode, "similar") or std.mem.eql(u8, mode, "dups") or std.mem.eql(u8, mode, "patterns")) {
+    const known = [_][]const u8{ "search", "similar", "dups", "patterns" };
+    for (known) |k| {
+        if (!std.mem.eql(u8, mode, k)) continue;
         var rest: std.ArrayList([]const u8) = .empty;
         defer rest.deinit(gpa);
         while (it.next()) |arg| try rest.append(gpa, arg);
-        if (std.mem.eql(u8, mode, "similar")) {
+        if (std.mem.eql(u8, mode, "search")) {
+            try search.runSearch(gpa, io, rest.items);
+        } else if (std.mem.eql(u8, mode, "similar")) {
             try verbs.runSimilar(gpa, io, rest.items);
         } else if (std.mem.eql(u8, mode, "dups")) {
             try verbs.runDups(gpa, io, rest.items);
@@ -89,6 +100,6 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
 
-    std.debug.print("hydra: unknown verb '{s}' (similar | dups | patterns; --help)\n", .{mode});
+    std.debug.print("hydra: unknown verb '{s}' (search | similar | dups | patterns; --help)\n", .{mode});
     std.process.exit(2);
 }

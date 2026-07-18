@@ -1,4 +1,4 @@
-"""Persistent resident-session client (ADR-352 rung 2.5). A long-lived Unix-socket connection to a `gist serve` daemon, reused across many queries so an eligible request answers warm — without re-paying the cold subprocess's process + index-mmap + candidate-read startup on every call. This is the Python leg of the same wire protocol `src/session/protocol.zig` defines and the Zig CLI client speaks; the daemon is the single source of truth, so both clients frame-match by construction. Fail-open, always: a `Session` that cannot connect, whose request is ineligible, or that receives a `decline` transparently falls back to the certified cold subprocess (`engine.files`/`engine.count`) and returns the byte-identical answer. The daemon is a pure accelerator — it never adds a failure mode a caller must handle, only removes latency when one is listening."""
+"""Persistent resident-session client (ADR-352 rung 2.5). A long-lived Unix-socket connection to a `gist serve` daemon, reused across many queries so an eligible request answers warm — without re-paying the cold subprocess's process + index-mmap + candidate-read startup on every call. This is the Python leg of the same wire protocol `src/gist/session/protocol.zig` defines and the Zig CLI client speaks; the daemon is the single source of truth, so both clients frame-match by construction. Fail-open, always: a `Session` that cannot connect, whose request is ineligible, or that receives a `decline` transparently falls back to the certified cold subprocess (`engine.files`/`engine.count`) and returns the byte-identical answer. The daemon is a pure accelerator — it never adds a failure mode a caller must handle, only removes latency when one is listening."""
 
 from __future__ import annotations
 
@@ -23,6 +23,13 @@ if TYPE_CHECKING:
 
 PROTOCOL_VERSION = 1
 DEFAULT_SOCKET = ".local/gist-verify/gistd.sock"
+
+# Soft deadline for every socket wait (connect, handshake, query round-trip) —
+# the Python twin of the Zig client's `client_io_timeout_ms`. A wedged, busy,
+# or pre-multiplex daemon must cost the caller at most this long before the
+# fail-open cold path answers; `socket.timeout` is an `OSError`, so every
+# existing wire-failure handler already routes it to cold.
+SESSION_IO_TIMEOUT = 2.0
 
 # Opcodes — mirror `protocol.zig::Opcode`.
 _OP_HELLO, _OP_READY, _OP_QUERY, _OP_RESULT, _OP_DECLINE = 1, 2, 3, 4, 5
@@ -90,6 +97,7 @@ def warm_eligible(request: SearchRequest) -> bool:
 def _socket_listening(path: Path) -> bool:
     """Whether a daemon accepts a connection on ``path`` right now."""
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(SESSION_IO_TIMEOUT)
     try:
         s.connect(str(path))
         return True
@@ -169,11 +177,18 @@ class Session:
     # ── connection lifecycle ──
 
     def _connect(self) -> socket.socket | None:
-        """Open + handshake, or None if no daemon / a version mismatch (→ cold)."""
+        """Open + handshake, or None if no daemon / a version mismatch (→ cold).
+
+        The deadline stays armed on the socket for the connection's whole
+        life, so no later send/recv can park the caller behind a wedged or
+        busy daemon either — `socket.timeout` is an `OSError`, which every
+        wire path already treats as "answer cold".
+        """
         path = Path(self._path)
         if not path.is_absolute():
             path = Path(self._cwd or Path.cwd()) / path
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(SESSION_IO_TIMEOUT)
         try:
             s.connect(str(path))
             _send(s, _OP_HELLO, bytes([PROTOCOL_VERSION]))

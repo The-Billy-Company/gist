@@ -30,8 +30,8 @@ cross-machine cross-check.
 | `portcert.sh`              | cross-compiles the two probes to two reference microarchitectures, runs `llvm-mca`, writes `portcert.csv`/`portcert.json`, splices the certificate                                                       |
 | `portcert_report.py`       | renders the `## Layer B` markdown section (static + the Layer B′ measured subsection) from `portcert.json` + `portbound.json` and splices it into `.local/gist-verify/CERTIFICATE.md`                    |
 | `portbound.zig`            | **Layer B′** — `gist-portbound`: times the same drift-guarded probes natively under the PMU (`bench/harness/pmu.zig`), writing `portbound.json` (measured cyc/byte + cyc/step; fail-closed without root) |
-| `probes/simd_contains.zig` | byte-faithful copy of the hot loop in [`../../src/scan/simd.zig`](../../src/scan/simd.zig)'s `contains` — throughput-bound                                                                               |
-| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/regex/dfa.zig`](../../src/regex/dfa.zig)'s `docMatch` — latency-bound                                                                                  |
+| `probes/simd_contains.zig` | byte-faithful copy of the hot loop in [`../../src/gist/kernel/scan/simd.zig`](../../src/gist/kernel/scan/simd.zig)'s `contains` — throughput-bound                                                                               |
+| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/gist/kernel/regex/dfa.zig`](../../src/gist/kernel/regex/dfa.zig)'s `docMatch` — latency-bound                                                                                  |
 | `probes_test.zig`          | the drift guard — asserts each probe is bit-identical to the real production function it copies, over adversarial random inputs (`zig build test`)                                                       |
 
 **Why cross-compiled reference cores, not this machine.** This dev box is

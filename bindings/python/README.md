@@ -106,7 +106,7 @@ it is absent or disabled. `limit` caps the rows (default 20).
 GIST used to be reachable only as a shell reflex (the `gist` CLI). Scripts that
 wanted its speed shelled out to `rg` and parsed text. This package gives them —
 and Billy's agent code-search tool — **one** request shape (`SearchRequest`) over
-**one** engine, per [ADR-352](../../../../docs/architecture/3-decisions/352-gist-unified-search-api.md).
+**one** engine, per [ADR-352](../../../../../docs/architecture/3-decisions/352-gist-unified-search-api.md).
 
 ## How it works
 
@@ -144,7 +144,7 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 (`gist.warm_eligible(req)` is `False` for scoped roots, globs/types, context, or
 any rich flag), or a wire hiccup transparently falls back to the byte-identical
 cold subprocess — the daemon is a pure accelerator, never a new failure mode.
-The wire protocol is the same one `src/session/protocol.zig` defines and the Zig
+The wire protocol is the same one `src/gist/session/protocol.zig` defines and the Zig
 CLI + Rust clients speak, so all three frame-match against the one daemon.
 `refresh_generation()` reads the daemon's current three-part generation; a
 reconnect, daemon restart, or index publication is visible through

@@ -1,19 +1,24 @@
 //! hydra --schema — the deterministic, machine-readable capability manifest.
 //!
-//! hydra's verb surface is closed and static (three verbs over the irregex
-//! primitives), so unlike gist's manifest — which renders its rg-flag buckets
-//! from the parser catalog — this one is a single comptime document. The JSON
-//! validity test keeps it honest.
+//! hydra's verb surface is closed and static (four verbs over the hydra
+//! engine + irregex primitives), so unlike gist's manifest — which renders
+//! its rg-flag buckets from the parser catalog — this one is a single
+//! comptime document. The JSON validity test keeps it honest.
 
 const std = @import("std");
-const corpus_mod = @import("../../kernel/corpus/corpus.zig");
+const corpus_mod = @import("../../corpus/corpus.zig");
 
 const manifest =
     \\{
     \\  "tool": "hydra",
     \\  "version": "0.1.0",
-    \\  "summary": "compression-as-search over the irregex primitives: kinship (relate), multi-pattern attribution (match), and engine-side shaping (weave)",
+    \\  "summary": "compression-as-search: retrieval by conditional description length (search), kinship (relate), multi-pattern attribution (match), and engine-side shaping (weave)",
     \\  "verbs": {
+    \\    "search": {
+    \\      "summary": "which files would describe this text most cheaply? two-stage compression retrieval: a corpus-priced fingerprint lexicon nominates, an exact suffix-automaton cross-parse decides; score = coding gain in [0,1], higher = closer",
+    \\      "args": [{"name": "text", "type": "string", "required": true, "description": "the query text"}, {"name": "ROOT...", "type": "string[]", "required": false, "description": "corpus roots (default: the index roots)"}],
+    \\      "flags": [{"name": "--top", "type": "int", "default": 10, "description": "rows surfaced"}, {"name": "--json", "type": "bool", "default": false, "description": "NDJSON {path, gain, cost_bits, bits_saved, factors, literals} rows"}]
+    \\    },
     \\    "similar": {
     \\      "summary": "nearest files to <path> by compression kinship (LZ dictionary distance, closest first)",
     \\      "args": [{"name": "path", "type": "string", "required": true, "description": "the probe file"}, {"name": "ROOT...", "type": "string[]", "required": false, "description": "corpus roots (default: the index roots)"}],
@@ -42,11 +47,12 @@ pub fn emit() void {
     corpus_mod.emitStdout(manifest);
 }
 
-test "hydra --schema is valid JSON naming all three verbs" {
+test "hydra --schema is valid JSON naming all four verbs" {
     const t = std.testing;
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, manifest, .{});
     defer parsed.deinit();
     const verbs = parsed.value.object.get("verbs").?.object;
+    try t.expect(verbs.contains("search"));
     try t.expect(verbs.contains("similar"));
     try t.expect(verbs.contains("dups"));
     try t.expect(verbs.contains("patterns"));
