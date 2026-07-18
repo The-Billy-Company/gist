@@ -10,12 +10,12 @@
 //! the former `commands/search/drivers.zig` when that module was deleted).
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/corpus.zig");
-const fresh = @import("../../kernel/index/fresh.zig");
-const persist = @import("../../kernel/index/persist.zig");
-const Index = @import("../../kernel/index/trigram.zig").Index;
-const nowNs = @import("args.zig").nowNs;
-const ms = @import("args.zig").ms;
+const corpus_mod = @import("../../../../corpus/corpus.zig");
+const fresh = @import("../../../kernel/index/fresh.zig");
+const persist = @import("../../../kernel/index/persist.zig");
+const Index = @import("../../../kernel/index/trigram.zig").Index;
+const nowNs = @import("../search/argv/args.zig").nowNs;
+const ms = @import("../search/argv/args.zig").ms;
 
 /// Build once, persist the index + the doc→path table (NUL-separated, doc-id
 /// order) so a later fresh process can map candidate ids back to files.

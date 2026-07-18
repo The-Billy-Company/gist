@@ -18,7 +18,7 @@ from .request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
 
 DEFAULT_TIMEOUT = 30.0
 # stderr phrases the engine prints when a pattern/flag is outside its
-# linear-time syntax (see src/commands/ripgrep/{args,run}.zig `die` messages).
+# linear-time syntax (see src/gist/faces/cli/search/{argv/args,engine/serial}.zig `die` messages).
 _UNSUPPORTED_MARKERS = (
     "unsupported",
     "use ripgrep",

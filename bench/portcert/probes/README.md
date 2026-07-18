@@ -7,8 +7,8 @@ Billy dependencies, and brackets its measured region with `# LLVM-MCA-
 BEGIN/END` marker comments **inside** the loop body (a marker straddling the
 loop header gets stranded by LLVM's loop rotation/versioning).
 
-| File                | Copies                                                                                                              | Bound kind                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| File                | Copies                                                                                      | Bound kind                                 |
+| ------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | `simd_contains.zig` | [`../../../src/gist/kernel/scan/simd.zig`](../../../src/gist/kernel/scan/simd.zig)'s `contains` vector filter       | throughput-bound (independent iterations)  |
 | `dfa_step.zig`      | [`../../../src/gist/kernel/regex/dfa.zig`](../../../src/gist/kernel/regex/dfa.zig)'s `Dfa.docMatch` transition loop | latency-bound (loop-carried pointer chase) |
 

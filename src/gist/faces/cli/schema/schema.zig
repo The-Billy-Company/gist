@@ -1,12 +1,12 @@
 //! gist --schema — the deterministic, machine-readable capability manifest.
 //!
 //! Search compatibility is not prose copied from the parser. The four ripgrep
-//! buckets are rendered directly from `ripgrep/args.zig`'s declarative catalog,
+//! buckets are rendered directly from `search/argv/args.zig`'s declarative catalog,
 //! the same rows that build the short- and long-flag dispatch tables.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/corpus.zig");
-const args = @import("../ripgrep/args.zig");
+const corpus_mod = @import("../../../../corpus/corpus.zig");
+const args = @import("../search/argv/args.zig");
 
 const manifest_prefix =
     \\{
@@ -43,7 +43,7 @@ const manifest_prefix =
     \\    ],
     \\    "flag_surface": "broad, tested ripgrep-compatible subset; not full ripgrep compatibility. Unsupported and unknown flags fail loud with exit 2.",
     \\    "ripgrep_compatibility": {
-    \\      "source_of_truth": "src/gist/faces/ripgrep/args.zig:flag_catalog",
+    \\      "source_of_truth": "src/gist/faces/cli/search/argv/args.zig:flag_catalog",
     \\      "unknown_flags": "unsupported-fail-loud",
     \\      "buckets": {
 ;

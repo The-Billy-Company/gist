@@ -33,10 +33,10 @@
 //!     never pays the FIFO poll.
 
 const std = @import("std");
-const request = @import("../../session/request.zig");
-const protocol = @import("../../session/protocol.zig");
-const corpus = @import("../../../corpus/corpus.zig");
-const run = @import("../ripgrep/run.zig");
+const request = @import("../../../../session/request.zig");
+const protocol = @import("../../../../session/protocol.zig");
+const corpus = @import("../../../../../corpus/corpus.zig");
+const run = @import("../../search/engine/serial.zig");
 const net = std.Io.net;
 
 /// Best-effort detached daemon auto-spawn: when an eligible query finds no

@@ -24,7 +24,7 @@ use crate::request::SearchRequest;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 // stderr phrases the engine prints when a pattern/flag is outside its
-// linear-time syntax (see src/commands/ripgrep/{args,run}.zig `die` messages).
+// linear-time syntax (see src/gist/faces/cli/search/{argv/args,engine/serial}.zig `die` messages).
 const UNSUPPORTED_MARKERS: &[&str] = &[
     "unsupported",
     "use ripgrep",

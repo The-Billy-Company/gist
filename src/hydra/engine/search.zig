@@ -18,7 +18,7 @@
 
 const std = @import("std");
 const corpus_mod = @import("../../corpus/corpus.zig");
-const cli_args = @import("../../gist/faces/ripgrep/args.zig");
+const cli_args = @import("../../gist/faces/cli/search/argv/args.zig");
 const scope = @import("../../scope/glob.zig");
 const lexicon = @import("lexicon.zig");
 const zipper = @import("zipper.zig");

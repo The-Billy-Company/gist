@@ -28,7 +28,7 @@
 //! agents/codegen).
 //!
 //! This is the thin dispatch shell only: every verb's real work lives in the
-//! engine + command modules, reached through the `gist` module (`commands.ripgrep`
+//! engine + command modules, reached through the `gist` module (`commands.search`
 //! for the unified search engine, `commands.indexer` for `gist index`,
 //! `commands.status` for introspection, `commands.schema` for the manifest). The
 //! bench/verify/certify harness is a separate executable (`bench/harness/bench.zig`).
@@ -39,7 +39,7 @@ const gist = @import("irregex");
 const indexer = gist.commands.indexer; // `gist index` — build + persist the trigram index
 const status = gist.commands.status; // read-only index introspection
 const schema = gist.commands.schema; // `--schema` JSON manifest
-const ripgrep = gist.commands.ripgrep; // the unified search engine (bare shorthand + `gist rg`)
+const search = gist.commands.search; // the unified search engine (bare shorthand + `gist rg`)
 const serve = gist.commands.serve; // `gist serve` — the resident warm daemon
 const client = gist.commands.client; // the warm CLI fast path (daemon dial + cold fallback)
 const default_roots = gist.corpus.default_roots;
@@ -116,7 +116,7 @@ pub fn main(init: std.process.Init) !void {
     // Resolve the output budget from the environment once, before any search
     // dispatch, so the warm client path (which emits without re-parsing flags)
     // honors `GIST_UNCAP`/`GIST_MAX_OUTPUT_*`. The cold engine re-resolves it
-    // with the parsed `--uncap` flag (`ripgrep.run`); `--uncap` always routes
+    // with the parsed `--uncap` flag (`search.run`); `--uncap` always routes
     // cold (the resident classifier declines it), so the flag still takes effect.
     gist.corpus.initOutputBudget(false);
 
@@ -174,7 +174,7 @@ pub fn main(init: std.process.Init) !void {
         defer rest.deinit(gpa);
         while (it.next()) |arg| try rest.append(gpa, arg);
         tryWarm(gpa, io, init.environ_map, rest.items);
-        try ripgrep.run(gpa, io, rest.items, init.environ_map);
+        try search.run(gpa, io, rest.items, init.environ_map);
         return;
     }
     // `search <pattern> [PATH...]` — the same engine addressed with the verb the
@@ -190,10 +190,10 @@ pub fn main(init: std.process.Init) !void {
         while (it.next()) |arg| try rest.append(gpa, arg);
         if (rest.items.len > 0) {
             tryWarm(gpa, io, init.environ_map, rest.items);
-            try ripgrep.run(gpa, io, rest.items, init.environ_map);
+            try search.run(gpa, io, rest.items, init.environ_map);
         } else {
             tryWarm(gpa, io, init.environ_map, &.{mode});
-            try ripgrep.run(gpa, io, &.{mode}, init.environ_map);
+            try search.run(gpa, io, &.{mode}, init.environ_map);
         }
         return;
     }
@@ -213,5 +213,5 @@ pub fn main(init: std.process.Init) !void {
     try implicit.append(gpa, mode);
     while (it.next()) |arg| try implicit.append(gpa, arg);
     tryWarm(gpa, io, init.environ_map, implicit.items);
-    try ripgrep.run(gpa, io, implicit.items, init.environ_map);
+    try search.run(gpa, io, implicit.items, init.environ_map);
 }

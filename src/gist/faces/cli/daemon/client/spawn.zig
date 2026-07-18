@@ -19,8 +19,8 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const request = @import("../../session/request.zig");
-const run = @import("../ripgrep/run.zig");
+const request = @import("../../../../session/request.zig");
+const run = @import("../../search/engine/serial.zig");
 const net = std.Io.net;
 
 /// Only these targets have the fork+exec + `flock`/FSEvents/inotify machinery the

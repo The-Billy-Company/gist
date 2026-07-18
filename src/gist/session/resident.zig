@@ -14,7 +14,7 @@
 //!
 //! ## The corpus is a faithful mirror
 //!
-//! Base docs load through `mirror.zig`: full reads (no cap), BOM/UTF-16 decode,
+//! Base docs load through `corpus.zig`: full reads (no cap), BOM/UTF-16 decode,
 //! whole-body first-NUL offsets, empty docs dropped — the same per-file ingest
 //! a cold run applies. Binary docs are ADMITTED (cold does not skip a walked
 //! binary; it searches up to the buffer that revealed the first NUL), and each
@@ -32,7 +32,7 @@
 //!
 //! The invariant is `resident matches == gist --no-index matches == rg matches`.
 //! It holds because both the base corpus and every reconcile re-derive their file
-//! set from the cold path's OWN certified walk (`commands/ripgrep/run.zig::
+//! set from the cold path's OWN certified walk (`faces/cli/search/engine/serial.zig::
 //! defaultFileSet` — hidden-file exclusion, `.gitignore`/`.ignore` precedence,
 //! `.git` skip, root scope), never `haystack`'s coarse superset. The warm set is
 //! therefore byte-identical to what a rootless `gist <pattern>` would walk:
@@ -62,15 +62,15 @@
 const std = @import("std");
 const corpus_mod = @import("../../corpus/corpus.zig");
 const bulkstat = @import("../../corpus/bulkstat.zig");
-const mirror = @import("mirror.zig");
+const corpus = @import("corpus.zig");
 const render = @import("render.zig");
 // The resident file set is the certified rg-default walk the cold path uses, NOT
 // `haystack`'s coarse superset — this is what makes `resident == --no-index ==
 // rg` true for hidden files, `.gitignore` precedence, and root scope. `session`
-// depending on `commands/ripgrep` is a one-way edge (run.zig never imports
+// depending on `faces/search` is a one-way edge (serial.zig never imports
 // session), so no import cycle.
-const run = @import("../faces/ripgrep/run.zig");
-const grepfile = @import("../faces/ripgrep/grepfile.zig");
+const run = @import("../faces/cli/search/engine/serial.zig");
+const grepfile = @import("../faces/cli/search/read/grepfile.zig");
 const dirtylog = @import("dirty.zig");
 const delta_mod = @import("delta.zig");
 const persist = @import("../kernel/index/persist.zig");
@@ -116,7 +116,7 @@ pub const Lines = struct {
 /// the `emit` call — the sink must copy anything it keeps. `line_number` is
 /// 1-based over rg's line model, and every span is a non-empty `[start,end)`
 /// byte range within `text`, byte-identical to the cold `gist --json` submatch
-/// stream (`commands/ripgrep/json.zig`).
+/// stream (`faces/cli/search/emit/json.zig`).
 pub const MatchRecord = struct {
     path: []const u8,
     line_number: u64,
@@ -143,7 +143,7 @@ const DocRef = struct {
     nul: ?usize = null,
 
     /// Separator-aware path order — the SAME `pathLess` cold's `--sort path`
-    /// comparator uses (`commands/ripgrep/run.zig::cmpFiles`). Cold's default
+    /// comparator uses (`faces/cli/search/engine/serial.zig::cmpFiles`). Cold's default
     /// parallel pipeline emits in worker-discovery order (nondeterministic);
     /// warm canonicalizes to this deterministic total order instead — per-file
     /// bytes stay identical, and the rgsuite oracle's own equivalence
@@ -160,7 +160,7 @@ const Admit = enum { json_stream, lines };
 
 /// A base doc's live substitute: a replacement document (gpa-owned bytes +
 /// first-NUL offset), or a tombstone (deleted / left the walk set / read empty).
-const Overlay = union(enum) { doc: mirror.OwnedDoc, tombstone };
+const Overlay = union(enum) { doc: corpus.OwnedDoc, tombstone };
 
 pub const ResidentSession = struct {
     gpa: std.mem.Allocator,
@@ -168,7 +168,7 @@ pub const ResidentSession = struct {
     roots_arena: std.heap.ArenaAllocator,
     roots: []const []const u8,
 
-    mir: mirror.Mirror,
+    mir: corpus.Mirror,
     idx: Index,
     /// doc-id lookup for overlay substitution (aliases `mir.paths`).
     by_path: std.StringHashMap(u32),
@@ -238,7 +238,7 @@ pub const ResidentSession = struct {
         // arena owns the path list just for the read.
         var sel_arena = std.heap.ArenaAllocator.init(gpa);
         const sel = run.defaultFileSet(sel_arena.allocator(), io, owned_roots);
-        var mir = mirror.load(gpa, io, sel.paths) catch |e| {
+        var mir = corpus.load(gpa, io, sel.paths) catch |e| {
             sel_arena.deinit();
             return e;
         };
@@ -601,7 +601,7 @@ pub const ResidentSession = struct {
     /// never produce cold output. A file that turned binary stays IN the
     /// overlay with its `nul` recorded, so each mode applies cold's binary rule.
     fn readInto(self: *ResidentSession, p: []const u8) QueryError!void {
-        const doc = mirror.readDocOwned(self.gpa, self.io, p) orelse
+        const doc = corpus.readDocOwned(self.gpa, self.io, p) orelse
             return self.putOverlay(p, .tombstone);
         return self.putOverlay(p, .{ .doc = doc });
     }

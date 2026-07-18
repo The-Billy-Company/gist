@@ -119,7 +119,7 @@ def ensure_serve(
     (now) reachable. Fail-open by construction: a missing binary, a spawn
     error, or a daemon that never binds within ``timeout`` returns ``False``,
     and the caller's `Session` still answers cold. Mirrors the Zig auto-spawn
-    (`src/commands/client/spawn.zig`): opt out with ``GIST_NO_AUTOSERVE``, and
+    (`src/gist/faces/cli/daemon/client/spawn.zig`): opt out with ``GIST_NO_AUTOSERVE``, and
     it is herd-safe because the daemon's advisory `flock` admits exactly one
     racer (the losers exit at once without touching the winner's live socket).
     """

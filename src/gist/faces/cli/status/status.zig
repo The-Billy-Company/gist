@@ -15,9 +15,9 @@
 //! machine consumers never need to scrape prose and the two views cannot drift.
 
 const std = @import("std");
-const persist = @import("../../kernel/index/persist.zig");
-const fresh = @import("../../kernel/index/fresh.zig");
-const corpus_mod = @import("../../../corpus/corpus.zig");
+const persist = @import("../../../kernel/index/persist.zig");
+const fresh = @import("../../../kernel/index/fresh.zig");
+const corpus_mod = @import("../../../../corpus/corpus.zig");
 const Dir = std.Io.Dir;
 
 /// Version of the `--json` machine contract; bumped only on a breaking field

@@ -39,18 +39,18 @@
 //! explicit FILE args, stdin) stays on the proven serial engine.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/corpus.zig");
-const args = @import("args.zig");
-const output = @import("output.zig");
-const ignore = @import("ignore.zig");
-const grepfile = @import("grepfile.zig");
-const ingest = @import("ingest.zig");
-const simd = @import("../../kernel/scan/simd.zig");
-const verify = @import("../../kernel/scan/verify.zig");
-const persist = @import("../../kernel/index/persist.zig");
-const fresh = @import("../../kernel/index/fresh.zig");
-const bulkstat = @import("../../../corpus/bulkstat.zig");
-const paths_mod = @import("paths.zig");
+const corpus_mod = @import("../../../../../corpus/corpus.zig");
+const args = @import("../argv/args.zig");
+const output = @import("../emit/output.zig");
+const ignore = @import("../walk/ignore.zig");
+const grepfile = @import("../read/grepfile.zig");
+const ingest = @import("../read/ingest.zig");
+const simd = @import("../../../../kernel/scan/simd.zig");
+const verify = @import("../../../../kernel/scan/verify.zig");
+const persist = @import("../../../../kernel/index/persist.zig");
+const fresh = @import("../../../../kernel/index/fresh.zig");
+const bulkstat = @import("../../../../../corpus/bulkstat.zig");
+const paths_mod = @import("../walk/paths.zig");
 const stripDot = paths_mod.stripDot;
 const replaceSep = paths_mod.replaceSep;
 const joinPath = paths_mod.join;
@@ -59,9 +59,9 @@ const Opts = args.Opts;
 const Emitter = output.Emitter;
 const die = args.die;
 const oom = args.oom;
-const Regex = @import("../../kernel/regex/core.zig").Regex;
-const Matcher = @import("../../kernel/regex/matcher.zig").Matcher;
-const pcre2 = @import("../../kernel/regex/pcre2.zig");
+const Regex = @import("../../../../kernel/regex/linear/core.zig").Regex;
+const Matcher = @import("../../../../kernel/regex/linear/matcher.zig").Matcher;
+const pcre2 = @import("../../../../kernel/regex/pcre2/backend.zig");
 const Dir = std.Io.Dir;
 
 /// Can this invocation run on the parallel engine byte-identically? Everything

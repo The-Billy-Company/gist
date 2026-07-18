@@ -40,10 +40,10 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const resident = @import("../../session/resident.zig");
-const protocol = @import("../../session/protocol.zig");
-const watch = @import("../../session/watch.zig");
-const corpus = @import("../../../corpus/corpus.zig");
+const resident = @import("../../../../session/resident.zig");
+const protocol = @import("../../../../session/protocol.zig");
+const watch = @import("../../../../session/watch.zig");
+const corpus = @import("../../../../../corpus/corpus.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
