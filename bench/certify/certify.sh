@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# certify.sh — complete Layer A certificate (microscopic + macroscopic).
+# certify.sh — full Certificate of Optimality (Layers A–D).
 #
-# The microscopic half (`zig build certify`) proves gist's in-process verify
-# kernel runs at N cycles/byte. This half proves the *end-to-end* claim the user
-# actually cares about: for every regex class ripgrep supports, gist's cold
-# fresh-process query is **at parity or faster than ripgrep**, established with a
-# real statistic — a 95% bootstrap-CI median + a Mann-Whitney significance test —
-# not a single mean. The verdict is fail-closed (a WIN needs a lower median AND
-# p<0.05); every class is shown, losses included.
+# Layer A has two halves: microscopic (`zig build certify` — cycles/byte for the
+# in-process verify kernel; auto-re-runs under sudo when available for PMU) and
+# macroscopic (this script's hyperfine race — cold fresh-process gist vs the
+# field, fail-closed bootstrap-CI + Mann-Whitney vs ripgrep). Layers B/B′/C/D
+# are then spliced automatically via `certify_layers.sh` so the committed
+# artifact never ships a header that promises four layers and delivers one.
 #
 # The 12 classes are byte-identical to certify.zig's probes, so the macroscopic
 # table and the microscopic table in CERTIFICATE.md map 1:1 by class name.
@@ -18,20 +17,24 @@
 #
 # Usage:  bench/certify/certify.sh            (RUNS=20 WARMUP=3 by default)
 #         RUNS=40 bench/certify/certify.sh    (tighten the CIs)
+#         CERT_SUDO=1 CERT_PUBLISH_DIR=bench/certify/artifact …
+#         make bench-gist-certify             (B–D refresh; CERT_FULL=1 = this)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../races/_compete.sh
 source "${HERE}/../races/_compete.sh"
 need_hyperfine
 
-# Refuse to mint a certificate whose machine.git_commit could not equal a clean HEAD.
+# Refuse to mint a certificate whose machine.git_commit could not equal a clean
+# HEAD — unless CERT_ALLOW_DIRTY=1 (local refresh / coworking trees).
 if ! git -C "${REPO}" rev-parse --verify HEAD > /dev/null 2>&1; then
   echo "certificate aborted: cannot resolve git HEAD" >&2
   exit 1
 fi
 dirty="$(git -C "${REPO}" status --porcelain 2> /dev/null || true)"
-if [[ -n "${dirty}" ]]; then
+if [[ -n "${dirty}" && "${CERT_ALLOW_DIRTY:-0}" != "1" ]]; then
   echo "certificate aborted: worktree is dirty — commit or isolate changes before certifying" >&2
+  echo "(local refresh: CERT_ALLOW_DIRTY=1 …, or bash bench/certify/certify_layers.sh for B–D only)" >&2
   git -C "${REPO}" status --porcelain >&2
   exit 1
 fi
@@ -53,6 +56,34 @@ echo "measuring microscopic Layer A (ReleaseFast)…"
   echo "certificate aborted: microscopic run did not emit ${OUT}/certify.csv" >&2
   exit 1
 }
+# PMU re-run BEFORE the macroscopic race — `gist-bench certify` rewrites the
+# whole CERTIFICATE.md, so it must happen before macro/B/C/D splices. Uses
+# passwordless sudo when available (CERT_SUDO=1 to prompt; CERT_SUDO=0 to skip).
+BENCH_BIN="${KERNEL}/zig-out/bin/gist-bench"
+if [[ -x "${BENCH_BIN}" ]] && ! grep -q 'cycles/byte provenance: \*\*measured on this machine\*\*' "${CERT}" 2> /dev/null; then
+  case "${CERT_SUDO:-auto}" in
+    0) echo "  CERT_SUDO=0 — Layer A micro stays wall-clock (no PMU)" ;;
+    1)
+      echo "  CERT_SUDO=1 — re-running microscopic Layer A under sudo for cycles…"
+      (cd "${REPO}" && sudo "${BENCH_BIN}" certify) || {
+        echo "certificate aborted: sudo microscopic certify failed" >&2
+        exit 1
+      }
+      ;;
+    *)
+      if sudo -n true 2> /dev/null; then
+        echo "  passwordless sudo — re-running microscopic Layer A under root for cycles…"
+        (cd "${REPO}" && sudo -n "${BENCH_BIN}" certify) || {
+          echo "certificate aborted: sudo -n microscopic certify failed" >&2
+          exit 1
+        }
+      else
+        echo "  no passwordless sudo — Layer A micro stays wall-clock (cycles labeled NOT measured)"
+        echo "  tip: CERT_SUDO=1 bash bench/certify/certify.sh   # prompt once for PMU"
+      fi
+      ;;
+  esac
+fi
 
 # class  kind  pattern — byte-identical to certify.zig's `probes` (patterns have
 # no spaces, so `read class kind pat` recovers the pattern as the trailing field).
@@ -296,6 +327,11 @@ PY
 
 python3 "${HERE}/../gates/index_size_accounting.py" \
   --index-dir "${OUT}" --csearch "${CSEARCH_IDX}" --zoekt "${ZOEKT_DIR}" || exit 1
+
+# Layers B / B′ / C / D — automatic; never leave a header-only certificate.
+echo "splicing Layers B/B′/C/D…"
+CERT_OUT="${OUT}" bash "${HERE}/certify_layers.sh" || exit 1
+
 python3 "${HERE}/check_artifacts.py" --artifacts-dir "${OUT}" --artifacts || exit 1
 
 # Publish a committed snapshot when asked (CERT_PUBLISH_DIR is crate-relative).
@@ -306,6 +342,10 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   cp -f "${CERT}" "${OUT}/certify.csv" "${MACRO_CSV}" "${OUT}/machine.json" \
     "${OUT}/tool-versions.txt" "${OUT}/corpus-manifest.tsv" \
     "${OUT}/command-log.txt" "${OUT}/index-sizes.json" "${pub}/"
+  # Layer B/C/D side-cars — the certificate is incomplete without them.
+  for side in portcert.json portcert.csv portbound.json roofline.json lowerbound.csv; do
+    [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
+  done
   cp -f "${OUT}/raw/"*.json "${pub}/raw/" || exit 1
   python3 "${HERE}/check_artifacts.py" --artifacts-dir "${pub}" --artifacts || exit 1
   echo "published reproducible certificate → ${pub}"

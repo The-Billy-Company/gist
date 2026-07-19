@@ -103,7 +103,8 @@ case "${art_rc}" in
     ;;
   2)
     echo "NOTE: no committed certificate yet — regenerate with"
-    echo "      CERT_PUBLISH_DIR=bench/certify/artifact bash bench/certify/certify.sh"
+    echo "      CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify"
+    echo "      (or CERT_PUBLISH_DIR=bench/certify/artifact bash bench/certify/certify.sh)"
     echo "      on a clean tree (or isolated git worktree)."
     ;;
   *)

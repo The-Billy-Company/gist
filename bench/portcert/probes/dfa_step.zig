@@ -1,6 +1,6 @@
 //! Layer-B port-optimality probe — the byte-class DFA transition loop.
 //!
-//! A **byte-faithful copy** of `Dfa.docMatch` in `src/regex/dfa.zig`
+//! A **byte-faithful copy** of `Dfa.docMatch` in `src/search/match/regex/linear/dfa.zig`
 //! (lines 123-158; the non-accelerated path), whose inner loop is the serial
 //! per-byte recurrence `s = trans_in[s + class[doc[i]]]`. That recurrence is a
 //! loop-carried dependency chain: each transition's address depends on the
