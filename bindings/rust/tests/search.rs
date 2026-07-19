@@ -115,10 +115,9 @@ fn unsupported_pattern_errors_not_kills() {
         return;
     }
     let dir = corpus();
-    // PCRE2 lookaround is outside GIST's linear-time engine → typed error,
-    // never a dead host process.
-    let err = SearchRequest::new("foo")
-        .flag("-P")
+    // A backreference is outside GIST's default linear-time engine (it needs
+    // `-P`/PCRE2 or `--engine auto`) → typed error, never a dead host process.
+    let err = SearchRequest::new(r"(a)\1")
         .cwd(dir.path())
         .run()
         .unwrap_err();

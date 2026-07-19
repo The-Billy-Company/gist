@@ -77,15 +77,19 @@ fn rank_forwards_search_options() {
 }
 
 #[test]
-fn rank_without_index_is_empty_not_error() {
+fn rank_without_index_live_ranks_not_error() {
     if !have_gist() {
         eprintln!("skip: no gist binary");
         return;
     }
-    // No persisted index ⇒ nothing to rank ⇒ an empty vec, never an error.
+    // No persisted index ⇒ gist live-ranks the tree rather than erroring or
+    // returning empty — the documented `--rank` fallback, matching the Python face.
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::create_dir(dir.path().join("libs")).unwrap();
     std::fs::write(dir.path().join("libs/a.py"), "TODO here\n").unwrap();
     let rows = gist::rank(SearchRequest::new("TODO").cwd(dir.path()), 5).unwrap();
-    assert!(rows.is_empty(), "got {rows:?}");
+    assert!(
+        rows.iter().any(|r| ends_with(&r.path, "a.py")),
+        "expected a live-ranked hit in a.py without a persisted index, got {rows:?}"
+    );
 }

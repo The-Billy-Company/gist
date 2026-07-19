@@ -57,7 +57,7 @@ mod session;
 pub use aggregate::{Axis, Group, Tally, tally, tally_by};
 pub use contract::{Match, MatchKind, RankKind, Ranked, Submatch};
 pub use error::{Error, Result};
-pub use request::SearchRequest;
+pub use request::{SearchEngine, SearchRequest};
 #[cfg(unix)]
 pub use session::{Session, default_socket_path, warm_eligible};
 

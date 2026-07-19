@@ -42,6 +42,10 @@ pub const REQUEST_OPTIONS: &[&str] = &[
     "no_ignore",
     "follow",
     "no_index",
+    "engine",
+    "multiline",
+    "multiline_dotall",
+    "unicode",
 ];
 
 /// Mirrors `[match_kinds]`.

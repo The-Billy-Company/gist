@@ -17,6 +17,20 @@ use crate::contract::Match;
 use crate::engine::{self, DEFAULT_TIMEOUT};
 use crate::error::Result;
 
+/// Which matcher runs the pattern. Mirrors `[request_options].engine`: the
+/// linear-time engine is the default, `Auto` escalates to PCRE2 only when the
+/// pattern needs it, and `Pcre2` forces the vendored JIT backend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchEngine {
+    /// Trigram + DFA + Pike VM linear-time matcher (the default).
+    #[default]
+    Linear,
+    /// Run linear first, escalate to PCRE2 only for constructs it can't express.
+    Auto,
+    /// The vendored PCRE2 10.x JIT backend (`-P`).
+    Pcre2,
+}
+
 /// A search expressed once. Build it with [`SearchRequest::new`] then chain
 /// setters; run it with [`run`](SearchRequest::run) / [`files`](SearchRequest::files)
 /// / [`count`](SearchRequest::count).
@@ -53,6 +67,16 @@ pub struct SearchRequest {
     pub no_ignore: bool,
     pub follow: bool,
     pub no_index: bool,
+    /// Which matcher runs the pattern (`--engine`/`-P`).
+    pub engine: SearchEngine,
+    /// Allow a match to span line boundaries (`-U`).
+    pub multiline: bool,
+    /// Make `.` match newlines; implies [`multiline`](Self::multiline)
+    /// (`--multiline-dotall`).
+    pub multiline_dotall: bool,
+    /// Explicit Unicode (`Some(true)`) or ASCII (`Some(false)`) semantics;
+    /// `None` keeps the engine's own defaults (`--unicode`/`--no-unicode`).
+    pub unicode: Option<bool>,
     /// Raw argv flags an advanced caller needs before the crate grows a
     /// first-class option — appended last so they never shadow the contract.
     pub extra_flags: Vec<String>,
@@ -87,6 +111,10 @@ impl SearchRequest {
             no_ignore: false,
             follow: false,
             no_index: false,
+            engine: SearchEngine::Linear,
+            multiline: false,
+            multiline_dotall: false,
+            unicode: None,
             extra_flags: Vec::new(),
             cwd: None,
             timeout: DEFAULT_TIMEOUT,
@@ -213,6 +241,37 @@ impl SearchRequest {
         self
     }
 
+    /// Select the matcher engine — [`SearchEngine::Auto`] (`--engine auto`) or
+    /// [`SearchEngine::Pcre2`] (`-P`); the default is linear-time.
+    #[must_use]
+    pub fn engine(mut self, e: SearchEngine) -> Self {
+        self.engine = e;
+        self
+    }
+
+    /// Allow a match to span line boundaries (`-U`).
+    #[must_use]
+    pub fn multiline(mut self) -> Self {
+        self.multiline = true;
+        self
+    }
+
+    /// Make `.` match newlines; implies [`multiline`](Self::multiline)
+    /// (`--multiline-dotall`).
+    #[must_use]
+    pub fn multiline_dotall(mut self) -> Self {
+        self.multiline_dotall = true;
+        self
+    }
+
+    /// Set explicit Unicode (`true`) or ASCII (`false`) semantics
+    /// (`--unicode`/`--no-unicode`); unset keeps the engine's own defaults.
+    #[must_use]
+    pub fn unicode(mut self, on: bool) -> Self {
+        self.unicode = Some(on);
+        self
+    }
+
     /// Lines of leading context (`-B`).
     #[must_use]
     pub fn before(mut self, n: u32) -> Self {
@@ -302,6 +361,27 @@ impl SearchRequest {
         }
         if self.no_index {
             push("--no-index");
+        }
+        // engine/multiline/unicode selectors — same order and spelling as the
+        // Python face so both lower to byte-identical argv.
+        match self.engine {
+            SearchEngine::Auto => {
+                argv.push("--engine".to_owned());
+                argv.push("auto".to_owned());
+            },
+            SearchEngine::Pcre2 => argv.push("-P".to_owned()),
+            SearchEngine::Linear => {},
+        }
+        if self.multiline || self.multiline_dotall {
+            argv.push("-U".to_owned());
+        }
+        if self.multiline_dotall {
+            argv.push("--multiline-dotall".to_owned());
+        }
+        if let Some(on) = self.unicode {
+            let prefix = if on { "" } else { "no-" };
+            argv.push(format!("--{prefix}unicode"));
+            argv.push(format!("--{prefix}pcre2-unicode"));
         }
         for g in &self.globs {
             argv.push("-g".to_owned());
