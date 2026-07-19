@@ -55,6 +55,16 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
     const sock = serve.socketPath(gpa, env) catch return;
     defer gpa.free(sock);
     const debug = env.get("GIST_DEBUG_WARM") != null; // observe the routing decision
+    if (debug) {
+        // Surface the CLASSIFY verdict independently of daemon availability, so a
+        // cold outcome from "ineligible argv" is distinguishable from "eligible
+        // but no daemon up". This is the oracle the cross-binding parity test
+        // reads to prove Python `warm_eligible` tracks this classifier exactly.
+        if (gist.session.request.classify(argv)) |_|
+            std.debug.print("gist: [eligible]\n", .{})
+        else |_|
+            std.debug.print("gist: [ineligible]\n", .{});
+    }
     switch (client.attempt(gpa, io, argv, sock)) {
         .served => |code| {
             if (debug) std.debug.print("gist: [warm]\n", .{});

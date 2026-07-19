@@ -82,7 +82,9 @@ def default_socket_path() -> str:
 
 
 def warm_eligible(request: SearchRequest) -> bool:
-    """True iff the resident daemon can answer `request` byte-identically to cold: default roots, no rich flags, no extra argv, no glob/type scoping."""
+    """True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping. Every clause mirrors `session/request.zig::classify` term-for-term (a `\\n`/`\\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
+    if not request.pattern or "\n" in request.pattern or "\x00" in request.pattern:
+        return False
     if request.paths or request.globs or request.iglobs or request.types or request.not_types:
         return False
     if request.extra_flags:

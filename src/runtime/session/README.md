@@ -9,11 +9,14 @@ doc_radar:
     - pkg/kernels/irregex/src/runtime/session/watch.zig
     - pkg/kernels/irregex/src/runtime/session/dirty.zig
     - pkg/kernels/irregex/src/runtime/session/delta.zig
+    - pkg/kernels/irregex/bindings/python/tests/test_classify_parity.py
   sentinels:
     - file: pkg/kernels/irregex/contract/search_api.toml
       contains: ["[session]", "eligible_modes", "fail-closed-reconcile", "\"lines\""]
     - file: pkg/kernels/irregex/src/runtime/session/protocol.zig
       contains: ["chunk = 11", "protocol_version: u8 = 1"]
+    - file: pkg/kernels/irregex/src/cli/gist/main.zig
+      contains: ["[eligible]", "[ineligible]"]
     - file: pkg/kernels/irregex/src/runtime/session/dirty.zig
       contains: ["armExact", "noteDoubt"]
     - file: pkg/kernels/irregex/src/runtime/session/delta.zig
@@ -39,7 +42,7 @@ sidesteps the exit hazard ADR-352 defers the in-process C FFI on.
 | [`resident.zig`](resident.zig) | `ResidentSession`: mirror + index, mutation overlay, generation reload, the fail-closed reconcile barrier, and the three answer faces — the `-l`/`-c` fold (`query`), the default line search (`queryLines`), and the FFI record stream (`search`).                                                                                                                                                                   |
 | [`corpus.zig`](corpus.zig)     | The faithful corpus ingest: full reads (no cap), BOM/UTF-16 decode, whole-body first-NUL offsets, empty docs dropped — the same per-file treatment a cold run applies, so binary/oversize/UTF-16 files answer warm exactly as they do cold.                                                                                                                                                                           |
 | [`render.zig`](render.zig)     | The warm `lines` renderer: the default `path:text` / `-n` `path:line:text` frame, produced through the cold engine's **own** `Emitter` + `grepfile.handleBinary` — byte-parity by construction, never a re-derived formatter.                                                                                                                                                                                         |
-| [`request.zig`](request.zig)   | The eligibility classifier — accepts only the supported argv surface (bare pattern → `lines`, `-l`/`-c`, `-F`, `-i`, `-n`/`-N`, `-e`/`--regexp`; **rootless only** — any explicit PATH arg, even `.`, stays cold), everything else → `error.Unsupported` (cold fallback).                                                                                                                                             |
+| [`request.zig`](request.zig)   | The eligibility classifier — accepts only the supported argv surface (bare pattern → `lines`, `-l`/`-c`, `-F`, `-i`, `-n`/`-N`, `-e`/`--regexp`; **rootless only** — any explicit PATH arg, even `.`, stays cold; a `\n`/NUL/empty pattern stays cold), everything else → `error.Unsupported` (cold fallback). This is the single argv authority — the CLI client, auto-spawn, and warm hints all call it, and the Python `session.warm_eligible` field-predicate is its only cross-language projection, mechanically parity-tested (`bindings/python/tests/test_classify_parity.py`) against the built classifier via the `GIST_DEBUG_WARM` `[eligible]`/`[ineligible]` verdict so the two can never drift. |
 | [`protocol.zig`](protocol.zig) | The length-prefixed UDS frame codec (`[u32 len][u8 opcode][payload]`) + fd send/recv, fail-closed on oversized/truncated/unknown frames. A `lines` answer streams as `chunk` frames + a terminal `result` (additive; protocol stays v1).                                                                                                                                                                              |
 | [`watch.zig`](watch.zig)       | The freshness watcher — a pure accelerator (Linux inotify · macOS FSEvents; reconcile-always baseline on other targets) that only ever decides _whether — and how narrowly — the reconcile walk may run_, never correctness. FSEvents runs with per-file events and feeds the exact dirty log; inotify stays coarse (never arms exactness) and poisons the session on queue overflow or an unwatchable new directory. |
 | [`dirty.zig`](dirty.zig)       | The exact dirty-path log: a bounded, deduped set of watcher-reported paths plus two soundness bits — `exact` (the backend promises every dirty bump was preceded by a note) and `doubt` (overflow / OOM / unattributable event ⇒ the next reconcile walks fully). The O(changed) hand-off between backend and reconcile.                                                                                              |
