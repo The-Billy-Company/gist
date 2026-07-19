@@ -6,9 +6,9 @@ doc_radar:
       unit: files
       equals: 9
   sentinels:
-    - description: "main.zig dispatches exactly the nine verbs (seven query + two lifecycle)"
+    - description: "main.zig lists exactly the nine verbs on the unknown-verb help line"
       file: pkg/kernels/irregex/src/cli/relate/main.zig
-      contains: 'const known = [_][]const u8{ "search", "pack", "quote", "similar", "dups", "clusters", "patterns", "index", "status" };'
+      contains: "search | pack | quote | similar | dups | clusters | patterns | index | status"
     - description: "the verbs are contract-documented, not CLI folklore"
       file: pkg/kernels/irregex/contract/search_api.toml
       contains: "[irregex.verbs]"
