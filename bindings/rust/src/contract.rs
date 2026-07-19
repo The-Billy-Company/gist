@@ -372,4 +372,13 @@ mod rank_parse {
         );
         assert_eq!(parse_rank(&noisy).len(), 3);
     }
+
+    #[test]
+    fn rejects_empty_and_malformed_rows() {
+        // Adverse: blank / missing `[kind]` / missing `×count` never invent rows.
+        assert!(parse_rank("").is_empty());
+        assert!(parse_rank("\n\n").is_empty());
+        assert!(parse_rank(" 1. path/to/file.rs:10  no-kind-tag  ×3  snip\n").is_empty());
+        assert!(parse_rank(" 1. path/to/file.rs:10  [def]  3  missing-times\n").is_empty());
+    }
 }
