@@ -55,6 +55,12 @@ esac
 
 echo "building gist + gist-bench + index…"
 compete_build_gist_index || exit 1
+# The default install is the product surface only; the lab step installs the
+# bench/certificate executables (gist-bench among them) → zig-out/bin.
+(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast lab > /dev/null 2>&1) || {
+  echo "zig build lab failed — cannot install gist-bench" >&2
+  exit 1
+}
 [[ -x "${BENCH_EXE}" ]] || {
   echo "no gist-bench at ${BENCH_EXE}" >&2
   exit 1
