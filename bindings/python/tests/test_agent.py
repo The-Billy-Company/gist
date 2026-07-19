@@ -46,16 +46,23 @@ def test_single_glob_string_becomes_tuple() -> None:
 
 
 def test_missing_pattern_is_a_loud_error() -> None:
-    with pytest.raises(ValueError, match="non-empty"):
+    """ADR-352 / agent.py: pattern|query must be non-empty — no silent default."""
+    with pytest.raises(ValueError, match="non-empty") as missing:
         request_from_tool({"glob": "*.py"})
+    assert "pattern" in str(missing.value)
     with pytest.raises(ValueError, match="non-empty"):
         request_from_tool({"query": ""})
 
 
 def test_unknown_option_is_a_loud_error() -> None:
     """A typo can't silently no-op a scoped search — but a routing key is fine."""
-    with pytest.raises(ValueError, match="unknown search option"):
+    with pytest.raises(ValueError, match="unknown search option") as exc:
         request_from_tool({"pattern": "x", "gloob": "*.py"})
+    assert "gloob" in str(exc.value)
+    # Routing keys remain ignored (place adapter owns them), not hard errors.
+    assert request_from_tool({"pattern": "x", "place": "machine"}) == SearchRequest(
+        pattern="x"
+    )
 
 
 def test_alias_and_canonical_agree() -> None:
