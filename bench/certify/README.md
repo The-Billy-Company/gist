@@ -10,12 +10,13 @@ with a real statistic — not a single mean.
 
 | File                  | Role                                                                                                                                                         |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `certify.sh`          | races gist + the whole field (via `../races/_compete.sh`) over 12 probe classes, hyperfine JSON per (class, tool)                                            |
+| `certify.sh`          | full A–D mint: Layer A micro (+ optional sudo PMU) + macroscopic field race, then auto-calls `certify_layers.sh` before publish                              |
+| `certify_layers.sh`   | Layers B/B′/C/D — build lab bins, measure, splice; the half that used to be a manual checklist. `make bench-gist-certify` default                            |
 | `certify_stats.py`    | a stdlib mirror of `../harness/stats.zig` — per-class bootstrap-CI median + Mann-Whitney verdict, splices the table into `.local/gist-verify/CERTIFICATE.md` |
-| `check_artifacts.py`  | reproducibility gate over a certificate dir (required files, corpus hashes, tool identities, raw-cell matrix)                                                |
+| `check_artifacts.py`  | reproducibility gate — required files + Layer B/C/D headers/side-cars + corpus hashes + tool identities + raw-cell matrix                                    |
 | `ratio_regress.py`    | principia-style **ratio** regression — committed `certify_macro.csv` vs `ratio_baseline.json` floors; optional live remasure behind `GIST_BENCH=1`           |
 | `ratio_baseline.json` | min gist/rg cold speedup floors (hardware cancels; refresh after a deliberate republish)                                                                     |
-| `artifact/`           | committed, reproducible certificate bundle (`CERT_PUBLISH_DIR=… certify.sh`)                                                                                 |
+| `artifact/`           | committed, reproducible certificate bundle (`CERT_PUBLISH_DIR=… certify.sh` / `CERT_PUBLISH=1 make bench-gist-certify`)                                      |
 
 The 12 classes are byte-identical to `../harness/certify.zig`'s probes, so the
 macroscopic table here and the microscopic table there map 1:1 by class name.
@@ -28,10 +29,17 @@ alternation `panic|0x`) where the trigram prefilter admits _every_ file — the
 cases the competition is built to win.
 
 ```bash
+# One command — Layers A–D. certify.sh mints A (micro + macro), auto-sudo for
+# PMU when available, then certify_layers.sh splices B/B′/C/D before publish.
+make bench-gist-certify                              # B–D refresh (fast)
+CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify  # full mint + publish
+
 cd pkg/kernels/irregex
 RUNS=20 bench/certify/certify.sh        # default RUNS=20 WARMUP=3; raise RUNS to tighten CIs
-# publish a committed bundle (requires a clean git tree — or an isolated worktree):
+# publish a committed bundle (clean tree, or CERT_ALLOW_DIRTY=1 for local):
 CERT_PUBLISH_DIR=bench/certify/artifact bash bench/certify/certify.sh
+# B–D only (when Layer A already exists):
+bash bench/certify/certify_layers.sh
 python3 bench/certify/ratio_regress.py --committed   # hermetic floor check
 GIST_BENCH=1 make bench-gist-ratio                   # + live remeasure
 ```
