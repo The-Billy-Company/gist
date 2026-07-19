@@ -18,7 +18,7 @@ from .request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
 
 DEFAULT_TIMEOUT = 30.0
 # stderr phrases the engine prints when a pattern/flag is outside its
-# linear-time syntax (see src/gist/faces/cli/search/{argv/args,engine/serial}.zig `die` messages).
+# linear-time syntax (see src/runtime/cold/{argv/args,engine/serial}.zig `die` messages).
 _UNSUPPORTED_MARKERS = (
     "unsupported",
     "use ripgrep",
@@ -64,9 +64,9 @@ def binary() -> str:
     return _resolve("gist", "GIST_BIN")
 
 
-def hydra_binary() -> str:
-    """The `hydra` binary (compression-search face: similar/dups/patterns). Env override: `HYDRA_BIN`."""
-    return _resolve("hydra", "HYDRA_BIN")
+def relate_binary() -> str:
+    """The `relate` binary (compression-search face: similar/dups/patterns). Env override: `RELATE_BIN`."""
+    return _resolve("relate", "RELATE_BIN")
 
 
 def _build_cli(zig: str, kernel: Path) -> None:
@@ -101,12 +101,19 @@ def _invoke(
         request.pattern,
         *request.paths,
     ]
+    # Binding methods promise complete result sets; CLI context budgets are a
+    # presentation concern. The engine's independent hard OOM ceiling remains.
+    env = os.environ.copy()
+    env["GIST_UNCAP"] = "1"
+    env.pop("GIST_MAX_OUTPUT_BYTES", None)
+    env.pop("GIST_MAX_OUTPUT_TOKENS", None)
     try:
         proc = subprocess.run(  # noqa: S603 — argv is a fixed list, no shell
             argv,
             capture_output=True,
             text=True,
             cwd=cwd,
+            env=env,
             timeout=timeout,
             check=False,
             # Detach stdin: with no path args and a non-tty stdin the engine
@@ -139,7 +146,10 @@ def run(
     timeout: float = DEFAULT_TIMEOUT,
 ) -> list[Match]:
     """Execute a `SearchRequest` and return structured matches (and any requested context lines), in engine output order."""
-    proc = _invoke(["--json"], request, cwd=cwd, timeout=timeout)
+    # The CLI's default output budget protects agent context, but truncating a
+    # structured API result silently breaks discovery. The process still retains
+    # gist's hard 256 MiB OOM ceiling.
+    proc = _invoke(["--json", "--uncap"], request, cwd=cwd, timeout=timeout)
     return _parse_json(proc.stdout)
 
 
@@ -198,6 +208,17 @@ def count(
     repeated hits and silently diverged from the warm transports.
     """
     proc = _invoke(["--count", "--no-filename"], request, cwd=cwd, timeout=timeout)
+    return sum(int(x) for x in proc.stdout.splitlines() if x.strip().isdigit())
+
+
+def count_matches(
+    request: SearchRequest,
+    *,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> int:
+    """Total match occurrences across the searched tree."""
+    proc = _invoke(["--count-matches", "--no-filename"], request, cwd=cwd, timeout=timeout)
     return sum(int(x) for x in proc.stdout.splitlines() if x.strip().isdigit())
 
 

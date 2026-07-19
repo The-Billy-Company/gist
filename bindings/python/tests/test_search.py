@@ -36,7 +36,7 @@ needs_rg = pytest.mark.skipif(shutil.which("rg") is None, reason="no rg on PATH"
 
 @pytest.fixture
 def corpus(tmp_path):
-    (tmp_path / "a.py").write_text("def alpha():\n    return TODO\n")
+    (tmp_path / "a.py").write_text("def alpha():\n    return TODO + TODO\n")
     (tmp_path / "b.py").write_text("class Beta:\n    pass  # TODO later\n")
     (tmp_path / "c.txt").write_text("no marker here\nplain text\n")
     (tmp_path / "unicode.txt").write_text("CAFÉ\ncafé\n")
@@ -60,6 +60,13 @@ def test_search_returns_structured_matches(corpus) -> None:
 
 
 @needs_gist
+def test_structured_search_is_not_truncated_by_cli_output_budget(corpus, monkeypatch) -> None:
+    monkeypatch.setenv("GIST_MAX_OUTPUT_BYTES", "64")
+    matches = gist.search("TODO", cwd=corpus)
+    assert {match.path for match in matches} == {"a.py", "b.py", "pkg/d.py"}
+
+
+@needs_gist
 def test_files_lists_matching_paths(corpus) -> None:
     hits = gist.files("TODO", cwd=corpus)
     assert any(p.endswith("a.py") for p in hits)
@@ -70,6 +77,11 @@ def test_files_lists_matching_paths(corpus) -> None:
 def test_count_sums_matching_lines(corpus) -> None:
     # a.py:1, b.py:1, pkg/d.py:1 (uppercase TODO) — lowercase 'todo' excluded.
     assert gist.count("TODO", cwd=corpus) == 3
+
+
+@needs_gist
+def test_count_matches_sums_occurrences(corpus) -> None:
+    assert gist.count_matches("TODO", cwd=corpus) == 4
 
 
 @needs_gist

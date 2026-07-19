@@ -88,6 +88,7 @@ __all__ = [
     "binary",
     "capabilities",
     "count",
+    "count_matches",
     "dups",
     "ensure_serve",
     "files",
@@ -141,6 +142,17 @@ def count(
 ) -> int:
     """Total matching lines across the searched tree."""
     return engine.count(SearchRequest(pattern=pattern, **options), cwd=cwd, timeout=timeout)
+
+
+def count_matches(
+    pattern: str,
+    *,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float = engine.DEFAULT_TIMEOUT,
+    **options: object,
+) -> int:
+    """Total match occurrences across the searched tree."""
+    return engine.count_matches(SearchRequest(pattern=pattern, **options), cwd=cwd, timeout=timeout)
 
 
 def run(
