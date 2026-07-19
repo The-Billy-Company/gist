@@ -1,33 +1,33 @@
 <!--
 doc_radar:
   paths_exist:
-    - pkg/kernels/irregex/src/gist/session/resident.zig
-    - pkg/kernels/irregex/src/gist/session/corpus.zig
-    - pkg/kernels/irregex/src/gist/session/render.zig
-    - pkg/kernels/irregex/src/gist/session/request.zig
-    - pkg/kernels/irregex/src/gist/session/protocol.zig
-    - pkg/kernels/irregex/src/gist/session/watch.zig
-    - pkg/kernels/irregex/src/gist/session/dirty.zig
-    - pkg/kernels/irregex/src/gist/session/delta.zig
+    - pkg/kernels/irregex/src/runtime/session/resident.zig
+    - pkg/kernels/irregex/src/runtime/session/corpus.zig
+    - pkg/kernels/irregex/src/runtime/session/render.zig
+    - pkg/kernels/irregex/src/runtime/session/request.zig
+    - pkg/kernels/irregex/src/runtime/session/protocol.zig
+    - pkg/kernels/irregex/src/runtime/session/watch.zig
+    - pkg/kernels/irregex/src/runtime/session/dirty.zig
+    - pkg/kernels/irregex/src/runtime/session/delta.zig
   sentinels:
     - file: pkg/kernels/irregex/contract/search_api.toml
       contains: ["[session]", "eligible_modes", "fail-closed-reconcile", "\"lines\""]
-    - file: pkg/kernels/irregex/src/gist/session/protocol.zig
+    - file: pkg/kernels/irregex/src/runtime/session/protocol.zig
       contains: ["chunk = 11", "protocol_version: u8 = 1"]
-    - file: pkg/kernels/irregex/src/gist/session/dirty.zig
+    - file: pkg/kernels/irregex/src/runtime/session/dirty.zig
       contains: ["armExact", "noteDoubt"]
-    - file: pkg/kernels/irregex/src/gist/session/delta.zig
+    - file: pkg/kernels/irregex/src/runtime/session/delta.zig
       contains: ["needs_full", "keyIsCurrent"]
 -->
 
-# `src/gist/session/` — the resident search session (ADR-352 rung 2.5)
+# `src/runtime/session/` — the resident search session (ADR-352 rung 2.5)
 
 The warm, in-memory engine behind the `gist serve` daemon. It productizes the
 in-memory bench path (`bench/harness/bench.zig::gistMatches`) as a real
 per-repository service: the corpus bytes + trigram index are held resident, so
 an eligible request answers without re-paying the cold subprocess's process +
 index-mmap + candidate-read startup. It selects its corpus with the cold path's
-own certified rg-default walk (`faces/cli/search/engine/serial.zig::defaultFileSet`),
+own certified rg-default walk (`runtime/cold/engine/serial.zig::defaultFileSet`),
 ingests each file exactly as a cold read would (`corpus.zig`), and lowers each
 query through the shared search core (`engine/query.zig` over `index/trigram`,
 `scan/verify`, `scan/simd`, `regex/core`) — but every entry point **returns
@@ -50,7 +50,7 @@ sidesteps the exit hazard ADR-352 defers the in-process C FFI on.
 `resident matches == gist --no-index matches == rg matches`. It holds by
 construction because both the base corpus and every reconcile re-derive their
 file set from the cold path's own certified walk
-(`faces/cli/search/engine/serial.zig::defaultFileSet` — hidden-file exclusion,
+(`runtime/cold/engine/serial.zig::defaultFileSet` — hidden-file exclusion,
 `.gitignore`/`.ignore` precedence, `.git` skip, root scope), never
 `haystack`'s coarse superset — and because per-file ingest is cold's own
 (`corpus.zig`): a binary doc is **admitted** with its first-NUL offset and each
@@ -73,7 +73,7 @@ cold reports it and exits 2) surfaces as `error.Stale`, and the daemon declines
 so the client uses the certified cold path.
 
 The daemon lifecycle, CLI routing, and clients live in
-[`../faces/cli/daemon/serve`](../faces/cli/daemon/serve) and
-[`../faces/cli/daemon/client`](../faces/cli/daemon/client); the persistent
+[`../../cli/gist/daemon/serve`](../../cli/gist/daemon/serve) and
+[`../../cli/gist/daemon/client`](../../cli/gist/daemon/client); the persistent
 client→daemon performance certificate lives in
-[`../../bench/session`](../../../bench/session).
+[`../../../bench/session`](../../../bench/session).

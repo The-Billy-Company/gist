@@ -1,6 +1,6 @@
-//! hydra — the `search` verb: compression-as-search over the live corpus.
+//! relate — the `search` verb: compression-as-search over the live corpus.
 //!
-//!   hydra search <text> [--top N] [--json] [ROOT...]
+//!   relate search <text> [--top N] [--json] [ROOT...]
 //!       which files would describe this text most cheaply? Two stages, one
 //!       theory (see lexicon.zig + zipper.zig): the corpus-priced fingerprint
 //!       lexicon nominates candidates (recall — no doc bytes touched), the
@@ -13,39 +13,23 @@
 //! Higher = closer (the inverse orientation of `similar`'s distance, because
 //! search asks "how much is already paid?" not "how far apart?").
 //!
-//! Corpus policy: the index corpus (`corpus.load`), same as every hydra verb.
+//! Corpus policy: the index corpus (`corpus.load`), same as every relate verb.
 //! Results on stdout (`--json` = NDJSON), diagnostics + timing on stderr.
 
 const std = @import("std");
-const corpus_mod = @import("../../runtime/corpus/corpus.zig");
-const cli_args = @import("../gist/search/argv/args.zig");
-const scope = @import("../../runtime/scope/glob.zig");
+const corpus_mod = @import("../../corpus/tree/corpus.zig");
+const cli_args = @import("../../runtime/cold/argv/args.zig");
+const scope = @import("../../corpus/scope/glob.zig");
 const lexicon = @import("../../search/similarity/lexicon.zig");
 const zipper = @import("../../search/similarity/zipper.zig");
+const kinship = @import("kinship.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
 const nowNs = cli_args.nowNs;
 const ms = cli_args.ms;
 
-/// Append `s` JSON-string-escaped (quotes included). Same escaper the other
-/// verb drivers keep; duplicated rather than exported to avoid making the
-/// verbs module a util shelf.
-fn jsonStr(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) void {
-    buf.append(a, '"') catch oom();
-    for (s) |c| switch (c) {
-        '"' => buf.appendSlice(a, "\\\"") catch oom(),
-        '\\' => buf.appendSlice(a, "\\\\") catch oom(),
-        '\n' => buf.appendSlice(a, "\\n") catch oom(),
-        '\r' => buf.appendSlice(a, "\\r") catch oom(),
-        '\t' => buf.appendSlice(a, "\\t") catch oom(),
-        else => if (c < 0x20)
-            buf.print(a, "\\u{x:0>4}", .{c}) catch oom()
-        else
-            buf.append(a, c) catch oom(),
-    };
-    buf.append(a, '"') catch oom();
-}
+const jsonStr = kinship.jsonStr;
 
 pub fn runSearch(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
     var query_text: ?[]const u8 = null;
@@ -69,8 +53,8 @@ pub fn runSearch(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
             try roots.append(gpa, scope.normalizeRoot(arg));
         }
     }
-    const query = query_text orelse die("usage: hydra search <text> [--top N] [--json] [ROOT...]\n", .{});
-    if (query.len == 0) die("hydra search: empty query\n", .{});
+    const query = query_text orelse die("usage: relate search <text> [--top N] [--json] [ROOT...]\n", .{});
+    if (query.len == 0) die("relate search: empty query\n", .{});
 
     const t0 = nowNs(io);
     var corpus = try corpus_mod.load(gpa, io, if (roots.items.len == 0) &corpus_mod.default_roots else roots.items);

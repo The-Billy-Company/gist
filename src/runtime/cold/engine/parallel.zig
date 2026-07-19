@@ -39,17 +39,17 @@
 //! explicit FILE args, stdin) stays on the proven serial engine.
 
 const std = @import("std");
-const corpus_mod = @import("../../../../runtime/corpus/corpus.zig");
+const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const args = @import("../argv/args.zig");
 const output = @import("../emit/output.zig");
 const ignore = @import("../walk/ignore.zig");
 const grepfile = @import("../read/grepfile.zig");
 const ingest = @import("../read/ingest.zig");
-const simd = @import("../../../../search/match/scan/simd.zig");
-const verify = @import("../../../../search/match/scan/verify.zig");
-const persist = @import("../../../../index/trigrams/persist.zig");
-const fresh = @import("../../../../index/trigrams/fresh.zig");
-const bulkstat = @import("../../../../runtime/corpus/bulkstat.zig");
+const simd = @import("../../../search/match/scan/simd.zig");
+const verify = @import("../../../search/match/scan/verify.zig");
+const persist = @import("../../../index/trigrams/persist.zig");
+const fresh = @import("../../../index/trigrams/fresh.zig");
+const bulkstat = @import("../../../corpus/tree/bulkstat.zig");
 const paths_mod = @import("../walk/paths.zig");
 const stripDot = paths_mod.stripDot;
 const replaceSep = paths_mod.replaceSep;
@@ -59,9 +59,9 @@ const Opts = args.Opts;
 const Emitter = output.Emitter;
 const die = args.die;
 const oom = args.oom;
-const Regex = @import("../../../../search/match/regex/linear/core.zig").Regex;
-const Matcher = @import("../../../../search/match/regex/linear/matcher.zig").Matcher;
-const pcre2 = @import("../../../../search/match/regex/pcre2/backend.zig");
+const Regex = @import("../../../search/match/regex/linear/core.zig").Regex;
+const Matcher = @import("../../../search/match/regex/linear/matcher.zig").Matcher;
+const pcre2 = @import("../../../search/match/regex/pcre2/backend.zig");
 const hints = @import("../emit/hints.zig");
 const Dir = std.Io.Dir;
 

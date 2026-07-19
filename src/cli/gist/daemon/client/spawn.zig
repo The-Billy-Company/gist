@@ -20,7 +20,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const request = @import("../../../../runtime/session/request.zig");
-const run = @import("../../search/engine/serial.zig");
+const run = @import("../../../../runtime/cold/engine/serial.zig");
 const net = std.Io.net;
 
 /// Only these targets have the fork+exec + `flock`/FSEvents/inotify machinery the

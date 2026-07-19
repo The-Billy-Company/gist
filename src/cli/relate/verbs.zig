@@ -1,159 +1,51 @@
-//! hydra — the `similar`, `dups`, and `patterns` verbs over irregex primitives.
+//! relate — the `similar`, `dups`, and `patterns` verbs over irregex primitives.
 //!
-//! The CLI surface over `src/primitives/`: three native shapes no
+//! The CLI surface over `src/search/{similarity,batch}/`: three native shapes no
 //! rg flag can express (like `--rank`, they are irregex vocabulary, not rg's):
 //!
-//!   hydra similar <path> [--top N] [--json] [ROOT...]
+//!   relate similar <path> [--top N] [--json] [--no-index] [ROOT...]
 //!       nearest files to <path> by compression kinship (LZ dictionary
 //!       distance) — "what else in this tree is LIKE this file?"
 //!
-//!   hydra dups [--max-distance T] [--top N] [--json] [ROOT...]
+//!   relate dups [--max-distance T] [--top N] [--json] [--no-index] [ROOT...]
 //!       near-duplicate pairs across the corpus, closest first — copy-paste
 //!       drift, forked fixtures, mirrored modules.
 //!
-//!   hydra patterns -e P [-e P…] [-f FILE] [-F] [-i] [--by pattern|file]
+//!   relate patterns -e P [-e P…] [-f FILE] [-F] [-i] [--by pattern|file]
 //!                 [--under GLOB] [--top N] [--json] [ROOT...]
 //!       ONE walk, N patterns, exact per-pattern attribution — the batched
 //!       shape relocator/lints re-derive today with N runs + Python. `--by`
 //!       groups into counts; `--under`/`--top` shape engine-side (loom).
 //!
-//! Corpus policy: these verbs load the INDEX corpus (every non-binary file
-//! under the roots, minus VCS/build subtrees — `corpus.load`), the same
+//! Corpus policy: these verbs answer over the INDEX corpus (every non-binary
+//! file under the roots, minus VCS/build subtrees — `corpus.load`), the same
 //! wider-than-gitignore policy `gist index` uses. They are corpus analytics,
 //! not per-file greps; the rg-parity walk stays with the search engine.
+//! The sketch-backed verbs resolve their (paths, sketches) view through
+//! `kinship.resolve` — persisted atlas + freshness fold when one is ready,
+//! live corpus build otherwise, identical answers either way.
 //! Diagnostics (timing) go to stderr; results to stdout, rg-style.
 
 const std = @import("std");
-const corpus_mod = @import("../../runtime/corpus/corpus.zig");
+const corpus_mod = @import("../../corpus/tree/corpus.zig");
 const fresh = @import("../../index/trigrams/fresh.zig");
 const persist = @import("../../index/trigrams/persist.zig");
-const cli_args = @import("../gist/search/argv/args.zig");
-const scope = @import("../../runtime/scope/glob.zig");
+const cli_args = @import("../../runtime/cold/argv/args.zig");
+const scope = @import("../../corpus/scope/glob.zig");
 const sketch = @import("../../search/similarity/sketch.zig");
 const patterns_mod = @import("../../search/batch/patterns.zig");
 const loom = @import("../../search/batch/loom.zig");
 const query = @import("../../search/match/query.zig");
+const kinship = @import("kinship.zig");
+const grepfile = @import("../../runtime/cold/read/grepfile.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
 const nowNs = cli_args.nowNs;
 const ms = cli_args.ms;
-const Sketch = sketch.Sketch;
+const jsonStr = kinship.jsonStr;
 
-// ── shared plumbing ──
-
-/// Positional args → corpus roots (normalized `./x/` → `x`); empty → the
-/// index's default roots.
-fn rootsOf(positional: []const []const u8) []const []const u8 {
-    if (positional.len == 0) return &corpus_mod.default_roots;
-    return positional;
-}
-
-/// Strip one exact leading `./` — the canonical shape for comparing a user
-/// arg against a walk-produced path (never trims `..`).
-fn stripDotSlash(p: []const u8) []const u8 {
-    return if (std.mem.startsWith(u8, p, "./")) p[2..] else p;
-}
-
-/// Is `path` at, or under, any of `roots`? Empty roots = the whole corpus.
-/// The shared `scope/glob.zig` boundary rule: exact file hit, or a directory
-/// prefix ending at `/` (so `services` never admits `services_old`).
-fn underAnyRoot(path: []const u8, roots: []const []const u8) bool {
-    if (roots.len == 0) return true;
-    for (roots) |r| if (scope.underRoot(path, std.mem.trimEnd(u8, scope.normalizeRoot(r), "/"))) return true;
-    return false;
-}
-
-/// Sketch every doc in parallel — byte-balanced shards, one thread per
-/// ~4 MiB of corpus (a sketch parse is heavier per byte than SIMD verify).
-/// A doc that fails to sketch (OOM under pressure) records `Sketch.empty`,
-/// which `distance` treats as maximally far — it can surface in no result,
-/// only ever hide one, and the failure is counted on stderr.
-fn buildSketches(gpa: std.mem.Allocator, docs: []const []const u8) []Sketch {
-    const out = gpa.alloc(Sketch, docs.len) catch oom();
-    var total: usize = 0;
-    for (docs) |d| total += d.len;
-
-    const ncpu = std.Thread.getCpuCount() catch 1;
-    const nthr = @min(@max(@as(usize, 1), total / (4 << 20)), ncpu);
-    if (nthr <= 1) {
-        var failed: usize = 0;
-        for (docs, out) |d, *s| s.* = sketch.build(gpa, d) catch blk: {
-            failed += 1;
-            break :blk .empty;
-        };
-        if (failed != 0) std.debug.print("hydra: {d} file(s) failed to sketch (skipped)\n", .{failed});
-        return out;
-    }
-
-    const Shard = struct {
-        docs: []const []const u8,
-        out: []Sketch,
-        failed: usize = 0,
-
-        fn run(sh: *@This()) void {
-            // Each worker allocates its own scratch from the page allocator —
-            // no cross-thread contention on the caller's gpa.
-            for (sh.docs, sh.out) |d, *s| s.* = sketch.build(std.heap.page_allocator, d) catch blk: {
-                sh.failed += 1;
-                break :blk .empty;
-            };
-        }
-    };
-
-    // Byte-greedy shard boundaries (same shape as scan/verify.zig).
-    const bounds = gpa.alloc(usize, nthr + 1) catch oom();
-    defer gpa.free(bounds);
-    const target = total / nthr;
-    bounds[0] = 0;
-    var b: usize = 1;
-    var acc: usize = 0;
-    for (docs, 0..) |d, i| {
-        acc += d.len;
-        if (b < nthr and acc >= target * b) {
-            bounds[b] = i + 1;
-            b += 1;
-        }
-    }
-    while (b <= nthr) : (b += 1) bounds[b] = docs.len;
-
-    const shards = gpa.alloc(Shard, nthr) catch oom();
-    defer gpa.free(shards);
-    const threads = gpa.alloc(std.Thread, nthr) catch oom();
-    defer gpa.free(threads);
-    var spawned: usize = 0;
-    for (0..nthr) |t| {
-        shards[t] = .{ .docs = docs[bounds[t]..bounds[t + 1]], .out = out[bounds[t]..bounds[t + 1]] };
-        threads[t] = std.Thread.spawn(.{}, Shard.run, .{&shards[t]}) catch break;
-        spawned += 1;
-    }
-    // A shard whose thread never spawned still needs its slice filled.
-    for (spawned..nthr) |t| shards[t].run();
-    for (threads[0..spawned]) |t| t.join();
-    var failed: usize = 0;
-    for (shards) |sh| failed += sh.failed;
-    if (failed != 0) std.debug.print("hydra: {d} file(s) failed to sketch (skipped)\n", .{failed});
-    return out;
-}
-
-/// Append `s` JSON-string-escaped (quotes included).
-fn jsonStr(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) void {
-    buf.append(a, '"') catch oom();
-    for (s) |c| switch (c) {
-        '"' => buf.appendSlice(a, "\\\"") catch oom(),
-        '\\' => buf.appendSlice(a, "\\\\") catch oom(),
-        '\n' => buf.appendSlice(a, "\\n") catch oom(),
-        '\r' => buf.appendSlice(a, "\\r") catch oom(),
-        '\t' => buf.appendSlice(a, "\\t") catch oom(),
-        else => if (c < 0x20)
-            buf.print(a, "\\u{x:0>4}", .{c}) catch oom()
-        else
-            buf.append(a, c) catch oom(),
-    };
-    buf.append(a, '"') catch oom();
-}
-
-// ── `hydra similar` ──
+// ── `relate similar` ──
 
 /// One scored neighbor, for the sort.
 const Scored = struct {
@@ -170,6 +62,7 @@ pub fn runSimilar(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) 
     var target_path: ?[]const u8 = null;
     var top: usize = 20;
     var json = false;
+    var no_index = false;
     var roots: std.ArrayList([]const u8) = .empty;
     defer roots.deinit(gpa);
 
@@ -182,13 +75,15 @@ pub fn runSimilar(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) 
             top = std.fmt.parseInt(usize, argv[i], 10) catch die("--top: bad number: {s}\n", .{argv[i]});
         } else if (std.mem.eql(u8, arg, "--json")) {
             json = true;
+        } else if (std.mem.eql(u8, arg, "--no-index")) {
+            no_index = true;
         } else if (target_path == null) {
             target_path = arg;
         } else {
             try roots.append(gpa, scope.normalizeRoot(arg));
         }
     }
-    const target = target_path orelse die("usage: hydra similar <path> [--top N] [--json] [ROOT...]\n", .{});
+    const target = target_path orelse die("usage: relate similar <path> [--top N] [--json] [--no-index] [ROOT...]\n", .{});
 
     const t0 = nowNs(io);
     const body = std.Io.Dir.cwd().readFileAlloc(io, target, gpa, .limited(corpus_mod.per_file_cap)) catch |e|
@@ -196,70 +91,53 @@ pub fn runSimilar(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) 
     defer gpa.free(body);
     var target_sketch = sketch.build(gpa, body) catch oom();
 
-    var corpus = try corpus_mod.load(gpa, io, rootsOf(roots.items));
-    defer corpus.deinit();
-    const sketches = buildSketches(gpa, corpus.docs);
-    defer gpa.free(sketches);
+    var view = try kinship.resolve(gpa, io, roots.items, no_index);
+    defer view.deinit();
 
     // Self-exclusion compares canonical shapes: a corpus path under an
     // explicit `.` root arrives `./`-prefixed while the arg may not (or vice
     // versa), and byte equality would leave the target ranked first at 0.0.
-    const norm_target = stripDotSlash(target);
+    const norm_target = kinship.stripDotSlash(target);
     var scored: std.ArrayList(Scored) = .empty;
     defer scored.deinit(gpa);
-    for (sketches, 0..) |*s, d| {
-        if (std.mem.eql(u8, stripDotSlash(corpus.paths[d]), norm_target)) continue; // self
+    for (view.sketches, 0..) |*s, d| {
+        if (std.mem.eql(u8, kinship.stripDotSlash(view.paths[d]), norm_target)) continue; // self
         const dist = sketch.distance(&target_sketch, s);
         try scored.append(gpa, .{ .dist = dist, .idx = @intCast(d) });
     }
-    std.mem.sort(Scored, scored.items, corpus.paths, Scored.less);
+    std.mem.sort(Scored, scored.items, view.paths, Scored.less);
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
-    const n = @min(top, scored.items.len);
-    for (scored.items[0..n]) |sc| {
+    var emitted: usize = 0;
+    for (scored.items) |sc| {
+        if (emitted >= top) break;
+        if (!view.gate(sc.idx)) continue; // deleted since the atlas anchor
+        emitted += 1;
         if (json) {
             buf.appendSlice(gpa, "{\"path\":") catch oom();
-            jsonStr(&buf, gpa, corpus.paths[sc.idx]);
+            jsonStr(&buf, gpa, view.paths[sc.idx]);
             buf.print(gpa, ",\"distance\":{d:.4}}}\n", .{sc.dist}) catch oom();
         } else {
-            buf.print(gpa, "{d:.4}  {s}\n", .{ sc.dist, corpus.paths[sc.idx] }) catch oom();
+            buf.print(gpa, "{d:.4}  {s}\n", .{ sc.dist, view.paths[sc.idx] }) catch oom();
         }
     }
     corpus_mod.emitStdout(buf.items);
-    std.debug.print("similar: {d} files sketched · {d:.0} ms\n", .{ corpus.docs.len, ms(nowNs(io) - t0) });
+    std.debug.print("similar: {d} sketches ({s}{d} refreshed) · {d:.0} ms\n", .{
+        view.sketches.len,
+        if (view.from_atlas) "atlas, " else "live, ",
+        view.refreshed,
+        ms(nowNs(io) - t0),
+    });
 }
 
-// ── `hydra dups` ──
-
-/// A verified near-duplicate pair (i < j), for the sort.
-const Pair = struct {
-    dist: f64,
-    i: u32,
-    j: u32,
-
-    fn less(paths: []const []const u8, x: Pair, y: Pair) bool {
-        if (x.dist != y.dist) return x.dist < y.dist;
-        const c = std.mem.order(u8, paths[x.i], paths[y.i]);
-        if (c != .eq) return c == .lt;
-        return std.mem.order(u8, paths[x.j], paths[y.j]) == .lt;
-    }
-};
-
-/// How many of each sketch's smallest hashes seed the candidate index. Two
-/// files at Jaccard ≥ 0.75 share ≥1 of their bottom-16 with probability
-/// ~1−0.25¹⁶ ≈ 1; the pairwise verify then rejects false candidates exactly.
-const seed_hashes = 16;
-/// A hash bucket bigger than this is a degenerate attractor (e.g. thousands
-/// of same-boilerplate files); pairing inside it would go quadratic. Its
-/// members almost surely share OTHER seed hashes pairwise, so capping costs
-/// recall only in adversarial corpora — and never precision.
-const bucket_cap = 64;
+// ── `relate dups` ──
 
 pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
     var max_dist: f64 = 0.25;
     var top: usize = 100;
     var json = false;
+    var no_index = false;
     var roots: std.ArrayList([]const u8) = .empty;
     defer roots.deinit(gpa);
 
@@ -276,81 +154,48 @@ pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
             top = std.fmt.parseInt(usize, argv[i], 10) catch die("--top: bad number: {s}\n", .{argv[i]});
         } else if (std.mem.eql(u8, arg, "--json")) {
             json = true;
+        } else if (std.mem.eql(u8, arg, "--no-index")) {
+            no_index = true;
         } else {
             try roots.append(gpa, scope.normalizeRoot(arg));
         }
     }
 
     const t0 = nowNs(io);
-    var corpus = try corpus_mod.load(gpa, io, rootsOf(roots.items));
-    defer corpus.deinit();
-    const sketches = buildSketches(gpa, corpus.docs);
-    defer gpa.free(sketches);
-
-    // Candidate generation: (seed hash, doc) tuples, sorted; docs sharing a
-    // seed hash form a bucket; every in-bucket pair gets an exact verify.
-    const Tuple = struct {
-        h: u64,
-        doc: u32,
-        fn less(_: void, x: @This(), y: @This()) bool {
-            if (x.h != y.h) return x.h < y.h;
-            return x.doc < y.doc;
-        }
-    };
-    var tuples: std.ArrayList(Tuple) = .empty;
-    defer tuples.deinit(gpa);
-    for (sketches, 0..) |*s, d| {
-        const seeds = s.slots()[0..@min(seed_hashes, s.len)];
-        for (seeds) |h| try tuples.append(gpa, .{ .h = h, .doc = @intCast(d) });
-    }
-    std.mem.sort(Tuple, tuples.items, {}, Tuple.less);
-
-    // Verified pairs, deduped via a seen-set keyed on (i,j).
-    var seen: std.AutoHashMapUnmanaged(u64, void) = .empty;
-    defer seen.deinit(gpa);
-    var pairs: std.ArrayList(Pair) = .empty;
-    defer pairs.deinit(gpa);
-
-    var lo: usize = 0;
-    while (lo < tuples.items.len) {
-        var hi = lo + 1;
-        while (hi < tuples.items.len and tuples.items[hi].h == tuples.items[lo].h) hi += 1;
-        const bucket = tuples.items[lo..hi];
-        const limit = @min(bucket.len, bucket_cap);
-        for (bucket[0..limit], 0..) |x, bi| {
-            for (bucket[bi + 1 .. limit]) |y| {
-                const a = @min(x.doc, y.doc);
-                const z = @max(x.doc, y.doc);
-                const key = (@as(u64, a) << 32) | z;
-                const entry = try seen.getOrPut(gpa, key);
-                if (entry.found_existing) continue;
-                const d = sketch.distance(&sketches[a], &sketches[z]);
-                if (d <= max_dist) try pairs.append(gpa, .{ .dist = d, .i = a, .j = z });
-            }
-        }
-        lo = hi;
-    }
-    std.mem.sort(Pair, pairs.items, corpus.paths, Pair.less);
+    var view = try kinship.resolve(gpa, io, roots.items, no_index);
+    defer view.deinit();
+    const pairs = try kinship.verifiedPairs(gpa, view.paths, view.sketches, max_dist);
+    defer gpa.free(pairs);
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
-    const n = @min(top, pairs.items.len);
-    for (pairs.items[0..n]) |p| {
+    var emitted: usize = 0;
+    for (pairs) |p| {
+        if (emitted >= top) break;
+        if (!view.gate(p.i) or !view.gate(p.j)) continue; // deleted since the anchor
+        emitted += 1;
         if (json) {
             buf.appendSlice(gpa, "{\"a\":") catch oom();
-            jsonStr(&buf, gpa, corpus.paths[p.i]);
+            jsonStr(&buf, gpa, view.paths[p.i]);
             buf.appendSlice(gpa, ",\"b\":") catch oom();
-            jsonStr(&buf, gpa, corpus.paths[p.j]);
+            jsonStr(&buf, gpa, view.paths[p.j]);
             buf.print(gpa, ",\"distance\":{d:.4}}}\n", .{p.dist}) catch oom();
         } else {
-            buf.print(gpa, "{d:.4}  {s}  {s}\n", .{ p.dist, corpus.paths[p.i], corpus.paths[p.j] }) catch oom();
+            buf.print(gpa, "{d:.4}  {s}  {s}\n", .{ p.dist, view.paths[p.i], view.paths[p.j] }) catch oom();
         }
     }
     corpus_mod.emitStdout(buf.items);
-    std.debug.print("dups: {d} files · {d} pair(s) ≤ {d:.2} · {d:.0} ms\n", .{ corpus.docs.len, pairs.items.len, max_dist, ms(nowNs(io) - t0) });
+    std.debug.print("dups: {d} files ({s}{d} refreshed) · {d} pair(s) ≤ {d:.2} · {d:.0} ms\n", .{
+        view.paths.len,
+        if (view.from_atlas) "atlas, " else "live, ",
+        view.refreshed,
+        pairs.len,
+        max_dist,
+        ms(nowNs(io) - t0),
+    });
 }
 
-// ── `hydra patterns` attribution ──
+// ── `relate patterns` attribution ──
 
 /// Attribute one document's bytes: the gate rejects all-miss docs in a single
 /// pass; survivors get exact per-pattern, per-line attribution as loom rows.
@@ -379,20 +224,7 @@ fn attributeDoc(
     }
 }
 
-/// Read one file fully into `scratch` (capped); returns bytes read or null.
-fn readFileInto(path: []const u8, scratch: []u8) ?usize {
-    const fd = std.posix.openat(std.posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0) catch return null;
-    defer {
-        _ = std.posix.system.close(fd);
-    }
-    var n: usize = 0;
-    while (n < scratch.len) {
-        const r = std.posix.read(fd, scratch[n..]) catch break;
-        if (r == 0) break;
-        n += r;
-    }
-    return n;
-}
+const readFileInto = grepfile.readFileInto;
 
 /// One worker of the index-backed candidate read+attribute pass: its own file
 /// scratch, its own `PatternSet.Scratch` (Pike sim state is not shareable),
@@ -509,13 +341,13 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         } else if (std.mem.eql(u8, arg, "--json")) {
             json = true;
         } else if (std.mem.startsWith(u8, arg, "-")) {
-            die("hydra patterns: unknown flag {s}\n", .{arg});
+            die("relate patterns: unknown flag {s}\n", .{arg});
         } else {
             try roots.append(gpa, scope.normalizeRoot(arg));
         }
     }
     if (pats.items.len == 0)
-        die("usage: hydra patterns -e P [-e P…] [-f FILE] [-F] [-i] [--by pattern|file] [--under GLOB] [--top N] [--json] [ROOT...]\n", .{});
+        die("usage: relate patterns -e P [-e P…] [-f FILE] [-F] [-i] [--by pattern|file] [--under GLOB] [--top N] [--json] [ROOT...]\n", .{});
 
     const t0 = nowNs(io);
     const specs = gpa.alloc(query.Spec, pats.items.len) catch oom();
@@ -550,7 +382,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         // corpus (`services/ai`, or the default roots verbatim); a root outside
         // it (`docs/`, `.`) has no candidates to elide and needs the live read.
         for (roots.items) |r| {
-            if (!underAnyRoot(r, &corpus_mod.default_roots)) break :indexed;
+            if (!kinship.underAnyRoot(r, &corpus_mod.default_roots)) break :indexed;
         }
         var filters: std.ArrayList([]const u8) = .empty;
         defer filters.deinit(gpa);
@@ -562,11 +394,11 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         }
         persisted = (persist.loadQuiet(gpa, io) catch null) orelse break :indexed;
         const p = &persisted.?;
-        cand = try fresh.candidates(gpa, io, &p.idx, &p.paths, filters.items, rootsOf(roots.items));
+        cand = try fresh.candidates(gpa, io, &p.idx, &p.paths, filters.items, kinship.rootsOf(roots.items));
         total_files = p.paths.items.len;
 
         // Root-scope gate before the read (rank.zig's lesson): without it a
-        // `hydra patterns … services/ai` would read + attribute the whole
+        // `relate patterns … services/ai` would read + attribute the whole
         // indexed corpus and answer out of scope.
         var scoped: std.ArrayList(u32) = .empty;
         defer scoped.deinit(gpa);
@@ -576,7 +408,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
             try scoped.ensureTotalCapacity(gpa, cand.?.ids.len);
             for (cand.?.ids) |d| {
                 if (d >= p.paths.items.len) continue;
-                if (underAnyRoot(p.paths.items[d], roots.items)) scoped.appendAssumeCapacity(d);
+                if (kinship.underAnyRoot(p.paths.items[d], roots.items)) scoped.appendAssumeCapacity(d);
             }
         }
         read_files = scoped.items.len;
@@ -584,7 +416,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         break :indexed;
     }
     if (persisted == null) {
-        corpus = try corpus_mod.load(gpa, io, rootsOf(roots.items));
+        corpus = try corpus_mod.load(gpa, io, kinship.rootsOf(roots.items));
         const c = &corpus.?;
         total_files = c.docs.len;
         read_files = c.docs.len;

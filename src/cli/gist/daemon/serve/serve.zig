@@ -43,7 +43,7 @@ const builtin = @import("builtin");
 const resident = @import("../../../../runtime/session/resident.zig");
 const protocol = @import("../../../../runtime/session/protocol.zig");
 const watch = @import("../../../../runtime/session/watch.zig");
-const corpus = @import("../../../../runtime/corpus/corpus.zig");
+const corpus = @import("../../../../corpus/tree/corpus.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 

@@ -1,9 +1,9 @@
-//! hydra — the `quote` verb: corpus-global cross-parse over the codex shelf.
+//! relate — the `quote` verb: corpus-global cross-parse over the codex shelf.
 //!
-//!   hydra quote <text> [--json]
+//!   relate quote <text> [--json]
 //!       rewrite <text> as a cento — a sequence of maximal verbatim quotations
 //!       from the WHOLE corpus (Ziv–Merhav cross-parse on the FM-index shelf;
-//!       src/codex/cento.zig) — and price it in bits. One pass, O(|text|)
+//!       src/index/codex/cento.zig) — and price it in bits. One pass, O(|text|)
 //!       rank operations: corpus size never appears in the query cost.
 //!
 //! What `search` answers per-document ("which file describes this most
@@ -13,7 +13,7 @@
 //! corpus-conditional compression rate — low = the corpus has seen it,
 //! ~8+ = foreign bytes.
 //!
-//! Unlike the other hydra verbs, quote reads the PERSISTED `codex.shelf`
+//! Unlike the other relate verbs, quote reads the PERSISTED `codex.shelf`
 //! (`gist codex build`) instead of building per-invocation: the cross-parse
 //! is only corpus-global if the index actually spans the corpus, and an
 //! FM-index build is a lifecycle event, not a query cost. Freshness is
@@ -22,12 +22,13 @@
 //! diagnostics on stderr.
 
 const std = @import("std");
-const corpus_mod = @import("../../runtime/corpus/corpus.zig");
+const corpus_mod = @import("../../corpus/tree/corpus.zig");
 const fresh = @import("../../index/trigrams/fresh.zig");
 const codex_face = @import("../gist/lifecycle/codex.zig");
-const cli_args = @import("../gist/search/argv/args.zig");
+const cli_args = @import("../../runtime/cold/argv/args.zig");
 const shelf_mod = @import("../../index/codex/shelf.zig");
 const cento = @import("../../index/codex/cento.zig");
+const kinship = @import("kinship.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
@@ -35,23 +36,7 @@ const nowNs = cli_args.nowNs;
 const ms = cli_args.ms;
 const Dir = std.Io.Dir;
 
-/// Append `s` JSON-string-escaped (quotes included). Same escaper the other
-/// verb drivers keep, for the same reason: no util shelf.
-fn jsonStr(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) void {
-    buf.append(a, '"') catch oom();
-    for (s) |c| switch (c) {
-        '"' => buf.appendSlice(a, "\\\"") catch oom(),
-        '\\' => buf.appendSlice(a, "\\\\") catch oom(),
-        '\n' => buf.appendSlice(a, "\\n") catch oom(),
-        '\r' => buf.appendSlice(a, "\\r") catch oom(),
-        '\t' => buf.appendSlice(a, "\\t") catch oom(),
-        else => if (c < 0x20)
-            buf.print(a, "\\u{x:0>4}", .{c}) catch oom()
-        else
-            buf.append(a, c) catch oom(),
-    };
-    buf.append(a, '"') catch oom();
-}
+const jsonStr = kinship.jsonStr;
 
 pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
     var query_text: ?[]const u8 = null;
@@ -61,17 +46,17 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
             json = true;
         } else if (query_text == null) {
             query_text = arg;
-        } else die("usage: hydra quote <text> [--json]\n", .{});
+        } else die("usage: relate quote <text> [--json]\n", .{});
     }
-    const query = query_text orelse die("usage: hydra quote <text> [--json]\n", .{});
-    if (query.len == 0) die("hydra quote: empty query\n", .{});
+    const query = query_text orelse die("usage: relate quote <text> [--json]\n", .{});
+    if (query.len == 0) die("relate quote: empty query\n", .{});
 
     const t0 = nowNs(io);
     const blob = Dir.cwd().readFileAlloc(io, codex_face.shelf_file, gpa, .unlimited) catch
-        die("no codex shelf at {s} — run `gist codex build` first\n", .{codex_face.shelf_file});
+        die("no codex shelf at {s} — run `relate index --shelf` (or `gist codex build`) first\n", .{codex_face.shelf_file});
     defer gpa.free(blob);
     var shelf = shelf_mod.Shelf.load(gpa, blob) catch
-        die("corrupt codex shelf at {s} — run `gist codex build` to rebuild\n", .{codex_face.shelf_file});
+        die("corrupt codex shelf at {s} — run `relate index --shelf` (or `gist codex build`) to rebuild\n", .{codex_face.shelf_file});
     defer shelf.deinit(gpa);
     const loaded_ns = nowNs(io);
 
@@ -119,20 +104,10 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     const parsed_ns = nowNs(io); // parse + attribution, before the freshness walk
     corpus_mod.emitStdout(out.items);
 
-    const stale = staleCount(gpa, io, shelf.built_ns);
+    const stale = fresh.staleCount(gpa, io, &corpus_mod.default_roots, shelf.built_ns);
     if (stale > 0)
-        std.debug.print("quote: {d} file(s) changed since the shelf was built — `gist codex build` refreshes\n", .{stale});
+        std.debug.print("quote: {d} file(s) changed since the shelf was built — `relate index --shelf` refreshes\n", .{stale});
     std.debug.print("quote: {d} files in shelf · load {d:.0} ms · parse {d:.2} ms\n", .{
         shelf.paths.len, ms(loaded_ns - t0), ms(parsed_ns - loaded_ns),
     });
-}
-
-/// Files changed at/after the shelf's anchor — the same honest staleness
-/// signal `gist codex` reports.
-fn staleCount(gpa: std.mem.Allocator, io: std.Io, built_ns: i64) usize {
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    var changed: std.ArrayList([]const u8) = .empty;
-    fresh.changedSince(gpa, io, &corpus_mod.default_roots, built_ns, arena.allocator(), &changed) catch return 0;
-    return changed.items.len;
 }

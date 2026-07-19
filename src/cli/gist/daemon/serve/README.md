@@ -5,11 +5,11 @@ doc_radar:
       file: pkg/kernels/irregex/contract/search_api.toml
       contains: ["GIST_SESSION_SOCK", "gistd.sock"]
     - description: "serve loop stays poll-multiplexed and decline-on-unservable"
-      file: pkg/kernels/irregex/src/gist/faces/cli/daemon/serve/serve.zig
+      file: pkg/kernels/irregex/src/cli/gist/daemon/serve/serve.zig
       contains: ["pub fn run", "pub fn socketPath", "decline"]
 ---
 
-# gist/faces/cli/daemon/serve — `gist serve`
+# cli/gist/daemon/serve — `gist serve`
 
 Keeps one [`ResidentSession`](../../../../session/resident.zig) warm behind a
 Unix-domain socket so a persistent client answers an eligible query without

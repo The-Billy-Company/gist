@@ -1,7 +1,7 @@
 //! gist `codex` — the exact existence/count tier over the compressed self-index.
 //!
 //! Four verbs over one persisted artifact (`codex.shelf`: the FM-index shelf
-//! from `src/codex/shelf.zig`, built over the SAME corpus policy as `gist
+//! from `src/index/codex/shelf.zig`, built over the SAME corpus policy as `gist
 //! index`):
 //!
 //!   gist codex build                    build + persist the shelf (`codex.shelf`)
@@ -25,12 +25,12 @@
 //! as-of-snapshot, and the report says so.
 
 const std = @import("std");
-const corpus_mod = @import("../../../runtime/corpus/corpus.zig");
+const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../index/trigrams/fresh.zig");
 const persist = @import("../../../index/trigrams/persist.zig");
 const shelf_mod = @import("../../../index/codex/shelf.zig");
-const nowNs = @import("../search/argv/args.zig").nowNs;
-const ms = @import("../search/argv/args.zig").ms;
+const nowNs = @import("../../../runtime/cold/argv/args.zig").nowNs;
+const ms = @import("../../../runtime/cold/argv/args.zig").ms;
 const Dir = std.Io.Dir;
 
 pub const shelf_file = corpus_mod.out_dir ++ "/codex.shelf";
@@ -90,16 +90,6 @@ fn loadShelf(gpa: std.mem.Allocator, io: std.Io) shelf_mod.Shelf {
     };
 }
 
-/// Files changed at/after the shelf's anchor (count only — the honest
-/// staleness signal every query verb reports).
-fn staleCount(gpa: std.mem.Allocator, io: std.Io, built_ns: i64) usize {
-    var arena = std.heap.ArenaAllocator.init(gpa);
-    defer arena.deinit();
-    var changed: std.ArrayList([]const u8) = .empty;
-    fresh.changedSince(gpa, io, &corpus_mod.default_roots, built_ns, arena.allocator(), &changed) catch return 0;
-    return changed.items.len;
-}
-
 const Report = struct {
     schema_version: u8 = schema_version,
     pattern: []const u8,
@@ -115,7 +105,7 @@ fn runQuery(gpa: std.mem.Allocator, io: std.Io, pattern: []const u8, top: ?usize
     var shelf = loadShelf(gpa, io);
     defer shelf.deinit(gpa);
     const total = shelf.count(pattern);
-    const stale = staleCount(gpa, io, shelf.built_ns);
+    const stale = fresh.staleCount(gpa, io, &corpus_mod.default_roots, shelf.built_ns);
 
     var tallies: []shelf_mod.DocCount = &.{};
     defer gpa.free(tallies);
@@ -183,7 +173,7 @@ fn runStatus(gpa: std.mem.Allocator, io: std.Io, json: bool) !void {
         .files = shelf.paths.len,
         .corpus_bytes = shelf.cx.len(),
         .bits_per_char = shelf.cx.stats.bitsPerChar(),
-        .stale_files = staleCount(gpa, io, shelf.built_ns),
+        .stale_files = fresh.staleCount(gpa, io, &corpus_mod.default_roots, shelf.built_ns),
         .built_unix_ns = shelf.built_ns,
     };
     var out: std.ArrayList(u8) = .empty;

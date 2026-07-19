@@ -1,12 +1,12 @@
 //! gist --schema — the deterministic, machine-readable capability manifest.
 //!
 //! Search compatibility is not prose copied from the parser. The four ripgrep
-//! buckets are rendered directly from `search/argv/args.zig`'s declarative catalog,
+//! buckets are rendered directly from `runtime/cold/argv/args.zig`'s declarative catalog,
 //! the same rows that build the short- and long-flag dispatch tables.
 
 const std = @import("std");
-const corpus_mod = @import("../../../runtime/corpus/corpus.zig");
-const args = @import("../search/argv/args.zig");
+const corpus_mod = @import("../../../corpus/tree/corpus.zig");
+const args = @import("../../../runtime/cold/argv/args.zig");
 
 const manifest_prefix =
     \\{
@@ -36,9 +36,9 @@ const manifest_prefix =
     \\      "args": [{"name": "verb", "type": "string", "required": true, "description": "build | count | tally | status"}, {"name": "text", "type": "string", "required": false, "description": "the literal text to count (count/tally)"}],
     \\      "flags": [{"name": "--json", "type": "bool", "default": false, "description": "versioned machine output"}, {"name": "--top", "type": "int", "default": 20, "description": "tally rows surfaced"}]
     \\    },
-    \\    "similar": {"moved": "the hydra binary owns this verb — see `hydra --schema`"},
-    \\    "dups": {"moved": "the hydra binary owns this verb — see `hydra --schema`"},
-    \\    "patterns": {"moved": "the hydra binary owns this verb — see `hydra --schema`"}
+    \\    "similar": {"moved": "the relate binary owns this verb — see `relate --schema`"},
+    \\    "dups": {"moved": "the relate binary owns this verb — see `relate --schema`"},
+    \\    "patterns": {"moved": "the relate binary owns this verb — see `relate --schema`"}
     \\  },
     \\  "search": {
     \\    "summary": "gist <pattern> [PATH...] [flags] live-scans with ripgrep-like defaults and automatically uses a covering index only to elide provable non-candidate reads",
@@ -48,7 +48,7 @@ const manifest_prefix =
     \\    ],
     \\    "flag_surface": "broad, tested ripgrep-compatible subset; not full ripgrep compatibility. Unsupported and unknown flags fail loud with exit 2.",
     \\    "ripgrep_compatibility": {
-    \\      "source_of_truth": "src/gist/faces/cli/search/argv/args.zig:flag_catalog",
+    \\      "source_of_truth": "src/runtime/cold/argv/args.zig:flag_catalog",
     \\      "unknown_flags": "unsupported-fail-loud",
     \\      "buckets": {
 ;

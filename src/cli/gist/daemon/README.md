@@ -2,16 +2,16 @@
 doc_radar:
   counts:
     - description: "daemon face is serve + client only"
-      glob: pkg/kernels/irregex/src/gist/faces/cli/daemon/*/
+      glob: pkg/kernels/irregex/src/cli/gist/daemon/*/
       equals: 2
       unit: dirs
   sentinels:
     - description: "warm path stays fail-open to cold"
-      file: pkg/kernels/irregex/src/gist/faces/cli/daemon/client/client.zig
+      file: pkg/kernels/irregex/src/cli/gist/daemon/client/client.zig
       contains: [".cold", "attempt"]
 ---
 
-# gist/faces/cli/daemon — warm Unix-socket path (ADR-352 rung 2.5)
+# cli/gist/daemon — warm Unix-socket path (ADR-352 rung 2.5)
 
 The CLI's optional accelerator. A resident [`ResidentSession`](../../../session/resident.zig)
 stays warm behind a Unix socket so the next eligible `gist <pattern>` can skip

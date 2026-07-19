@@ -3,7 +3,7 @@
 # safety claim: the persisted trigram index is an ACCELERATION structure only,
 # never a semantic one. `gist <pattern>` uses the index solely to elide *reading*
 # files the live walk already found but that provably can't match (see
-# `src/gist/faces/cli/search/engine/serial.zig` `IndexSkip`); the walk stays the sole authority
+# `src/runtime/cold/engine/serial.zig` `IndexSkip`); the walk stays the sole authority
 # on the file set, ignore semantics, ordering, and output. So for every query,
 # the index-accelerated run MUST be byte-for-byte identical to the same run with
 # `--no-index` (a full live read of every walked file). This gate proves exactly

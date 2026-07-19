@@ -17,7 +17,7 @@
 const std = @import("std");
 const persist = @import("../../../index/trigrams/persist.zig");
 const fresh = @import("../../../index/trigrams/fresh.zig");
-const corpus_mod = @import("../../../runtime/corpus/corpus.zig");
+const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const Dir = std.Io.Dir;
 
 /// Version of the `--json` machine contract; bumped only on a breaking field

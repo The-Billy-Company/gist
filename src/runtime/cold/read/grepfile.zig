@@ -12,7 +12,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const corpus_mod = @import("../../../../runtime/corpus/corpus.zig");
+const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const args = @import("../argv/args.zig");
 const output = @import("../emit/output.zig");
 const Opts = args.Opts;
@@ -20,8 +20,8 @@ const die = args.die;
 const oom = args.oom;
 const multiline = @import("../emit/multiline.zig");
 const Emitter = output.Emitter;
-const Regex = @import("../../../../search/match/regex/linear/core.zig").Regex;
-const Matcher = @import("../../../../search/match/regex/linear/matcher.zig").Matcher;
+const Regex = @import("../../../search/match/regex/linear/core.zig").Regex;
+const Matcher = @import("../../../search/match/regex/linear/matcher.zig").Matcher;
 
 /// ripgrep's default read-buffer capacity. Binary detection scans buffer-sized
 /// reads for a NUL; a match in the buffer that first contains the NUL is NOT
@@ -352,6 +352,23 @@ pub fn readFileRaw(a: std.mem.Allocator, scratch: []u8, disk: []const u8) ?[]con
     const sf = StagedFile.open(scratch, std.posix.AT.FDCWD, disk) orelse return null;
     defer sf.close();
     return sf.readRest(a, scratch);
+}
+
+/// Read one file fully into `scratch` (capped at its length); returns bytes
+/// read or null when the file can't be opened. The allocation-free sibling of
+/// `readFileRaw` for callers that own a fixed per-worker buffer.
+pub fn readFileInto(path: []const u8, scratch: []u8) ?usize {
+    const fd = std.posix.openat(std.posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0) catch return null;
+    defer {
+        _ = std.posix.system.close(fd);
+    }
+    var n: usize = 0;
+    while (n < scratch.len) {
+        const r = std.posix.read(fd, scratch[n..]) catch break;
+        if (r == 0) break;
+        n += r;
+    }
+    return n;
 }
 
 /// A candidate opened and read in TWO stages: the first `BUFCAP` bytes now, the

@@ -32,7 +32,7 @@
 //!
 //! The invariant is `resident matches == gist --no-index matches == rg matches`.
 //! It holds because both the base corpus and every reconcile re-derive their file
-//! set from the cold path's OWN certified walk (`faces/cli/search/engine/serial.zig::
+//! set from the cold path's OWN certified walk (`runtime/cold/engine/serial.zig::
 //! defaultFileSet` — hidden-file exclusion, `.gitignore`/`.ignore` precedence,
 //! `.git` skip, root scope), never `haystack`'s coarse superset. The warm set is
 //! therefore byte-identical to what a rootless `gist <pattern>` would walk:
@@ -60,8 +60,8 @@
 //! seqlock over a mutex-guarded engine.
 
 const std = @import("std");
-const corpus_mod = @import("../corpus/corpus.zig");
-const bulkstat = @import("../corpus/bulkstat.zig");
+const corpus_mod = @import("../../corpus/tree/corpus.zig");
+const bulkstat = @import("../../corpus/tree/bulkstat.zig");
 const corpus = @import("corpus.zig");
 const render = @import("render.zig");
 // The resident file set is the certified rg-default walk the cold path uses, NOT
@@ -69,8 +69,8 @@ const render = @import("render.zig");
 // rg` true for hidden files, `.gitignore` precedence, and root scope. `session`
 // depending on `faces/search` is a one-way edge (serial.zig never imports
 // session), so no import cycle.
-const run = @import("../../cli/gist/search/engine/serial.zig");
-const grepfile = @import("../../cli/gist/search/read/grepfile.zig");
+const run = @import("../cold/engine/serial.zig");
+const grepfile = @import("../cold/read/grepfile.zig");
 const dirtylog = @import("dirty.zig");
 const delta_mod = @import("delta.zig");
 const persist = @import("../../index/trigrams/persist.zig");
@@ -116,7 +116,7 @@ pub const Lines = struct {
 /// the `emit` call — the sink must copy anything it keeps. `line_number` is
 /// 1-based over rg's line model, and every span is a non-empty `[start,end)`
 /// byte range within `text`, byte-identical to the cold `gist --json` submatch
-/// stream (`faces/cli/search/emit/json.zig`).
+/// stream (`runtime/cold/emit/json.zig`).
 pub const MatchRecord = struct {
     path: []const u8,
     line_number: u64,
@@ -143,7 +143,7 @@ const DocRef = struct {
     nul: ?usize = null,
 
     /// Separator-aware path order — the SAME `pathLess` cold's `--sort path`
-    /// comparator uses (`faces/cli/search/engine/serial.zig::cmpFiles`). Cold's default
+    /// comparator uses (`runtime/cold/engine/serial.zig::cmpFiles`). Cold's default
     /// parallel pipeline emits in worker-discovery order (nondeterministic);
     /// warm canonicalizes to this deterministic total order instead — per-file
     /// bytes stay identical, and the rgsuite oracle's own equivalence

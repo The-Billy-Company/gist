@@ -2,21 +2,21 @@
 doc_radar:
   sentinels:
     - description: "machine status contract stays versioned and CLI-addressable"
-      file: pkg/kernels/irregex/src/gist/faces/cli/status/status.zig
+      file: pkg/kernels/irregex/src/cli/gist/status/status.zig
       contains: ["pub const schema_version = 1;", "pub const Snapshot = struct"]
     - description: "status JSON remains discoverable through the CLI"
-      file: pkg/kernels/irregex/src/gist/faces/cli/main.zig
+      file: pkg/kernels/irregex/src/cli/gist/main.zig
       contains: 'std.mem.eql(u8, value, "--json")'
 ---
 
-# gist/faces/cli/status — `gist status`
+# cli/gist/status — `gist status`
 
 Read-only introspection of the persisted index. Answers the question agents ask
 before a search loop: *am I ready to search fast, and how fresh?*
 
 `status.zig` derives a `Snapshot` from the same mmap'd artifacts the query path
-loads (`kernel/index/persist.zig`) plus the freshness anchor
-(`kernel/index/fresh.zig`): index presence, files indexed, distinct trigrams,
+loads (`index/trigrams/persist.zig`) plus the freshness anchor
+(`index/trigrams/fresh.zig`): index presence, files indexed, distinct trigrams,
 postings, on-disk size, build age, corpus roots. No build, no scan, no
 mutation — a missing index is an actionable `unavailable` state ("run
 `gist index`"), never an error, so `status` is safe to call blind.

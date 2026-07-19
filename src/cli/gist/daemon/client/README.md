@@ -2,14 +2,14 @@
 doc_radar:
   sentinels:
     - description: "warm client stays fail-open with an I/O deadline"
-      file: pkg/kernels/irregex/src/gist/faces/cli/daemon/client/client.zig
+      file: pkg/kernels/irregex/src/cli/gist/daemon/client/client.zig
       contains: ["pub fn attempt", "client_io_timeout_ms", ".cold", ".served"]
     - description: "autoserve remains opt-out, not opt-in"
-      file: pkg/kernels/irregex/src/gist/faces/cli/daemon/client/spawn.zig
+      file: pkg/kernels/irregex/src/cli/gist/daemon/client/spawn.zig
       contains: ["maybeSpawn", "GIST_NO_AUTOSERVE"]
 ---
 
-# gist/faces/cli/daemon/client — warm dial + cold fallback
+# cli/gist/daemon/client — warm dial + cold fallback
 
 The fail-open bridge from the bare `gist <pattern>` front door to the resident
 daemon ([`../serve`](../serve)). Warm acceleration is opportunistic; correctness

@@ -35,8 +35,8 @@
 const std = @import("std");
 const request = @import("../../../../runtime/session/request.zig");
 const protocol = @import("../../../../runtime/session/protocol.zig");
-const corpus = @import("../../../../runtime/corpus/corpus.zig");
-const run = @import("../../search/engine/serial.zig");
+const corpus = @import("../../../../corpus/tree/corpus.zig");
+const run = @import("../../../../runtime/cold/engine/serial.zig");
 const net = std.Io.net;
 
 /// Best-effort detached daemon auto-spawn: when an eligible query finds no

@@ -9,7 +9,7 @@ doc_radar:
       contains: ["int32_t irregex_open(", "int32_t irregex_search(", "void irregex_close("]
 ---
 
-# gist/faces/ffi — in-process C-ABI search session (ADR-352 rung 3)
+# runtime/ffi — in-process C-ABI search session (ADR-352 rung 3)
 
 The package binding for non-Zig hosts. `session.zig` exposes
 `irregex_open` / `irregex_search` / `irregex_close` so a caller (the Python
@@ -18,8 +18,8 @@ corpus warm **in its own process** and stream match records over a callback —
 no subprocess, no Unix socket, no `stdout`, no `exit`.
 
 It is the in-process sibling of the socket-served resident daemon
-([`../cli/daemon/serve`](../cli/daemon/serve)) and draws on the same shared
-search core ([`../../kernel/engine/query.zig`](../../kernel/engine/query.zig)),
+([`../../cli/gist/daemon/serve`](../../cli/gist/daemon/serve)) and draws on the same shared
+search core ([`../../search/match/query.zig`](../../search/match/query.zig)),
 so an in-process answer is byte-identical to cold `gist --json` and to the UDS
 daemon.
 
