@@ -1,8 +1,9 @@
 //! gist `index` — build + persist the trigram index and freshness anchor.
 //!
 //! The one mutating lifecycle action behind the `gist index` verb. It scans the
-//! corpus (every non-binary file under `corpus.default_roots`), builds the
-//! trigram `Index`, and generation-publishes it plus the doc→path table and the
+//! corpus (every non-binary file under the resolved roots — explicit argv, else
+//! `corpus.resolveRoots`), builds the trigram `Index`, and generation-publishes
+//! it plus the doc→path table, the build roots (`roots.list`), and the
 //! freshness anchor (`corpus/fresh.zig`) that later queries map back zero-copy.
 //! The persisted index is what the unified engine's read-elision path
 //! (`run.zig` `IndexSkip`) and the ranked view (`rank.zig`) consume — building
@@ -13,6 +14,7 @@ const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../index/trigrams/fresh.zig");
 const persist = @import("../../../index/trigrams/persist.zig");
+const crest_sidecar = @import("../../../index/crest/sidecar.zig");
 const Index = @import("../../../index/trigrams/trigram.zig").Index;
 const nowNs = @import("../../../runtime/cold/argv/args.zig").nowNs;
 const ms = @import("../../../runtime/cold/argv/args.zig").ms;
@@ -28,10 +30,16 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void 
     defer corpus.deinit();
     var idx = try Index.build(gpa, corpus.docs);
     defer idx.deinit();
+    // Crest sidecar (the class-run sieve, research/crest/): one parallel pass
+    // over the already-loaded docs. Best-effort — an OOM here costs only the
+    // sieve, never the index build.
+    const crest_vectors: ?[]const @import("../../../math/crest.zig").Vector =
+        crest_sidecar.build(gpa, corpus.docs) catch null;
+    defer if (crest_vectors) |cv| gpa.free(cv);
 
-    // Generation-atomic pair publish: both blobs stage under gens/<id>/, then
-    // pair.gen flips — concurrent loaders never see a mixed old/new pair.
-    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths);
+    // Generation-atomic publish: all blobs stage under gens/<id>/, then
+    // pair.gen flips — concurrent loaders never see a mixed old/new set.
+    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths, roots, crest_vectors);
     try fresh.writeAnchor(io, built_ns); // T3 freshness anchor
 
     std.debug.print("indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{
@@ -39,6 +47,6 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void 
         @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20),
         @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
         ms(nowNs(io) - t0),
-        corpus_mod.out_dir,
+        corpus_mod.outDir(),
     });
 }

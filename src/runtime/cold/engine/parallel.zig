@@ -49,6 +49,7 @@ const simd = @import("../../../search/match/scan/simd.zig");
 const verify = @import("../../../search/match/scan/verify.zig");
 const persist = @import("../../../index/trigrams/persist.zig");
 const fresh = @import("../../../index/trigrams/fresh.zig");
+const crest = @import("../../../math/crest.zig");
 const bulkstat = @import("../../../corpus/tree/bulkstat.zig");
 const paths_mod = @import("../walk/paths.zig");
 const stripDot = paths_mod.stripDot;
@@ -61,7 +62,7 @@ const die = args.die;
 const oom = args.oom;
 const Regex = @import("../../../search/match/regex/linear/core.zig").Regex;
 const Matcher = @import("../../../search/match/regex/linear/matcher.zig").Matcher;
-const pcre2 = @import("../../../search/match/regex/pcre2/backend.zig");
+const serial = @import("serial.zig");
 const hints = @import("../emit/hints.zig");
 const Dir = std.Io.Dir;
 
@@ -80,8 +81,7 @@ const Dir = std.Io.Dir;
 /// this; it is never exposed as a CLI flag.
 pub fn eligible(io: std.Io, parsed: args.Parsed, o: Opts) bool {
     if (args.envSpan("GIST_NO_PARALLEL") != null) return false;
-    if (o.follow or o.json or o.quiet or o.stats or o.files_without or
-        o.replace != null or o.max_filesize != 0 or o.multiline) return false;
+    if (o.follow or o.json or o.quiet or o.stats or o.files_without or o.replace != null or o.max_filesize != 0 or o.multiline) return false;
     // A globally ordered result (`--sort`/`--sortr`) and a device-bounded walk
     // (`--one-file-system`) both need cross-file state the streaming sink can't
     // give, so they run on the serial engine — which still reads in parallel,
@@ -170,9 +170,7 @@ fn shouldSkip(cfg: *const Cfg, chain: ?*const IgNode, a: std.mem.Allocator, task
     var v: ?bool = null;
     if (cfg.compiled) |c| {
         if (c.matchRank(stripDot(rel), is_dir, task.root_depth, ig.reanchor_root_rules)) |r| v = !c.rules[r].negated;
-    } else {
-        v = ig.decideAt(rel, is_dir, task.root_depth);
-    }
+    } else v = ig.decideAt(rel, is_dir, task.root_depth);
     applyChain(chain, a, ig.o.ignore_case_insensitive, task.root_depth, ig.reanchor_root_rules, rel, is_dir, &v);
     const wl_ig = cfg.o.filter.whitelists(a, rel);
     const wl_hid = cfg.o.filter.whitelistsHidden(a, rel);
@@ -278,8 +276,16 @@ pub const IndexedPaths = struct {
 /// ctime for free (`getattrlistbulk` returns them with the name), so
 /// staleness is decided per file against the persisted build anchor instead of
 /// via a second full tree traversal. Elide reading P iff P is indexed, NOT a
-/// trigram candidate, AND both timestamps prove it predates the anchor.
+/// candidate, AND both timestamps prove it predates the anchor.
 /// Equality or unavailable metadata forces a live read.
+///
+/// "Candidate" folds BOTH necessary conditions at assembly time: the trigram
+/// prefilter hits AND the crest sieve's survivors (`assembleElide` clears the
+/// bit for a doc whose persisted crest vector falls short of ĝ — sound here
+/// precisely because `skip` already refuses any file the timestamps can't
+/// prove unchanged, which is the exact validity condition of the persisted
+/// vector). The sieve is what elides for literal-free class patterns
+/// (`[0-9a-f]{8}`) where the trigram filter concedes (research/crest/).
 const Elide = struct {
     p: persist.Persisted,
     indexed: IndexedPaths,
@@ -310,36 +316,48 @@ const LazyElide = struct {
     val: ?Elide = null,
     ready: std.atomic.Value(bool) = .init(false),
 
-    fn loaderMain(le: *LazyElide, gpa: std.mem.Allocator, io: std.Io, o: Opts, filters: []const []const u8) void {
-        le.val = buildElide(gpa, io, o, filters);
+    fn loaderMain(le: *LazyElide, gpa: std.mem.Allocator, io: std.Io, o: Opts, filters: []const []const u8, sieve: crest.Vector) void {
+        le.val = buildElide(gpa, io, o, filters, sieve);
         le.ready.store(true, .release);
     }
 };
 
 /// Explicit nested roots usually finish their scoped walk before a fresh index
-/// process can load. Rootless searches, `.`, and direct indexed corpus roots are
+/// process can load. Rootless searches, `.`, and whole top-level subtrees are
 /// broad enough to plausibly amortize it; narrower scopes stay on the live path.
+/// This is a pre-load COST heuristic only (the index's real roots are persisted
+/// beside it and load with it): a scoped query that declines here just walks
+/// live — same answer, no index load.
 fn broadIndexedRoots(roots: []const []const u8) bool {
     if (roots.len == 0) return true;
     for (roots) |raw| {
         var root = raw;
         while (std.mem.startsWith(u8, root, "./")) root = root[2..];
         root = std.mem.trimEnd(u8, root, "/");
+        // Empty / `.` = the whole tree; a single path segment = a top-level
+        // subtree of the corpus — both plausibly amortize the index load.
         if (root.len == 0 or std.mem.eql(u8, root, ".")) return true;
-        for (corpus_mod.default_roots) |indexed| {
-            if (std.mem.eql(u8, root, indexed)) return true;
-        }
+        if (std.mem.indexOfScalar(u8, root, '/') == null) return true;
     }
     return false;
 }
 
 /// Cheap pre-checks before spawning the loader. Short literals cannot query the
-/// trigram index, and narrow explicit roots are cheaper to walk directly.
-pub fn indexElisionWanted(parsed: args.Parsed, filters: []const []const u8) bool {
+/// trigram index, and narrow explicit roots are cheaper to walk directly. An
+/// active crest sieve admits elision even with NO usable trigram filter — the
+/// literal-free class-repetition queries are exactly the sieve's raison d'être.
+pub fn indexElisionWanted(parsed: args.Parsed, filters: []const []const u8, sieve: crest.Vector) bool {
     const o = parsed.opts;
-    if (o.files_list or o.no_index or filters.len == 0) return false;
-    for (filters) |f| if (f.len < 3) return false;
+    if (o.files_list or o.no_index) return false;
+    if (!usableFilters(filters) and !crest.active(sieve)) return false;
     return broadIndexedRoots(parsed.roots);
+}
+
+/// Every filter can actually query the trigram index (non-empty, all ≥3 B).
+fn usableFilters(filters: []const []const u8) bool {
+    if (filters.len == 0) return false;
+    for (filters) |f| if (f.len < 3) return false;
+    return true;
 }
 
 /// Once the index has answered, only build the path table when the corpus and
@@ -352,25 +370,45 @@ pub fn indexSavingsWorthTable(total: usize, candidates: usize) bool {
     return elidable >= 512 and elidable >= quarter;
 }
 
-fn buildElide(gpa: std.mem.Allocator, io: std.Io, o: Opts, filters: []const []const u8) ?Elide {
-    if (o.no_index or filters.len == 0) return null;
-    for (filters) |f| if (f.len < 3) return null;
-    return assembleElide(gpa, io, filters) catch null;
+fn buildElide(gpa: std.mem.Allocator, io: std.Io, o: Opts, filters: []const []const u8, sieve: crest.Vector) ?Elide {
+    if (o.no_index) return null;
+    if (!usableFilters(filters) and !crest.active(sieve)) return null;
+    return assembleElide(gpa, io, filters, sieve) catch null;
 }
 
 /// Fallible half of `buildElide`: every early exit (a missing anchor, an
 /// unloadable/unworthwhile index, an OOM) is an error, so `errdefer` sheds the
 /// half-built state instead of hand-threading `deinit` down each return path.
-fn assembleElide(gpa: std.mem.Allocator, io: std.Io, filters: []const []const u8) !Elide {
+fn assembleElide(gpa: std.mem.Allocator, io: std.Io, filters: []const []const u8, sieve: crest.Vector) !Elide {
     const anchor = fresh.readAnchor(gpa, io) orelse return error.NoAnchor;
     var p = (persist.loadQuiet(gpa, io) catch return error.NoIndex) orelse return error.NoIndex;
     errdefer p.deinit();
-    const cand = try p.idx.queryAny(gpa, filters);
-    defer gpa.free(cand);
-    if (!indexSavingsWorthTable(p.paths.items.len, cand.len)) return error.NotWorthwhile;
     var candidates = try std.DynamicBitSet.initEmpty(gpa, p.paths.items.len);
     errdefer candidates.deinit();
-    for (cand) |d| candidates.set(d);
+    if (usableFilters(filters)) {
+        const cand = try p.idx.queryAny(gpa, filters);
+        defer gpa.free(cand);
+        for (cand) |d| candidates.set(d);
+    } else {
+        // Sieve-only elision: every doc starts as a candidate; the crest
+        // subtraction below is the sole pruning criterion.
+        candidates.setRangeValue(.{ .start = 0, .end = p.paths.items.len }, true);
+    }
+    // Crest sieve: clear docs whose persisted crest vector provably falls short
+    // of ĝ. Valid because `Elide.skip` refuses any file whose timestamps can't
+    // prove it predates the anchor — exactly when the vector describes live bytes.
+    if (crest.active(sieve)) {
+        if (p.crest) |table| {
+            for (table, 0..) |v, d| {
+                if (crest.pruned(v, sieve)) candidates.unset(d);
+            }
+        } else if (!usableFilters(filters)) {
+            // No table to sieve with and no trigram filter either — nothing
+            // can be elided; decline rather than build a can't-prune oracle.
+            return error.NotWorthwhile;
+        }
+    }
+    if (!indexSavingsWorthTable(p.paths.items.len, candidates.count())) return error.NotWorthwhile;
     const indexed = try IndexedPaths.init(gpa, p.paths.items);
     return .{ .p = p, .indexed = indexed, .candidates = candidates, .anchor = anchor };
 }
@@ -429,6 +467,11 @@ const Queue = struct {
     // (rg parity: an unsignaled walk gap must never present as a silent
     // "no match", see `reportWalkError`/`run.zig`'s identical `walk_error`).
     walk_error: std.atomic.Value(bool) = .init(false),
+    // Any file the walk ADMITTED past the ignore/type/glob/hidden filters
+    // (pre index-elision — rg would still have opened it). Stays false ⇒ the
+    // filters excluded everything, which on an implicit-path run triggers
+    // rg's "No files were searched" stderr note + exit 2 (`run`, rg parity).
+    files_seen: std.atomic.Value(bool) = .init(false),
     gpa: std.mem.Allocator,
     io: std.Io,
 
@@ -567,8 +610,7 @@ const Sink = struct {
         var ok = true;
         if (self.files_mode) {
             self.matched_files += 1;
-            ok = corpus_mod.writeStdout(buf) and
-                corpus_mod.writeStdout(if (self.null_sep) "\x00" else "\n");
+            ok = corpus_mod.writeStdout(buf) and corpus_mod.writeStdout(if (self.null_sep) "\x00" else "\n");
         } else {
             switch (kind) {
                 .text_hit => {
@@ -769,13 +811,7 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
         if (listing) |listed| {
             for (listed) |e| {
                 noteIgnoreFile(&present, e.name, e.is_file);
-                entries.append(a, .{
-                    .name = e.name,
-                    .is_dir = e.is_dir,
-                    .is_file = e.is_file,
-                    .mtime_ns = e.mtime_ns,
-                    .ctime_ns = e.ctime_ns,
-                }) catch oom();
+                entries.append(a, .{ .name = e.name, .is_dir = e.is_dir, .is_file = e.is_file, .mtime_ns = e.mtime_ns, .ctime_ns = e.ctime_ns }) catch oom();
             }
             bulk_ok = true;
         } else |_| {}
@@ -814,23 +850,15 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
             var ctime: ?i128 = null;
             // Change timestamps are only consulted for elision candidates;
             // stat lazily there. A failed stat leaves both unknown, forcing read.
-            if (e.kind == .file and needsElisionMetadata(cfg)) {
-                if (dir.statFile(w.io, e.name, .{})) |st| {
-                    mtime = st.mtime.nanoseconds;
-                    ctime = st.ctime.nanoseconds;
-                } else |_| {}
-            }
+            if (e.kind == .file and needsElisionMetadata(cfg)) if (dir.statFile(w.io, e.name, .{})) |st| {
+                mtime = st.mtime.nanoseconds;
+                ctime = st.ctime.nanoseconds;
+            } else |_| {};
             // The iterator's name buffer is reused on the next `next()` —
             // fragments/tasks hold rel paths built from it, so own a copy.
             const name = a.dupe(u8, e.name) catch oom();
             noteIgnoreFile(&present, name, e.kind == .file);
-            entries.append(a, .{
-                .name = name,
-                .is_dir = e.kind == .directory,
-                .is_file = e.kind == .file,
-                .mtime_ns = mtime,
-                .ctime_ns = ctime,
-            }) catch oom();
+            entries.append(a, .{ .name = name, .is_dir = e.kind == .directory, .is_file = e.kind == .file, .mtime_ns = mtime, .ctime_ns = ctime }) catch oom();
         }
     }
 
@@ -859,13 +887,12 @@ fn needsElisionMetadata(cfg: *const Cfg) bool {
 
 fn noteIgnoreFile(present: *IgPresent, name: []const u8, is_file: bool) void {
     if (!is_file or name.len < 7 or name[0] != '.') return;
-    if (std.mem.eql(u8, name, ".gitignore")) {
-        present.gitignore = true;
-    } else if (std.mem.eql(u8, name, ".ignore")) {
-        present.dotignore = true;
-    } else if (std.mem.eql(u8, name, ".rgignore")) {
+    if (std.mem.eql(u8, name, ".gitignore"))
+        present.gitignore = true
+    else if (std.mem.eql(u8, name, ".ignore"))
+        present.dotignore = true
+    else if (std.mem.eql(u8, name, ".rgignore"))
         present.rgignore = true;
-    }
 }
 
 fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.fd_t, task: DirTask, chain: ?*const IgNode, children: *std.ArrayList(DirTask), e: Entry) void {
@@ -877,29 +904,22 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     if (shouldSkip(cfg, chain, a, task, rel, e.is_dir, e.name)) return;
     if (e.is_dir) {
         if (o.max_depth != 0 and depth >= o.max_depth) return;
-        children.append(a, .{
-            .disk = joinPath(a, task.disk, e.name),
-            .rel = rel,
-            .depth = depth,
-            .root_depth = task.root_depth,
-            .chain = chain,
-        }) catch oom();
+        children.append(a, .{ .disk = joinPath(a, task.disk, e.name), .rel = rel, .depth = depth, .root_depth = task.root_depth, .chain = chain }) catch oom();
         return;
     }
     if (o.max_depth != 0 and depth > o.max_depth) return;
     if (o.filter.active() and !o.filter.admits(a, rel)) return;
+    // Admitted: every filter that decides "would rg have searched this file"
+    // has passed. Flag BEFORE index elision — an elided file still counts as
+    // walked for the implicit-path nothing-searched heuristic (see `Queue`).
+    if (!w.q.files_seen.load(.monotonic)) w.q.files_seen.store(true, .monotonic);
     if (cfg.lazy) |lz| {
         if (lz.ready.load(.acquire)) {
             if (lz.val) |*el| if (el.skip(stripDot(rel), e.mtime_ns, e.ctime_ns)) return;
         } else {
             // Oracle still loading — hold the file back so it can still be
             // elided (the walk races ahead; deferring costs three slices + metadata).
-            w.pending.append(a, .{
-                .disk = joinPath(a, task.disk, e.name),
-                .rel = rel,
-                .mtime_ns = e.mtime_ns,
-                .ctime_ns = e.ctime_ns,
-            }) catch oom();
+            w.pending.append(a, .{ .disk = joinPath(a, task.disk, e.name), .rel = rel, .mtime_ns = e.mtime_ns, .ctime_ns = e.ctime_ns }) catch oom();
             return;
         }
     }
@@ -953,8 +973,7 @@ fn searchFile(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.
     // settle, before paying for the tail (86% of this corpus's bytes live in
     // the tails of >64 KiB files). A UTF-16 BOM opts out: the transcode needs
     // the whole file and dissolves its NULs, so no prefix triage is sound.
-    const utf16 = sf.prefix.len >= 2 and
-        ((sf.prefix[0] == 0xFF and sf.prefix[1] == 0xFE) or (sf.prefix[0] == 0xFE and sf.prefix[1] == 0xFF));
+    const utf16 = sf.prefix.len >= 2 and ((sf.prefix[0] == 0xFF and sf.prefix[1] == 0xFE) or (sf.prefix[0] == 0xFE and sf.prefix[1] == 0xFF));
     if (!utf16) {
         // NUL in buffer 0: rg's emission cutoff is the start of the buffer that
         // holds the first NUL — the very first — so an implicit walked file
@@ -968,7 +987,7 @@ fn searchFile(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.
         // tail. Absence proves nothing; fall through to the full read.
         if (cfg.fast_l and sf.more and prefixProvesMatch(w, re, grepfile.stripBom(sf.prefix))) {
             var buf: std.ArrayList(u8) = .empty;
-            buf.print(a, "{s}{c}", .{ dpath, @as(u8, if (o.null_sep) 0 else '\n') }) catch oom();
+            buf.print(a, "{s}{s}", .{ dpath, if (o.null_sep) "\x00" else o.outTerm() }) catch oom();
             cfg.sink.emit(.text_hit, buf.items);
             return;
         }
@@ -1016,6 +1035,7 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
         .show_name = if (o.heading) false else cfg.show_name,
         .out = &buf,
         .base = @intFromPtr(body.ptr),
+        .body_end = @intFromPtr(body.ptr) + body.len,
         .use_color = cfg.use_color,
         .needle = cfg.line_needle,
         // The worker's reusable scratch (null only on OOM ⇒ Emitter builds a
@@ -1027,10 +1047,15 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     // returned there), so the first NUL — the binary cutoff — can only sit in
     // the unseen tail. Sub-cap files are fully covered: zero bytes rescanned.
     if (cfg.binary_detect) if (std.mem.indexOfScalarPos(u8, body, covered, 0)) |nul| {
-        const matched = grepfile.handleBinary(a, re, o, &buf, &em, dpath, false, body, nul, cfg.show_name);
-        if (matched or buf.items.len > 0)
-            cfg.sink.emit(if (matched) .bin_hit else .text_plain, buf.items);
-        return;
+        // rg's -U slice model runs only when the pattern can actually match
+        // `\n`; slice model + NUL beyond the 64K sniff means the searcher never
+        // notices it — ordinary text, fall through to the normal path.
+        if (!(o.multiline and re.canMatchNewline() and !grepfile.multilineBinary(body.len, nul))) {
+            const matched = grepfile.handleBinary(a, re, o, &buf, &em, dpath, false, body, nul, cfg.show_name);
+            if (matched or buf.items.len > 0)
+                cfg.sink.emit(if (matched) .bin_hit else .text_plain, buf.items);
+            return;
+        }
     };
 
     // `-l` fused fast path: one early-exit whole-buffer pass answers the file —
@@ -1043,7 +1068,7 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
             break :blk re.docMatch(sim, body);
         };
         if (hit) {
-            buf.print(a, "{s}{c}", .{ dpath, @as(u8, if (o.null_sep) 0 else '\n') }) catch oom();
+            buf.print(a, "{s}{s}", .{ dpath, if (o.null_sep) "\x00" else o.outTerm() }) catch oom();
             cfg.sink.emit(.text_hit, buf.items);
         }
         return;
@@ -1051,7 +1076,7 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
 
     var lines: std.ArrayList([]const u8) = .empty;
     grepfile.collectLines(a, body, o.term(), &lines);
-    if (cfg.heading) buf.print(a, "{s}\n", .{dpath}) catch oom();
+    if (cfg.heading) buf.print(a, "{s}{s}", .{ dpath, o.outTerm() }) catch oom();
     const before_body = buf.items.len;
     const hits = em.file(dpath, lines.items);
     if (hits == 0) {
@@ -1086,20 +1111,11 @@ fn prefixProvesMatch(w: *Worker, re: *const Matcher, prefix: []const u8) bool {
 /// Fan out, walk, search, stream, exit. `filters` powers inline index elision;
 /// `file_needle` may reject a whole body, while `line_needle` only avoids regex
 /// execution and remains valid for passthru. Never returns.
-pub fn run(
-    gpa: std.mem.Allocator,
-    io: std.Io,
-    parsed: args.Parsed,
-    o: Opts,
-    re: ?*const Matcher,
-    use_color: bool,
-    filters: []const []const u8,
-    file_needle: ?[]const u8,
-    line_needle: ?[]const u8,
-    icfg: *const ingest.Config,
-) noreturn {
-    const heading = o.heading and !o.count_only and !o.count_matches and !o.files_only and !o.vimgrep;
-    const want_elision = indexElisionWanted(parsed, filters);
+pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re: ?*const Matcher, use_color: bool, filters: []const []const u8, sieve: crest.Vector, file_needle: ?[]const u8, line_needle: ?[]const u8, icfg: *const ingest.Config) noreturn {
+    // Heading needs a printable path: `--no-filename` suppresses the header
+    // like rg (the walk is recursive, so `.auto` filenames are always on here).
+    const heading = o.heading and o.filename != .never and !o.count_only and !o.count_matches and !o.files_only and !o.vimgrep;
+    const want_elision = indexElisionWanted(parsed, filters, sieve);
     // Internal gate-only contract: load synchronously and fail closed unless
     // the real elision oracle is admitted. This makes freshness_fs.sh prove the
     // accelerated path instead of accidentally passing via an async/full-read
@@ -1112,7 +1128,7 @@ pub fn run(
     var lazy = LazyElide{};
     if (want_elision) {
         if (require_elision) {
-            lazy.val = buildElide(gpa, io, o, filters);
+            lazy.val = buildElide(gpa, io, o, filters, sieve);
             if (lazy.val == null) die("gist: test-required index elision was declined\n", .{});
             if (!testHasElidableFile(io, &lazy.val.?)) die("gist: test-required index elision found no elidable live file\n", .{});
             lazy.ready.store(true, .release);
@@ -1121,29 +1137,20 @@ pub fn run(
             // elision, nobody waits on this thread — `run` exits the process and
             // the OS reclaims it. (`lazy`/`o`/`filters` outlive it either way:
             // this frame never returns.)
-            if (std.Thread.spawn(.{}, LazyElide.loaderMain, .{ &lazy, gpa, io, o, filters })) |t| {
+            if (std.Thread.spawn(.{}, LazyElide.loaderMain, .{ &lazy, gpa, io, o, filters, sieve })) |t| {
                 t.detach();
             } else |_| {
-                lazy.val = buildElide(gpa, io, o, filters);
+                lazy.val = buildElide(gpa, io, o, filters, sieve);
                 lazy.ready.store(true, .release);
             }
         }
-    } else {
-        lazy.ready.store(true, .release);
-    }
+    } else lazy.ready.store(true, .release);
 
     var ig = ignore.Ignore.init(gpa, io, o, parsed.roots);
     const compiled = ignore.Compiled.build(gpa, &ig);
     var q = Queue{ .gpa = gpa, .io = io };
     defer q.items.deinit(gpa);
-    var sink = Sink{
-        .q = &q,
-        .io = io,
-        .heading = heading,
-        .join_groups = o.wantsContext() and !o.files_only and !o.count_only and !o.count_matches and !heading,
-        .files_mode = o.files_list,
-        .null_sep = o.null_sep,
-    };
+    var sink = Sink{ .q = &q, .io = io, .heading = heading, .join_groups = o.wantsContext() and !o.files_only and !o.count_only and !o.count_matches and !heading, .files_mode = o.files_list, .null_sep = o.null_sep };
     // Pure-literal alternation gate/equivalence (see `Cfg.file_alts`): only when
     // no single required literal already gates, and never for modes that must
     // read every body (`-v` needs zero-hit files; passthru emits them).
@@ -1152,14 +1159,10 @@ pub fn run(
     // Equivalence proof: the whole-file gate that will run (`file_needle`, a
     // single pure literal, or `file_alts`, a pure alternation) IS the pattern.
     const lits_equiv = (file_needle != null and lits.len == 1 and std.mem.eql(u8, lits[0], file_needle.?)) or file_alts.len > 0;
-    const fast_l = o.files_only and !o.invert and !o.word and !o.crlf and !o.null_data and
-        o.max_per_file == 0 and !o.only_matching and !o.count_only and !o.count_matches and
-        !o.passthru and !o.vimgrep and !o.stop_on_nonmatch and o.replace == null;
-    const gate_len = blk: {
-        var m: usize = if (file_needle) |n| n.len else 0;
-        for (file_alts) |n| m = @max(m, n.len);
-        break :blk m;
-    };
+    const fast_l = o.files_only and !o.invert and !o.word and !o.crlf and !o.null_data and o.max_per_file == 0 and !o.only_matching and
+        !o.count_only and !o.count_matches and !o.passthru and !o.vimgrep and !o.stop_on_nonmatch and o.replace == null;
+    var gate_len: usize = if (file_needle) |n| n.len else 0;
+    for (file_alts) |n| gate_len = @max(gate_len, n.len);
     const cfg = Cfg{
         .o = o,
         .re = re,
@@ -1211,18 +1214,13 @@ pub fn run(
     // syscall/namei-bound plaintext walk, where more threads only add fd + namei
     // contention; it throttles decode-heavy codecs (xz/zstd) below the serial
     // path, so a transforming pipeline lifts the cap to all logical CPUs.
-    var nworkers = if (icfg.active())
-        @max(@as(usize, 1), ncpu)
-    else
-        defaultWorkerCount(ncpu, o.files_list or want_elision or narrow_scope);
+    var nworkers = if (icfg.active()) @max(@as(usize, 1), ncpu) else defaultWorkerCount(ncpu, o.files_list or want_elision or narrow_scope);
     // -j/--threads caps the pool explicitly (rg's `--threads`); 0 keeps gist's
     // adaptive topology. `GIST_WORKERS` still overrides everything (parity gates).
     if (o.threads != 0) nworkers = @max(1, o.threads);
-    if (args.envSpan("GIST_WORKERS")) |s| {
-        if (std.fmt.parseInt(usize, s, 10)) |n| {
-            nworkers = @max(1, n);
-        } else |_| {}
-    }
+    if (args.envSpan("GIST_WORKERS")) |s| if (std.fmt.parseInt(usize, s, 10)) |n| {
+        nworkers = @max(1, n);
+    } else |_| {};
     const workers = gpa.alloc(Worker, nworkers) catch oom();
     defer gpa.free(workers);
     for (workers) |*w| w.* = .{ .q = &q, .io = io, .gpa = gpa, .cfg = &cfg, .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
@@ -1249,19 +1247,21 @@ pub fn run(
     corpus_mod.finishOutput();
     // A `-P` worker that tripped a resource limit on catastrophic input latched
     // the process-global fault — mirror ripgrep's exit 2 over the accumulated
-    // (already-streamed) output, exactly as the serial engine's `pcreFaultExit`.
-    if (re) |m| if (m.matchError() != 0) {
-        var errbuf: [256]u8 = undefined;
-        std.debug.print("gist: PCRE2: error matching: {s}\n", .{pcre2.matchErrorMessage(&errbuf)});
-        std.process.exit(2);
-    };
+    // (already-streamed) output, via the serial engine's own `pcreFaultExit`
+    // renderer so the two engines' fault text can't drift.
+    if (re) |m| serial.pcreFaultExit(m);
     // The no-match hint seam (mirrors the serial engine's): a clean exit-1
     // search run — not `--files`, not `--quiet`, no walk error — gets shape-
     // derived stderr guidance. The streamed walk has no cheap total-files
     // count, so the summary omits it rather than report a partial number.
-    if (re != null and !o.quiet and !o.files_list and sink.matched_files == 0 and !q.walk_error.load(.acquire))
+    // rg's implicit-path heuristic (search modes only, never `--files`): a
+    // GUESSED root whose walk admitted zero files means a filter excluded
+    // everything — stderr note + exit 2, never a silent exit-1 "no matches".
+    const nothing_searched = re != null and parsed.roots.len == 0 and !q.files_seen.load(.acquire);
+    if (nothing_searched) grepfile.printNothingSearched();
+    if (re != null and !o.quiet and !o.files_list and sink.matched_files == 0 and !nothing_searched and !q.walk_error.load(.acquire))
         hints.noMatches(hints.shape(parsed.patterns, o, parsed.roots, parsed.roots.len > 0), null);
-    std.process.exit(if (q.walk_error.load(.acquire)) 2 else if (sink.matched_files > 0) 0 else 1);
+    std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);
 }
 
 fn defaultWorkerCount(ncpu_raw: usize, selective: bool) usize {
