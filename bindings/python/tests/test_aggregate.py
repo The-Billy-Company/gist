@@ -137,9 +137,16 @@ def test_empty_input_is_an_empty_tally() -> None:
 
 
 def test_group_and_tally_are_frozen() -> None:
+    """Frozen dataclasses: neither Group.key nor Tally.groups may be reassigned."""
     g = Group(key="k", matches=())
     with pytest.raises((AttributeError, TypeError)):
         setattr(g, "key", "other")
+    t = Tally(groups=(g,))
+    with pytest.raises((AttributeError, TypeError)):
+        setattr(t, "groups", ())
+    # Mutation must not silently succeed — identity and ranking stay pinned.
+    assert t.groups[0].key == "k"
+    assert t.total == 0
 
 
 # ─────────────────────────── integration (real engine) ───────────────────────────
