@@ -62,6 +62,7 @@ const oom = args.oom;
 const Regex = @import("../../../../kernel/regex/linear/core.zig").Regex;
 const Matcher = @import("../../../../kernel/regex/linear/matcher.zig").Matcher;
 const pcre2 = @import("../../../../kernel/regex/pcre2/backend.zig");
+const hints = @import("../emit/hints.zig");
 const Dir = std.Io.Dir;
 
 /// Can this invocation run on the parallel engine byte-identically? Everything
@@ -1254,6 +1255,12 @@ pub fn run(
         std.debug.print("gist: PCRE2: error matching: {s}\n", .{pcre2.matchErrorMessage(&errbuf)});
         std.process.exit(2);
     };
+    // The no-match hint seam (mirrors the serial engine's): a clean exit-1
+    // search run — not `--files`, not `--quiet`, no walk error — gets shape-
+    // derived stderr guidance. The streamed walk has no cheap total-files
+    // count, so the summary omits it rather than report a partial number.
+    if (re != null and !o.quiet and !o.files_list and sink.matched_files == 0 and !q.walk_error.load(.acquire))
+        hints.noMatches(hints.shape(parsed.patterns, o, parsed.roots, parsed.roots.len > 0), null);
     std.process.exit(if (q.walk_error.load(.acquire)) 2 else if (sink.matched_files > 0) 0 else 1);
 }
 

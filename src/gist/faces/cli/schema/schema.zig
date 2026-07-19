@@ -60,6 +60,14 @@ const manifest_suffix =
     \\    "alias": "gist rg [flags] <pattern> [PATH...] and gist search <pattern> [PATH...] address the same engine"
     \\  },
     \\  "output_stream": {"results": "stdout", "diagnostics": "stderr"},
+    \\  "hints": {
+    \\    "summary": "structured stderr guidance on notable outcomes: a no-match run gets a 'gist: no matches for ...' summary plus up to three ranked suggestion lines derived from the query's own shape (-i / -U / -F / -uu / scope); a truncated run gets the output-budget notice. Results on stdout are never touched.",
+    \\    "channel": "stderr",
+    \\    "grammar": ["gist: <outcome>", "gist: try <flag or move> — <why it applies>", "gist: note: <fact worth knowing>"],
+    \\    "fires_on": ["no matches (exit 1)", "output truncated by the soft/hard budget"],
+    \\    "suppressed_by": ["GIST_HINTS=0 (or false/no)", "--quiet", "--json", "--files"],
+    \\    "env": {"GIST_HINTS": "0/false/no mutes the channel; unset or any other value keeps it on"}
+    \\  },
     \\  "exit_codes": {"0": "search ran and matched, or an introspection action succeeded", "1": "search ran with no match", "2": "usage, parse, path, or unsupported-flag error"}
     \\}
     \\

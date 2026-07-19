@@ -56,6 +56,13 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
         .served => |code| {
             if (debug) std.debug.print("gist: [warm]\n", .{});
             gist.corpus.finishOutput(); // announce a budget cut on the warm flush (idempotent, stderr-only)
+            // A warm-served no-match (exit 1) gets the same stderr guidance the
+            // cold engines emit. The classifier already parsed this argv to
+            // route it warm, so re-classifying recovers pattern + -F/-i without
+            // a second full flag parse; eligible requests are always rootless.
+            if (code == 1) if (gist.session.request.classify(argv)) |req| {
+                search.hints.noMatches(search.hints.shapeBare(req.pattern, req.fixed, req.ignore_case), null);
+            } else |_| {};
             std.process.exit(code);
         },
         // Cold miss on an eligible shape with no daemon up: fork one detached so
@@ -67,25 +74,47 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
     }
 }
 
+/// `--help` / bare `gist`: the organized one-screen map of the CLI. Requested
+/// output, so it goes to STDOUT (rg convention); diagnostics/hints stay on
+/// stderr. Flag-level detail deliberately lives in `--schema`, not here.
 fn usage() void {
-    std.debug.print(
+    gist.corpus.emitStdout(
         \\gist — fast, agent-friendly code locator
         \\
         \\usage:
-        \\  gist <pattern> [PATH...] [flags]   find matches — no verb, no setup; live-scans
-        \\                                     the tree (rg's default behavior), auto-using a
-        \\                                     fresh index to skip non-candidate reads
-        \\  index                              build + persist the trigram index
-        \\  status [--json]                    is an index ready, how fresh, how big
+        \\  gist <pattern> [PATH...] [flags]   search — no verb, no setup; ripgrep's default
+        \\                                     behavior and flags, auto-accelerated by a fresh
+        \\                                     index (acceleration never changes output)
         \\
-        \\  rg / search <pattern> [PATH...]    the same engine, addressed with a verb (habit-safe aliases)
-        \\  --no-index / --index               force the live walk / the index-accelerated path
-        \\  --rank [=N]                         definition-first ranked view (top N, default 20)
-        \\  gist --help                        the broad tested flag subset (`gist rg --help`)
-        \\  gist --schema                      a JSON capability manifest for agents
-        \\  gist --version
+        \\search views:
+        \\  --rank[=N]              definition-first ranked view (top N, default 20)
+        \\  -l / -c                 file list / per-file counts (compact for agents)
+        \\  --json                  ripgrep's JSON-lines record stream
+        \\  -P / --engine auto      PCRE2 backend (lookaround, backreferences) / auto-escalate
+        \\  --no-index / --index    force the pure live walk / the index-accelerated path
         \\
-    , .{});
+        \\index lifecycle:
+        \\  gist index              build + persist the trigram index (optional, ~3 s)
+        \\  gist status [--json]    is an index ready, how fresh, how big
+        \\  gist serve [ROOT...]    resident warm daemon (auto-spawned; explicit run scopes it)
+        \\  gist codex <build|count|tally|status>   exact corpus-wide counts off the
+        \\                          compressed self-index — O(|pattern|), zero corpus I/O
+        \\
+        \\aliases:
+        \\  gist rg / gist search <pattern> [PATH...]   the same engine, addressed with a verb
+        \\
+        \\introspection:
+        \\  gist --help / -h        this summary
+        \\  gist --schema           JSON capability manifest for agents (the full flag surface)
+        \\  gist --version / -V
+        \\
+        \\channels & env:
+        \\  results -> stdout (rg-shaped bytes) · guidance -> stderr ('gist: try' / 'gist: note:')
+        \\  GIST_HINTS=0            mute stderr hints (results are untouched either way)
+        \\  GIST_UNCAP=1            lift the ~25k-token soft output cap (also: --uncap)
+        \\  GIST_MAX_OUTPUT_TOKENS / GIST_MAX_OUTPUT_BYTES   resize the output budget
+        \\
+    );
 }
 
 pub fn main(init: std.process.Init) !void {

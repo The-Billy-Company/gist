@@ -6,12 +6,13 @@
 #
 # The contract is STRONGER than the old two-engine design (which printed a
 # `—`-prefixed timing/count summary to stderr on every query): the default
-# rg-parity path emits NOTHING on stderr at all — a real ripgrep drop-in has
-# no chatter to leak. The one deliberate exception is `--rank` (`rank.zig`,
-# hoisted out of the former `commands/search/drivers.zig`), which keeps its
-# `— N ranked matches …` cold-load/rank timing line on stderr because an
-# agent choosing between the ranked view and a plain query benefits from
-# knowing the cost. Both shapes are asserted below.
+# rg-parity path with a HIT emits NOTHING on stderr at all — a real ripgrep
+# drop-in has no chatter to leak. Two deliberate exceptions: `--rank`
+# (`ranked.zig`) keeps its `gist: N ranked matches …` cold-load/rank timing
+# line on stderr because an agent choosing between the ranked view and a
+# plain query benefits from knowing the cost; and a NO-MATCH run gets the
+# structured guidance channel (`emit/hints.zig`) — every line `gist:`-prefixed,
+# muted wholesale by `GIST_HINTS=0`. All three shapes are asserted below.
 #
 # Why this is a gate, not a nicety: gist brands itself an *agent-friendly*
 # code locator, and an agent in a shell does `gist foo -l > files` or `gist
@@ -88,25 +89,39 @@ else
   fails=$((fails + 1))
 fi
 
-# Guaranteed-miss: BOTH streams empty (exit 1, ripgrep's "no match" code) — a
-# strictly stronger bar than the old engine's "0 matches" summary line, since
-# the unified engine has nothing to say about a plain miss at all. The token
-# is built from $RANDOM at runtime so the literal can never appear in any
-# file — including this script itself (a fixed literal here would match
-# streams.sh and stop being a miss).
+# Guaranteed-miss: stdout empty, exit 1 (ripgrep's "no match" code), and stderr
+# carries ONLY the structured guidance channel — every line `gist:`-prefixed
+# (the no-match summary + `gist: try`/`gist: note:` lines, emit/hints.zig). Under
+# `GIST_HINTS=0` both streams must be byte-empty, so a parity harness or
+# byte-counting capture can still buy the old total silence. The token is
+# built from $RANDOM at runtime so the literal can never appear in any file —
+# including this script itself (a fixed literal here would match streams.sh
+# and stop being a miss).
 miss="zq${RANDOM}${RANDOM}_no_such_symbol_${RANDOM}qz"
 "${GIST_BIN}" "${miss}" -l < /dev/null > "${O}" 2> "${E}"
 status=$?
-if [[ ! -s "${O}" ]] && [[ ! -s "${E}" ]] && [[ "${status}" -eq 1 ]]; then
-  printf "  %-34s %s\n" "guaranteed-miss clean streams" "ok"
+stray="$(grep -cv '^gist:' "${E}")"
+if [[ ! -s "${O}" ]] && [[ "${stray}" -eq 0 ]] && [[ "${status}" -eq 1 ]]; then
+  printf "  %-34s %s\n" "guaranteed-miss structured stderr" "ok"
 else
-  printf "  %-34s %s\n" "guaranteed-miss clean streams" "FAIL: stdout/stderr not empty or exit != 1 (got ${status})"
+  printf "  %-34s %s\n" "guaranteed-miss structured stderr" "FAIL: stdout non-empty, un-prefixed stderr line, or exit != 1 (got ${status})"
+  fails=$((fails + 1))
+fi
+
+# The kill switch: GIST_HINTS=0 mutes the guidance channel entirely — both
+# streams byte-empty on the same miss, results untouched.
+GIST_HINTS=0 "${GIST_BIN}" "${miss}" -l < /dev/null > "${O}" 2> "${E}"
+status=$?
+if [[ ! -s "${O}" ]] && [[ ! -s "${E}" ]] && [[ "${status}" -eq 1 ]]; then
+  printf "  %-34s %s\n" "GIST_HINTS=0 clean streams" "ok"
+else
+  printf "  %-34s %s\n" "GIST_HINTS=0 clean streams" "FAIL: a stream was non-empty or exit != 1 (got ${status})"
   fails=$((fails + 1))
 fi
 
 echo
 if [[ "${fails}" -eq 0 ]]; then
-  echo "PROVEN: gist keeps results on stdout and stderr silent (bar --rank's timing line) across the index, rank, and scan paths (rg-conventional, agent-friendly)."
+  echo "PROVEN: gist keeps results on stdout; stderr carries only the gist:-prefixed guidance channel (--rank timing, no-match hints — muted by GIST_HINTS=0) across the index, rank, and scan paths."
 else
   echo "FAILED: ${fails} contract violation(s) — see the table above."
   exit 1
