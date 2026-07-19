@@ -31,6 +31,11 @@ const manifest_prefix =
     \\        "roots": "string[]"
     \\      }
     \\    },
+    \\    "codex": {
+    \\      "summary": "the exact existence/count tier over the compressed self-index shelf: `build` persists it (codex.shelf); `count <text>` answers the corpus-wide occurrence count in O(|text|) with zero corpus I/O and zero false positives (exit 0 = present, 1 = absent); `tally <text> [--top N]` gives per-file counts heaviest-first; `status` reports size and freshness. Query verbs report how many files changed since the shelf was built.",
+    \\      "args": [{"name": "verb", "type": "string", "required": true, "description": "build | count | tally | status"}, {"name": "text", "type": "string", "required": false, "description": "the literal text to count (count/tally)"}],
+    \\      "flags": [{"name": "--json", "type": "bool", "default": false, "description": "versioned machine output"}, {"name": "--top", "type": "int", "default": 20, "description": "tally rows surfaced"}]
+    \\    },
     \\    "similar": {"moved": "the hydra binary owns this verb — see `hydra --schema`"},
     \\    "dups": {"moved": "the hydra binary owns this verb — see `hydra --schema`"},
     \\    "patterns": {"moved": "the hydra binary owns this verb — see `hydra --schema`"}

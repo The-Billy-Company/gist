@@ -1,9 +1,11 @@
 //! gist — the CLI executable entrypoint (the `gist` binary).
 //!
-//! Two lifecycle verbs — what gist DOES, not which competitor's argv it apes:
+//! The lifecycle verbs — what gist DOES, not which competitor's argv it apes:
 //!
 //!   gist index                        build + persist the trigram index
 //!   gist status [--json]              read-only: is an index ready, how fresh, how big
+//!   gist codex <build|count|tally|status>  the exact existence/count tier over the
+//!                                     compressed self-index shelf (src/codex/)
 //!
 //! Everything else is the search itself — no verb at all, the shape an agent's
 //! `rg <pattern>` reflex already takes:
@@ -37,6 +39,7 @@ const std = @import("std");
 const gist = @import("irregex");
 
 const indexer = gist.commands.indexer; // `gist index` — build + persist the trigram index
+const codex_face = gist.commands.codex; // `gist codex` — the exact existence/count tier
 const status = gist.commands.status; // read-only index introspection
 const schema = gist.commands.schema; // `--schema` JSON manifest
 const search = gist.commands.search; // the unified search engine (bare shorthand + `gist rg`)
@@ -151,6 +154,17 @@ pub fn main(init: std.process.Init) !void {
 
     if (std.mem.eql(u8, mode, "index")) {
         try indexer.run(gpa, io, &default_roots);
+        return;
+    }
+    // `gist codex <build|count|tally|status>` — the exact existence/count tier
+    // over the compressed self-index (`src/codex/`): corpus-wide occurrence
+    // counts in O(|pattern|) with zero corpus I/O and zero false positives,
+    // freshness-reported against the shelf's own build anchor.
+    if (std.mem.eql(u8, mode, "codex")) {
+        var rest: std.ArrayList([]const u8) = .empty;
+        defer rest.deinit(gpa);
+        while (it.next()) |arg| try rest.append(gpa, arg);
+        try codex_face.run(gpa, io, rest.items);
         return;
     }
     if (std.mem.eql(u8, mode, "status")) {

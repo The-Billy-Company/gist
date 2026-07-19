@@ -7,12 +7,20 @@ doc_radar:
         - "persist.persistIndexAndPaths"
         - "fresh.writeAnchor"
         - "Index.build"
+    - description: "codex verb group persists + queries the self-index shelf"
+      file: pkg/kernels/irregex/src/gist/faces/cli/lifecycle/codex.zig
+      contains:
+        - "codex.shelf"
+        - "Shelf.build"
+        - "fresh.changedSince"
 ---
 
-# gist/faces/cli/lifecycle — `gist index`
+# gist/faces/cli/lifecycle — `gist index` · `gist codex`
 
-The one *mutating* lifecycle action. Everything else in the CLI is read-only
-against the live tree or the artifacts this verb publishes.
+The *mutating* lifecycle actions. Everything else in the CLI is read-only
+against the live tree or the artifacts these verbs publish.
+
+## `gist index` — the trigram tier
 
 `index.zig::run` walks the configured corpus roots, builds the trigram `Index`,
 and generation-publishes three things into `.local/gist-verify/`:
@@ -32,3 +40,16 @@ the `--rank` view ([`../search/engine/ranked.zig`](../search/engine/ranked.zig))
 mmap these artifacts. A missing index is never fatal for search — the engine
 live-scans — but `gist status` reports it as an actionable `unavailable` state.
 See [`../status/`](../status) for the matching read-only verb.
+
+## `gist codex` — the exact existence/count tier
+
+`codex.zig` owns the verb group over the compressed self-index shelf
+([`src/codex/shelf.zig`](../../../../codex/README.md)): `build` loads the
+same index corpus, builds the FM-index shelf, and writes `codex.shelf`
+atomically (temp-then-rename); `count` / `tally` / `status` are read-only
+queries against it. Where the trigram index nominates *candidate* files
+(false positives possible; a read verifies), the codex *answers*: `count == 0`
+with a clean freshness walk is a proof of absence across the corpus with
+zero corpus I/O. The shelf carries its own build anchor; every query verb
+stat-walks the roots against it (`fresh.changedSince`) and reports how many
+files changed since the build. `hydra quote` reads the same artifact.

@@ -22,11 +22,13 @@ lives in a sibling package below.
 
 ## What the binary does
 
-Two lifecycle verbs (what gist *does*, not which competitor's argv it apes):
+The lifecycle verbs (what gist *does*, not which competitor's argv it apes):
 
 ```text
 gist index                        build + persist the trigram index
 gist status [--json]              is an index ready, how fresh, how big
+gist codex build|count|tally|status   the exact existence/count tier — corpus-wide
+                                  counts off the compressed self-index, zero corpus I/O
 ```
 
 Everything else is search — no verb at all, the shape an agent's `rg <pattern>`
@@ -52,7 +54,7 @@ forces the pure walk; `--rank` is gist's one native shape ripgrep can't express.
 | --- | --- |
 | [`schema/`](schema) | `gist --schema` JSON capability manifest (driven from the flag catalog) |
 | [`status/`](status) | read-only index introspection |
-| [`lifecycle/`](lifecycle) | `gist index` — the one mutating build |
+| [`lifecycle/`](lifecycle) | `gist index` + `gist codex` — the mutating builds (+ codex queries) |
 | [`search/`](search) | the unified rg-DEFAULT engine (argv → walk → read → emit) |
 | [`daemon/`](daemon) | `gist serve` + warm dial / cold fallback / autoserve |
 
