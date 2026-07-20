@@ -375,9 +375,10 @@ exact/regex leg those systems and agents can compose with.
 
 The longer landscape review, including qgrep, Hound, livegrep, indexing
 literature, and semantic/structural systems, is
-[`PRIOR_ART.md`](../../../PRIOR_ART.md). Where that essay or any benchmark prose
-lags implementation, `gist --schema`, the live differential harness, and the
-committed certificate are authoritative.
+[`research/gist/`](../../../research/gist/) (`PRIOR_ART.md` + `CLAIM.md` +
+`TESTING.md`). Where that dossier or any benchmark prose lags implementation,
+`gist --schema`, the live differential harness, and the committed certificate
+are authoritative.
 
 ## Package map
 

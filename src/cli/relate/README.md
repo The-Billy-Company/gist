@@ -1,14 +1,14 @@
 ---
 doc_radar:
   counts:
-    - description: "the relate face: dispatch, seven verb drivers, lifecycle, schema, shared kinship plumbing"
+    - description: "the relate face: dispatch, eight verb drivers, lifecycle, schema, shared kinship plumbing"
       glob: pkg/kernels/irregex/src/cli/relate/*.zig
       unit: files
-      equals: 9
+      equals: 10
   sentinels:
-    - description: "main.zig lists exactly the nine verbs on the unknown-verb help line"
+    - description: "main.zig lists exactly the ten verbs on the unknown-verb help line"
       file: pkg/kernels/irregex/src/cli/relate/main.zig
-      contains: "search | pack | quote | similar | dups | clusters | patterns | index | status"
+      contains: "search | pack | quote | similar | dups | clusters | echoes | patterns | index | status"
     - description: "the verbs are contract-documented, not CLI folklore"
       file: pkg/kernels/irregex/contract/search_api.toml
       contains: "[irregex.verbs]"
@@ -28,9 +28,9 @@ That is compression as search.
 
 Where `gist` asks _"where is this exact pattern?"_, `relate` handles the
 set-shaped questions beside it: _what is this text like, which files cover it
-together, how much does the corpus already know, what forked from what, and
-which of these N intents hit where?_ Seven query verbs and one lifecycle tell
-that story
+together, how much does the corpus already know, what forked from what, what
+repeats a shape under different names, and which of these N intents hit
+where?_ Eight query verbs and one lifecycle tell that story
 ([ADR-363](../../../../../../docs/architecture/3-decisions/363-irregex-primitives.md)):
 
 ```text
@@ -49,9 +49,12 @@ relate quote <text>   [--json]
     priced in bits; the Ziv–Merhav cross-parse on the persisted codex
     shelf, O(|text|); corpus size never appears in the query cost
 
-relate similar <path> [--top N] [--json] [--no-index] [ROOT...]
-    nearest files by compression kinship (LZJD dictionary distance):
-    "what else in this tree is LIKE this file?"
+relate similar <path> [--lens bytes|structure|fused] [--top N] [--json]
+               [--no-index] [ROOT...]
+    nearest files by compression kinship: "what else in this tree is
+    LIKE this file?" The lens picks the distance channel: bytes (LZJD
+    dictionary distance, vocabulary-true, the default), structure (the
+    normalized silhouette: renamed twins surface), or fused (min of both)
 
 relate dups           [--max-distance T] [--top N] [--json] [--no-index] [ROOT...]
     near-duplicate pairs across the corpus, closest first: copy-paste
@@ -61,6 +64,11 @@ relate clusters       [--max-distance T] [--min-size N] [--top N] [--no-index] [
     fork FAMILIES: connected components of the verified dup graph,
     largest first: the whole fixture farm in one answer, not a pair
     list the caller re-joins (exactly the transitive closure of dups)
+
+relate echoes         [--min-echo E] [--top N] [--json] [--no-index] [ROOT...]
+    DRY candidates dups cannot see: pairs far apart in bytes but close
+    in structure (echo = byte distance − structure distance), widest
+    gap first — same skeleton, different vocabulary
 
 relate patterns -e P [-e P…] [-f FILE] [-F] [-i]
                 [--by pattern|file] [--under GLOB] [--top N] [ROOT...]
@@ -78,10 +86,11 @@ diagnostics on stderr, unknown verbs exit 2.
 
 This directory is only the face: `main.zig` classifies the verb and hands
 off to the sibling drivers (`search.zig` · `pack.zig` · `quote.zig` ·
-`verbs.zig` · `family.zig` · `lifecycle.zig` · `schema.zig`), with the
-shared view resolver + pair machinery in `kinship.zig`. The engines live
-under [`src/search/similarity/`](../../search/similarity/README.md) (sketch
-· lexicon · zipper), [`src/search/batch/`](../../search/batch/README.md)
+`verbs.zig` · `family.zig` · `echoes.zig` · `lifecycle.zig` · `schema.zig`),
+with the shared view resolver + pair machinery in `kinship.zig`. The engines
+live under [`src/search/similarity/`](../../search/similarity/README.md)
+(sketch · silhouette · lexicon · zipper),
+[`src/search/batch/`](../../search/batch/README.md)
 (patterns · loom), [`src/index/codex/`](../../index/codex/README.md) (the
 FM-index shelf behind `quote`), and
 [`src/index/atlas/`](../../index/atlas/README.md) (the persisted kinship
@@ -89,10 +98,11 @@ atlas behind the warm verbs).
 
 ## The warm tier: why relate is an engine, not a shim
 
-I persist one LZJD sketch per corpus file (~1 KiB each) into the **kinship
-atlas**. Then `similar` / `dups` / `clusters` can read a few tens of MiB instead
-of re-reading a couple-hundred-MiB corpus every time. Here, warm `similar` is
-~95 ms versus ~1.1 s live, about 11× faster.
+I persist one LZJD sketch (~1 KiB) and one structure silhouette (~2 KiB) per
+corpus file into the **kinship atlas**. Then `similar` / `dups` / `clusters` /
+`echoes` can read tens of MiB instead of re-reading a couple-hundred-MiB
+corpus every time. Here, warm `similar` is ~95 ms versus ~1.1 s live, about
+11× faster.
 
 I keep the same covenant as Gist: the atlas is an accelerator, never an
 authority. Queries fold in every file changed since the build anchor, emitted
@@ -126,6 +136,18 @@ pulls one of those loops into the kernel, and each claim traces to a harness:
   _irregular_. `clusters` returns the transitive families restructure/dedup
   sweeps re-derive by hand from pair lists (token-parsing dup tools stop at
   per-language pairs).
+- **`echoes`** reports what neither channel can say alone. Byte kinship calls
+  a renamed twin unrelated; structure distance alone has no clean absolute
+  threshold (measured: family-max vs cross-min overlap at every winnow
+  setting). The _difference_ — `echo = bytes − structure` — is self-calibrated
+  per pair: high echo means "far more shared shape than shared vocabulary,"
+  the Type-2 clone an abstraction should collapse. On the graduation eval
+  (54 lint-registry rows, 19 labeled family members) the echo ranking hit
+  P@10 = 100% against an 11.9% base rate. The structure channel is
+  MOSS-style winnowed shingles over a normalized token stream
+  (identifiers→I, numbers→N, strings→S, comments dropped, pan-language
+  keywords kept) — a squint, not a parse, so the no-language-list covenant
+  holds. Plain duplication ranks LOW here by design; `dups` already owns it.
 - **`quote`** is the corpus-global tier: text the corpus knows quotes at
   **~0.15 bits/byte**, foreign bytes at **~15**. That is a ~90× separation, each
   phrase attributed to an exemplar file, flat in corpus size
@@ -160,22 +182,10 @@ Loreto's
 well one text's language describes another. That paper turned compression from
 storage into comparison for me.
 
-I built from there with LZJD (Raff & Nicholas, KDD 2017), bottom-k MinHash
-(Beyer et al., SIGMOD 2007), winnowing (Schleimer–Wilkerson–Aiken, SIGMOD 2003
-/ MOSS), suffix automata (Blumer et al. 1985), Ziv–Merhav cross-parsing (1993),
-matching statistics over an FM-index (Ohlebusch–Gog–Kügel, SPIRE 2010), and
-submodular max-coverage (Nemhauser–Wolsey–Fisher 1978; Minoux's lazy greedy
-1978). What is mine here is the composition, not the theorems: pricing
-winnowed fingerprints at corpus information content so a lexicon can nominate,
-then letting an exact cross-parse decide without ever running a compressor —
-each stage cited, the seam between them hand-rolled. (The one place this
-kernel carries genuinely new math is on the gist side: the crest sieve,
-[`research/crest/`](../../../research/crest/PROOF.md).)
-
-I tested **embeddings** honestly as a k-NN classifier over the real engine
-(`zig build relate-knn`, [`bench/relate/`](../../../bench/relate/README.md))
-and they win semantic retrieval. I keep relate in the model-free, deterministic,
-exact-byte lane where compression measurably wins: kinship, duplication,
-attribution, and anti-redundant packing. I also left out Hyperscan-style fused
-multi-pattern DFAs for `patterns`; exact attribution comes from per-pattern
-confirmation behind a gate that can only skip work, never change an answer.
+The full citation trail — LZJD, winnowing/MOSS, Ziv–Merhav, FM-index, submodular
+pack, what we measured and left (embeddings, Hyperscan, NCD-gzip) — plus the
+composition claim and evidence inventory live in
+[`research/relate/`](../../../research/relate/) (`PRIOR_ART.md` · `CLAIM.md` ·
+`TESTING.md`). What is mine here is the composition, not the theorems. (The one
+place this kernel carries genuinely new math is on the gist side: the crest
+sieve, [`research/crest/`](../../../research/crest/PROOF.md).)
