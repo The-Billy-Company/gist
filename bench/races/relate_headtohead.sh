@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hydra vs the field — the RELATE race: retrieval by conditional description
+# relate vs the field — the RELATE race: retrieval by conditional description
 # length ("which files would describe this text most cheaply?").
 #
 # This class has no exact-search competitor: the queries are PARAPHRASES —
@@ -9,15 +9,15 @@
 # tokens, run one gist per token, and rank files by aggregate hit count. The
 # race is therefore three-lane:
 #
-#   hydra search   one pass — winnowed fingerprint lexicon nominates, the
-#                  suffix-automaton cross-parse decides (engine/lexicon.zig +
-#                  engine/zipper.zig)
+#   relate search  one pass — persisted trigram codebook nominates, then a
+#                  bounded suffix-automaton cross-parse decides
+#                  (src/search/similarity/retrieval.zig)
 #   gist exact     the paraphrase as a literal — must find NOTHING (capability
 #                  line, not a timing lane)
 #   gist tokens    K single-token gist runs + awk count aggregation — today's
 #                  workflow, timed end-to-end
 #
-# QUALITY GATE (regression guard): hydra must rank the planted source file
+# QUALITY GATE (regression guard): relate must rank the planted source file
 # top-1 for every paraphrase query. A miss exits 1 — this script doubles as
 # the relate-class regression check, not just a stopwatch.
 #
@@ -39,14 +39,14 @@ WORK="${COMPETE_DIR}/relate"
 rm -rf "${WORK}"
 mkdir -p "${WORK}/corpus"
 
-echo "building gist+hydra (ReleaseFast) + installing the binaries…"
+echo "building gist+relate (ReleaseFast) + installing the binaries…"
 (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || {
   echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
   exit 1
 }
 compete_install_gist_bin || exit 1
-[[ -x "${HYDRA_BIN}" ]] || {
-  echo "  no hydra binary staged — aborting"
+[[ -x "${RELATE_BIN}" ]] || {
+  echo "  no relate binary staged — aborting"
   exit 1
 }
 
@@ -78,6 +78,8 @@ for i in range(1, count + 1):
             f"/// the {noun}{i} {verb} the {noun} row {j} atomically and "
             f"records the {noun}{i} outcome in slot {j % 7}\n"
         )
+    if i == 1:
+        body.append("// dog\n")
     sub = root / f"sub{(i - 1) // per_dir}"
     sub.mkdir(parents=True, exist_ok=True)
     (sub / f"f{i}.zig").write_text("".join(body))
@@ -95,19 +97,31 @@ QUERIES+=("the beacon346 walks its beacon row then the beacon346 outcome fills a
 EXPECT+=("f346.zig")
 
 cd "${REPO}" || exit 1
+export GIST_DIR="${WORK}/index"
+"${GIST_BIN}" index "${WORK}/corpus" > /dev/null
 csv="${COMPETE_DIR}/relate.csv"
 echo "query,tool,ms,top1,expected,ok" > "${csv}"
 
 echo
-echo "── quality gate: hydra top-1 must be the planted source ──"
+echo "── quality gate: relate top-1 must be the planted source ──"
 fail=0
+short="$("${RELATE_BIN}" search dog --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
+[[ "${short}" == *"f1.zig" ]] || {
+  echo "  three-byte recall failed: got ${short:-<none>}, want f1.zig" >&2
+  fail=1
+}
+packed="$("${RELATE_BIN}" pack "wallet1 ledger200" --top 2 "${WORK}/corpus" 2> /dev/null)"
+[[ "${packed}" == *"f1.zig"* && "${packed}" == *"f200.zig"* ]] || {
+  echo "  complementary pack failed: expected f1.zig + f200.zig" >&2
+  fail=1
+}
 for qi in "${!QUERIES[@]}"; do
   q="${QUERIES[${qi}]}"
   want="${EXPECT[${qi}]}"
-  top1="$("${HYDRA_BIN}" search "${q}" --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
+  top1="$("${RELATE_BIN}" search "${q}" --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
   ok=no
   [[ "${top1}" == *"${want}" ]] && ok=yes
-  printf "  q%d  hydra → %-40s (want %s)  %s\n" "$((qi + 1))" "${top1:-<none>}" "${want}" "${ok}"
+  printf "  q%d  relate → %-40s (want %s)  %s\n" "$((qi + 1))" "${top1:-<none>}" "${want}" "${ok}"
   [[ "${ok}" == yes ]] || fail=1
 
   # capability line: the paraphrase as an exact literal finds nothing
@@ -123,7 +137,7 @@ done
   exit 1
 }
 
-# ── timing: hydra one-pass vs the token-grep emulation ───────────────────────
+# ── timing: relate one-pass vs the token-grep emulation ───────────────────────
 # The emulation is the real workflow this verb replaces: one gist -c per
 # token ≥ 4 chars, awk-aggregated per file, sorted. Timed as one pipeline.
 emulate_cmd() { # <query> — echoes the full shell pipeline
@@ -137,24 +151,24 @@ emulate_cmd() { # <query> — echoes the full shell pipeline
 
 echo
 echo "── cold retrieval — fresh process, corpus of ${COUNT} files (hyperfine mean, runs=${RUNS}) ──"
-echo "fields: <tool> <ms> (<hydra speedup>)"
+echo "fields: <tool> <ms> (<relate speedup>)"
 echo
 for qi in "${!QUERIES[@]}"; do
   q="${QUERIES[${qi}]}"
   want="${EXPECT[${qi}]}"
-  hydra_ms="$(hf_mean 3 "${RUNS}" "${HYDRA_BIN} search '${q}' --top 5 '${WORK}/corpus'")" || {
-    echo "aborting: hydra failed while timing q$((qi + 1))" >&2
+  relate_ms="$(hf_mean 3 "${RUNS}" "${RELATE_BIN} search '${q}' --top 5 '${WORK}/corpus'")" || {
+    echo "aborting: relate failed while timing q$((qi + 1))" >&2
     exit 1
   }
   emu_pipeline="$(emulate_cmd "${q}")"
   emu_ms="$(hf_mean 2 "${RUNS}" "${emu_pipeline}")" || emu_ms="?"
-  spd="$(ratio "${emu_ms}" "${hydra_ms}")"
-  printf "q%d  hydra %sms   gist-tokens %sms (%s)\n" "$((qi + 1))" "${hydra_ms}" "${emu_ms}" "${spd}"
-  echo "q$((qi + 1)),hydra,${hydra_ms},,${want},yes" >> "${csv}"
+  spd="$(ratio "${emu_ms}" "${relate_ms}")"
+  printf "q%d  relate %sms   gist-tokens %sms (%s)\n" "$((qi + 1))" "${relate_ms}" "${emu_ms}" "${spd}"
+  echo "q$((qi + 1)),relate,${relate_ms},,${want},yes" >> "${csv}"
   echo "q$((qi + 1)),gist-tokens,${emu_ms},,${want}," >> "${csv}"
 done
 
 echo
-echo "hydra answers the relate class in one pass (fingerprint lexicon → exact"
+echo "relate answers this class in one pass (persisted codebook → bounded exact"
 echo "cross-parse); the exact-search emulation runs one process per token and"
 echo "still only counts tokens — it never measures description length. csv → ${csv}"

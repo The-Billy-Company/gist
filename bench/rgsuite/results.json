@@ -206,7 +206,7 @@
  {
   "name": "after_match1_implicit_count",
   "file": "binary.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--no-mmap",
    "-c",
@@ -214,7 +214,7 @@
    "-g",
    "hay"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "after_match1_implicit_count_binary",
@@ -272,7 +272,7 @@
  {
   "name": "before_match1_implicit",
   "file": "binary.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--no-mmap",
    "-n",
@@ -280,7 +280,7 @@
    "-g",
    "hay"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "before_match1_explicit",
@@ -325,7 +325,7 @@
  {
   "name": "before_match2_implicit",
   "file": "binary.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--no-mmap",
    "-n",
@@ -333,7 +333,7 @@
    "-g",
    "hay"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "before_match2_explicit",
@@ -410,20 +410,20 @@
  {
   "name": "f1_unknown_encoding",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-Efoobar"
   ],
-  "detail": "terminal=stderr"
+  "detail": "own diagnostic wording; exit-class + presence parity"
  },
  {
   "name": "f1_replacement_encoding",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-Ecsiso2022kr"
   ],
-  "detail": "terminal=stderr"
+  "detail": "own diagnostic wording; exit-class + presence parity"
  },
  {
   "name": "f7",
@@ -623,24 +623,24 @@
  {
   "name": "f109_case_sensitive_part1",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--smart-case",
    "--case-sensitive",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "f109_case_sensitive_part2",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--ignore-case",
    "--case-sensitive",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "f129_matches",
@@ -687,22 +687,22 @@
  {
   "name": "f159_max_count_zero",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-m0",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "f196_persistent_config#1",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "sherlock",
    "sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "f196_persistent_config#2",
@@ -770,24 +770,24 @@
  {
   "name": "f362_exceeds_regex_size_limit",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--regex-size-limit",
    "10K",
    "[0-9]\\w+"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "f362_u64_to_narrow_usize_overflow",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--dfa-size-limit",
    "34359738368M",
    "--files"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "f411_single_threaded_search_stats",
@@ -964,29 +964,29 @@
  {
   "name": "f948_exit_code_match",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "."
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "f948_exit_code_no_match",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "NADA"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "f948_exit_code_error",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "*"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "f917_trim",
@@ -1177,24 +1177,24 @@
  {
   "name": "f1155_auto_hybrid_regex",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "NA",
   "argv": [
    "--no-pcre2",
    "--auto-hybrid-regex",
    "(?<=the )Sherlock"
   ],
-  "detail": "pcre2-only"
+  "detail": "unknown flag --no-pcre2\n"
  },
  {
   "name": "f1207_auto_encoding",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-a",
    "\\x00",
    "foo"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "f1207_ignore_encoding",
@@ -1368,40 +1368,40 @@
  {
   "name": "f1404_nothing_searched_warning#1",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "needle"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "f1404_nothing_searched_warning#2",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "needle"
   ],
-  "detail": "terminal=output"
+  "detail": ""
  },
  {
   "name": "f1404_nothing_searched_ignored#1",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--no-messages",
    "needle"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "f1404_nothing_searched_ignored#2",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--no-messages",
    "needle"
   ],
-  "detail": "terminal=output"
+  "detail": ""
  },
  {
   "name": "f1842_field_context_separator#1",
@@ -1638,13 +1638,13 @@
  {
   "name": "no_unicode",
   "file": "feature.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-i",
    "--no-unicode",
    "\u0394"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "stop_on_nonmatch",
@@ -1768,13 +1768,13 @@
  {
   "name": "r1412_look_behind_match_missing",
   "file": "json.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--json",
    "(?<=foo\\n)bar"
   ],
-  "detail": "pcre2-only"
+  "detail": ""
  },
  {
   "name": "single_file",
@@ -2036,7 +2036,7 @@
  {
   "name": "file_type_clear",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--type-clear",
    "rust",
@@ -2044,7 +2044,7 @@
    "rust",
    "Sherlock"
   ],
-  "detail": "terminal=stderr"
+  "detail": "own diagnostic wording; exit-class + presence parity"
  },
  {
   "name": "file_type_add",
@@ -2186,48 +2186,48 @@
  {
   "name": "include_zero#1",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--count",
    "--include-zero",
    "nada"
   ],
-  "detail": "terminal=err"
+  "detail": "exit rc gist=2 rg=1 \u00b7 rg stderr=''"
  },
  {
   "name": "include_zero#2",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--count",
    "--include-zero",
    "nada"
   ],
-  "detail": "terminal=output"
+  "detail": "stdout differs (gist 0B rc=2 \u00b7 rg 11B rc=1)"
  },
  {
   "name": "include_zero_override#1",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--count",
    "--include-zero",
    "--no-include-zero",
    "nada"
   ],
-  "detail": "terminal=err"
+  "detail": "exit rc gist=2 rg=1 \u00b7 rg stderr=''"
  },
  {
   "name": "include_zero_override#2",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--count",
    "--include-zero",
    "--no-include-zero",
    "nada"
   ],
-  "detail": "terminal=output"
+  "detail": "stdout matched but exit rc gist=2 rg=1"
  },
  {
   "name": "files_with_matches",
@@ -2327,22 +2327,22 @@
  {
   "name": "max_filesize_parse_error_length",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--max-filesize",
    "44444444444444444444"
   ],
-  "detail": "terminal=stderr"
+  "detail": "own diagnostic wording; exit-class + presence parity"
  },
  {
   "name": "max_filesize_parse_error_suffix",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--max-filesize",
    "45k"
   ],
-  "detail": "terminal=stderr"
+  "detail": "own diagnostic wording; exit-class + presence parity"
  },
  {
   "name": "max_filesize_parse_no_suffix",
@@ -2380,22 +2380,22 @@
  {
   "name": "max_filesize_suffix_overflow",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--max-filesize",
    "34359738368G",
    "--files"
   ],
-  "detail": "terminal=stderr"
+  "detail": "own diagnostic wording; exit-class + presence parity"
  },
  {
   "name": "ignore_hidden",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "no_ignore_hidden",
@@ -2410,29 +2410,29 @@
  {
   "name": "ignore_git",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "ignore_generic",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "ignore_ripgrep",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "no_ignore",
@@ -2447,11 +2447,11 @@
  {
   "name": "ignore_git_parent",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "ignore_git_parent_stop",
@@ -2474,11 +2474,11 @@
  {
   "name": "ignore_ripgrep_parent_no_stop",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "no_parent_ignore_git",
@@ -2493,11 +2493,11 @@
  {
   "name": "symlink_nofollow",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "symlink_follow",
@@ -2674,24 +2674,24 @@
  {
   "name": "binary_quit",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--no-mmap",
    "foo",
    "-gfile"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "binary_quit_mmap",
   "file": "misc.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--mmap",
    "foo",
    "-gfile"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "binary_search_mmap",
@@ -2783,14 +2783,14 @@
  {
   "name": "dot_no_newline",
   "file": "multiline.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-n",
    "-U",
    "of this world.+detective work",
    "sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "dot_all",
@@ -2858,11 +2858,11 @@
  {
   "name": "r16",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "xyz"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r25#1",
@@ -2894,20 +2894,20 @@
  {
   "name": "r49",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "xyz"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r50",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "xyz"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r64",
@@ -2922,11 +2922,11 @@
  {
   "name": "r65",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "xyz"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r67",
@@ -2940,11 +2940,11 @@
  {
   "name": "r87",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r90",
@@ -3017,11 +3017,11 @@
  {
   "name": "r131",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r137",
@@ -3096,23 +3096,23 @@
  {
   "name": "r228",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--ignore-file",
    "foo",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r229",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-S",
    "[E]conomie"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r251",
@@ -3211,22 +3211,22 @@
  {
   "name": "r428_unrecognized_style#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--colors=match:style:",
    "Sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r428_unrecognized_style#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--colors=match:style:",
    "Sherlock"
   ],
-  "detail": "terminal=output"
+  "detail": ""
  },
  {
   "name": "r451_only_matching_as_in_issue",
@@ -3266,14 +3266,14 @@
  {
   "name": "r483_non_matching_exit_code",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--quiet",
    "--files",
    "--glob",
    "*.py"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r493",
@@ -3459,13 +3459,13 @@
  {
   "name": "r2711#4",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--hidden",
    "--files",
    "a/b"
   ],
-  "detail": "terminal=err"
+  "detail": "exit rc gist=0 rg=1 \u00b7 rg stderr=''"
  },
  {
   "name": "r2711#5",
@@ -3491,12 +3491,12 @@
  {
   "name": "r2711#7",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--hidden",
    "--files"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r2711#8",
@@ -3511,30 +3511,30 @@
  {
   "name": "r829_original#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sample"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r829_original#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sample",
    "a"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r829_original#3",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "Sample"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r829_2731#1",
@@ -3639,40 +3639,40 @@
  {
   "name": "r829_2836#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r829_2836#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r829_2933",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files-with-matches",
    "needle"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r900",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-fpat",
    "sherlock"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1064",
@@ -3686,11 +3686,11 @@
  {
   "name": "r1098",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1130#1",
@@ -3717,93 +3717,93 @@
  {
   "name": "r1159_invalid_flag",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--wat"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1159_exit_status#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "test"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1159_exit_status#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-q",
    "test"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1159_exit_status#3",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "test",
    "no-file"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1159_exit_status#4",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-q",
    "test",
    "foo",
    "no-file"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1159_exit_status#5",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "nada"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1159_exit_status#6",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-q",
    "nada"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1159_exit_status#7",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "nada",
    "no-file"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1159_exit_status#8",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-q",
    "nada",
    "foo",
    "no-file"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r1163",
@@ -3817,12 +3817,12 @@
  {
   "name": "r1164#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--ignore-file-case-insensitive",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1164#2",
@@ -3838,20 +3838,20 @@
  {
   "name": "r1173",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1174",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1176_literal_file",
@@ -3953,13 +3953,13 @@
  {
   "name": "r1334_invert_empty_patterns#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-f",
    "zero-patterns",
    "haystack"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1334_invert_empty_patterns#2",
@@ -3986,13 +3986,13 @@
  {
   "name": "r1334_invert_empty_patterns#4",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-vf",
    "one-pattern",
    "haystack"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1334_crazy_literals",
@@ -4033,47 +4033,47 @@
  {
   "name": "r1401_look_ahead_only_matching_1#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-No",
    ".*o(?!.*\\s)",
    "ip.txt"
   ],
-  "detail": "pcre2-only"
+  "detail": ""
  },
  {
   "name": "r1401_look_ahead_only_matching_1#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-No",
    ".*o(?!.*[ \\t])",
    "ip.txt"
   ],
-  "detail": "pcre2-only"
+  "detail": ""
  },
  {
   "name": "r1401_look_ahead_only_matching_2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-No",
    ".*o(?!.*\\s)",
    "ip.txt"
   ],
-  "detail": "pcre2-only"
+  "detail": ""
  },
  {
   "name": "r1412_look_behind_no_replacement",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-nU",
    "-rquux",
    "(?<=foo\\n)bar",
    "test"
   ],
-  "detail": "pcre2-only"
+  "detail": ""
  },
  {
   "name": "r1446_respect_excludes_in_worktree",
@@ -4108,7 +4108,7 @@
  {
   "name": "r1573#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--pcre2",
    "--multiline",
@@ -4116,12 +4116,12 @@
    "(?s)def (\\w+);(?=.*use \\w+)",
    "foo"
   ],
-  "detail": "pcre2-only"
+  "detail": "stdout differs (gist 0B rc=1 \u00b7 rg 2B rc=0)"
  },
  {
   "name": "r1573#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--pcre2",
    "--multiline",
@@ -4129,7 +4129,7 @@
    "(?s)def (\\w+);(?=.*use \\w+)",
    "foo"
   ],
-  "detail": "pcre2-only"
+  "detail": "stdout differs (gist 0B rc=1 \u00b7 rg 2B rc=0)"
  },
  {
   "name": "r1638",
@@ -4206,16 +4206,16 @@
    "--color",
    "always"
   ],
-  "detail": "ripgrep --crlf+color \\r artifact not replicated (matches rg plain)"
+  "detail": "own color palette by design (color.zig)"
  },
  {
   "name": "r1838_nul_error_with_binary_detection#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "foo\\x00?"
   ],
-  "detail": "terminal=err"
+  "detail": "exit rc gist=0 rg=2 \u00b7 rg stderr='rg: pattern contains \"\\\\0\" but it is impossible to match\\n\\nConsider enabling text '"
  },
  {
   "name": "r1838_nul_error_with_binary_detection#2",
@@ -4360,50 +4360,50 @@
  {
   "name": "r1878#3",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "-U",
    "--no-mmap",
    "(?-m)^baz",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": "exit rc gist=0 rg=1 \u00b7 rg stderr=''"
  },
  {
   "name": "r1878#4",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "-U",
    "--mmap",
    "(?-m)^baz",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": "exit rc gist=0 rg=1 \u00b7 rg stderr=''"
  },
  {
   "name": "r1878#5",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--no-mmap",
    "\\Abaz",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1878#6",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--mmap",
    "\\Abaz",
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r1891",
@@ -4445,7 +4445,7 @@
    "^(?P<indent>\\s*)a=(?P<value>(?ms:[(].*?[)])|.*?)$",
    "test"
   ],
-  "detail": "bad pattern '^(?P<indent>\\s*)a=(?P<value>(?ms:[(].*?[)])|.*?)$' \u2014 outside gist's linear-time syntax: no lookaround, no b"
+  "detail": "gist: error: bad pattern '^(?P<indent>\\s*)a=(?P<value>(?ms:[(].*?[)])|.*?)$' \u2014 outside gist's linear-time syntax\ngist: n"
  },
  {
   "name": "r2198#1",
@@ -4487,11 +4487,11 @@
  {
   "name": "r2236",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "test"
   ],
-  "detail": "terminal=err"
+  "detail": "exit rc gist=0 rg=2 \u00b7 rg stderr='rg: No files were searched, which means ripgrep probably applied a filter you di'"
  },
  {
   "name": "r2480#1",
@@ -4513,7 +4513,7 @@
    ")(",
    "file"
   ],
-  "detail": "bad pattern ')(' \u2014 outside gist's linear-time syntax: no lookaround, no backreferences (\\0\u2013\\9; NUL is \\x00), no unrecogn"
+  "detail": "gist: error: bad pattern ')(' \u2014 outside gist's linear-time syntax\ngist: note: not owned by the linear engine: lookaround"
  },
  {
   "name": "r2480#3",
@@ -4559,7 +4559,7 @@
  {
   "name": "r2480#6",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "NA",
   "argv": [
    "--only-matching",
    "-e",
@@ -4568,7 +4568,7 @@
    "bar",
    "file"
   ],
-  "detail": "terminal=err"
+  "detail": "gist engine decline by design (use -P/--engine auto): (?i) on some patterns but not others \u2014 gist compiles one engine; use rg for this"
  },
  {
   "name": "r2574",
@@ -4597,22 +4597,22 @@
  {
   "name": "r2770_gitignore_error#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-l",
    "quux"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r2770_gitignore_error#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "-l",
    "quux"
   ],
-  "detail": "terminal=err"
+  "detail": "exit rc gist=0 rg=2 \u00b7 rg stderr='rg: No files were searched, which means ripgrep probably applied a filter you di'"
  },
  {
   "name": "r2944_incorrect_bytes_searched",
@@ -4660,70 +4660,70 @@
  {
   "name": "r3108_files_without_match_quiet_exit#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-q",
    "abc",
    "non-match"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r3108_files_without_match_quiet_exit#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "-q",
    "abc",
    "yes-match"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r3108_files_without_match_quiet_exit#3",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files-with-matches",
    "-q",
    "abc",
    "non-match"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r3108_files_without_match_quiet_exit#4",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files-with-matches",
    "-q",
    "abc",
    "yes-match"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r3108_files_without_match_quiet_exit#5",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files-without-match",
    "abc",
    "non-match"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r3108_files_without_match_quiet_exit#6",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files-without-match",
    "abc",
    "yes-match"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r3108_files_without_match_quiet_exit#7",
@@ -4739,26 +4739,26 @@
  {
   "name": "r3108_files_without_match_quiet_exit#8",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files-without-match",
    "-q",
    "abc",
    "non-match"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r3108_files_without_match_quiet_exit#9",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files-without-match",
    "-q",
    "abc",
    "yes-match"
   ],
-  "detail": "terminal=exit"
+  "detail": ""
  },
  {
   "name": "r3108_files_without_match_quiet_exit#10",
@@ -4784,30 +4784,30 @@
  {
   "name": "r3127_glob_flag_not_allow_unclosed_class",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "PASS",
   "argv": [
    "--files",
    "-g",
    "[abc"
   ],
-  "detail": "terminal=err"
+  "detail": ""
  },
  {
   "name": "r3139_multiline_lookahead_files_with_matches#1",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--multiline",
    "--pcre2",
    "(?s)Start(?=.*thing2)",
    "test"
   ],
-  "detail": "pcre2-only"
+  "detail": "stdout differs (gist 0B rc=1 \u00b7 rg 7B rc=0)"
  },
  {
   "name": "r3139_multiline_lookahead_files_with_matches#2",
   "file": "regression.rs",
-  "bucket": "SKIP",
+  "bucket": "FAIL",
   "argv": [
    "--multiline",
    "--pcre2",
@@ -4815,7 +4815,7 @@
    "(?s)Start(?=.*thing2)",
    "test"
   ],
-  "detail": "pcre2-only"
+  "detail": "stdout differs (gist 0B rc=1 \u00b7 rg 5B rc=0)"
  },
  {
   "name": "r3173_hidden_whitelist_only_dot#1",

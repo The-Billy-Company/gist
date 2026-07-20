@@ -1,0 +1,312 @@
+//! gist — the CLI executable entrypoint (the `gist` binary).
+//!
+//! The lifecycle verbs — what gist DOES, not which competitor's argv it apes:
+//!
+//!   gist index                        build + persist the trigram index
+//!   gist status [--json]              read-only: is an index ready, how fresh, how big
+//!   gist codex <build|count|tally|status>  the exact existence/count tier over the
+//!                                     compressed self-index shelf (src/index/codex/)
+//!
+//! Everything else is the search itself — no verb at all, the shape an agent's
+//! `rg <pattern>` reflex already takes:
+//!
+//!   gist <pattern> [PATH...] [flags]  find it, right now, zero setup
+//!
+//! `gist jesus` needs no `gist index` first: it live-scans the current tree with
+//! ripgrep's own default behavior (gitignore precedence, piped stdin, exit
+//! codes) — a true `rg` drop-in. When a fresh index covers the searched subtree
+//! it is used *automatically* as an acceleration structure (reads of provable
+//! non-candidate files are elided), byte-identically to the live walk;
+//! `--no-index` forces the pure walk, `--index` forces the accelerated path.
+//! `--rank[=N]` selects gist's one native shape ripgrep can't express — the
+//! definition-first ranked view. `gist rg [flags] <pattern> [PATH...]` and its
+//! habit-safe twin `gist search <pattern> [PATH...]` are the same engine
+//! addressed explicitly with a verb (the `alias rg=gist` drop-in's shape, and
+//! the `search` reflex — so `gist search foo` finds `foo` instead of dying on a
+//! nonexistent path).
+//!
+//! Plus three top-level introspection flags (convention, like `--help`):
+//! `--help`, `--version`, `--schema` (a JSON capability manifest for
+//! agents/codegen).
+//!
+//! This is the thin dispatch shell only: every verb's real work lives in the
+//! engine + command modules, reached through the `gist` module (`commands.search`
+//! for the unified search engine, `commands.indexer` for `gist index`,
+//! `commands.status` for introspection, `commands.schema` for the manifest). The
+//! bench/verify/certify harness is a separate executable (`bench/harness/bench.zig`).
+
+const std = @import("std");
+const gist = @import("irregex");
+
+const indexer = gist.commands.indexer; // `gist index` — build + persist the trigram index
+const codex_face = gist.commands.codex; // `gist codex` — the exact existence/count tier
+const status = gist.commands.status; // read-only index introspection
+const schema = gist.commands.schema; // `--schema` JSON manifest
+const search = gist.commands.search; // the unified search engine (bare shorthand + `gist rg`)
+const serve = gist.commands.serve; // `gist serve` — the resident warm daemon
+const client = gist.commands.client; // the warm CLI fast path (daemon dial + cold fallback)
+
+/// Canonicalize a `gist index ROOT` argument to the walk's path shape: strip
+/// any leading `./` and trailing `/` (so `./libs/` indexes as `libs` — the
+/// byte shape every query walker and root-scope compare emits); a root that
+/// reduces to nothing is the whole tree (`.`).
+fn normalizeRootArg(raw: []const u8) []const u8 {
+    var root = raw;
+    while (std.mem.startsWith(u8, root, "./")) root = root[2..];
+    root = std.mem.trimEnd(u8, root, "/");
+    return if (root.len == 0 or std.mem.eql(u8, root, ".")) "." else root;
+}
+
+/// Try the resident daemon for an eligible query; on a served answer this exits
+/// the process with rg's code and never returns. Any miss (ineligible argv, no
+/// daemon, decline, wire error) returns so the caller runs the cold engine —
+/// the daemon is a pure accelerator, never a new failure mode.
+fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, argv: []const []const u8) void {
+    const sock = serve.socketPath(gpa, env) catch return;
+    defer gpa.free(sock);
+    const debug = env.get("GIST_DEBUG_WARM") != null; // observe the routing decision
+    if (debug) {
+        // Surface the CLASSIFY verdict independently of daemon availability, so a
+        // cold outcome from "ineligible argv" is distinguishable from "eligible
+        // but no daemon up". This is the oracle the cross-binding parity test
+        // reads to prove Python `warm_eligible` tracks this classifier exactly.
+        if (gist.session.request.classify(argv)) |_|
+            std.debug.print("gist: [eligible]\n", .{})
+        else |_|
+            std.debug.print("gist: [ineligible]\n", .{});
+    }
+    switch (client.attempt(gpa, io, argv, sock)) {
+        .served => |code| {
+            if (debug) std.debug.print("gist: [warm]\n", .{});
+            gist.corpus.finishOutput(); // announce a budget cut on the warm flush (idempotent, stderr-only)
+            // A warm-served no-match (exit 1) gets the same stderr guidance the
+            // cold engines emit. The classifier already parsed this argv to
+            // route it warm, so re-classifying recovers pattern + -F and the
+            // RESOLVED case state (smart-case folds through the session's one
+            // resolution site) without a second full flag parse; eligible
+            // requests are always rootless.
+            if (code == 1) if (gist.session.request.classify(argv)) |req| {
+                // `-q` and `-m0` are SILENT on a miss (cold exits 1 with no
+                // stderr guidance — `serial.zig`), so suppress the hint for them.
+                if (!req.quiet and !req.matchNothing())
+                    search.hints.noMatches(search.hints.shapeBare(req.pattern, req.fixed, req.effectiveIgnoreCase()), null);
+            } else |_| {};
+            std.process.exit(code);
+        },
+        // Cold miss on an eligible shape with no daemon up: fork one detached so
+        // the next such query lands warm. This query still runs cold below.
+        .cold => {
+            if (debug) std.debug.print("gist: [cold]\n", .{});
+            client.spawn.maybeSpawn(gpa, io, env, argv, sock);
+        },
+    }
+}
+
+/// `--help` / bare `gist`: the ergonomic map of the CLI. Requested output goes
+/// to stdout (rg convention); diagnostics/hints stay on stderr. This teaches
+/// selection while flag-level truth remains generated from `flag_catalog` by
+/// `--schema`.
+fn usage() void {
+    gist.corpus.emitStdout(
+        \\gist — fast, agent-friendly code locator
+        \\
+        \\usage:
+        \\  gist <pattern> [PATH...] [flags]   search — no verb, no setup; ripgrep's default
+        \\                                     behavior and flags, auto-accelerated by a fresh
+        \\                                     index (acceleration never changes output)
+        \\
+        \\ergonomics — keep the reflex, choose the native shape:
+        \\  muscle memory           replace `rg` with `gist`; pattern, paths, familiar flags,
+        \\                          stdout, and 0/1/2 exit codes keep their meaning
+        \\  native Gist             add --rank, index controls, resident, or codex behavior
+        \\                          only when the question is no longer ordinary grep
+        \\
+        \\default move:
+        \\  exact text / regex      gist PATTERN [PATH...]
+        \\  one strong code hit     gist PATTERN --rank[=N]     (default N = 20)
+        \\  existence / file set    -q / -l
+        \\  counts / machine data   -c / --json
+        \\  literal / word / line   -F / -w / -x
+        \\  case                    -i insensitive · -s sensitive · -S smart (last wins)
+        \\  complex regex           --engine auto, or -P when PCRE2 semantics are required
+        \\  multiline               -U; --multiline-dotall also lets `.` cross newlines
+        \\  context                 -A N / -B N / -C N
+        \\  scope                   PATH... · -t TYPE · -T TYPE · -g GLOB · --iglob GLOB
+        \\  hidden / ignored        -u disables ignores · -uu adds hidden · -uuu adds binary
+        \\
+        \\native choices:
+        \\  --rank[=N]              definition-biased bounded view; linear engine only
+        \\  --no-index / --index    pure live oracle / explicitly re-enable acceleration
+        \\  resident session        automatic and fail-open for eligible searches; do nothing
+        \\  gist codex count TEXT   exact literal count without source-file I/O on a clean shelf
+        \\  --uncap                 lift the soft agent-output budget for this query
+        \\
+        \\niche choices:
+        \\  --no-unicode / (?-u)    byte/ASCII classes, folding, words, and boundaries
+        \\  --sort / --sortr KEY    stable order: path|modified|accessed|created
+        \\  -z / --pre CMD / -E     compressed input / preprocessed input / source encoding
+        \\  -a / --binary           treat as text / search binary files in full
+        \\  -0 / --null-data        NUL-delimited paths / NUL-delimited input records
+        \\  -m0 / -M0               match nothing (exit 1) / disable the long-line cap
+        \\  -rn                     means --replace=n, not recursive + line numbers; use -n
+        \\  no match                read stderr suggestions; stdout remains pipeline-clean
+        \\
+        \\index lifecycle:
+        \\  gist index [ROOT...]    build + persist the trigram index (optional, ~3 s);
+        \\                          no roots = this tree (GIST_ROOTS overrides)
+        \\  gist status [--json]    is an index ready, how fresh, how big
+        \\  gist serve [ROOT...]    resident warm daemon (auto-spawned; explicit run scopes it)
+        \\  gist codex <build|count|tally|status>   exact corpus-wide counts off the
+        \\                          compressed self-index — O(|pattern|), zero corpus I/O
+        \\
+        \\aliases:
+        \\  gist rg / gist search <pattern> [PATH...]   the same engine, addressed with a verb
+        \\
+        \\introspection:
+        \\  gist --help / -h        this ergonomics guide
+        \\  gist --schema           exhaustive JSON surface generated from the live flag catalog
+        \\  gist --version / -V
+        \\
+        \\channels & env:
+        \\  results -> stdout (rg-shaped bytes) · guidance -> stderr ('gist: try' / 'gist: note:')
+        \\  GIST_HINTS=0            mute stderr hints (results are untouched either way)
+        \\  GIST_UNCAP=1            lift the ~25k-token soft output cap (also: --uncap)
+        \\  GIST_MAX_OUTPUT_TOKENS / GIST_MAX_OUTPUT_BYTES   resize the output budget
+        \\  GIST_DIR                artifact home (default .local/gist-verify)
+        \\  GIST_SKIP / <GIST_DIR>/skips.list   extra skip dirs for the corpus walks
+        \\                          (index/freshness/relate only — search keeps rg parity)
+        \\
+    );
+}
+
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
+
+    var it = std.process.Args.Iterator.init(init.minimal.args);
+    _ = it.skip(); // argv[0]
+    const mode = it.next() orelse {
+        usage();
+        return;
+    };
+
+    // Top-level introspection flags (convention, not verbs).
+    if (std.mem.eql(u8, mode, "--help") or std.mem.eql(u8, mode, "-h")) {
+        usage();
+        return;
+    }
+    if (std.mem.eql(u8, mode, "--version") or std.mem.eql(u8, mode, "-V")) {
+        std.debug.print("gist {s}\n", .{gist.version_string});
+        return;
+    }
+    if (std.mem.eql(u8, mode, "--schema")) {
+        schema.emit();
+        return;
+    }
+
+    // Resolve the output budget from the environment once, before any search
+    // dispatch, so the warm client path (which emits without re-parsing flags)
+    // honors `GIST_UNCAP`/`GIST_MAX_OUTPUT_*`. The cold engine re-resolves it
+    // with the parsed `--uncap` flag (`search.run`); `--uncap` always routes
+    // cold (the resident classifier declines it), so the flag still takes effect.
+    gist.corpus.initOutputBudget(false);
+
+    // `gist index [ROOT...]` — explicit roots scope the index to those
+    // subtrees; with none, `corpus.resolveRoots` picks the corpus for THIS
+    // working directory (GIST_ROOTS → `.`, the whole tree).
+    if (std.mem.eql(u8, mode, "index")) {
+        var roots: std.ArrayList([]const u8) = .empty;
+        defer roots.deinit(gpa);
+        while (it.next()) |arg| try roots.append(gpa, normalizeRootArg(arg));
+        if (roots.items.len > 0) return indexer.run(gpa, io, roots.items);
+        const resolved = try gist.corpus.resolveRoots(gpa);
+        defer gist.corpus.freeRoots(gpa, resolved);
+        return indexer.run(gpa, io, resolved);
+    }
+    // `gist codex <build|count|tally|status>` — the exact existence/count tier
+    // over the compressed self-index (`src/index/codex/`): corpus-wide occurrence
+    // counts in O(|pattern|) with zero corpus I/O and zero false positives,
+    // freshness-reported against the shelf's own build anchor.
+    if (std.mem.eql(u8, mode, "codex")) {
+        var rest: std.ArrayList([]const u8) = .empty;
+        defer rest.deinit(gpa);
+        while (it.next()) |arg| try rest.append(gpa, arg);
+        try codex_face.run(gpa, io, rest.items);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "status")) {
+        const arg = it.next();
+        const json = if (arg) |value| std.mem.eql(u8, value, "--json") else false;
+        if (arg != null and !json or it.next() != null) {
+            std.debug.print("gist: status accepts only --json\n", .{});
+            std.process.exit(2);
+        }
+        try status.run(gpa, io, json);
+        return;
+    }
+    // `gist serve [ROOT...]` — run the resident daemon: keep the corpus + index
+    // warm behind a Unix socket so subsequent eligible queries answer without
+    // cold startup. With NO path args it serves the rootless CWD walk — the EXACT
+    // tree a bare `gist <pattern>` walks (`walkDir(".", "")`, CWD-relative paths,
+    // no `./` prefix), which is the whole basis of warm==cold parity; this is
+    // what auto-spawn (`client/spawn.zig`) starts. Trailing path args scope a
+    // subtree instead (a real use, and what the hermetic client/session tests
+    // drive over a throwaway corpus).
+    if (std.mem.eql(u8, mode, "serve")) {
+        const sock = try serve.socketPath(gpa, init.environ_map);
+        defer gpa.free(sock);
+        var roots: std.ArrayList([]const u8) = .empty;
+        defer roots.deinit(gpa);
+        while (it.next()) |arg| try roots.append(gpa, arg);
+        // Empty roots ⇒ rootless CWD walk (byte-identical to rootless cold).
+        try serve.run(gpa, io, roots.items, sock);
+        return;
+    }
+    // ── shed verbs: similar/dups/patterns live in the `relate` binary now ──
+    // These verbs used to shadow a bare-literal search for their own names, so
+    // a redirect stub regresses nothing a literal searcher could reach; it just
+    // routes muscle memory (and agents replaying old argv) to the new face.
+    if (std.mem.eql(u8, mode, "similar") or std.mem.eql(u8, mode, "dups") or std.mem.eql(u8, mode, "patterns")) {
+        std.debug.print("gist: '{s}' moved to the relate binary — run `relate {s} ...` (same flags; `make install-gist` installs both)\n", .{ mode, mode });
+        std.process.exit(2);
+    }
+
+    // `rg [flags] <pattern> [PATH...]` — the same whole-tree engine the bare
+    // shorthand below uses, addressed explicitly (the shape an `alias
+    // rg=gist` drop-in takes). It also backs the rgsuite differential-parity
+    // certificate (441 mined `rg`-argv replays via `bench/rgsuite/run.py`).
+    // Omitted from `usage()`'s three-verb list (it isn't index-backed — see
+    // the bare shorthand, which IS documented there) and from `--schema`
+    // (its flag surface is rg's own, not gist's native vocabulary), but it is
+    // a fully supported, intentional entry point, not a hidden fallback.
+    //
+    // `search <pattern> [PATH...]` — the same engine addressed with the verb the
+    // reflex reaches for. gist's canonical shape is verbless (`gist <pattern>`),
+    // but `gist search foo` is a near-universal habit; without this it parses as
+    // pattern=`search`, path=`foo`, and dies on `foo: No such file (os error 2)`
+    // — a faithful-to-rg but repeatedly baffling failure. A bare `gist search`
+    // (no pattern after it) still searches for the literal word "search", so no
+    // existing invocation regresses.
+    //
+    // Implicit invocation: `gist <pattern> [PATH...] [flags]` with no explicit
+    // verb — documented in `usage()` as the everyday shorthand: the shape an
+    // agent's `rg <pattern>` reflex already takes, with zero setup (no `gist
+    // index` needed first). Routes through the SAME rg-compatible engine
+    // `gist rg` uses (its `readableStdin()` piped-input path, default
+    // presentation, exit codes) rather than falling through to "unknown
+    // command" (which printed to stderr while a piped `make | gist "pattern"`
+    // produced no stdout at all) or silently re-interpreting the pattern as an
+    // indexed full-corpus `search`, which has no stdin path, requires an
+    // index to exist, and diverges wildly from `rg`'s piped-stream behavior.
+    const verbed = std.mem.eql(u8, mode, "rg") or std.mem.eql(u8, mode, "search");
+    var query: std.ArrayList([]const u8) = .empty;
+    defer query.deinit(gpa);
+    if (!verbed) try query.append(gpa, mode);
+    while (it.next()) |arg| try query.append(gpa, arg);
+    // A bare `gist search` keeps its literal-word meaning; a bare `gist rg`
+    // stays the empty argv the engine rejects itself.
+    if (query.items.len == 0 and std.mem.eql(u8, mode, "search"))
+        try query.append(gpa, mode);
+    tryWarm(gpa, io, init.environ_map, query.items);
+    try search.run(gpa, io, query.items, init.environ_map);
+}

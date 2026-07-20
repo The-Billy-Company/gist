@@ -64,6 +64,9 @@ def test_warm_eligible_accepts_default_roots_literal() -> None:
     assert irregex.warm_eligible(SearchRequest(pattern="TODO", quiet=True))
     assert irregex.warm_eligible(SearchRequest(pattern="TODO", max_count=3))
     assert irregex.warm_eligible(SearchRequest(pattern="TODO", max_count=0))
+    # v2 lane 3b: -v is warm-eligible (the set-complement, sound under the index).
+    assert irregex.warm_eligible(SearchRequest(pattern="TODO", invert=True))
+    assert irregex.warm_eligible(SearchRequest(pattern="TODO", invert=True, word=True))
 
 
 @pytest.mark.parametrize(
@@ -74,7 +77,6 @@ def test_warm_eligible_accepts_default_roots_literal() -> None:
         SearchRequest(pattern="x", types=("py",)),  # type scoping
         SearchRequest(pattern="x", context=2),  # context lines
         SearchRequest(pattern="x", before=2),  # asymmetric context side
-        SearchRequest(pattern="x", invert=True),  # rich flag
         SearchRequest(pattern="x", extra_flags=("-P",)),  # raw argv
         SearchRequest(pattern="x", engine=SearchEngine.AUTO),
         SearchRequest(pattern="x", multiline=True),
@@ -154,14 +156,21 @@ def test_round_trip_matches_cold(corpus) -> None:
             warm_files = s.files(SearchRequest(pattern="TODO"))
             warm_count = s.count(SearchRequest(pattern="TODO"))
             warm_ci = s.count(SearchRequest(pattern="TODO", ignore_case=True))
+            # lane 3b: the invert complement, warm end-to-end (FFI → UDS → cold).
+            warm_inv_files = s.files(SearchRequest(pattern="TODO", invert=True))
+            warm_inv_count = s.count(SearchRequest(pattern="TODO", invert=True))
         # Cold oracle over the same subtree ".".
         cold_files = irregex.files("TODO", paths=(".",), cwd=corpus)
         cold_count = irregex.count("TODO", paths=(".",), cwd=corpus)
         cold_ci = irregex.count("TODO", ignore_case=True, paths=(".",), cwd=corpus)
+        cold_inv_files = irregex.files("TODO", invert=True, paths=(".",), cwd=corpus)
+        cold_inv_count = irregex.count("TODO", invert=True, paths=(".",), cwd=corpus)
         assert _norm(warm_files) == _norm(cold_files)
         assert warm_count == cold_count
         assert warm_ci == cold_ci
         assert warm_ci > warm_count  # 'todo' lowercase pulled in by -i
+        assert _norm(warm_inv_files) == _norm(cold_inv_files)
+        assert warm_inv_count == cold_inv_count
     finally:
         proc.terminate()
         proc.wait(timeout=10)

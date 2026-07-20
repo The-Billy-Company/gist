@@ -26,6 +26,8 @@ fn corpus() -> tempfile::TempDir {
     std::fs::write(p.join("c.txt"), "no marker here\nplain text\n").unwrap();
     std::fs::create_dir(p.join("pkg")).unwrap();
     std::fs::write(p.join("pkg/d.py"), "x = 1  # todo lowercase\nTODO upper\n").unwrap();
+    // -w discriminator: a glued occurrence (word-rejected) beside a word-valid one.
+    std::fs::write(p.join("w.txt"), "myTODO glued\nTODO word\n").unwrap();
     dir
 }
 
@@ -42,6 +44,21 @@ fn normset(paths: &[String]) -> BTreeSet<String> {
 fn warm_eligible_accepts_default_roots_literal() {
     assert!(warm_eligible(&SearchRequest::new("TODO")));
     assert!(warm_eligible(&SearchRequest::new("TODO").fixed().ignore_case()));
+    // v2: smart_case ships raw on the wire; the Zig session resolves it.
+    assert!(warm_eligible(&SearchRequest::new("TODO").smart_case()));
+    assert!(warm_eligible(&SearchRequest::new("todo").smart_case()));
+    // v2 lane 2: -w is warm-eligible, alone and composed with case flags.
+    assert!(warm_eligible(&SearchRequest::new("TODO").word()));
+    assert!(warm_eligible(&SearchRequest::new("todo").fixed().word()));
+    assert!(warm_eligible(&SearchRequest::new("todo").ignore_case().word()));
+    // v2 lane 4: -q (existence early-halt) and -m N (per-file cap) are
+    // warm-eligible, alone and composed.
+    assert!(warm_eligible(&SearchRequest::new("TODO").quiet()));
+    assert!(warm_eligible(&SearchRequest::new("TODO").max_count(3)));
+    assert!(warm_eligible(&SearchRequest::new("TODO").word().max_count(2)));
+    // v2 lane 3b: -v is warm-eligible (the set-complement, sound under the index).
+    assert!(warm_eligible(&SearchRequest::new("TODO").invert()));
+    assert!(warm_eligible(&SearchRequest::new("TODO").invert().word()));
 }
 
 #[test]
@@ -50,9 +67,7 @@ fn warm_eligible_rejects_rich_requests() {
     assert!(!warm_eligible(&SearchRequest::new("x").glob("*.py")));
     assert!(!warm_eligible(&SearchRequest::new("x").type_("py")));
     assert!(!warm_eligible(&SearchRequest::new("x").context(2)));
-    assert!(!warm_eligible(&SearchRequest::new("x").word()));
-    assert!(!warm_eligible(&SearchRequest::new("x").invert()));
-    assert!(!warm_eligible(&SearchRequest::new("x").max_count(3)));
+    assert!(!warm_eligible(&SearchRequest::new("x").before(2)));
     assert!(!warm_eligible(&SearchRequest::new("x").flag("-P")));
 }
 
@@ -120,15 +135,48 @@ fn round_trip_matches_cold() {
         let warm_files = s.files(&SearchRequest::new("TODO")).unwrap();
         let warm_count = s.count(&SearchRequest::new("TODO")).unwrap();
         let warm_ci = s.count(&SearchRequest::new("TODO").ignore_case()).unwrap();
+        // v2 smart-case: lowercase pattern folds (≡ -i), uppercase stays exact.
+        let warm_sc_lower = s.count(&SearchRequest::new("todo").smart_case()).unwrap();
+        let warm_sc_upper = s.count(&SearchRequest::new("TODO").smart_case()).unwrap();
+        // v2 lane 2: -w crosses the wire; the daemon applies cold's word rule.
+        let warm_word = s.count(&SearchRequest::new("TODO").word()).unwrap();
+        // v2 lane 4: -m1 caps each file to one matching line (w.txt has two),
+        // sent as the u64 payload after the flags byte.
+        let warm_m1 = s.count(&SearchRequest::new("TODO").max_count(1)).unwrap();
+        // v2 lane 3b: -v answers by the set-complement, warm over the wire.
+        let warm_inv_files = s.files(&SearchRequest::new("TODO").invert()).unwrap();
+        let warm_inv_count = s.count(&SearchRequest::new("TODO").invert()).unwrap();
         // Cold oracle over the same subtree ".".
         let cold_files = gist::files(SearchRequest::new("TODO").path(".").cwd(dir.path())).unwrap();
         let cold_count = gist::count(SearchRequest::new("TODO").path(".").cwd(dir.path())).unwrap();
         let cold_ci =
             gist::count(SearchRequest::new("TODO").ignore_case().path(".").cwd(dir.path())).unwrap();
+        let cold_sc_lower =
+            gist::count(SearchRequest::new("todo").smart_case().path(".").cwd(dir.path())).unwrap();
+        let cold_sc_upper =
+            gist::count(SearchRequest::new("TODO").smart_case().path(".").cwd(dir.path())).unwrap();
+        let cold_word =
+            gist::count(SearchRequest::new("TODO").word().path(".").cwd(dir.path())).unwrap();
+        let cold_m1 =
+            gist::count(SearchRequest::new("TODO").max_count(1).path(".").cwd(dir.path())).unwrap();
+        let cold_inv_files =
+            gist::files(SearchRequest::new("TODO").invert().path(".").cwd(dir.path())).unwrap();
+        let cold_inv_count =
+            gist::count(SearchRequest::new("TODO").invert().path(".").cwd(dir.path())).unwrap();
         assert_eq!(normset(&warm_files), normset(&cold_files));
         assert_eq!(warm_count, cold_count);
         assert_eq!(warm_ci, cold_ci);
         assert!(warm_ci > warm_count, "-i should widen the count");
+        assert_eq!(warm_sc_lower, cold_sc_lower);
+        assert_eq!(warm_sc_upper, cold_sc_upper);
+        assert_eq!(warm_sc_lower, warm_ci, "-S lowercase folds exactly like -i");
+        assert_eq!(warm_sc_upper, warm_count, "-S uppercase stays case-sensitive");
+        assert_eq!(warm_word, cold_word);
+        assert!(warm_word < warm_count, "-w must drop the glued `myTODO` line");
+        assert_eq!(warm_m1, cold_m1);
+        assert!(warm_m1 < warm_count, "-m1 must cap w.txt's two matches to one");
+        assert_eq!(normset(&warm_inv_files), normset(&cold_inv_files));
+        assert_eq!(warm_inv_count, cold_inv_count);
     }));
 
     let _ = child.kill();

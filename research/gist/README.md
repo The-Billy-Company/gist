@@ -1,11 +1,11 @@
 ---
 doc_radar:
   paths_exist:
-    - pkg/kernels/irregex/src/cli/gist/main.zig
+    - pkg/kernels/irregex/src/surface/face/gist/main.zig
     - pkg/kernels/irregex/contract/search_api.toml
     - pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
   sentinels:
-    - file: pkg/kernels/irregex/src/runtime/cold/argv/args.zig
+    - file: pkg/kernels/irregex/src/surface/exec/cold/argv/args.zig
       contains:
         - "pub const flag_catalog"
         - "unsupported_fail_loud"
@@ -19,36 +19,36 @@ doc_radar:
         - 'subprocess = { status = "authoritative"'
 ---
 
-# Gist — agent-loop indexed regex locator
+# Gist — research map for agent-loop code search
 
-A **systems/workload composition** for one repository and one high-frequency
-consumer: coding agents repeatedly issuing small grep-shaped queries against a
-concurrently changing tree. Persistent byte-trigram candidate index, crest
-sidecar for literal-free class repetitions, freshness-aware live fallback,
-linear + opt-in PCRE2 verification, ripgrep-like CLI conventions, and compact
-definition-biased ranking — measured against a fail-closed correctness slate
-and Certificate of Optimality.
+Gist studies one systems question: **how often can an agent search a changing
+repository without letting acceleration impersonate truth?** Its answer is a
+ripgrep-shaped locator whose live tree remains authoritative while a
+persistent trigram index, Crest sidecar, resident session, PCRE2 literal
+proofs, and definition-biased ranking optimize the repeated locate → inspect →
+refine loop.
 
-That composition is the claim. The underlying techniques are established prior
-art (except the crest sieve, which has its own dossier).
+The research claim is the measured **systems/workload composition**. The
+product case, ancestry, and evidence are kept separate so usefulness does not
+stand in for novelty and benchmark speed does not stand in for correctness.
 
 ## This folder (research: writing + scope only)
 
-| file | role |
-|---|---|
-| `CLAIM.md` | precise novelty statement, explicit non-claims, public contract (`--schema`), what the composition is and is not |
-| `PRIOR_ART.md` | the full landscape review: every neighboring family (agent search, indexed regex, semantic/structural), why each is a different object |
-| `TESTING.md` | the complete evidence story: rg-oracle parity, index-elision, freshness, resident fail-open, Certificate layers A–D, reproduction commands |
+| file                           | research role                                                                                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`CLAIM.md`](CLAIM.md)         | the positive product thesis: why agent search is a distinct workload, how one query works, what the architecture unlocks, and where originality begins |
+| [`PRIOR_ART.md`](PRIOR_ART.md) | the comparison set: agent search, indexed search, matchers, ranking, and the exact ancestry of every borrowed technique                                |
+| [`TESTING.md`](TESTING.md)     | the falsification record: rg-oracle parity, index-elision, freshness, resident fail-open, Certificate layers A–D, and reproduction commands            |
 
 ## The code (lives with the system, not here)
 
-| where | what |
-|---|---|
-| `src/cli/gist/` | the product CLI face (search, index, status, serve, codex) |
-| `src/runtime/cold/` | authoritative cold path: argv → walk → index elision → verify → emit |
-| `src/index/trigrams/` + `src/index/crest/` | candidate filters (trigrams + crest sidecar) |
-| `src/search/rank/` | definition-biased `--rank` view |
-| `src/runtime/session/` | fail-open resident UDS session |
+| where                                                | what                                                                       |
+| ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| `src/cli/gist/`                                      | the product CLI face (search, index, status, serve, codex)                 |
+| `src/runtime/cold/`                                  | authoritative cold path: argv → walk → index elision → verify → emit       |
+| `src/index/trigrams/` + `src/index/crest/`           | candidate filters (trigrams + crest sidecar)                               |
+| `src/search/rank/`                                   | definition-biased `--rank` view                                            |
+| `src/runtime/session/`                               | fail-open resident UDS session                                             |
 | `bench/gates/` + `bench/rgsuite/` + `bench/certify/` | correctness-before-speed gates, mined rg parity, Certificate of Optimality |
 
 Novel math that rides inside gist (forced-class-run pruning) is documented
@@ -77,7 +77,7 @@ not universal constants. Correctness gates always run before performance gates
 ## Status
 
 **Shipped.** Dogfooded as the agents' everyday exact/regex locator
-(`make install-gist`; workspace rule: gist not ripgrep). Public surface is the
-four-bucket flag catalog behind `gist --schema`. Prior-art scope and explicit
-non-claims live in `PRIOR_ART.md`; the composition claim in `CLAIM.md`; the
-evidence inventory in `TESTING.md`.
+(`make install-gist`; workspace rule: gist not ripgrep). Start with the
+positive case in [`CLAIM.md`](CLAIM.md), audit its ancestry in
+[`PRIOR_ART.md`](PRIOR_ART.md), then test every assertion against
+[`TESTING.md`](TESTING.md) and the four-bucket `gist --schema` contract.

@@ -52,14 +52,25 @@ export GIST_UNCAP=1
 COMPETE_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KERNEL="$(cd "${COMPETE_HERE}/../.." && pwd)" # races/ → bench/ → gist root
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
-OUT="${REPO}/.local/gist-verify"          # gist's persisted index + paths.list live here
-COMPETE_DIR="${REPO}/.local/gist-compete" # competitor indices live here
+OUT="${GIST_DIR:-${REPO}/.local/gist-verify}" # gist's persisted index + paths.list live here (GIST_DIR-relocatable)
+COMPETE_DIR="${REPO}/.local/gist-compete"     # competitor indices live here
 GIST_BIN="${REPO}/.local/gist-bin"
-HYDRA_BIN="${REPO}/.local/hydra-bin" # the compression-search face (similar/dups/patterns)
+RELATE_BIN="${REPO}/.local/relate-bin" # the compression-search face (similar/dups/patterns)
 CSEARCH_IDX="${COMPETE_DIR}/csearch.idx"
 ZOEKT_DIR="${COMPETE_DIR}/zoekt"
 PATHS_LIST="${OUT}/paths.list"
-ROOTS=(services libs clients contracts scripts quality)
+# Corpus scope: $GIST_ROOTS override (`:`/`,`/space separated), else the
+# historical published-corpus roots when they all exist here (the Billy
+# monorepo), else the whole tree — mirrors `corpus.resolveRoots`.
+if [[ -n "${GIST_ROOTS:-}" ]]; then
+  read -ra ROOTS <<< "${GIST_ROOTS//[:,]/ }"
+else
+  ROOTS=(services libs clients contracts scripts quality)
+  for r in "${ROOTS[@]}"; do [[ -d "${REPO}/${r}" ]] || {
+    ROOTS=(.)
+    break
+  }; done
+fi
 
 # Heavy build/cache dirs that have no per-file gitignore equivalent for ugrep /
 # GNU grep / zoekt. Mirrors gist's own ignored-subtree set + the rule-of-five
@@ -130,11 +141,11 @@ compete_install_gist_bin() {
   mkdir -p "$(dirname "${GIST_BIN}")"
   cp "${exe_src}" "${GIST_BIN}"
   command -v codesign > /dev/null 2>&1 && codesign --force --sign - "${GIST_BIN}" > /dev/null 2>&1
-  # Stage the hydra face beside it when built (same cp + re-sign rationale).
-  local hydra_src="${KERNEL}/zig-out/bin/hydra"
-  if [[ -x "${hydra_src}" ]]; then
-    cp "${hydra_src}" "${HYDRA_BIN}"
-    command -v codesign > /dev/null 2>&1 && codesign --force --sign - "${HYDRA_BIN}" > /dev/null 2>&1
+  # Stage the relate face beside it when built (same cp + re-sign rationale).
+  local relate_src="${KERNEL}/zig-out/bin/relate"
+  if [[ -x "${relate_src}" ]]; then
+    cp "${relate_src}" "${RELATE_BIN}"
+    command -v codesign > /dev/null 2>&1 && codesign --force --sign - "${RELATE_BIN}" > /dev/null 2>&1
   fi
   return 0
 }

@@ -47,15 +47,15 @@ _MODE_FILES, _MODE_COUNT = 0, 1
 # existence early-halt; `max_count` sets bit 7 AND writes a `u64 LE` after the
 # flags byte (the only flag carrying a payload — mirror `protocol.zig`).
 _FLAG_FIXED, _FLAG_IGNORE_CASE, _FLAG_WORD, _FLAG_SMART_CASE = 1 << 0, 1 << 1, 1 << 3, 1 << 5
-_FLAG_QUIET, _FLAG_MAX_COUNT = 1 << 6, 1 << 7
+_FLAG_INVERT, _FLAG_QUIET, _FLAG_MAX_COUNT = 1 << 4, 1 << 6, 1 << 7
 _MAX_FRAME = 16 << 20  # `protocol.max_frame`
 
 # Warm-ineligible fields — projection of `session/request.zig::classify`
-# (`tests/test_classify_parity.py`). `quiet`/`max_count` are NOT here: the UDS
-# daemon and the payload-bearing FFI options entry both serve them (existence
-# early-halt and per-file cap).
+# (`tests/test_classify_parity.py`). `quiet`/`max_count`/`invert` are NOT here:
+# the UDS daemon and the payload-bearing FFI options entry both serve them
+# (existence early-halt, per-file cap, and — lane 3b — the set-complement
+# `lines(f) − matches(f)` that keeps `-v` sound under the trigram index).
 _INELIGIBLE_FIELDS = (
-    "invert",
     "hidden",
     "no_ignore",
     "follow",
@@ -67,9 +67,9 @@ _INELIGIBLE_FIELDS = (
     "multiline",
     "multiline_dotall",
 )
-# The FFI options contract additionally carries invert and context records.
+# The FFI options contract additionally carries the context (before/after) records.
 _FFI_INELIGIBLE_FIELDS = tuple(
-    field for field in _INELIGIBLE_FIELDS if field not in {"invert", "before", "after", "context"}
+    field for field in _INELIGIBLE_FIELDS if field not in {"before", "after", "context"}
 )
 
 
@@ -121,7 +121,7 @@ def _eligible(
 
 
 def warm_eligible(request: SearchRequest) -> bool:
-    r"""True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping — ±case including `smart_case` (sent raw; the Zig session resolves it), ±`word` (the session applies cold's exact post-match word rule), ±`quiet` (the existence early-halt) and ±`max_count` including `-m0` (the per-file cap, resolved in the resident session). Every clause mirrors `session/request.zig::classify` term-for-term (a `\n`/`\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
+    r"""True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping — ±case including `smart_case` (sent raw; the Zig session resolves it), ±`word` (the session applies cold's exact post-match word rule), ±`invert` (lane 3b: the session answers `-v` by the `lines(f) − matches(f)` set-complement, sound under the trigram index), ±`quiet` (the existence early-halt) and ±`max_count` including `-m0` (the per-file cap, resolved in the resident session). Every clause mirrors `session/request.zig::classify` term-for-term (a `\n`/`\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
     return _eligible(request, _INELIGIBLE_FIELDS)
 
 
@@ -401,6 +401,7 @@ class Session:
                     (_FLAG_FIXED if request.fixed else 0)
                     | (_FLAG_IGNORE_CASE if request.ignore_case else 0)
                     | (_FLAG_WORD if request.word else 0)
+                    | (_FLAG_INVERT if request.invert else 0)
                     | (_FLAG_SMART_CASE if request.smart_case else 0)
                     | (_FLAG_QUIET if request.quiet else 0)
                     | (_FLAG_MAX_COUNT if request.max_count is not None else 0)

@@ -31,150 +31,107 @@ Usage:  python3 run.py            # score the frozen spec.json
 """
 
 import base64
-import contextlib
 import json
-import os
 from pathlib import Path
-import re
 import subprocess
 import sys
 import tempfile
 
+import _oracle as O
+from _oracle import GIST, RG
+
 
 HERE = Path(__file__).resolve().parent
-GIST = HERE.parents[1] / "zig-out" / "bin" / "gist"  # …/gist/zig-out/bin — the CLI (`rg` verb)
-RG = "rg"
 spec = json.loads((HERE / "spec.json").read_text())
-
-# gist's default soft output cap (the agent-context guard, corpus.zig) would clip
-# a high-hit case and diverge from ripgrep's uncapped output; this differential
-# oracle needs the full stream, so lift the soft cap for every gist child (both
-# engines inherit os.environ). The hard OOM ceiling stays on.
-os.environ.setdefault("GIST_UNCAP", "1")
-
-
-def materialize(rec, root: Path):
-    """Perform materialize."""
-    for d in rec["dirs"]:
-        (root / d).mkdir(parents=True, exist_ok=True)
-    for f in rec["files"]:
-        p = root / f["path"]
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(base64.b64decode(f["b64"]))
-    # Sparse zero-filled files (ripgrep's Dir::create_size = File::set_len).
-    for s in rec.get("sized", []):
-        p = root / s["path"]
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("wb") as fh:
-            fh.truncate(int(s["size"]))
-    # Symlinks (ripgrep's Dir::link_file/link_dir → absolute symlink target).
-    for link in rec.get("symlinks", []):
-        p = root / link["path"]
-        p.parent.mkdir(parents=True, exist_ok=True)
-        if p.is_symlink() or p.exists():
-            with contextlib.suppress(OSError):
-                p.unlink()
-        p.symlink_to(root / link["target"])
-
-
-def run(cmd, cwd, stdin_bytes, engine_env=None):
-    """Run a command with optional stdin bytes; return (rc, stdout, stderr).
-
-    No piped input → hand the child /dev/null (a char device), exactly like
-    ripgrep's own Rust harness. Load-bearing: an empty *pipe* would make rg
-    read (empty) stdin instead of searching the directory.
-    """
-    kw = {"input": stdin_bytes} if stdin_bytes is not None else {"stdin": subprocess.DEVNULL}
-    env = {**os.environ, **engine_env} if engine_env else None
-    try:
-        r = subprocess.run(cmd, cwd=cwd, capture_output=True, timeout=20, env=env, **kw)
-    except subprocess.TimeoutExpired:
-        return 124, b"", b"timeout"
-    else:
-        return r.returncode, r.stdout, r.stderr
-
-
-def sort_lines(b: bytes) -> bytes:
-    """Return bytes for sort lines."""
-    ls = b.decode("utf-8", "replace").strip("\n").split("\n") if b.strip() else []
-    return ("\n".join(sorted(ls)) + ("\n" if ls else "")).encode()
-
-
-# `--stats` prints two wall-clock lines (`… seconds spent searching`, `… seconds
-# total`) that are inherently non-deterministic. ripgrep's own tests only assert
-# `contains("seconds")`, never the value — so we normalize both sides' timing
-# lines to a fixed token before the byte-exact diff (not a correctness property).
-_SECONDS = re.compile(rb"^[0-9.]+ (seconds spent searching|seconds total)$", re.MULTILINE)
-
-
-def norm_time(b: bytes) -> bytes:
-    """Return bytes for norm time."""
-    return _SECONDS.sub(rb"T \1", b)
-
-
-# `--json` carries the same inherently non-reproducible accounting the text
-# `--stats` block does: wall-clock `elapsed`/`elapsed_total` objects and the
-# printer-internal `bytes_printed` byte count. ripgrep's own JSON tests assert
-# structure + counts, never these — so we normalize just those fields (on BOTH
-# sides) before the byte-exact diff, exactly like the `seconds` normalization.
-_ELAPSED = re.compile(rb'"elapsed(?:_total)?":\{[^}]*\}')
-_BYTES_PRINTED = re.compile(rb'"bytes_printed":\d+')
-
-
-def norm_json(b: bytes) -> bytes:
-    """Return bytes for norm json."""
-    b = _ELAPSED.sub(rb'"elapsed":{}', b)
-    return _BYTES_PRINTED.sub(rb'"bytes_printed":0', b)
-
-
-# gist now IMPLEMENTS the git ignore boundary (.gitignore/.ignore/.rgignore,
-# .git/info/exclude incl. linked worktrees, --ignore-file, --no-ignore*), so a
-# diverging ignore test is a REAL bug, not "by design" — it must FAIL, not hide
-# as NA. Only two ignore sub-features stay genuinely out of scope: a GLOBAL
-# gitignore (git `core.excludesFile` / `$XDG_CONFIG_HOME`, machine-external
-# state a locator shouldn't read) and fd's `.fdignore` dialect (not ripgrep's).
-UNSUPPORTED_IGNORE_FILES = {".fdignore"}
-UNSUPPORTED_IGNORE_FLAGS = ("--no-ignore-global", "--ignore-file-case-insensitive")
-
-
-def _exercises_ignore(rec) -> bool:
-    for f in rec["files"]:
-        if f["path"].rsplit("/", 1)[-1] in UNSUPPORTED_IGNORE_FILES:
-            return True
-    return any(a in UNSUPPORTED_IGNORE_FLAGS for a in rec["argv"])
-
-
-_ANSI = re.compile(rb"\x1b\[[0-9;]*m")
-
-
-def _strip_ansi(b: bytes) -> bytes:
-    return _ANSI.sub(b"", b)
-
-
-def _uses_color(rec) -> bool:
-    return any(
-        a in ("--color", "--colors") or a.startswith(("--color=", "--colors=")) for a in rec["argv"]
-    )
 
 
 def score(rec, engine_env=None):
-    """Perform score."""
+    """Bucket one mined case against live ripgrep, dispatched by the stream its
+    upstream `rgtest!` asserted on (`terminal`).
+
+    A case with no replayable argv (a `control-flow`/`fixture-helper` miner skip)
+    stays SKIP — those are credited through the coverage manifest, not replayed
+    here. Everything else runs on BOTH tools and is scored at the *upstream test's
+    own oracle*: `stdout` diffs bytes, `exit` diffs the return code, `stderr`
+    (`assert_non_empty_stderr`) requires a matching diagnostic + exit class, and
+    `output` (`.output()`/`.raw_output()`) asserts stdout + exit + that a warning
+    ripgrep emits is not silently dropped.
+    """
     if rec["status"] == "skip" or not rec["argv"]:
         return "SKIP", "control-flow/unresolved"
-    if rec["pcre2"]:
-        return "SKIP", "pcre2-only"
-    if rec["terminal"] != "stdout":
-        return "SKIP", f"terminal={rec['terminal']}"
 
-    with tempfile.TemporaryDirectory() as td:
+    # ignore_cleanup_errors: gist's resident-session auto-serve may asynchronously
+    # touch its working dir after the child returns; that's a perf-tier daemon,
+    # never part of what's scored, so a cleanup race must not crash the board.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         root = Path(td)
-        materialize(rec, root)
+        O.materialize(rec, root)
         cwd = str(root / rec["current_dir"]) if rec["current_dir"] else str(root)
         stdin = base64.b64decode(rec["stdin"]) if rec["stdin"] else None
-        argv = rec["argv"]
-        rc_rg, out_rg, err_rg = run([RG, "--path-separator", "/", *argv], cwd, stdin)
-        rc_g, out_g, err_g = run([str(GIST), "rg", *argv], cwd, stdin, engine_env)
+        rc_rg, out_rg, err_rg = O.run(O.rg_cmd(rec), cwd, stdin)
+        rc_g, out_g, err_g = O.run(O.gist_cmd(rec), cwd, stdin, engine_env)
 
+    term = rec["terminal"]
+    if term in ("exit", "err"):
+        return _score_exit(rec, rc_g, err_g, rc_rg, err_rg)
+    if term == "stderr":
+        return _score_stderr(rc_g, err_g, rc_rg, err_rg)
+    if term == "output":
+        return _score_output(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg)
+    return _score_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg)
+
+
+def _score_exit(rec, rc_g, err_g, rc_rg, err_rg):
+    """`assert_exit_code`: ripgrep pins one return code; gist must reproduce it.
+
+    Live rg is the oracle (not the mined literal, so an rg-version drift is
+    self-correcting). A gist that exits 2 where rg didn't is a real regression,
+    never a design-boundary NA — the exit-code contract (0 match / 1 none /
+    2 error) is one gist claims in full.
+    """
+    if rc_g == rc_rg:
+        return "PASS", ""
+    # A gist exit-2 that is one of its DOCUMENTED engine declines (lookaround /
+    # backreferences / mixed per-pattern flags — see `is_design_decline`) is the
+    # same purposeful boundary a `stdout`-terminal case already scores NA on, not a
+    # regression. rg's own exit here is a normal 0/1 (it has no such boundary); gist
+    # declines loud and names the fallback. Score it NA uniformly across terminals.
+    if rc_g == 2 and rc_rg in (0, 1) and O.is_design_decline(err_g):
+        return "NA", "gist engine decline by design (use -P/--engine auto): " + err_g.decode("utf-8", "replace").strip().split("\n", 1)[0][:90]
+    return "FAIL", f"exit rc gist={rc_g} rg={rc_rg} · rg stderr={err_rg.decode('utf-8', 'replace')[:80]!r}"
+
+
+def _score_stderr(rc_g, err_g, rc_rg, err_rg):
+    """`assert_non_empty_stderr`: ripgrep warned/errored on stderr. gist must
+    reach the same exit class AND emit its own (non-empty) diagnostic — a silent
+    accept where rg warns is a real gap. Exact wording is gist's own (color.zig
+    sibling: diagnostics are gist's voice), so only presence + exit are compared.
+    """
+    if rc_g != rc_rg:
+        return "FAIL", f"exit rc gist={rc_g} rg={rc_rg}"
+    if err_rg.strip() and not err_g.strip():
+        return "FAIL", "rg emitted a diagnostic; gist stderr is empty (silent accept)"
+    return "PASS", "own diagnostic wording; exit-class + presence parity"
+
+
+def _score_output(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg):
+    """`.output()`/`.raw_output()`: ripgrep inspects stdout + stderr + status
+    together. Assert stdout byte-parity (at the case's own cmp bar), exit-code
+    parity, and that a diagnostic rg prints isn't dropped silently — the exact
+    diagnostic text stays gist's own (see `_score_stderr`).
+    """
+    bucket, detail = _cmp_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg)
+    if bucket != "PASS":
+        return bucket, detail
+    if rc_g != rc_rg:
+        return "FAIL", f"stdout matched but exit rc gist={rc_g} rg={rc_rg}"
+    if err_rg.strip() and not err_g.strip():
+        return "FAIL", "rg emitted a diagnostic; gist stderr is empty (silent accept)"
+    return "PASS", ""
+
+
+def _score_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg):
+    """The default `.stdout()` oracle: a fixture/rg-error guard, then a byte diff."""
     if rc_rg == 2:
         e = err_rg.decode("utf-8", "replace")
         if "No such file" in e or "IO error" in e:
@@ -182,14 +139,20 @@ def score(rec, engine_env=None):
         return "RG_ERR", e[:120]
     if rc_g == 2:
         return "NA", err_g.decode("utf-8", "replace")[:120]
+    return _cmp_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg)
 
+
+def _cmp_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg):
+    """Byte-diff gist vs rg stdout (with the case's normalizations + the honest
+    design-boundary re-bucketing), returning one of PASS/ORDER/NA/FAIL.
+    """
     if "--stats" in rec["argv"]:
-        out_g, out_rg = norm_time(out_g), norm_time(out_rg)
+        out_g, out_rg = O.norm_time(out_g), O.norm_time(out_rg)
     if "--json" in rec["argv"]:
-        out_g, out_rg = norm_json(out_g), norm_json(out_rg)
+        out_g, out_rg = O.norm_json(out_g), O.norm_json(out_rg)
     if out_g == out_rg:
         return "PASS", ""
-    if sort_lines(out_g) == sort_lines(out_rg):
+    if O.sort_lines(out_g) == O.sort_lines(out_rg):
         # ripgrep's own assertion for this test: `eqnice!` (cmp=plain) pins the
         # exact bytes, `eqnice_sorted!` (cmp=sort) compares sorted lines because
         # rg's parallel dir walk is genuinely nondeterministic there (empirically:
@@ -221,22 +184,22 @@ def score(rec, engine_env=None):
     #   (e) `--crlf`+`--color`: ripgrep injects a `\r` in color mode that is
     #       absent from the file AND from rg's OWN plain output; gist matches rg's
     #       plain output and stays self-consistent, so it does not replicate it.
-    if _exercises_ignore(rec):
+    if O.exercises_ignore(rec):
         return "NA", "unsupported ignore source by design (global gitignore / .fdignore)"
     if b"binary file matches" in out_rg:
         return "NA", "text/source-oriented by design (skips binary)"
     if "--type-list" in rec["argv"]:
         return "NA", "rg-sorted superset registry by design (scope/types.zig)"
-    if _uses_color(rec) and _strip_ansi(out_g) == _strip_ansi(out_rg):
+    if O.uses_color(rec) and O.strip_ansi(out_g) == O.strip_ansi(out_rg):
         return "NA", "own color palette by design (color.zig)"
     if (
-        _uses_color(rec)
+        O.uses_color(rec)
         and "--crlf" in rec["argv"]
-        and _strip_ansi(out_g).replace(b"\r\n", b"\n")
-        == _strip_ansi(out_rg).replace(b"\r\n", b"\n")
+        and O.strip_ansi(out_g).replace(b"\r\n", b"\n")
+        == O.strip_ansi(out_rg).replace(b"\r\n", b"\n")
     ):
         return "NA", "ripgrep --crlf+color \\r artifact not replicated (matches rg plain)"
-    return "FAIL", None
+    return "FAIL", f"stdout differs (gist {len(out_g)}B rc={rc_g} · rg {len(out_rg)}B rc={rc_rg})"
 
 
 # The whole mined suite runs once per ENGINE — parallel (`pipeline.zig`,

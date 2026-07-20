@@ -25,7 +25,10 @@ OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
 CERT="${OUT}/CERTIFICATE.md"
 CERT_SUDO="${CERT_SUDO:-auto}"
 
-die() { echo "certify_layers: $*" >&2; exit 1; }
+die() {
+  echo "certify_layers: $*" >&2
+  exit 1
+}
 note() { echo "certify_layers: $*"; }
 
 [[ -s "${CERT}" ]] || die "missing ${CERT} — run Layer A first (zig build -Doptimize=ReleaseFast certify / bench/certify/certify.sh)"
@@ -53,7 +56,10 @@ run_root() { # <abs-bin> [args…] — 0 on success, 1 if skipped/unavailable
     return $?
   fi
   case "${CERT_SUDO}" in
-    0) note "CERT_SUDO=0 — skipping root re-run of $(basename "${bin}")"; return 1 ;;
+    0)
+      note "CERT_SUDO=0 — skipping root re-run of $(basename "${bin}")"
+      return 1
+      ;;
     1)
       note "CERT_SUDO=1 — prompting for sudo to run $(basename "${bin}")…"
       (cd "${REPO}" && sudo "${bin}" "$@")

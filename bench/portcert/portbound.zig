@@ -47,7 +47,7 @@ const simd_probe = @import("probes/simd_contains.zig");
 const dfa_probe = @import("probes/dfa_step.zig");
 
 const Regex = gist.regex.Regex;
-const out_dir = gist.corpus.out_dir;
+const out_dir = gist.corpus.default_out_dir;
 
 // Best-of-N: interference from coworking agents on this shared box only ever
 // *slows* a trial, so the min cycles (and min ns) across trials is the cleanest

@@ -79,6 +79,14 @@ _ELIGIBLE: list[SearchRequest] = [
     SearchRequest(pattern="TODO", max_count=0),  # rg's `-m0`: matches nothing
     SearchRequest(pattern="todo", ignore_case=True, max_count=2),
     SearchRequest(pattern="TODO", word=True, max_count=2),
+    # v2 lane 3b: -v is warm-eligible (the session answers the `lines(f) −
+    # matches(f)` set-complement, sound under the trigram index), alone and
+    # composed with -F / -i / -w / -m N across every mode.
+    SearchRequest(pattern="TODO", invert=True),
+    SearchRequest(pattern="TODO", fixed=True, invert=True),
+    SearchRequest(pattern="todo", ignore_case=True, invert=True),
+    SearchRequest(pattern="TODO", word=True, invert=True),
+    SearchRequest(pattern="TODO", invert=True, max_count=2),
 ]
 
 # One request per ineligible DIMENSION — every field/scope that must fall to cold,
@@ -90,7 +98,6 @@ _INELIGIBLE: list[SearchRequest] = [
     SearchRequest(pattern="TODO", iglobs=("*.PY",)),
     SearchRequest(pattern="TODO", types=("py",)),
     SearchRequest(pattern="TODO", not_types=("py",)),
-    SearchRequest(pattern="TODO", invert=True),
     SearchRequest(pattern="TODO", hidden=True),
     SearchRequest(pattern="TODO", no_ignore=True),
     SearchRequest(pattern="TODO", follow=True),

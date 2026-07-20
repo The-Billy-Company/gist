@@ -213,12 +213,19 @@ pub fn files(request: &SearchRequest) -> Result<Vec<String>> {
     Ok(paths)
 }
 
-/// Total matching lines across the searched tree (`--count-matches`).
+/// Total matching lines across the searched tree.
+///
+/// rg `-c`/`--count`: one line counted once regardless of how many times the
+/// pattern hits it — the semantic every other count surface shares (the
+/// resident daemon's `countLines`, the in-process FFI's per-line stream, the
+/// Python `count`). Was `--count-matches` (per-occurrence), which over-counted
+/// a line with repeated hits and, under `-m N`, silently diverged from the
+/// warm transports.
 ///
 /// # Errors
 /// See [`SearchRequest::count`].
 pub fn count(request: &SearchRequest) -> Result<usize> {
-    let out = invoke(&["--count-matches", "--no-filename"], request)?;
+    let out = invoke(&["--count", "--no-filename"], request)?;
     Ok(out
         .stdout
         .lines()

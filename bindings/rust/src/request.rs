@@ -53,6 +53,8 @@ pub struct SearchRequest {
     pub ignore_case: bool,
     pub smart_case: bool,
     pub word: bool,
+    /// Print nothing; exit 0 at the first match, 1 if none (`-q`).
+    pub quiet: bool,
     pub invert: bool,
     pub globs: Vec<String>,
     pub iglobs: Vec<String>,
@@ -97,6 +99,7 @@ impl SearchRequest {
             ignore_case: false,
             smart_case: false,
             word: false,
+            quiet: false,
             invert: false,
             globs: Vec::new(),
             iglobs: Vec::new(),
@@ -203,6 +206,14 @@ impl SearchRequest {
     #[must_use]
     pub fn word(mut self) -> Self {
         self.word = true;
+        self
+    }
+
+    /// Suppress output; the exit code alone reports whether any line matched
+    /// (`-q`). Served warm as an existence early-halt (first match wins).
+    #[must_use]
+    pub fn quiet(mut self) -> Self {
+        self.quiet = true;
         self
     }
 
@@ -347,6 +358,9 @@ impl SearchRequest {
         if self.word {
             push("-w");
         }
+        if self.quiet {
+            push("-q");
+        }
         if self.invert {
             push("-v");
         }
@@ -445,7 +459,8 @@ impl SearchRequest {
         engine::files(self)
     }
 
-    /// Total matching lines across the searched tree (`--count-matches`).
+    /// Total matching lines across the searched tree (`-c`/`--count`; a line
+    /// with repeated hits counts once).
     ///
     /// # Errors
     /// As [`run`](SearchRequest::run).

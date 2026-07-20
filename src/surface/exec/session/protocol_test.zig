@@ -1,0 +1,305 @@
+//! gist resident session — the UDS wire-protocol codec suite (ADR-352 rung 2.5).
+//!
+//! Pure encode/decode over byte slices (no socket). Round-trips are lossless;
+//! malformed frames are hard errors.
+
+const std = @import("std");
+const protocol = @import("protocol.zig");
+const request = @import("request.zig");
+
+const gpa = std.testing.allocator;
+
+/// Encode one frame and return the parser's view of it (the round-trip the
+/// server and client each perform over the socket).
+fn roundTrip(buf: *std.ArrayList(u8)) !protocol.Parsed {
+    return (try protocol.parseFrame(buf.items)) orelse return error.TestExpectedFrame;
+}
+
+test "writeFrame ↔ parseFrame round-trips opcode + payload" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.writeFrame(&buf, gpa, .ping, "hello");
+
+    const p = try roundTrip(&buf);
+    try std.testing.expectEqual(protocol.Opcode.ping, p.op);
+    try std.testing.expectEqualStrings("hello", p.payload);
+    try std.testing.expectEqual(buf.items.len, p.consumed);
+}
+
+test "parseFrame returns null until a whole frame is buffered" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.writeFrame(&buf, gpa, .query, "payload-bytes");
+
+    // Every strict prefix is an incomplete frame → keep reading, never a parse.
+    for (0..buf.items.len) |n| {
+        try std.testing.expectEqual(@as(?protocol.Parsed, null), try protocol.parseFrame(buf.items[0..n]));
+    }
+    try std.testing.expect((try protocol.parseFrame(buf.items)) != null);
+}
+
+test "query encode/decode preserves mode, flags, and pattern" {
+    inline for (.{ request.Mode.files, request.Mode.count, request.Mode.lines }) |mode| {
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(gpa);
+        const req = request.Request{ .pattern = "needle", .mode = mode, .fixed = true, .ignore_case = true, .line_num = true };
+        try protocol.encodeQuery(&buf, gpa, req);
+
+        const p = try roundTrip(&buf);
+        try std.testing.expectEqual(protocol.Opcode.query, p.op);
+        const got = try protocol.decodeQuery(p.payload);
+        try std.testing.expectEqual(mode, got.mode);
+        try std.testing.expect(got.fixed);
+        try std.testing.expect(got.ignore_case);
+        try std.testing.expect(got.line_num);
+        try std.testing.expectEqualStrings("needle", got.pattern);
+    }
+}
+
+test "query v2 round-trips the raw smart_case bit independently of ignore_case" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const req = request.Request{ .pattern = "Needle", .mode = .lines, .smart_case = true };
+    try protocol.encodeQuery(&buf, gpa, req);
+
+    const p = try roundTrip(&buf);
+    const got = try protocol.decodeQuery(p.payload);
+    try std.testing.expect(got.smart_case);
+    try std.testing.expect(!got.ignore_case);
+    try std.testing.expect(!got.fixed);
+    try std.testing.expect(!got.word);
+    try std.testing.expectEqualStrings("Needle", got.pattern);
+}
+
+test "query v2 round-trips the word bit (lane 2) independently of the rest" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const req = request.Request{ .pattern = "run", .mode = .count, .word = true };
+    try protocol.encodeQuery(&buf, gpa, req);
+
+    const p = try roundTrip(&buf);
+    const got = try protocol.decodeQuery(p.payload);
+    try std.testing.expect(got.word);
+    try std.testing.expect(!got.fixed and !got.ignore_case and !got.smart_case and !got.line_num);
+    try std.testing.expectEqualStrings("run", got.pattern);
+}
+
+test "query v2 round-trips the quiet bit (lane 4) independently of the rest" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const req = request.Request{ .pattern = "err", .mode = .lines, .quiet = true };
+    try protocol.encodeQuery(&buf, gpa, req);
+
+    const p = try roundTrip(&buf);
+    const got = try protocol.decodeQuery(p.payload);
+    try std.testing.expect(got.quiet);
+    try std.testing.expectEqual(@as(?u64, null), got.max_count);
+    try std.testing.expect(!got.fixed and !got.word and !got.ignore_case and !got.smart_case);
+    try std.testing.expectEqualStrings("err", got.pattern);
+}
+
+test "query v2 round-trips the max_count u64 (lane 4) at 0, 1, and > u32" {
+    inline for (.{ @as(u64, 0), @as(u64, 1), @as(u64, 4_294_967_301) }) |m| {
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(gpa);
+        const req = request.Request{ .pattern = "needle", .mode = .count, .max_count = m };
+        try protocol.encodeQuery(&buf, gpa, req);
+
+        const p = try roundTrip(&buf);
+        const got = try protocol.decodeQuery(p.payload);
+        try std.testing.expectEqual(@as(?u64, m), got.max_count);
+        try std.testing.expect(!got.quiet);
+        try std.testing.expectEqualStrings("needle", got.pattern);
+    }
+    // Absent max_count leaves the field null (no bit 7, no u64 on the wire).
+    var buf2: std.ArrayList(u8) = .empty;
+    defer buf2.deinit(gpa);
+    try protocol.encodeQuery(&buf2, gpa, .{ .pattern = "x", .mode = .lines });
+    try std.testing.expectEqual(@as(?u64, null), (try protocol.decodeQuery((try roundTrip(&buf2)).payload)).max_count);
+}
+
+test "decodeQuery round-trips the invert bit; the flag byte is now fully assigned" {
+    // Lane 3b: bit 4 (`-v`) joins `known_flags` — the set-complement makes it
+    // warm-eligible, so a set invert bit decodes to `invert = true` (no longer
+    // BadFrame → cold).
+    const payload = [_]u8{ @intFromEnum(request.Mode.lines), 1 << 4, 'n' };
+    const got = try protocol.decodeQuery(&payload);
+    try std.testing.expect(got.invert);
+    try std.testing.expectEqualStrings("n", got.pattern);
+    // Every bit 0..7 now carries an engine semantic, so `known_flags` spans the
+    // whole byte — fail-closed on a malformed query now rests on the version
+    // handshake plus the length/opcode gates, not a spare reserved bit.
+    try std.testing.expectEqual(@as(u8, 0xFF), protocol.known_flags);
+    // A full encode→decode preserves invert alongside the rest of the family.
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.encodeQuery(&buf, gpa, .{ .pattern = "needle", .mode = .files, .invert = true, .word = true });
+    const rt = try protocol.decodeQuery((try roundTrip(&buf)).payload);
+    try std.testing.expect(rt.invert and rt.word);
+}
+
+test "decodeQuery fails closed on a max_count flag with a truncated or pattern-less u64" {
+    // Bit 7 set but < 8 bytes for the u64 ⇒ BadFrame (a truncated frame, not an
+    // empty-pattern one). Hand-built: mode, flags=max_count_present, 3 bytes.
+    const trunc = [_]u8{ @intFromEnum(request.Mode.files), 1 << 7, 1, 2, 3 };
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&trunc));
+    // A full 8-byte u64 but no pattern after it ⇒ empty-pattern BadFrame.
+    const no_pat = [_]u8{ @intFromEnum(request.Mode.files), 1 << 7 } ++ [_]u8{0} ** 8;
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&no_pat));
+}
+
+test "files result encode/decode yields every path in order" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const files = [_][]const u8{ "a/x.zig", "b/y.zig", "c/z.zig" };
+    try protocol.encodeFiles(&buf, gpa, &files);
+
+    const p = try roundTrip(&buf);
+    try std.testing.expectEqual(protocol.Opcode.result, p.op);
+    const view = try protocol.decodeResult(p.payload);
+    var iter = view.files;
+    for (files) |want| {
+        const got = (try iter.next()) orelse return error.TestMissingPath;
+        try std.testing.expectEqualStrings(want, got);
+    }
+    try std.testing.expectEqual(@as(?[]const u8, null), try iter.next());
+}
+
+test "count result encode/decode preserves the u64" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.encodeCount(&buf, gpa, 4_294_967_301); // > u32 to prove the width
+
+    const p = try roundTrip(&buf);
+    const view = try protocol.decodeResult(p.payload);
+    try std.testing.expectEqual(@as(u64, 4_294_967_301), view.count);
+}
+
+/// Reassemble a chunk-streamed `lines` answer from a raw frame byte stream —
+/// the exact loop the warm client runs over the socket.
+fn reassembleLines(bytes: []const u8, out: *std.ArrayList(u8)) !bool {
+    var rest = bytes;
+    while (true) {
+        const p = (try protocol.parseFrame(rest)) orelse return error.TestTruncatedStream;
+        rest = rest[p.consumed..];
+        switch (p.op) {
+            .chunk => try out.appendSlice(gpa, p.payload),
+            .result => {
+                try std.testing.expectEqual(@as(usize, 0), rest.len); // terminal frame is last
+                return (try protocol.decodeResult(p.payload)).lines;
+            },
+            else => return error.TestUnexpectedFrame,
+        }
+    }
+}
+
+test "lines answer: chunk framing reassembles byte-identically, split at chunk_bytes" {
+    // A body larger than one chunk budget must split into ⌈len/chunk_bytes⌉
+    // chunks and reassemble to the exact original bytes.
+    const body = try gpa.alloc(u8, protocol.chunk_bytes + 1234);
+    defer gpa.free(body);
+    for (body, 0..) |*b, i| b.* = @truncate(i *% 251);
+
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.encodeLines(&buf, gpa, body, true);
+
+    // First frame is a full-budget chunk, proving the split boundary.
+    const first = (try protocol.parseFrame(buf.items)).?;
+    try std.testing.expectEqual(protocol.Opcode.chunk, first.op);
+    try std.testing.expectEqual(protocol.chunk_bytes, first.payload.len);
+
+    var got: std.ArrayList(u8) = .empty;
+    defer got.deinit(gpa);
+    try std.testing.expect(try reassembleLines(buf.items, &got));
+    try std.testing.expectEqualSlices(u8, body, got.items);
+}
+
+test "lines answer: a no-match reply is zero chunks + a terminal matched=false" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.encodeLines(&buf, gpa, "", false);
+
+    var got: std.ArrayList(u8) = .empty;
+    defer got.deinit(gpa);
+    try std.testing.expect(!try reassembleLines(buf.items, &got));
+    try std.testing.expectEqualStrings("", got.items);
+}
+
+test "decodeResult(lines) rejects a truncated terminal frame" {
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeResult(&.{@intFromEnum(request.Mode.lines)}));
+}
+
+test "chunk_fd payload encode/decode preserves length + matched, fails closed short" {
+    // The daemon builds the fixed 14-byte control frame by hand (see
+    // `sendLinesFd`); parse it back through the shared frame reader + decoder.
+    inline for (.{ .{ @as(u64, 1 << 20), true }, .{ @as(u64, 4_294_967_301), false } }) |c| {
+        var frame: [14]u8 = undefined;
+        std.mem.writeInt(u32, frame[0..4], 1 + 8 + 1, .little);
+        frame[4] = @intFromEnum(protocol.Opcode.chunk_fd);
+        std.mem.writeInt(u64, frame[5..13], c[0], .little);
+        frame[13] = @intFromBool(c[1]);
+        const p = (try protocol.parseFrame(&frame)).?;
+        try std.testing.expectEqual(protocol.Opcode.chunk_fd, p.op);
+        const cf = try protocol.decodeChunkFd(p.payload);
+        try std.testing.expectEqual(c[0], cf.length);
+        try std.testing.expectEqual(c[1], cf.matched);
+    }
+    // A payload shorter than [u64 length][u8 matched] fails closed.
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeChunkFd(&.{ 0, 0, 0, 0 }));
+}
+
+test "fd-transport capability advertises exactly where the shm path exists" {
+    const shm = @import("shm.zig");
+    // The advertised set is the fd bit iff this target has the anonymous-shm +
+    // SCM_RIGHTS path — a peer on an unsupported target advertises nothing and
+    // stays on chunk frames automatically.
+    const expect_fd = shm.supported;
+    try std.testing.expectEqual(expect_fd, (protocol.caps_supported & protocol.cap_fd_transport) != 0);
+    // It is a session/transport capability, NOT a query-flag bit (that byte is full).
+    try std.testing.expectEqual(@as(u8, 0xFF), protocol.known_flags);
+    try std.testing.expect(protocol.fd_transport_floor > 0);
+}
+
+test "ready handshake encode/decode preserves both generations and the index gen" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.encodeReady(&buf, gpa, 7, 42, "gen-abc123");
+
+    const p = try roundTrip(&buf);
+    try std.testing.expectEqual(protocol.Opcode.ready, p.op);
+    const r = try protocol.decodeReady(p.payload);
+    try std.testing.expectEqual(protocol.protocol_version, r.proto);
+    try std.testing.expectEqual(@as(u64, 7), r.daemon_gen);
+    try std.testing.expectEqual(@as(u64, 42), r.session_gen);
+    try std.testing.expectEqualStrings("gen-abc123", r.index_gen);
+}
+
+test "parseFrame fails closed on a zero-length or oversized frame" {
+    var zero = [_]u8{ 0, 0, 0, 0, 1 }; // len == 0
+    try std.testing.expectError(protocol.WireError.FrameTooLarge, protocol.parseFrame(&zero));
+
+    var huge: [5]u8 = undefined;
+    std.mem.writeInt(u32, huge[0..4], protocol.max_frame + 1, .little);
+    huge[4] = 1;
+    try std.testing.expectError(protocol.WireError.FrameTooLarge, protocol.parseFrame(&huge));
+}
+
+test "parseFrame rejects an unknown opcode" {
+    var bad = [_]u8{ 1, 0, 0, 0, 250 }; // len 1, opcode 250 ∉ Opcode
+    try std.testing.expectError(protocol.WireError.BadOpcode, protocol.parseFrame(&bad));
+}
+
+test "decodeQuery / decodeResult reject truncated payloads" {
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&.{})); // < 2 bytes
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&.{ @intFromEnum(request.Mode.files), 0 })); // empty pattern
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeResult(&.{})); // no mode byte
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeResult(&.{@intFromEnum(request.Mode.count)})); // count < 9 bytes
+}
+
+test "FileIter fails closed on a truncated path length" {
+    // mode=files, n=1, then a path length of 8 with only 2 bytes behind it.
+    var payload = [_]u8{ @intFromEnum(request.Mode.files), 1, 0, 0, 0, 8, 0, 0, 0, 'a', 'b' };
+    var view = try protocol.decodeResult(&payload);
+    try std.testing.expectError(protocol.WireError.BadFrame, view.files.next());
+}

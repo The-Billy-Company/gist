@@ -1,0 +1,86 @@
+<!--
+doc_radar:
+  paths_exist:
+    - pkg/kernels/irregex/src/surface/exec/session/resident.zig
+    - pkg/kernels/irregex/src/surface/exec/session/recall.zig
+    - pkg/kernels/irregex/src/surface/exec/session/corpus.zig
+    - pkg/kernels/irregex/src/surface/exec/session/render.zig
+    - pkg/kernels/irregex/src/surface/exec/session/request.zig
+    - pkg/kernels/irregex/src/surface/exec/session/protocol.zig
+    - pkg/kernels/irregex/src/surface/exec/session/watch.zig
+    - pkg/kernels/irregex/src/surface/exec/session/dirty.zig
+    - pkg/kernels/irregex/src/surface/exec/session/delta.zig
+    - pkg/kernels/irregex/bindings/python/tests/test_classify_parity.py
+  sentinels:
+    - file: pkg/kernels/irregex/contract/search_api.toml
+      contains: ["[session]", "eligible_modes", "fail-closed-reconcile", "\"lines\""]
+    - file: pkg/kernels/irregex/src/surface/exec/session/protocol.zig
+      contains: ["chunk = 11", "protocol_version: u8 = 2", "known_flags", "flag_word", "flag_invert", "flag_smart_case", "flag_quiet", "flag_max_count_present"]
+    - file: pkg/kernels/irregex/src/surface/exec/session/request.zig
+      contains: ["effectiveIgnoreCase", "smart_case"]
+    - file: pkg/kernels/irregex/src/surface/face/gist/main.zig
+      contains: ["[eligible]", "[ineligible]"]
+    - file: pkg/kernels/irregex/src/surface/exec/session/dirty.zig
+      contains: ["armExact", "noteDoubt"]
+    - file: pkg/kernels/irregex/src/surface/exec/session/delta.zig
+      contains: ["needs_full", "keyIsCurrent"]
+-->
+
+# `src/runtime/session/` — the resident search session (ADR-352 rung 2.5)
+
+The warm, in-memory engine behind the `gist serve` daemon. It productizes the
+in-memory bench path (`bench/harness/bench.zig::gistMatches`) as a real
+per-repository service: the corpus bytes + trigram index are held resident, so
+an eligible request answers without re-paying the cold subprocess's process +
+index-mmap + candidate-read startup. It selects its corpus with the cold path's
+own certified rg-default walk (`runtime/cold/engine/serial.zig::defaultFileSet`),
+ingests each file exactly as a cold read would (`corpus.zig`), and lowers each
+query through the shared search core (`engine/query.zig` over `index/trigram`,
+`scan/verify`, `scan/simd`, `regex/core`) — but every entry point **returns
+errors** instead of calling `die()`, which is exactly why the resident path
+sidesteps the exit hazard ADR-352 defers the in-process C FFI on.
+
+| File                           | Role                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`resident.zig`](resident.zig) | `ResidentSession`: mirror + index, mutation overlay, generation reload, the fail-closed reconcile barrier, and the three answer faces — the `-l`/`-c` fold (`query`, answering `-v` by the `queryInvert` set-complement `lines(f) − matching(f)` so the trigram index stays sound and only candidate files run the matcher), the default line search (`queryLines`), and the FFI record stream (`search`).                                                                                                                                     |
+| [`corpus.zig`](corpus.zig)     | The faithful corpus ingest: full reads (no cap), BOM/UTF-16 decode, whole-body first-NUL offsets, empty docs dropped — the same per-file treatment a cold run applies, so binary/oversize/UTF-16 files answer warm exactly as they do cold.                                                                                                                                                                           |
+| [`render.zig`](render.zig)     | The warm `lines` renderer: the default `path:text` / `-n` `path:line:text` frame, produced through the cold engine's **own** `Emitter` + `grepfile.handleBinary` — byte-parity by construction, never a re-derived formatter. Also home to `renderLinesParallel` + the `par_min_bytes` floor: above it EVERY warm face (positive + invert emit, the `-l`/`-c` fold, the FFI record stream) shards its scan over cores through the one shared `math/parallel.zig` primitive, byte-identical to the serial core below it.                                                                                                                                                                         |
+| [`request.zig`](request.zig)   | The eligibility classifier — accepts only the supported argv surface (bare pattern → `lines`, `-l`/`-c`, `-F`, the last-wins case family `-i`/`-s`/`-S`, `-w`, `-v`, `-q`, `-m N`/`--max-count N` (incl `-m0`), `-n`/`-N`, `-e`/`--regexp`; **rootless only** — any explicit PATH arg, even `.`, stays cold; a `\n`/NUL/empty pattern stays cold), everything else → `error.Unsupported` (cold fallback). `Request.effectiveIgnoreCase` is the **single smart-case resolution site**: `-S` folds via `args.hasUpper` at the compile seam, so clients ship the raw bit and never re-implement the fold. This is the single argv authority — the CLI client, auto-spawn, and warm hints all call it, and the Python `session.warm_eligible` field-predicate is its only cross-language projection, mechanically parity-tested (`bindings/python/tests/test_classify_parity.py`) against the built classifier via the `GIST_DEBUG_WARM` `[eligible]`/`[ineligible]` verdict so the two can never drift. |
+| [`protocol.zig`](protocol.zig) | The length-prefixed UDS frame codec (`[u32 len][u8 opcode][payload]`) + fd send/recv, fail-closed on oversized/truncated/unknown frames. A `lines` answer streams as `chunk` frames + a terminal `result`; a `-q` answer is a single terminal `result` carrying one matched bit. v2 grew the query flags byte with the flag-family table — `word`/`invert`/`smart_case`/`quiet`/`max_count` are all live, so the byte is now fully assigned — `max_count` also writes a `u64 LE` cap immediately after the flags byte, the only flag carrying a payload — and `decodeQuery` rejects any bit outside `known_flags` or a truncated cap (BadFrame → decline → cold), so a flag is never silently dropped server-side.                                                                                              |
+| [`watch.zig`](watch.zig)       | The freshness watcher — a pure accelerator (Linux inotify · macOS FSEvents; reconcile-always baseline on other targets) that only ever decides _whether — and how narrowly — the reconcile walk may run_, never correctness. FSEvents runs with per-file events and feeds the exact dirty log; inotify stays coarse (never arms exactness) and poisons the session on queue overflow or an unwatchable new directory. |
+| [`dirty.zig`](dirty.zig)       | The exact dirty-path log: a bounded, deduped set of watcher-reported paths plus two soundness bits — `exact` (the backend promises every dirty bump was preceded by a note) and `doubt` (overflow / OOM / unattributable event ⇒ the next reconcile walks fully). The O(changed) hand-off between backend and reconcile.                                                                                              |
+| [`delta.zig`](delta.zig)       | The O(changed) resolver: maps one drained batch of absolute watcher paths into walk-certified verdicts (`file`/`subtree`/`gone`/`skip`/`needs_full`) using the cold walk's **own** `Ignore` machinery, so a scoped reconcile cannot drift from `defaultFileSet`. Ignore-source edits, `.git` topology, unmapped or non-ASCII paths all answer `needs_full`.                                                           |
+| [`recall.zig`](recall.zig)     | `RetrievalSession`: the sibling warm session for **relate** search/pack. It holds one repo's mmap'd trigram index + doc→path table warm and answers through the shared `runtime/cold/engine/retrieval.zig` kernel, so warm ≡ cold. Unlike the byte-mirroring resident above, its freshness is the persisted index's build **anchor** (`fresh.readAnchor`), so the overlay is cacheable while the watcher proves the roots quiescent. Shares this tier's `watch`/`dirty` accelerators; fail-closed to a cold answer on any doubt. |
+
+## The invariant
+
+`resident matches == gist --no-index matches == rg matches`. It holds by
+construction because both the base corpus and every reconcile re-derive their
+file set from the cold path's own certified walk
+(`runtime/cold/engine/serial.zig::defaultFileSet` — hidden-file exclusion,
+`.gitignore`/`.ignore` precedence, `.git` skip, root scope), never
+`haystack`'s coarse superset — and because per-file ingest is cold's own
+(`corpus.zig`): a binary doc is **admitted** with its first-NUL offset and each
+mode applies cold's binary rule (`-l` observes only complete buffers before the
+NUL one; `-c` suppresses the file; the line search emits pre-cut matches + the
+WARNING), rather than being skipped by an approximate sniff. A query is
+answered from resident bytes directly only in a watcher-proven-clean window;
+otherwise the session reconciles before answering — **scoped** when it can
+prove the drained dirty-path set covers every possible divergence (an exact
+per-file backend, a doubt-free bounded log, one prior covering full pass, no
+ignore-semantics path in the batch: verify exactly those paths via `delta.zig`
+against the walk's own admission rules), else **full** (re-walk the
+authoritative set and diff it against base + overlay: left the set →
+tombstone; new → read in; mtime/ctime advanced → re-read). Every scoped-path
+refusal degrades to the full walk — never to trusting stale bytes. A delete
+that races the walk→report window is caught
+by a per-match existence check whenever the session is not watcher-clean. A
+rebuilt index (`pair.gen` drift) or an errored walk (unreadable directory —
+cold reports it and exits 2) surfaces as `error.Stale`, and the daemon declines
+so the client uses the certified cold path.
+
+The daemon lifecycle, CLI routing, and clients live in
+[`../../cli/gist/daemon/serve`](../../cli/gist/daemon/serve) and
+[`../../cli/gist/daemon/client`](../../cli/gist/daemon/client); the persistent
+client→daemon performance certificate lives in
+[`../../../bench/session`](../../../bench/session).

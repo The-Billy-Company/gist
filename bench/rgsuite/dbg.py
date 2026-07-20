@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 """Side-by-side debugger for a single mined test: materialize its fixture, run real `rg` and `gist rg` with the identical argv+stdin, and print both stdouts + exit codes for eyeballing a divergence.
 
+Shares one replay path with the scoreboard (`_oracle`), so what you eyeball here
+is byte-for-byte what `run.py` scored — including the `--pcre2` the ripgrep test
+harness injects for an `is_pcre2()`-guarded case.
+
 Usage:  python3 dbg.py <name> [<name>…].
 """
 
 import base64
-import contextlib
 import json
-import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 
+import _oracle as O
 
-# gist caps its own output by default (agent-context guard); rg has no such cap,
-# so lift the soft ceiling for byte-exact side-by-side diffing. Hard OOM ceiling stays on.
-os.environ.setdefault("GIST_UNCAP", "1")
 
 HERE = Path(__file__).resolve().parent
-GIST = HERE.parents[1] / "zig-out" / "bin" / "gist"  # the CLI (`rg` verb), not the bench harness
 spec = {r["name"]: r for r in json.loads((HERE / "spec.json").read_text())}
 
 
@@ -28,40 +26,23 @@ def show(n):
     r = spec[n]
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
-        for d in r["dirs"]:
-            (root / d).mkdir(parents=True, exist_ok=True)
-        for f in r["files"]:
-            p = root / f["path"]
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(base64.b64decode(f["b64"]))
-        for s in r.get("sized", []):
-            p = root / s["path"]
-            p.parent.mkdir(parents=True, exist_ok=True)
-            with p.open("wb") as fh:
-                fh.truncate(int(s["size"]))
-        for link in r.get("symlinks", []):
-            p = root / link["path"]
-            p.parent.mkdir(parents=True, exist_ok=True)
-            if p.is_symlink() or p.exists():
-                with contextlib.suppress(OSError):
-                    p.unlink()
-            p.symlink_to(root / link["target"])
+        O.materialize(r, root)
         cwd = str(root / r["current_dir"]) if r["current_dir"] else str(root)
-        kw = (
-            {"input": base64.b64decode(r["stdin"])} if r["stdin"] else {"stdin": subprocess.DEVNULL}
-        )
-        rr = subprocess.run(
-            ["rg", "--path-separator", "/"] + r["argv"], cwd=cwd, capture_output=True, **kw
-        )
-        gg = subprocess.run([str(GIST), "rg"] + r["argv"], cwd=cwd, capture_output=True, **kw)
-    print(f"### {n}  argv={r['argv']}  files={[f['path'] for f in r['files']]} dirs={r['dirs']}")
-    print(f"  rc rg={rr.returncode} gist={gg.returncode}")
+        stdin = base64.b64decode(r["stdin"]) if r["stdin"] else None
+        rc_rg, out_rg, err_rg = O.run(O.rg_cmd(r), cwd, stdin)
+        rc_g, out_g, err_g = O.run(O.gist_cmd(r), cwd, stdin)
+    print(
+        f"### {n}  term={r['terminal']}  argv={O.argv_for(r)}  files={[f['path'] for f in r['files']]} dirs={r['dirs']}"
+    )
+    print(f"  rc rg={rc_rg} gist={rc_g}")
     print("  --- rg stdout ---")
-    print("   " + rr.stdout.decode("utf-8", "replace").replace("\n", "\n   ")[:600])
+    print("   " + out_rg.decode("utf-8", "replace").replace("\n", "\n   ")[:600])
     print("  --- gist stdout ---")
-    print("   " + gg.stdout.decode("utf-8", "replace").replace("\n", "\n   ")[:600])
-    if gg.returncode == 2:
-        print("  gist stderr:", gg.stderr.decode()[:150])
+    print("   " + out_g.decode("utf-8", "replace").replace("\n", "\n   ")[:600])
+    if err_rg.strip():
+        print("  rg stderr:", err_rg.decode("utf-8", "replace")[:200])
+    if err_g.strip():
+        print("  gist stderr:", err_g.decode("utf-8", "replace")[:200])
 
 
 for name in sys.argv[1:]:

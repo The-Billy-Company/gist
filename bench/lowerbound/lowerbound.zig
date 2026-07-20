@@ -47,8 +47,7 @@ const Regex = gist.regex.Regex;
 const Dfa = gist.regex_dfa.Dfa;
 const Dir = std.Io.Dir;
 const load = corpus_mod.load;
-const out_dir = corpus_mod.out_dir;
-const default_roots = corpus_mod.default_roots;
+const out_dir = corpus_mod.default_out_dir;
 
 const probes_mod = @import("probes");
 const Kind = probes_mod.Kind;
@@ -284,7 +283,9 @@ pub fn main(init: std.process.Init) !void {
 }
 
 pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
-    var corpus = try load(gpa, io, &default_roots);
+    const roots = try corpus_mod.resolveRoots(gpa);
+    defer corpus_mod.freeRoots(gpa, roots);
+    var corpus = try load(gpa, io, roots);
     defer corpus.deinit();
     var idx = try Index.build(gpa, corpus.docs);
     defer idx.deinit();

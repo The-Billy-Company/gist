@@ -1,4 +1,22 @@
-# Gist — the composition claim (scope, contract, non-claims)
+---
+doc_radar:
+  sentinels:
+    - file: pkg/kernels/irregex/src/surface/exec/cold/engine/serial.zig
+      contains: ["used purely to ELIDE reads", "never to change the file set"]
+    - file: pkg/kernels/irregex/src/kernel/match/regex/pcre2/literal.zig
+      contains: ["pub fn required"]
+    - file: pkg/kernels/irregex/src/kernel/rank/signals.zig
+      contains: ["pub fn declarationConfidence", "pub fn shapeFingerprint", "pub fn isGenerated"]
+    - file: pkg/kernels/irregex/src/kernel/primitives/crest.zig
+      contains: ["pub const Vector", "pub fn crest"]
+    - file: pkg/kernels/irregex/contract/search_api.toml
+      contains:
+        - 'subprocess = { status = "authoritative"'
+        - 'uds = { status = "operational-accelerator"'
+        - 'ffi = { status = "operational-accelerator"'
+---
+
+# Gist — exact code search built for agents
 
 **Status:** shipped product + measured evidence. CLI face:
 `src/cli/gist/`. Authoritative cold path: `src/runtime/cold/`. Public
@@ -7,142 +25,173 @@ compatibility contract: `gist --schema` (rendered from
 `PRIOR_ART.md`; evidence inventory: `TESTING.md`. Novel crest math:
 [`../crest/PROOF.md`](../crest/PROOF.md).
 
-**One sentence.** Persist an optional candidate index over a live working
-tree, use it only to skip reads that cannot match, always verify survivors
-against current bytes, expose a broad fail-loud ripgrep-compatible CLI
-subset, and (when asked) rank hits for an agent's bounded context — measured
-so a faster wrong answer cannot earn a win.
+**Gist is grep rebuilt around the coding-agent loop.** It keeps ripgrep's
+familiar command shape and a fail-closed correctness contract, then makes the
+repeated operation agents actually perform—locate, inspect, refine, locate
+again—fast enough to be a primitive rather than a tax.
 
 ---
 
-## 0. What is claimed (and what is not)
+## 0. The product thesis
 
-### The claim
+Code search for an agent is not one large query. It is dozens or hundreds of
+small questions against a tree changing underneath the searcher:
 
-Gist's contribution is a **systems/workload composition** for one repository
-and one high-frequency consumer: coding agents repeatedly issuing small
-grep-shaped queries against a concurrently changing tree. It combines:
+- Where is this symbol defined?
+- Which call sites matter?
+- Did the rename leave a straggler?
+- Can this regex match anywhere at all?
+- Which result is authored code rather than generated noise?
 
-1. an optional persisted candidate index (trigrams + crest sidecar) with
-   fail-open live scanning;
-2. a freshness overlay so unindexed edits stay visible;
-3. a broad, explicit, fail-loud ripgrep-compatible CLI subset
-   (`flag_catalog` → `gist --schema`);
-4. definition-biased, generated-code-aware ranking for bounded agent context;
-5. a fail-open resident session and in-process FFI that may decline rather
-   than invent answers;
-6. reproducible correctness and cold-start performance gates (Certificate of
-   Optimality layers A–D).
+The winning tool must make those questions cheap without making stale answers
+plausible. That is Gist's purpose: **agent-speed search with the working tree
+still in command**.
 
-None of those ingredients alone is novel (except the crest sieve — separate
-dossier). The value is integrating and measuring them against the agent
-search loop without claiming the semantic, hosted, or structural breadth of
-the systems in `PRIOR_ART.md`.
+### What Gist changes
 
-### Explicit non-claims
+1. **Repeated search becomes a resident operation.** A persisted index avoids
+   irrelevant reads; a warm session avoids process and corpus setup; an FFI
+   lets tools invoke the same engine in-process.
+2. **The useful answer arrives first.** `--rank` lifts likely definitions and
+   dense authored matches while sinking generated files, mirrors, deep paths,
+   and incidental text. It changes order, never membership.
+3. **Rich regex remains indexable when proof permits.** Required literals let
+   PCRE2 lookarounds and backreferences use the trigram index. Crest handles
+   an important literal-free class. Anything unproved scans.
+4. **Compatibility is a contract, not a resemblance.** The CLI, stdout,
+   stderr, Unicode defaults, and exit codes are ripgrep-shaped. `gist
+--schema` states every supported, divergent, ignored, and rejected flag.
+5. **Current bytes always win.** The live walk chooses the corpus. Changed
+   files widen candidates. Every survivor is verified against the file now on
+   disk.
 
-Gist is:
+The result is deliberately boring to call:
 
-- **not a new indexing algorithm** for the trigram family; document and
-  positional n-gram indexes have decades of literature and production use
-  (Cox 2012 is direct ancestry);
-- **not a claim that every pattern is linear-time**; the default engine is
-  RE2/Pike-family linear matching; lookaround, backreferences, and other
-  PCRE2-only constructs require `-P` or `--engine auto` escalation, with
-  resource caps — backtracking is opted into, never disguised;
-- **not a semantic code-intelligence engine**; it does not resolve types,
-  definitions, references, or call graphs — `--rank`'s declaration-shaped
-  boost is heuristic text ranking, not name resolution;
-- **not a Sourcegraph/Moderne/GitHub Code Search replacement**; those systems
-  cover hosted multi-repository search, permissions, semantic metadata,
-  navigation, governance, and transformation workflows that Gist does not
-  attempt;
-- **not structural search or rewrite**; Semgrep, ast-grep, Comby, and
-  OpenRewrite answer a different class of question.
+```bash
+gist 'class Wallet' --rank
+gist 'pgxpool\.\w+' services/backend -t go
+gist -P '(?<=route\()"/api/[^"]+"' -U
+```
 
-`gist --schema` is authoritative for the narrower public compatibility
-contract. Where any prose (including this dossier) lags the shipped binary,
-the schema, the live differential harness, and the committed certificate win.
+The difference is underneath: fewer tree reads, less repeated setup, less
+junk placed above the answer, and no permission for an optimization to
+manufacture an empty result.
 
 ---
 
-## 1. The public contract
+## 1. How one query works
 
-### Flag surface
+```text
+argv
+  → live scope walk
+  → sound candidate proof
+      trigram requirements
+      + Crest run requirements
+      + changed-file freshness overlay
+  → current-byte matching
+  → optional agent ranking
+  → ripgrep-shaped output
+```
 
-`src/runtime/cold/argv/args.zig` `flag_catalog` is the single source of truth
-for argv handling and `gist --schema`. It buckets every flag into:
+Each arrow has one authority:
 
-| bucket | meaning |
-|---|---|
-| supported | behavior matches the documented ripgrep-compatible semantics |
-| supported_with_differences | accepted; deliberate documented deltas (see CLI README) |
-| accepted_but_ignored | compatibility no-ops (e.g. some mmap/color/limit knobs) |
-| unsupported_fail_loud | unknown or rejected → exit 2, never a silent empty |
+- **The walk owns inclusion.** Gitignore, hidden-file, type, and path rules
+  decide what may be searched.
+- **The index owns only read-elision.** It can prove a file irrelevant; it
+  cannot introduce a file or certify a match.
+- **The matcher owns truth.** Linear regex, fixed-string, or resource-capped
+  PCRE2 executes against current bytes.
+- **Ranking owns presentation.** It reorders the complete verified hit set.
 
-Unicode case folding, `\b`/`\w` word semantics, and character properties are
-**default-on** (rg parity); `(?-u)` / `--no-unicode` selects ASCII-byte
-semantics. Multiline is native (`-U`). PCRE2 is vendored and selected with
-`-P` or auto-escalation.
+This separation is the core safety property. Gist can become faster by adding
+better proofs, never by weakening the answer.
 
-### Three transports, one answer
+### Two ways to prove a file cannot match
 
-| path | role |
-|---|---|
-| cold subprocess | **authoritative** — can answer every supported request |
-| resident UDS session | fail-open accelerator; declines on doubt / overflow / ineligible shape |
-| in-process FFI (`irregex_*`) | embedder route to the same resident engine |
+**Required text.** Most patterns imply one or more literals every match must
+contain. The trigram index intersects those posting lists before any file
+read. Gist extends that proof conservatively into PCRE2: if a literal is not
+required across every branch, it is not used.
 
-Contract: [`contract/search_api.toml`](../../contract/search_api.toml).
-Accelerators may save work; they may not invent a file set or return stale
-content. `--no-index` is the differential oracle for the index-elision
-invariant.
+**Required shape.** Some patterns have no literal at all—`[0-9a-f]{12}` is
+the canonical case—but still require a run of a certain byte class. Crest
+stores the longest class-runs in each document and proves when that required
+shape is absent. Trigrams and Crest are complementary necessary conditions;
+neither is a matcher.
 
-### Exit codes (rg-shaped)
+---
+
+## 2. Why it fits an agent
+
+### Search is high-frequency
+
+The index and resident session compound across a work session. The first
+query establishes reusable state; later queries pay for the question, not the
+repository again. Warm paths remain optional accelerators: if a request shape,
+buffer, watcher, or freshness condition is uncertain, they decline to the
+authoritative cold path.
+
+### Context is scarce
+
+Agents do not merely need matches; they need the few lines worth reading.
+Bounded context flags retain ripgrep semantics, while `--rank` fuses
+declaration geometry, lexical density, match rarity, path depth, and
+generated-code signals. The complete set remains available.
+
+### Tools need a stable surface
+
+One matcher is exposed three ways:
+
+| path                         | job                                                       |
+| ---------------------------- | --------------------------------------------------------- |
+| cold subprocess              | authoritative answer for the full supported CLI surface   |
+| resident UDS session         | warm reusable engine; declines when the request is unsafe |
+| in-process FFI (`irregex_*`) | the same engine embedded in another tool                  |
+
+The subprocess is sufficient. The other paths remove overhead without
+creating a second definition of search.
+
+---
+
+## 3. What is original
+
+Gist's **systems/workload composition** is original: a ripgrep-shaped local
+search tool whose live tree remains authoritative while trigram, Crest,
+resident, FFI, and ranking layers optimize the repeated coding-agent loop.
+
+One component makes a stronger algorithmic claim:
+
+- **Crest sieve.** A per-document vector of longest runs by byte class is
+  compared with a regex-AST-derived lower bound on runs every match must
+  contain. It soundly prunes literal-free class repetitions that substring
+  indexes cannot express. The theorem, calculus, adversarial prior-art
+  review, and corpus proof live in [`../crest/`](../crest/).
+
+The rest is systems design. Gist does not claim to have invented trigrams,
+PCRE2, SIMD scanning, watchers, RRF, or daemonized search. It claims that
+their usual boundaries are wrong for an agent making constant, exact queries
+against a live local tree—and demonstrates a better boundary.
+
+---
+
+## 4. Contract and boundaries
+
+`gist --schema` is the machine-readable surface. It classifies flags as
+supported, supported with documented differences, accepted compatibility
+no-ops, or fail-loud refusals. Unicode is default-on; multiline is native;
+`-P` selects resource-capped PCRE2. Exit codes remain rg-shaped:
 
 - `0` — at least one match
 - `1` — clean search, no match
 - `2` — invalid argv, unsupported syntax, unreadable path, or search error
 
-An unknown flag or a pattern rejected by the selected engine is therefore an
-error, never a convincing empty result.
+Gist locates text. It does not resolve types or call graphs, perform AST
+rewrites, or provide hosted multi-repository governance. Those are adjacent
+systems, not failed ambitions.
 
----
+The differential harness in `TESTING.md` defines current conformance. The
+certificate defines recorded performance. If either disagrees with prose,
+the artifact wins.
 
-## 2. Design invariants (load-bearing)
-
-1. **Tree tells the truth.** The walk chooses the files. The index only
-   removes provable non-candidates. Files changed since the index anchor are
-   read live.
-2. **Fail-open acceleration.** Missing index, stale coverage, crest-sidecar
-   absence, caseless crest disable, warm-session doubt — all fall back to
-   reading current bytes, never to a wrong empty.
-3. **Correctness before speed.** `bench/gates/ci_order.sh` runs parity and
-   elision gates before the Certificate. A faster wrong answer cannot earn a
-   benchmark win.
-4. **Fail loud on the unsupported.** The product is a tested subset, not a
-   silent partial clone of every ripgrep flag ever shipped.
-
----
-
-## 3. Relationship to Crest
-
-The trigram family shares one blind spot: patterns with no extractable
-literal (`[0-9a-f]{12}` and kin) concede a full scan. The **crest sieve** —
-a per-document max-run-per-class signature plus an AST-derived forced-run
-lower bound — is the one place inside gist where the *math* is new. Its
-theorem, calculus, adversarial prior-art review, and fail-closed corpus proof
-live in [`../crest/`](../crest/). This dossier owns the *product* claim
-around the agent loop; Crest owns the *necessary-condition* claim for that
-literal-free hole.
-
----
-
-## 4. Standing obligation
-
-The composition claim and non-claims are dated with the shipped surface. If
-a prior system already integrates the same measured contract for the same
-workload, the correct move is to cite it and re-scope — never to quietly
-drop this dossier. Performance numbers are Certificate artifacts, not
-universal constants; refresh them with the harness rather than hand-editing
-prose.
+The enduring claim is simple: **search as often as an agent thinks, without
+ever teaching speed to impersonate truth.**

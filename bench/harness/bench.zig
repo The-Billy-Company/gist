@@ -67,8 +67,7 @@ const regex_templates = [_][]const u8{
 const corpus_mod = gist.corpus;
 const Corpus = corpus_mod.Corpus;
 const load = corpus_mod.load;
-const out_dir = corpus_mod.out_dir;
-const default_roots = corpus_mod.default_roots;
+const out_dir = corpus_mod.default_out_dir;
 
 // Fixed adversarial slate: rare symbol, dotted ident, trailing-space keyword,
 // 3-byte floor, punctuation grams, guaranteed-absent negatives, a 2-byte needle
@@ -247,7 +246,8 @@ fn runBench(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void
 }
 
 fn runVerify(gpa: std.mem.Allocator, io: std.Io, battery_n: usize, seed: u64) !void {
-    const roots: []const []const u8 = &default_roots;
+    const roots = try corpus_mod.resolveRoots(gpa);
+    defer corpus_mod.freeRoots(gpa, roots);
     std.debug.print("gist verify · abi v{d} · battery={d} seed={d}\n", .{ gist.abi(), battery_n, seed });
 
     var corpus = try load(gpa, io, roots);
@@ -434,7 +434,8 @@ fn sessionQuery(gpa: std.mem.Allocator, fd: std.posix.fd_t, qbytes: []const u8) 
 }
 
 fn runSession(gpa: std.mem.Allocator, io: std.Io) !void {
-    const roots: []const []const u8 = &default_roots;
+    const roots = try corpus_mod.resolveRoots(gpa);
+    defer corpus_mod.freeRoots(gpa, roots);
     try Dir.cwd().createDirPath(io, out_dir);
     const socket = out_dir ++ "/gistd-bench.sock";
     Dir.cwd().deleteFile(io, socket) catch {};
@@ -500,7 +501,9 @@ fn runSession(gpa: std.mem.Allocator, io: std.Io) !void {
 /// `std.mem.indexOf` vs the SIMD `contains`, per needle length. Proves where
 /// (and how much) the SIMD path beats std's naive 2–4 byte `findPosLinear`.
 fn runScanBench(gpa: std.mem.Allocator, io: std.Io) !void {
-    var corpus = try load(gpa, io, &default_roots);
+    const roots = try corpus_mod.resolveRoots(gpa);
+    defer corpus_mod.freeRoots(gpa, roots);
+    var corpus = try load(gpa, io, roots);
     defer corpus.deinit();
     const mib = @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20);
     std.debug.print("scanbench · {d} files · {d:.1} MiB · single-thread full scan\n", .{ corpus.docs.len, mib });
@@ -561,6 +564,11 @@ pub fn main(init: std.process.Init) !void {
     defer roots_list.deinit(gpa);
     if (!std.mem.eql(u8, mode, "bench")) try roots_list.append(gpa, mode); // first token was a root
     while (it.next()) |arg| try roots_list.append(gpa, arg);
-    const roots: []const []const u8 = if (roots_list.items.len > 0) roots_list.items else &default_roots;
+    var resolved: ?[]const []const u8 = null;
+    defer if (resolved) |r| corpus_mod.freeRoots(gpa, r);
+    const roots: []const []const u8 = if (roots_list.items.len > 0) roots_list.items else blk: {
+        resolved = try corpus_mod.resolveRoots(gpa);
+        break :blk resolved.?;
+    };
     try runBench(gpa, io, roots);
 }

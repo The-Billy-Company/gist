@@ -1,22 +1,44 @@
-# Gist — the complete evidence story
+---
+doc_radar:
+  occurrences:
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 391}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 14}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "NA"', equals: 16}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 20}
+    - {file: pkg/kernels/irregex/bench/matrix/matrix.toml, pattern: '\[\[shape\]\]', equals: 19}
+  sentinels:
+    - file: pkg/kernels/irregex/bench/gates/ci_order.sh
+      contains:
+        - "rgsuite parity (check_results.py)"
+        - "CLI-shape matrix parity (matrix.py)"
+        - "warm session floors (gate_session.py --committed)"
+        - "CLI-shape matrix floors (matrix.py gate)"
+---
 
-Every layer of Gist is tested at the level where its failure would be
-invisible elsewhere, and every soundness gate is **fail-closed**: a
-violation exits non-zero, and the fix is always the product or the calculus,
-never the assertion (sins.mdc Sin #2 — no bandaids).
+# Gist — the evidence story
 
-The properties that matter:
+Gist has several independent evidence layers. They do not all make the same
+claim, and the tracked ripgrep replay is **not currently fully green**:
+391/405 scoreable mined cases pass on each walk engine; 14 are known,
+phase-tracked failures. This document distinguishes a passing parity proof
+from complete accounting of known gaps.
 
-1. **Answer identity** — indexed path ≡ `--no-index` path ≡ (when eligible)
-   warm path, for every supported request.
-2. **Oracle parity** — stdout + exit code match a live ripgrep oracle on the
-   scoreable surface (documented NAs are explicit product differences, never
-   silent).
-3. **No false negatives from acceleration** — trigram elision and crest
-   pruning may only skip files that cannot match; freshness exempts changed
-   files.
-4. **Correctness before speed** — a faster wrong answer cannot earn a
-   Certificate win.
+The properties under test are:
+
+1. **Index-elision identity** — the indexed cold path must equal
+   `--no-index` wherever acceleration applies.
+2. **Oracle parity** — a harness may claim ripgrep parity only for rows that
+   actually match the live `rg` oracle at that harness's declared comparison
+   bar.
+3. **No false negatives from acceleration** — trigram and crest filters may
+   skip only proven non-candidates; changed files are reconciled from current
+   bytes.
+4. **Transport identity** — eligible resident and FFI requests must preserve
+   the authoritative cold answer; declining to cold is valid.
+5. **Correctness before performance** — the default `ci_order.sh` path skips
+   performance when a correctness gate fails. Its explicit `--allow-known`
+   development option is an exception for traversing past the 14 tracked
+   rgsuite failures, not a clean correctness verdict.
 
 ---
 
@@ -25,8 +47,9 @@ The properties that matter:
 Kernel, corpus, index, search, runtime, and CLI packages carry Zig tests for
 the load-bearing rules: trigram extraction, query planning, freshness
 overlay, crest sieve (see also [`../crest/TESTING.md`](../crest/TESTING.md)),
-rank fusion inputs, argv catalog buckets, resident request classifier, and
-FFI smoke (real C compile/link/run against `libirregex`).
+rank fusion inputs, argv catalog buckets, resident/cold parity, daemon
+lifecycle, watcher behavior, and FFI smoke (real C compile/link/run against
+`libirregex`).
 
 Reproduce from `pkg/kernels/irregex/`:
 
@@ -38,78 +61,149 @@ zig build test
 
 ## 2. Ripgrep differential oracle — `bench/rgsuite/`
 
-I compare gist with a live `rg` oracle instead of writing expectations by
-hand. Parallel and serial walk engines are scored separately (same contract,
-different implementation paths — never added together to inflate counts).
+The mined suite compares Gist with a live `rg` oracle rather than copying
+ripgrep's expected output. Parallel and serial walk engines are scored
+separately because they have distinct implementations; their totals are not
+added together.
 
-Recorded slate against ripgrep 15.1.0 (refresh by re-running; prose is not
-the authority):
+The tracked ripgrep 15.1.0 snapshot contains 441 invocations **per engine**:
 
-| suite | result shape |
-|---|---|
-| mined upstream | 441 rg invocations × both engines; scoreable surface 306/306 PASS, 0 ORDER, 0 FAIL; NA = documented difference; SKIP = unscored assertion |
-| multiline | 30/30 — stdout, exit, indexed≡`--no-index` |
-| PCRE2 (`-P`) | 30/30 — lookaround, backreferences, Unicode toggles, resource-limit failures |
-| walk / ignore flags | 26/26 per engine |
-| content transforms | 22/22 per engine (preprocess, binary, encodings, gzip/bzip2/xz/zstd/lz4/Brotli) |
+| bucket | count | meaning                                                   |
+| ------ | ----: | --------------------------------------------------------- |
+| PASS   |   391 | Gist matches the oracle at the upstream test's own bar    |
+| ORDER  |     0 | byte-exact case differs only by order                     |
+| FAIL   |    14 | in-scope divergence, each assigned to a deferred phase    |
+| NA     |    16 | deliberate, documented product boundary                   |
+| SKIP   |    20 | accounted companion, boundary, or irreplayable obligation |
+
+Supported-surface parity is therefore **391/405 = 96.5%**, not 100%.
+`check_results.py --allow-fail` proves that every FAIL/SKIP is accounted for
+and that the README and result artifact agree; it does **not** turn the 14
+FAIL rows into passes.
+
+Companion suites exercise surfaces the mined replay cannot freeze cleanly:
+
+- `modes.py`: multiline and PCRE2, currently 30/30 each;
+- `flags.py`: sorting, thread count, filesystem scope, global ignores, and
+  last-wins toggles, once per walk engine;
+- `transforms.py`: preprocessing, binary handling, transcoding, and compressed
+  inputs, once per walk engine.
 
 Reproduce from `pkg/kernels/irregex/bench/rgsuite/`:
 
 ```bash
 python3 run.py
+python3 check_results.py --allow-fail  # accounting check; known FAILs remain failures
 python3 modes.py run --mode multiline
 python3 modes.py run --mode pcre
-python3 flags.py run
-python3 transforms.py run
+python3 flags.py run --engine both
+python3 transforms.py run --engine both
 ```
 
 ---
 
-## 3. Permanent gate order — `bench/gates/`
+## 3. CLI-shape admission matrix — `bench/matrix/`
+
+The mined replay is broad by upstream test case; the matrix is broad by
+invocation shape. Its 19 declared rows span engine mode, output form, walk
+scope, selectivity, and pattern kind. `parity` drives every row through three
+real argv paths and compares at the row's declared set/lines/count bar:
+
+```text
+gist indexed == gist --no-index == rg
+```
+
+```bash
+python3 bench/matrix/matrix.py parity
+python3 bench/matrix/matrix.py gate
+```
+
+The committed performance gate currently includes three explicit,
+report-only losses: literal-free PCRE2 backreferences and two multiline
+shapes. Their correctness parity still gates; only their known performance
+loss is non-blocking.
+
+---
+
+## 4. Permanent gate order — `bench/gates/`
 
 `ci_order.sh` is the load-bearing schedule: correctness gates before
-performance gates. Representative gates:
+performance gates. Its correctness phase runs Zig tests, the mined rgsuite,
+mode/flag/transform companions, the CLI-shape matrix, line and Unicode
+parity, index-elision parity, fail-closed behavior, and filesystem freshness.
 
-| gate | pins |
-|---|---|
-| line / Unicode / stream parity | framing and encoding vs oracle |
-| PCRE2 parity (`-P`) | backtracking lane matches selected semantics |
-| index-elision parity | indexed ≡ `--no-index` on covering queries |
-| freshness | edits since anchor are visible |
-| fail-closed certificate prelude | speed work never runs on a red correctness slate |
+If any default correctness gate fails, the performance phase is skipped.
+Because the tracked rgsuite presently has 14 FAIL rows, a normal invocation
+does not produce an all-green verdict. `--allow-known` passes
+`--allow-fail` only to the rgsuite accounting check so developers can inspect
+later performance gates without pretending those gaps are closed.
+
+The performance phase validates the committed artifact bundle and cold ratio
+floors, resident-session floors, matrix floors, compressed-input speed floor,
+the macro certificate, index-size accounting, and fresh artifact integrity.
+Some standalone gates documented in `bench/gates/README.md` are useful
+focused proofs but are not all scheduled by `ci_order.sh`.
 
 ```bash
 # from pkg/kernels/irregex/
 ./bench/gates/ci_order.sh
+# development traversal past the tracked rgsuite gaps:
+./bench/gates/ci_order.sh --allow-known
 ```
 
 ---
 
-## 4. Resident session (fail-open, not fail-silent)
+## 5. Resident session (correctness and latency are separate)
 
 The warm UDS path (`src/runtime/session/`) is an accelerator with a narrow
-eligibility classifier. Tests and gates pin:
+eligibility classifier. Zig tests pin answer identity and lifecycle behavior:
 
-- ineligible shapes (paths, stdin, TTY, context, JSON, rank, replacement,
-  multiline, …) stay cold;
-- FSEvents/inotify may narrow work, but a reconcile barrier decides safety;
+- eligible file-list and line-output requests preserve cold bytes and exit
+  status; the wire also supports a corpus-wide count for embedders;
+- explicit paths, readable stdin, TTY output, context, JSON, rank,
+  replacement, multiline, and other unsupported warm shapes stay cold;
+- macOS FSEvents and Linux inotify can arm the watcher-clean fast path, while
+  the reconcile barrier remains the safety authority;
 - doubt, overflow, index-generation change, or walk error → decline warm,
   return to subprocess;
 - declined warm never fabricates an empty success.
 
+The latency gate does **not** prove correctness. It reads the published
+session artifact and enforces the speed floor only when that artifact says
+the watcher fast path was armed:
+
+```bash
+python3 bench/session/gate_session.py --committed
+GIST_BENCH=1 python3 bench/session/gate_session.py --live
+```
+
 ---
 
-## 5. Certificate of Optimality — `bench/certify/`
+## 6. Certificate layers — `bench/certify/`
 
-Performance claims are measured artifacts, not vibes. Four layers, cheapest
-evidence first:
+The certificate is a measured, machine- and corpus-specific evidence bundle.
+Its layers answer narrower questions than the phrase "optimality" can imply:
 
-| layer | question | harness |
-|---|---|---|
-| A | empirical dominance vs field (fail-closed: lower median **and** Mann–Whitney p < 0.05) | `zig build certify` + `bench/certify.sh` |
-| B | port-optimality (llvm-mca vs hot loop) | `bench/portcert/` |
-| C | roofline (cycles/byte on hardware ceiling) | `zig build roofline` |
-| D | algorithmic lower bound | `zig build lowerbound` |
+| layer | evidence actually produced                                                                                                             | harness                                          |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| A     | empirical cold-process comparison on 12 query classes; a win requires a lower median **and** Mann–Whitney p < 0.05                     | `zig build certify` + `bench/certify/certify.sh` |
+| B/B′  | static port-pressure bounds on modeled reference CPUs plus native PMU measurements of drift-guarded hot-loop probes                    | `bench/portcert/`                                |
+| C     | measured scan throughput placed against this machine's STREAM-style cache/DRAM ceilings                                                | `bench/roofline/`                                |
+| D     | structural audit that the verifier touches admitted candidate bytes once (DFA) or fewer (SIMD), with verdict parity against production | `bench/lowerbound/`                              |
+
+Important limits:
+
+- Layer A's wins apply to the recorded corpus, hardware, tool versions, and
+  12 classes; they are not a universal performance theorem.
+- Layer B bounds the measured instruction sequences and modeled CPUs, not
+  every possible implementation.
+- Layer C reports distance from a measured ceiling. The committed absent-needle
+  scan is 29.6 GB/s against a 75.0 GB/s DRAM read ceiling (39%); that supports
+  a roofline comparison but not a claim that the scan saturates DRAM.
+- Layer D proves one-pass verification over the candidate set admitted by the
+  current filter. It does not prove that this candidate set is globally
+  minimal among all possible indexes or that no different search algorithm
+  can do less work on non-adversarial inputs.
 
 Committed artifact:
 [`bench/certify/artifact/CERTIFICATE.md`](../../bench/certify/artifact/CERTIFICATE.md).
@@ -117,16 +211,18 @@ Do not hand-edit — re-run to refresh. Repo-level entry:
 
 ```bash
 make bench-gist-certify
-# full mint (when needed): CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 …
+# full mint + publish:
+CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify
 ```
 
-Honesty rule: Layer A rewrites the whole certificate file; Layers B–D must
-be re-spliced afterward per each layer's README. Numbers in product READMEs
-cite this artifact and are not universal constants.
+The current driver runs `certify_layers.sh` to splice B/B′/C/D after Layer A;
+the older manual re-splice warning no longer describes the default full-mint
+path. Numbers in product READMEs must cite the committed artifact rather than
+being presented as universal constants.
 
 ---
 
-## 6. Crest sieve evidence (sibling dossier)
+## 7. Crest sieve evidence (sibling dossier)
 
 Class-repetition pruning soundness (`matched ⇒ ¬pruned`) is Crest's
 obligation: corpus-wide fail-closed harness (`zig build crest`), randomized
@@ -136,15 +232,20 @@ missing/invalid crest sidecar as sieve-off, never as authority to prune.
 
 ---
 
-## 7. What a failure means
+## 8. Reading verdicts correctly
 
-| failure class | correct fix |
-|---|---|
-| indexed ≠ `--no-index` | fix elision / freshness — never weaken the equality gate |
-| rg oracle FAIL on scoreable surface | fix gist — or promote to documented NA with schema + README |
-| warm returns stale / empty success | decline path must fire — never invent answers |
-| Certificate win with red correctness | impossible under `ci_order.sh`; do not reorder |
-| crest false negative | fix `src/math/crest.zig` calculus — see crest TESTING |
+| failure class                                              | correct fix                                                                                                                     |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| indexed ≠ `--no-index`                                     | fix elision / freshness — never weaken the equality gate                                                                        |
+| rg oracle FAIL on scoreable surface                        | it remains a product gap even when phase-tracked; fix Gist, or reclassify only if it is genuinely outside the declared contract |
+| `check_results.py --allow-fail` passes                     | accounting is internally consistent; it is not full oracle parity                                                               |
+| warm returns stale / empty success                         | decline path must fire — never invent answers                                                                                   |
+| certificate numbers exist while default correctness is red | the artifact is historical/measured evidence, not proof that today's full correctness slate passes                              |
+| matrix reports a declared loss                             | correctness passed; that shape's performance remains explicitly below expectation                                               |
+| crest false negative                                       | fix `src/math/crest.zig` calculus — see crest TESTING                                                                           |
 
-The product contract (`gist --schema`), this evidence inventory, and the
-committed certificate are the three authorities. Prose follows them.
+Authority is split deliberately: `gist --schema` defines the public CLI
+surface; differential harness outputs define current compatibility; Zig
+tests define internal invariants; committed certificate artifacts define
+recorded performance. This page summarizes those sources and must not
+upgrade a tracked exception into a pass.

@@ -1,18 +1,9 @@
 //! Persistent resident-session client (ADR-352 rung 2.5) — Unix only.
 //!
-//! A long-lived Unix-socket connection to a `gist serve` daemon, reused across
-//! many queries so an eligible request answers warm — without re-paying the cold
-//! subprocess's process + index-mmap + candidate-read startup on every call. This
-//! is the Rust leg of the same wire protocol `src/gist/session/protocol.zig` defines
-//! and the Zig CLI + Python clients speak; the daemon is the single source of
-//! truth, so all three clients frame-match by construction.
-//!
-//! Fail-open, always: a [`Session`] that cannot connect, whose request is
-//! ineligible, or that receives a `decline` transparently falls back to the
-//! certified cold subprocess ([`SearchRequest::files`]/[`SearchRequest::count`])
-//! and returns the byte-identical answer. The daemon is a pure accelerator — it
-//! never adds a failure mode a caller must handle, only removes latency when one
-//! is listening.
+//! Long-lived Unix-socket connection to a `gist serve` daemon. Same wire
+//! protocol as `src/runtime/session/protocol.zig` / Zig CLI / Python. Fail-open:
+//! connect miss, ineligible request, or `decline` → cold
+//! ([`SearchRequest::files`] / [`SearchRequest::count`]).
 
 use std::env;
 use std::io::{self, Read, Write};
@@ -22,32 +13,52 @@ use std::path::PathBuf;
 use crate::error::Result;
 use crate::request::SearchRequest;
 
-const PROTOCOL_VERSION: u8 = 1;
-const DEFAULT_SOCKET: &str = ".local/gist-verify/gistd.sock";
-const MAX_FRAME: u32 = 16 << 20; // matches `protocol.max_frame`; a hostile/looping-peer cap.
+const PROTOCOL_VERSION: u8 = 2; // must match `protocol.protocol_version`
+const DEFAULT_OUT_DIR: &str = ".local/gist-verify"; // `$GIST_DIR` default
+const MAX_FRAME: u32 = 16 << 20; // `protocol.max_frame`
 
-// Opcodes — mirror `protocol.zig::Opcode`.
+// Mirror `protocol.zig::Opcode` / `request.Mode` / `flag_*`.
 const OP_HELLO: u8 = 1;
 const OP_READY: u8 = 2;
 const OP_QUERY: u8 = 3;
 const OP_RESULT: u8 = 4;
-
-// Mode bytes — `request.Mode` enum order (files, count).
 const MODE_FILES: u8 = 0;
 const MODE_COUNT: u8 = 1;
-// Query flag bits — `protocol.zig::flag_*`.
+// `smart_case` ships raw; Zig resolves via `effectiveIgnoreCase`. `quiet` is the
+// existence early-halt; `max_count` sets bit 7 AND writes a `u64 LE` after the
+// flags byte (the only flag carrying a payload — mirror `protocol.zig`).
 const FLAG_FIXED: u8 = 1 << 0;
 const FLAG_IGNORE_CASE: u8 = 1 << 1;
+const FLAG_WORD: u8 = 1 << 3;
+const FLAG_INVERT: u8 = 1 << 4;
+const FLAG_SMART_CASE: u8 = 1 << 5;
+const FLAG_QUIET: u8 = 1 << 6;
+const FLAG_MAX_COUNT: u8 = 1 << 7;
 
-/// `$GIST_SESSION_SOCK`, else the per-repo default beside the index.
+/// `$GIST_SESSION_SOCK`, else the per-repo default beside the index
+/// (`$GIST_DIR`-relocatable, matching the Zig CLI).
 #[must_use]
 pub fn default_socket_path() -> String {
-    env::var("GIST_SESSION_SOCK").unwrap_or_else(|_| DEFAULT_SOCKET.to_owned())
+    if let Ok(p) = env::var("GIST_SESSION_SOCK") {
+        return p;
+    }
+    let out_dir = env::var("GIST_DIR")
+        .ok()
+        .map(|d| d.trim_end_matches('/').to_owned())
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| DEFAULT_OUT_DIR.to_owned());
+    format!("{out_dir}/gistd.sock")
 }
 
 /// True iff the resident daemon can answer `request` byte-identically to cold:
-/// default roots, no rich flags, no extra argv, no glob/type scoping. Mirrors
-/// `session/request.zig::classify` and the Python `warm_eligible`.
+/// default roots, no rich flags, no extra argv, no glob/type scoping — ±case
+/// including `smart_case` (sent raw; the Zig session resolves it), ±`word` (the
+/// session applies cold's exact post-match word rule), ±`invert` (lane 3b: the
+/// session answers `-v` by the `lines(f) − matches(f)` set-complement, sound
+/// under the trigram index), ±`quiet` (the existence early-halt) and
+/// ±`max_count` (the per-file cap; `0` is the crate's "unlimited", so the cap is
+/// simply unconstrained). Mirrors `session/request.zig::classify` and the Python
+/// `warm_eligible`.
 #[must_use]
 pub fn warm_eligible(r: &SearchRequest) -> bool {
     r.paths.is_empty()
@@ -56,9 +67,6 @@ pub fn warm_eligible(r: &SearchRequest) -> bool {
         && r.types.is_empty()
         && r.not_types.is_empty()
         && r.extra_flags.is_empty()
-        && !r.smart_case
-        && !r.word
-        && !r.invert
         && !r.hidden
         && !r.no_ignore
         && !r.follow
@@ -66,7 +74,6 @@ pub fn warm_eligible(r: &SearchRequest) -> bool {
         && r.before == 0
         && r.after == 0
         && r.context == 0
-        && r.max_count == 0
         && r.max_depth == 0
 }
 
@@ -159,7 +166,25 @@ impl Session {
             if request.ignore_case {
                 flags |= FLAG_IGNORE_CASE;
             }
+            if request.word {
+                flags |= FLAG_WORD;
+            }
+            if request.invert {
+                flags |= FLAG_INVERT;
+            }
+            if request.smart_case {
+                flags |= FLAG_SMART_CASE;
+            }
+            if request.quiet {
+                flags |= FLAG_QUIET;
+            }
+            if request.max_count > 0 {
+                flags |= FLAG_MAX_COUNT;
+            }
             let mut body = vec![mode, flags];
+            if request.max_count > 0 {
+                body.extend_from_slice(&u64::from(request.max_count).to_le_bytes());
+            }
             body.extend_from_slice(request.pattern.as_bytes());
             let exchange = send(s, OP_QUERY, &body).and_then(|()| recv(s));
             match exchange {

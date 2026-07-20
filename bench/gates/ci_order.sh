@@ -74,6 +74,12 @@ run "flags parity (flags.py, both engines)" python3 bench/rgsuite/flags.py run -
 # --no-index. Blocking so a transform regression can't reach the perf phase. See
 # `bench/rgsuite/transforms.py`.
 run "transforms parity -z/--pre/-E/--binary (transforms.py, both engines)" python3 bench/rgsuite/transforms.py run --engine both
+# The CLI-shape admission matrix: one row per supported shape (mode × flags ×
+# walk-scope × emit × selectivity), each driven as REAL argv three ways and
+# asserted gist-idx == gist-noidx == rg at its bar (set/lines/count + exit class).
+# Blocking so a per-shape parity or index-elision regression can't reach the perf
+# phase. See `bench/matrix/`.
+run "CLI-shape matrix parity (matrix.py)" python3 bench/matrix/matrix.py parity
 run "line-output parity (line_parity.sh)" bash bench/gates/line_parity.sh
 run "Unicode parity (unicode_parity.sh)" bash bench/gates/unicode_parity.sh
 run "index-elision parity (index_elision_parity.sh)" bash bench/gates/index_elision_parity.sh
@@ -118,6 +124,11 @@ esac
 # and armed-only — report-only on an unarmed platform's freshness-taxed number.
 run "warm session floors (gate_session.py --committed)" \
   python3 bench/session/gate_session.py --committed
+# Per-shape cold floors: every non-loss matrix row cleared its committed floor at
+# publish time (hermetic — no re-timing on this shared box). Declared `loss` rows
+# (serial -U, literal-less backref) are report-only so no aggregate buries them.
+run "CLI-shape matrix floors (matrix.py gate)" \
+  python3 bench/matrix/matrix.py gate
 missing=""
 for t in hyperfine csearch zoekt rg; do command -v "${t}" > /dev/null || missing="${missing} ${t}"; done
 if [[ -n "${missing}" ]]; then

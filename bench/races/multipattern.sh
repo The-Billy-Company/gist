@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hydra patterns — the BATCHED multi-pattern race (irregex match half).
+# relate patterns — the BATCHED multi-pattern race (irregex match half).
 #
 # The workload relocator/lints actually run: N patterns over the tree, needing
 # per-pattern attribution. Three honest strategies race:
@@ -7,7 +7,7 @@
 #   sequential   N separate `gist -l <p>` processes (today's consumer loop)
 #   fused        one `gist -l '(?:p0)|(?:p1)|…'` alternation — fast, but the
 #                answer loses WHICH pattern hit (the re-derive-in-Python tax)
-#   patterns     one `hydra patterns -e p0 -e p1 … --by pattern` — one walk,
+#   patterns     one `relate patterns -e p0 -e p1 … --by pattern` — one walk,
 #                exact per-pattern attribution, loom-grouped engine-side
 #
 # `patterns` should land near `fused` while answering the question `fused`
@@ -18,7 +18,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 source "${HERE}/_compete.sh"
 need_hyperfine
 
-ROOTS=("${@:-services libs clients contracts scripts quality}")
+# Positional roots override; else inherit _compete.sh's resolution
+# ($GIST_ROOTS → published-corpus roots when present → whole tree).
+[[ $# -gt 0 ]] && ROOTS=("$@")
 
 echo "building gist…"
 compete_build_gist_index || exit 1
@@ -52,9 +54,9 @@ pat_flags=""
 for p in "${pats[@]}"; do
   pat_flags+=" -e '${p}'"
 done
-patterns_cmd="${HYDRA_BIN} patterns -F ${pat_flags} --by pattern ${ROOTS[*]} >/dev/null"
+patterns_cmd="${RELATE_BIN} patterns -F ${pat_flags} --by pattern ${ROOTS[*]} >/dev/null"
 
 hyperfine --warmup 1 --min-runs 5 \
   --command-name "sequential (${#pats[@]}× gist -l)" "${seq_cmd}" \
   --command-name "fused alternation (no attribution)" "${fused_cmd}" \
-  --command-name "hydra patterns (attributed)" "${patterns_cmd}"
+  --command-name "relate patterns (attributed)" "${patterns_cmd}"

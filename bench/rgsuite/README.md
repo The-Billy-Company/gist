@@ -1,9 +1,10 @@
 # gist ⇄ ripgrep drop-in proof (`rgsuite`)
 
 This is the honest, reproducible measurement of how close gist's `rg` verb is to
-a **drop-in ripgrep** on the surface it claims to support (currently **100.0%
-byte-for-byte, zero FAILs** — see the scoreboard), benchmarked against real
-ripgrep as both the **correctness oracle** and the **performance baseline**.
+a **drop-in ripgrep** on the surface it claims to support (currently **96.5%
+supported-surface parity** with every remaining divergence explained and
+phase-tracked — see the scoreboard), benchmarked against real ripgrep as both
+the **correctness oracle** and the **performance baseline**.
 `run.py` replays the whole suite once per **engine** — the parallel
 work-stealing walk (`pipeline.zig`, gist's default recursive-walk dispatch)
 and the serial fallback (`run.zig`, forced via the internal `GIST_NO_PARALLEL`
@@ -24,17 +25,45 @@ code path, and a single-engine run has already once missed a real regression
 `rg 15.1.0`, 441 mined `rgtest!` cases (invocations; a multi-command `rgtest!`
 mines one case per command), replayed against **both** engines:
 
-| Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                     |
-| --------- | ------------------------: | -----------------: | --------------------------------------------------------------------------- |
-| **PASS**  |                       306 |                306 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below) |
-| **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole    |
-| **FAIL**  |                         0 |                  0 | a supported-surface divergence (a real bug)                                 |
-| NA        |                        14 |                 14 | unsupported **by design** (see boundaries below)                            |
-| SKIP      |                       121 |                121 | not replayable here (control-flow test, pcre2-only, non-stdout terminal)    |
+| Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                          |
+| --------- | ------------------------: | -----------------: | ------------------------------------------------------------------------------- |
+| **PASS**  |                       391 |                391 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)      |
+| **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole         |
+| **FAIL**  |                        14 |                 14 | a supported-surface divergence, each phase-tracked in `coverage_manifest.toml`   |
+| NA        |                        16 |                 16 | unsupported **by design** (see boundaries below)                                 |
+| SKIP      |                        20 |                 20 | not replayable as one argv — each mapped to a companion proof / upstream reason  |
 
-**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 306/306 = 100.0%
-on both engines — genuinely zero-FAIL, zero-ORDER**, not just on whichever
-engine a given case happens to dispatch to.
+**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 391/405 = 96.5%
+on both engines** — identical on whichever engine a given case dispatches to. The
+14 FAILs are not hidden behind a shrunken denominator: each is an explained,
+adverse-tested divergence recorded once in `coverage_manifest.toml` and tracked
+to the deferred entry that owns its fix. Together the 441 mined obligations account
+completely — every case is replayed (PASS/ORDER/FAIL/NA) or claimed by exactly
+one manifest entry (SKIP) — and `check_results.py` fails the build on any orphan
+skip, double credit, undeferred FAIL, undocumented divergence, or README drift.
+
+### Complete obligation accounting (no misleading denominator)
+
+The 441 mined `rgtest!` obligations split into what the harness can drive against
+live `rg` as one argv, and what it accounts for out-of-band in
+`coverage_manifest.toml` (`tomllib`-parsed, gate-enforced):
+
+- **405 replayed** — executed against real ripgrep and bucketed above
+  (391 PASS + 14 FAIL); NA (16) are replayed too but fall outside the parity
+  denominator as announced design refusals.
+- **20 SKIP, each claimed once** by a manifest entry: **companion** (the miner
+  couldn't lower a control-flow `rgtest!` to one argv, but a sibling proof —
+  `flags.py`/`modes.py`/`transforms.py` — drives the same flags byte-for-byte),
+  **boundary** (a purposeful decline whose adverse test is the loud exit-2
+  itself), or **irreplayable** (the mined JSON can't encode the case, e.g. a
+  non-UTF-8 filename).
+- **14 FAIL, each claimed once** by a **deferred** manifest entry naming the plan
+  phase that closes it (`rich-output`, `walk-scope`, `hard-paths`).
+
+`check_results.py` is the anti-gaming gate: it rejects a SKIP no companion
+claims, a case credited twice, a FAIL missing a `[[deferred]]` entry, a stale
+deferral that no longer FAILs, a FAIL/NA row with an empty `detail`, and any
+drift between this README, `results.json`, and the computed parity.
 
 Each mined case carries its upstream assertion mode (`cmp` in `spec.json`):
 ripgrep's own suite pins most cases byte-exact (`eqnice!`, `cmp=plain`) but
@@ -152,11 +181,11 @@ gist is built for, geomean speedup, gist wins:
 | GNU grep |     ~5460× | 20/20 |
 | ugrep    |     ~6600× | 20/20 |
 
-The honest headline: gist is a **byte-identical drop-in rg (100.0% supported-
-surface parity, zero FAILs on both engines)** that is **~3.3× faster cold** and
-**~1770× faster warm-resident** than ripgrep — the "40×" claim sits comfortably
-between the one-shot and resident models and is conservative for gist's
-intended long-lived agent-session use.
+The honest headline: gist is a **near-drop-in rg (96.5% supported-surface parity
+on both engines, with every remaining divergence explained and phase-tracked)**
+that is **~3.3× faster cold** and **~1770× faster warm-resident** than ripgrep —
+the "40×" claim sits comfortably between the one-shot and resident models and is
+conservative for gist's intended long-lived agent-session use.
 
 ## Running it
 

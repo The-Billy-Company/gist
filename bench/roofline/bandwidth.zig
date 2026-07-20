@@ -28,7 +28,7 @@ const pmu = @import("pmu"); // bench/harness/pmu.zig, wired as a module in build
 
 const corpus_mod = gist.corpus;
 const simd = gist.simd;
-const out_dir = corpus_mod.out_dir;
+const out_dir = corpus_mod.default_out_dir;
 
 // 8×u64 = 64-byte logical vector (lowered to NEON 128-bit loads on aarch64);
 // NACC independent accumulators hide load-use latency so the loop is bound by
@@ -214,7 +214,9 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
 
     // gist's own SIMD scan bandwidth over the real corpus — the honest operating
     // point on this roofline (same process, same clock, same methodology).
-    var corpus = try corpus_mod.load(gpa, io, &corpus_mod.default_roots);
+    const roots = try corpus_mod.resolveRoots(gpa);
+    defer corpus_mod.freeRoots(gpa, roots);
+    var corpus = try corpus_mod.load(gpa, io, roots);
     defer corpus.deinit();
     const corpus_mib = @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20);
     var scans = scan_needles;
