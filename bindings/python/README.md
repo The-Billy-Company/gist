@@ -155,13 +155,14 @@ reconnect, daemon restart, or index publication is visible through
 When the host process already holds the shared library and `cffi` (e.g. the AI
 service, which depends on `cffi` via the sibling kernels), a `Session`
 transparently serves eligible queries **in-process** over the
-`irregex_open` / payload-bearing `irregex_search_with_options` /
-`irregex_close` C ABI (`irregex/_ffi.py` over `libirregex.{dylib,so}`) — no
+`irregex_open` / `irregex_search` / `irregex_close` C ABI (`irregex/_ffi.py`
+over `libirregex.{dylib,so}`) — no
 subprocess or socket. Unlike the UDS transport (files/count only), it streams
 full `Match` records, so `Session.run` gains a warm path for the first time;
-`files`/`count`/`absent` prefer it too. Raw smart-case, explicit Unicode/ASCII
-mode, invert-match, quiet, and the `u64` per-file max-count cross a size-checked
-options struct without breaking older ABI callers; invert records carry zero
+`files`/`count`/`absent` prefer it too. The ABI-1 options contract carries raw
+smart-case, explicit Unicode/ASCII mode, invert-match, context windows, quiet,
+and per-file max-count through one size-checked shape. Match records explicitly
+identify match versus context; invert records remain matches with zero
 submatches, exactly like cold JSON. Explicit `paths` become the C session's root
 array, with handles bounded and keyed by `(cwd, roots)` so scopes cannot
 cross-contaminate. `engine="auto"` tries this linear FFI path first and falls

@@ -102,15 +102,17 @@ pub const Result = struct { mode: Mode, files: []const []const u8 = &.{}, count:
 /// arena) and whether any file matched (cold's exit-code boolean).
 pub const Lines = struct { out: []const u8, matched: bool };
 
-/// One streamed match: a matching LINE (ADR-352 rung 3 — the in-process FFI's
-/// output unit). `path` aliases the mirror path table / overlay key; `text` is
+/// One streamed selection: a matching line, or a zero-span nonmatching line for
+/// `-v` (ADR-352 rung 3 — the in-process FFI's output unit). `path` aliases the
+/// mirror path table / overlay key; `text` is
 /// the line CONTENT without its `\n` terminator and aliases session bytes;
 /// `spans` alias `search`'s per-line scratch. All three are valid ONLY during
 /// the `emit` call — the sink must copy anything it keeps. `line_number` is
 /// 1-based over rg's line model, and every span is a non-empty `[start,end)`
 /// byte range within `text`, byte-identical to the cold `gist --json` submatch
 /// stream (`runtime/cold/emit/json.zig`).
-pub const MatchRecord = struct { path: []const u8, line_number: u64, text: []const u8, spans: []const Span };
+pub const MatchKind = enum(u32) { match, context };
+pub const MatchRecord = struct { path: []const u8, line_number: u64, text: []const u8, spans: []const Span, kind: MatchKind = .match };
 
 // The caller's streaming sink for `search` — the FFI's no-stdout, no-exit
 // output channel. Any pointer type `*Sink` with a `pub fn emit(self: *Sink,
@@ -601,11 +603,16 @@ pub const ResidentSession = struct {
             .mode = mode,
             .fixed = req.fixed,
             .ignore_case = req.effectiveIgnoreCase(),
+            .unicode = req.unicode,
             // `-w`: the shared core owns the word-valid span decision, so every
             // face (docMatches for -l, countLines for -c, collectSpans for the
             // record stream) applies cold's exact rule. The word check runs on
             // the ORIGINAL bytes regardless of the case fold above.
             .word = req.word,
+            // `-m N`: the per-file count cap (`null` ⇒ 0 ⇒ unlimited). `-m0`
+            // (match nothing) never reaches here — every entry point below
+            // short-circuits `req.matchNothing()` before compiling.
+            .max_count = req.max_count orelse 0,
         }) catch return QueryError.Stale;
     }
 
@@ -617,6 +624,9 @@ pub const ResidentSession = struct {
     /// count folder would silently produce the wrong shape.
     pub fn query(self: *ResidentSession, arena: std.mem.Allocator, req: Request) QueryError!Result {
         if (req.mode == .lines) return QueryError.Stale;
+        // `-m0`: ripgrep matches nothing in every mode — an empty answer, no
+        // corpus walk (cold exits 1 before searching a byte; `serial.zig`).
+        if (req.matchNothing()) return .{ .mode = req.mode, .files = &.{}, .count = 0 };
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         try self.reconcile();
@@ -653,6 +663,7 @@ pub const ResidentSession = struct {
     /// engine (or a mid-render OOM) is `error.Stale`/`OutOfMemory` → the daemon
     /// declines and the client answers cold.
     pub fn queryLines(self: *ResidentSession, arena: std.mem.Allocator, req: Request) QueryError!Lines {
+        if (req.matchNothing()) return .{ .out = "", .matched = false }; // `-m0` (see `query`)
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         try self.reconcile();
@@ -666,13 +677,50 @@ pub const ResidentSession = struct {
         // The whole-doc gate over full bytes is a sound superset: a binary doc
         // whose only match sits past its NUL buffer renders to nothing, exactly
         // as cold's emit loop produces nothing for it.
-        const docs = try self.matchingDocs(arena, &cq, &sc, .lines);
+        const docs = try self.matchingDocs(arena, &cq, &sc, .lines, false);
         var out: std.ArrayList(u8) = .empty;
         const matched = render.renderLines(arena, req, docs, &out) catch |e| switch (e) {
             error.OutOfMemory => return QueryError.OutOfMemory,
             error.Unsupported => return QueryError.Stale,
         };
         return .{ .out = out.items, .matched = matched };
+    }
+
+    /// Answer an eligible `-q`/`--quiet` request: does ANY line match, anywhere
+    /// in the corpus? rg's `-q` prints nothing and exits 0 the instant the first
+    /// match is found (else 1) — so this is an EARLY-HALTING existence walk: the
+    /// `Exister` visitor raises `stop` on its first hit and `eachCandidate`
+    /// abandons the rest of the corpus unscanned. That short-circuit IS the warm
+    /// win (a bounded prefix instead of the whole tree). Binary/empty handling
+    /// mirrors cold's `anyMatch` (an implicit-binary file is skipped whole, not
+    /// pre-NUL sliced like `-l`); off the watcher-clean path the first hit is
+    /// existence-checked so a just-deleted file never fabricates a match. No
+    /// arena: only a boolean crosses back. `-m0` short-circuits to `false`.
+    pub fn queryExists(self: *ResidentSession, req: Request) QueryError!bool {
+        if (req.matchNothing()) return false; // `-m0` (see `query`)
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        try self.reconcile();
+
+        var cq = try self.compileFor(req, .files); // the whole-doc gate is all `-q` needs
+        defer cq.deinit(self.gpa);
+        var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
+        defer sc.deinit();
+
+        var msc = cq.matchScratch(self.gpa) catch return QueryError.OutOfMemory;
+        defer msc.deinit();
+        var ex = Exister{
+            .gpa = self.gpa,
+            .io = self.io,
+            .cq = &cq,
+            .sc = &sc,
+            .msc = &msc,
+            .invert = req.invert,
+            .verify_existence = !self.clean.load(.acquire),
+        };
+        defer ex.spans.deinit(self.gpa);
+        if (req.invert) try self.eachDoc(&ex) else try self.eachCandidate(&cq, &ex);
+        return ex.found;
     }
 
     /// Stream one `MatchRecord` per matching LINE over the warm corpus to `sink`
@@ -692,6 +740,8 @@ pub const ResidentSession = struct {
     /// outside the linear-time syntax surfaces as `error.Stale` (→ cold
     /// fallback), exactly like `query` — the C boundary never sees a `die()`.
     pub fn search(self: *ResidentSession, arena: std.mem.Allocator, req: Request, sink: anytype) QueryError!bool {
+        if (req.matchNothing()) return false;
+        if (req.quiet) return self.queryExists(req);
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
         try self.reconcile();
@@ -712,33 +762,52 @@ pub const ResidentSession = struct {
         var msc = cq.matchScratch(self.gpa) catch return QueryError.OutOfMemory;
         defer msc.deinit();
 
-        const docs = try self.matchingDocs(arena, &cq, &sc, .json_stream);
+        const docs = try self.matchingDocs(arena, &cq, &sc, .json_stream, req.invert);
 
         var spans: std.ArrayList(Span) = .empty;
         defer spans.deinit(self.gpa);
         var any = false;
         for (docs) |d| {
-            const o = try emitDoc(self.gpa, &cq, &msc, &spans, d, sink);
+            const o = try emitDoc(self.gpa, &cq, &msc, &spans, d, req.invert, req.before, req.after, req.max_count, sink);
             any = any or o.matched;
             if (o.halt) break; // sink asked to stop — leave the rest unscanned
         }
         return any;
     }
 
-    /// Gather the MATCHING docs (base ∪ overlay − tombstones) into a path-sorted
-    /// slice, shared by the `lines` renderer and the FFI record stream. A doc is
-    /// admitted only after it clears the whole-doc gate (the SAME `-l` decision
-    /// `query` uses), so the result holds real matches only; off the
+    /// Gather searchable docs (base ∪ overlay − tombstones) into a path-sorted
+    /// slice, shared by the `lines` renderer and the FFI record stream. Positive
+    /// searches require the whole-doc match gate; invert admits every text doc
+    /// because any one of its lines may be selected. Off the
     /// watcher-clean path a matching doc is then existence-checked (the same
     /// fail-closed stat-per-hit `query` uses) so a file removed in the
     /// walk→report window is never reported. `admit` selects the binary policy
     /// (see `Admit`). The sort is `run.pathLess` — the warm canonical file
     /// order (see `docLess`) — so downstream output is deterministic.
-    fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, sc: *Scratch, admit: Admit) QueryError![]const DocRef {
-        var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .check_exists = !self.clean.load(.acquire) };
-        try self.eachCandidate(cq, &g);
+    fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, sc: *Scratch, admit: Admit, invert: bool) QueryError![]const DocRef {
+        var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .require_match = !invert, .check_exists = !self.clean.load(.acquire) };
+        if (invert) try self.eachDoc(&g) else try self.eachCandidate(cq, &g);
         std.mem.sort(DocRef, g.docs.items, {}, docLess);
         return g.docs.items;
+    }
+
+    /// Walk every live document without trigram pruning. Invert-match needs this:
+    /// a document excluded by the positive candidate set may be entirely made of
+    /// selected nonmatching lines.
+    fn eachDoc(self: *ResidentSession, v: anytype) QueryError!void {
+        for (self.mir.paths, self.mir.docs, self.mir.nuls) |path, bytes, nul| {
+            if (self.overlay.contains(path)) continue;
+            try v.visit(path, bytes, nul);
+            if (wantsStop(v)) return;
+        }
+        var it = self.overlay.iterator();
+        while (it.next()) |e| switch (e.value_ptr.*) {
+            .tombstone => {},
+            .doc => |d| {
+                try v.visit(e.key_ptr.*, d.bytes, d.nul);
+                if (wantsStop(v)) return;
+            },
+        };
     }
 
     /// Walk every candidate doc through `v.visit(path, bytes, nul)`: first the
@@ -754,6 +823,7 @@ pub const ResidentSession = struct {
         for (try self.candidateIds(cq, &cand_buf)) |id| {
             if (self.overlay.contains(self.mir.paths[id])) continue; // handled below
             try v.visit(self.mir.paths[id], self.mir.docs[id], self.mir.nuls[id]);
+            if (wantsStop(v)) return; // `-q` early-halt (comptime no-op for other visitors)
         }
         var it = self.overlay.iterator();
         while (it.next()) |e| switch (e.value_ptr.*) {
@@ -763,7 +833,10 @@ pub const ResidentSession = struct {
             // Off the watcher-clean path each visitor existence-checks its match
             // (the same fail-closed stat-per-hit the base docs get); the clean
             // path already tombstoned any delete, keeping the no-stat path.
-            .doc => |d| try v.visit(e.key_ptr.*, d.bytes, d.nul),
+            .doc => |d| {
+                try v.visit(e.key_ptr.*, d.bytes, d.nul);
+                if (wantsStop(v)) return;
+            },
         };
     }
 
@@ -799,6 +872,54 @@ fn fileExists(io: std.Io, path: []const u8) bool {
     return true;
 }
 
+/// A walk visitor MAY expose a `stop: bool` to abandon `eachCandidate` early
+/// (the `-q` existence halt). The `@hasField` guard is comptime, so a visitor
+/// without the field compiles the check away entirely — no runtime branch is
+/// added to the fold/gather hot walk.
+inline fn wantsStop(v: anytype) bool {
+    if (comptime @hasField(std.meta.Child(@TypeOf(v)), "stop")) return v.stop;
+    return false;
+}
+
+/// The `-q` existence visitor: cold `anyMatch`'s exact admission — an
+/// implicit-binary file (a NUL inside the first 8 KiB) is skipped WHOLE (unlike
+/// `-l`'s pre-NUL slice), an empty body never matches — then the shared
+/// whole-doc gate. The first hit sets `found` and raises `stop`, so the corpus
+/// walk halts at once (the early-out the quiet perf win rests on).
+const Exister = struct {
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    cq: *const CompiledQuery,
+    sc: *Scratch,
+    msc: *MatchScratch,
+    invert: bool,
+    verify_existence: bool,
+    spans: std.ArrayList(Span) = .empty,
+    found: bool = false,
+    stop: bool = false,
+
+    fn visit(self: *Exister, path: []const u8, bytes: []const u8, nul: ?usize) QueryError!void {
+        if (bytes.len == 0) return;
+        if (nul != null and corpus_mod.isBinary(bytes)) return;
+        if (self.invert) {
+            var pos: usize = 0;
+            while (pos < bytes.len) {
+                const nl = std.mem.indexOfScalarPos(u8, bytes, pos, '\n');
+                const end = nl orelse bytes.len;
+                self.spans.clearRetainingCapacity();
+                self.cq.collectSpans(self.gpa, bytes[pos..end], self.msc, &self.spans) catch
+                    return QueryError.OutOfMemory;
+                if (self.spans.items.len == 0) break;
+                if (nl == null) return;
+                pos = end + 1;
+            } else return;
+        } else if (!self.cq.docMatches(bytes, self.sc)) return;
+        if (self.verify_existence and !fileExists(self.io, path)) return;
+        self.found = true;
+        self.stop = true;
+    }
+};
+
 /// The `matchingDocs` visitor — one admission decision per candidate doc:
 /// binary policy, whole-doc gate, existence check, append.
 const Gather = struct {
@@ -807,6 +928,7 @@ const Gather = struct {
     cq: *const CompiledQuery,
     sc: *Scratch,
     admit: Admit,
+    require_match: bool,
     check_exists: bool,
     docs: std.ArrayList(DocRef) = .empty,
 
@@ -814,7 +936,7 @@ const Gather = struct {
         // Cold `--json` skips a doc its 8 KiB `isBinary` window flags; a doc whose
         // first NUL sits past the window is streamed in full. Match that exactly.
         if (self.admit == .json_stream and nul != null and corpus_mod.isBinary(bytes)) return;
-        if (!self.cq.docMatches(bytes, self.sc)) return; // trigram false positive / no match
+        if (self.require_match and !self.cq.docMatches(bytes, self.sc)) return;
         if (self.check_exists and !fileExists(self.io, path)) return;
         try self.docs.append(self.arena, .{ .path = path, .bytes = bytes, .nul = nul });
     }
@@ -824,15 +946,18 @@ const Gather = struct {
 /// sink asked to halt the whole stream on one of them.
 const DocEmit = struct { matched: bool, halt: bool };
 
-/// Emit every matching LINE of one doc to `sink`, ascending by line number,
+/// Emit every selected LINE of one doc to `sink`, ascending by line number,
 /// over rg's line model (`\n` terminates, no phantom final line). `spans` is a
 /// caller-owned per-line buffer, cleared and refilled per line so no allocation
-/// survives the call. Stops at the line where the sink returns `true`, reporting
-/// the halt so the caller ends the whole stream. `matchingDocs(.json_stream)`
-/// admits only non-empty docs cold `--json` would search, so the binary/empty
-/// skips that path applies are already upstream.
-fn emitDoc(gpa: std.mem.Allocator, cq: *const CompiledQuery, msc: *MatchScratch, spans: *std.ArrayList(Span), d: DocRef, sink: anytype) error{OutOfMemory}!DocEmit {
+/// survives the call. `max_count` caps matching lines PER FILE, then advances to
+/// the next doc; a sink stop still halts the whole stream. `matchingDocs`
+/// (`.json_stream`) admits only non-empty docs cold `--json` would search, so
+/// the binary/empty skips that path applies are already upstream.
+fn emitDoc(gpa: std.mem.Allocator, cq: *const CompiledQuery, msc: *MatchScratch, spans: *std.ArrayList(Span), d: DocRef, invert: bool, before: u64, after: u64, max_count: ?u64, sink: anytype) error{OutOfMemory}!DocEmit {
+    if (before != 0 or after != 0)
+        return emitDocContext(gpa, cq, msc, spans, d, invert, before, after, max_count, sink);
     var any = false;
+    var emitted: u64 = 0;
     var pos: usize = 0;
     var lineno: u64 = 0;
     while (pos < d.bytes.len) {
@@ -842,15 +967,76 @@ fn emitDoc(gpa: std.mem.Allocator, cq: *const CompiledQuery, msc: *MatchScratch,
         const view = d.bytes[pos..end];
         spans.clearRetainingCapacity();
         try cq.collectSpans(gpa, view, msc, spans);
-        if (spans.items.len > 0) {
+        if ((spans.items.len > 0) != invert) {
             any = true;
+            emitted += 1;
             if (sink.emit(.{ .path = d.path, .line_number = lineno, .text = view, .spans = spans.items }))
                 return .{ .matched = true, .halt = true };
+            if (max_count) |cap| if (emitted == cap) break;
         }
         if (nl == null) break;
         pos = end + 1;
     }
     return .{ .matched = any, .halt = false };
+}
+
+const LineKind = enum(u2) { none, context, match };
+const PlannedLine = struct { start: usize, end: usize, kind: LineKind = .none };
+
+/// Context needs a file-local plan: classify capped match lines first, paint
+/// their merged neighborhoods with match precedence, then emit in line order.
+/// This mirrors cold JSON's `emitFile` state machine without reproducing its
+/// matcher—the shared `CompiledQuery.collectSpans` remains the sole oracle.
+fn emitDocContext(gpa: std.mem.Allocator, cq: *const CompiledQuery, msc: *MatchScratch, spans: *std.ArrayList(Span), d: DocRef, invert: bool, before: u64, after: u64, max_count: ?u64, sink: anytype) error{OutOfMemory}!DocEmit {
+    var lines: std.ArrayList(PlannedLine) = .empty;
+    defer lines.deinit(gpa);
+    var pos: usize = 0;
+    while (pos < d.bytes.len) {
+        const nl = std.mem.indexOfScalarPos(u8, d.bytes, pos, '\n');
+        const end = nl orelse d.bytes.len;
+        try lines.append(gpa, .{ .start = pos, .end = end });
+        if (nl == null) break;
+        pos = end + 1;
+    }
+
+    const bcap = std.math.cast(usize, before) orelse std.math.maxInt(usize);
+    const acap = std.math.cast(usize, after) orelse std.math.maxInt(usize);
+    var selected: u64 = 0;
+    for (lines.items, 0..) |*line, i| {
+        spans.clearRetainingCapacity();
+        try cq.collectSpans(gpa, d.bytes[line.start..line.end], msc, spans);
+        if ((spans.items.len > 0) == invert) continue;
+        if (max_count) |cap| if (selected >= cap) break;
+        selected += 1;
+        line.kind = .match;
+
+        var n: usize = 1;
+        while (n <= bcap and n <= i) : (n += 1) {
+            const prior = &lines.items[i - n];
+            if (prior.kind == .none) prior.kind = .context;
+        }
+        n = 1;
+        while (n <= acap and n <= lines.items.len - i - 1) : (n += 1) {
+            const following = &lines.items[i + n];
+            if (following.kind == .none) following.kind = .context;
+        }
+    }
+    if (selected == 0) return .{ .matched = false, .halt = false };
+
+    for (lines.items, 1..) |line, lineno| {
+        if (line.kind == .none) continue;
+        spans.clearRetainingCapacity();
+        if (line.kind == .match and !invert)
+            try cq.collectSpans(gpa, d.bytes[line.start..line.end], msc, spans);
+        if (sink.emit(.{
+            .path = d.path,
+            .line_number = lineno,
+            .text = d.bytes[line.start..line.end],
+            .spans = spans.items,
+            .kind = if (line.kind == .match) .match else .context,
+        })) return .{ .matched = true, .halt = true };
+    }
+    return .{ .matched = true, .halt = false };
 }
 
 /// Folds matched docs into either the file-path set (`-l`) or the matching-line

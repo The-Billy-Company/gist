@@ -67,9 +67,10 @@ _INELIGIBLE_FIELDS = (
     "multiline",
     "multiline_dotall",
 )
-# The FFI options entry additionally carries invert-match; unlike the rootless
-# daemon, its record stream can represent selected lines with zero submatches.
-_FFI_INELIGIBLE_FIELDS = tuple(field for field in _INELIGIBLE_FIELDS if field != "invert")
+# The FFI options contract additionally carries invert and context records.
+_FFI_INELIGIBLE_FIELDS = tuple(
+    field for field in _INELIGIBLE_FIELDS if field not in {"invert", "before", "after", "context"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +126,7 @@ def warm_eligible(request: SearchRequest) -> bool:
 
 
 def ffi_eligible(request: SearchRequest) -> bool:
-    """True iff FFI can attempt `request`. Beyond the daemon subset, it serves invert-match, opens explicit roots, carries Unicode/ASCII mode, and accelerates the linear-compatible arm of `engine="auto"`; `IRREGEX_STALE` falls through to cold PCRE2."""
+    """True iff FFI can attempt `request`. Beyond the daemon subset, it serves invert/context records, opens explicit roots, carries Unicode/ASCII mode, and accelerates the linear-compatible arm of `engine="auto"`; `IRREGEX_STALE` falls through to cold PCRE2."""
     return _eligible(
         request,
         _FFI_INELIGIBLE_FIELDS,

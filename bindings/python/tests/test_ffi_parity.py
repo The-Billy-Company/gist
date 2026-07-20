@@ -67,6 +67,10 @@ def corpus(tmp_path, monkeypatch):
         SearchRequest(pattern="TODO", engine=SearchEngine.AUTO),
         SearchRequest(pattern="TODO", invert=True),
         SearchRequest(pattern="TODO", invert=True, max_count=1),
+        SearchRequest(pattern="TODO", before=1),
+        SearchRequest(pattern="TODO", after=1),
+        SearchRequest(pattern="TODO", context=1),
+        SearchRequest(pattern="TODO", invert=True, context=1),
     ],
 )
 def test_run_equals_cold(corpus, req: SearchRequest) -> None:
@@ -84,7 +88,8 @@ def test_files_and_count_equal_cold(corpus) -> None:
     ci = SearchRequest(pattern="TODO", ignore_case=True)
     assert _ffi.count(ci, cwd=None) == engine.count(ci, cwd=None)
     ci_count, plain_count = _ffi.count(ci, cwd=None), _ffi.count(req, cwd=None)
-    assert ci_count is not None and plain_count is not None
+    assert ci_count is not None
+    assert plain_count is not None
     assert ci_count > plain_count  # -i pulls in 'todo'
 
 
@@ -117,6 +122,21 @@ def test_invert_faces_equal_cold(corpus, req: SearchRequest) -> None:
     assert _ffi.count(req, cwd=None) == engine.count(req, cwd=None)
 
 
+@pytest.mark.parametrize(
+    "req",
+    [
+        SearchRequest(pattern="TODO", context=2),
+        SearchRequest(pattern="TODO", before=1, context=3),
+        SearchRequest(pattern="TODO", after=1, max_count=1),
+        SearchRequest(pattern="TODO", invert=True, context=1),
+    ],
+)
+def test_context_is_stream_only_and_all_faces_equal_cold(corpus, req: SearchRequest) -> None:
+    assert _ffi.run(req, cwd=None) == engine.run(req, cwd=None)
+    assert _ffi.files(req, cwd=None) == engine.files(req, cwd=None)
+    assert _ffi.count(req, cwd=None) == engine.count(req, cwd=None)
+
+
 def test_word_files_and_count_equal_cold(corpus) -> None:
     word = SearchRequest(pattern="run", fixed=True, word=True)
     assert _ffi.files(word, cwd=None) == engine.files(word, cwd=None)
@@ -124,7 +144,8 @@ def test_word_files_and_count_equal_cold(corpus) -> None:
     # -w strictly narrows the plain answer (`runner`/`rerun`/`érun` lines drop).
     plain = SearchRequest(pattern="run", fixed=True)
     plain_count, word_count = _ffi.count(plain, cwd=None), _ffi.count(word, cwd=None)
-    assert plain_count is not None and word_count is not None
+    assert plain_count is not None
+    assert word_count is not None
     assert plain_count > word_count
 
 
@@ -134,7 +155,8 @@ def test_smart_case_resolves_in_engine(corpus) -> None:
     assert _ffi.count(folded, cwd=None) == engine.count(folded, cwd=None)
     assert _ffi.count(exact, cwd=None) == engine.count(exact, cwd=None)
     folded_count, exact_count = _ffi.count(folded, cwd=None), _ffi.count(exact, cwd=None)
-    assert folded_count is not None and exact_count is not None
+    assert folded_count is not None
+    assert exact_count is not None
     assert folded_count > exact_count
 
 
@@ -150,7 +172,8 @@ def test_explicit_unicode_mode_resolves_in_engine(corpus) -> None:
     assert _ffi.count(ascii_word, cwd=None) == engine.count(ascii_word, cwd=None)
     ascii_count = _ffi.count(ascii_word, cwd=None)
     unicode_count = _ffi.count(unicode_word, cwd=None)
-    assert ascii_count is not None and unicode_count is not None
+    assert ascii_count is not None
+    assert unicode_count is not None
     assert ascii_count > unicode_count
 
 
@@ -170,7 +193,8 @@ def test_absolute_root_equals_cold_and_handle_scope_isolated(corpus) -> None:
     assert _ffi.run(scoped, cwd=None) == engine.run(scoped, cwd=None)
     scoped_count = _ffi.count(scoped, cwd=None)
     rootless_count = _ffi.count(rootless, cwd=None)
-    assert scoped_count is not None and rootless_count is not None
+    assert scoped_count is not None
+    assert rootless_count is not None
     assert scoped_count == engine.count(scoped, cwd=None)
     assert rootless_count == engine.count(rootless, cwd=None)
     assert rootless_count > scoped_count
@@ -200,7 +224,7 @@ def test_abi_version_parity() -> None:
     loaded = _ffi._load()
     assert loaded is not None
     _ffi_mod, lib = loaded
-    assert getattr(lib, "irregex_abi_version")() == _ffi._ABI_VERSION
+    assert lib.irregex_abi_version() == _ffi._ABI_VERSION
 
 
 def test_read_your_writes(corpus) -> None:

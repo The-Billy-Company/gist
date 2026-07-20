@@ -1,8 +1,8 @@
 """In-process cffi transport for the warm search session (ADR-352 rung 3).
 
 `dlopen`s `libirregex.{dylib,so}` in ABI mode (no C compiler, dev headers, or
-per-Python build) and drives the `irregex_open` / payload-bearing
-`irregex_search_with_options` / `irregex_close` C ABI (`../../../include/irregex.h`,
+per-Python build) and drives the `irregex_open` / `irregex_search` /
+`irregex_close` C ABI (`../../../include/irregex.h`,
 implemented in `src/runtime/ffi/session.zig`). It holds one corpus WARM in this
 very process — no subprocess, Unix socket, `stdout`, or `exit` — and streams
 full `Match` records over a callback, byte-identical to the cold `gist --json`
@@ -51,27 +51,27 @@ typedef struct {
   const uint8_t *path; size_t path_len; uint64_t line_number;
   const uint8_t *line; size_t line_len;
   const irregex_submatch *submatches; size_t nsubmatches;
+  uint32_t kind;
 } irregex_match;
 typedef int32_t (*irregex_match_fn)(void *ctx, const irregex_match *m);
 typedef struct {
   uint32_t struct_size; uint32_t flags; uint64_t max_count;
+  uint64_t before_context; uint64_t after_context;
 } irregex_search_options;
 uint32_t irregex_abi_version(void);
 int32_t irregex_open(const char *const *roots, size_t nroots, irregex_session **out);
-int32_t irregex_search(irregex_session *s, const uint8_t *pattern, size_t pattern_len,
-                    uint32_t flags, irregex_match_fn on_match, void *ctx);
-int32_t irregex_search_with_options(irregex_session *s, const uint8_t *pattern,
+int32_t irregex_search(irregex_session *s, const uint8_t *pattern,
                     size_t pattern_len, const irregex_search_options *options,
                     irregex_match_fn on_match, void *ctx);
 void irregex_close(irregex_session *s);
 """
 
-# The C-ABI symbol version the loader gates on (`root.zig::abi`). v2 gave the
-# match callback an `i32` abort return; distinct from the contract's
+# The C-ABI symbol version the loader gates on (`root.zig::abi`). ABI 1 is the
+# coherent open/search/close interface. This is distinct from the contract's
 # `search_api.toml` `[meta].abi_version` (`gist.ABI_VERSION`), which they may
 # diverge from. Callbacks below always return 0 (CONTINUE) — the Python API
 # wants every match — so the abort path is exercised only by future consumers.
-_ABI_VERSION = 2
+_ABI_VERSION = 1
 _CONTINUE = 0  # a match-callback return of 0 keeps the stream going
 _FLAG_FIXED, _FLAG_IGNORE_CASE, _FLAG_WORD, _FLAG_QUIET = 1 << 0, 1 << 1, 1 << 2, 1 << 3
 _FLAG_MAX_COUNT, _FLAG_SMART_CASE = 1 << 4, 1 << 5
@@ -139,10 +139,9 @@ def _try_load() -> tuple[FFI, object] | None:
     ffi.cdef(_CDEF)
     try:
         lib = ffi.dlopen(lib_path)
-        # The options entry is additive, so an older ABI-v2 library can match
-        # the version yet lack the symbol. Resolve it eagerly: a stale library
-        # declines here instead of raising on the first query.
-        getattr(lib, "irregex_search_with_options")
+        # Resolve the required search entry eagerly; a stale library declines
+        # here instead of raising on the first query.
+        getattr(lib, "irregex_search")
         if lib.irregex_abi_version() != _ABI_VERSION:
             return None  # header/library ABI drift — decline, answer cold
     except (AttributeError, OSError):
@@ -181,7 +180,9 @@ class Handle:
         """Whether the corpus opened (else the caller answers cold)."""
         return bool(self._session)
 
-    def _invoke(self, request: SearchRequest, callback: object) -> int | None:
+    def _invoke(
+        self, request: SearchRequest, callback: object, *, include_context: bool = True
+    ) -> int | None:
         """Drive one `irregex_search` under the handle lock.
 
         None if closed, else the raw status (negative = the caller answers
@@ -198,18 +199,27 @@ class Handle:
             | (_FLAG_QUIET if request.quiet else 0)
             | (_FLAG_MAX_COUNT if request.max_count is not None else 0)
         )
+        before, after = (
+            (request.before, request.after)
+            if request.before or request.after
+            else (request.context, request.context)
+        )
+        if not include_context:
+            before = after = 0
         options = self._ffi.new(
             "irregex_search_options *",
             {
                 "struct_size": self._ffi.sizeof("irregex_search_options"),
                 "flags": flags,
                 "max_count": request.max_count or 0,
+                "before_context": before,
+                "after_context": after,
             },
         )
         with self._lock:
             if not self._session:
                 return None
-            return self._lib.irregex_search_with_options(
+            return self._lib.irregex_search(
                 self._session, pattern, len(pattern), options, callback, self._ffi.NULL
             )
 
@@ -236,7 +246,7 @@ class Handle:
                     path=_decode(ffi.buffer(m.path, m.path_len)),
                     line_number=m.line_number,
                     text=text,
-                    kind=MatchKind.MATCH,
+                    kind=MatchKind.CONTEXT if m.kind == 1 else MatchKind.MATCH,
                     submatches=subs,
                 )
             )
@@ -255,7 +265,7 @@ class Handle:
             tally[0] += 1
             return _CONTINUE
 
-        rc = self._invoke(request, on_match)
+        rc = self._invoke(request, on_match, include_context=False)
         return tally[0] if rc is not None and rc >= 0 else None
 
     def files(self, request: SearchRequest) -> list[str] | None:
@@ -268,7 +278,7 @@ class Handle:
             seen.add(_decode(ffi.buffer(m.path, m.path_len)))
             return _CONTINUE
 
-        rc = self._invoke(request, on_match)
+        rc = self._invoke(request, on_match, include_context=False)
         return sorted(seen) if rc is not None and rc >= 0 else None
 
     def close(self) -> None:

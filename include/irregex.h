@@ -2,10 +2,11 @@
  *
  * This C ABI covers ABI/engine-version introspection, one allocation-free
  * trigram primitive, and an in-process warm search SESSION:
- * irregex_open / irregex_search / irregex_close stream match records to a callback with
- * no subprocess, socket, stdout, or exit. Every session call returns a status
- * code instead of aborting, so a bad query never terminates the host. Index
- * BUILD lifecycle stays a Zig/CLI surface (a session searches the live tree). */
+ * irregex_open / irregex_search / irregex_close
+ * stream match records to a callback with no subprocess, socket, stdout, or
+ * exit. Every session call returns a status code instead of aborting, so a bad
+ * query never terminates the host. Index BUILD lifecycle stays a Zig/CLI
+ * surface (a session searches the live tree). */
 #ifndef IRREGEX_H
 #define IRREGEX_H
 
@@ -41,9 +42,17 @@ size_t irregex_trigram_count(const uint8_t *text, size_t len, uint32_t *out);
 #define IRREGEX_OPEN_FAILED (-3)
 #define IRREGEX_INVALID (-4)
 
-/* search() flags bitset. */
+/* search() flags bitset. Any set bit outside these makes irregex_search
+ * return IRREGEX_INVALID (fail closed): an unknown flag is never silently
+ * dropped in-process — the caller answers cold instead. */
 #define IRREGEX_FIXED (1u << 0)       /* -F: fixed string, not a regex   */
 #define IRREGEX_IGNORE_CASE (1u << 1) /* -i: case-insensitive            */
+#define IRREGEX_WORD (1u << 2)        /* -w: word-bounded matches only   */
+#define IRREGEX_QUIET (1u << 3)       /* -q: existence-only early halt   */
+#define IRREGEX_MAX_COUNT (1u << 4)   /* options.max_count is present    */
+#define IRREGEX_SMART_CASE (1u << 5)  /* -S: fold iff pattern has no caps */
+#define IRREGEX_NO_UNICODE (1u << 6)  /* ASCII classes/fold/boundaries   */
+#define IRREGEX_INVERT (1u << 7)      /* -v: select nonmatching lines    */
 
 /* An opaque warm session (one corpus held in-memory). */
 typedef struct irregex_session irregex_session;
@@ -57,9 +66,13 @@ typedef struct {
   size_t end;
 } irregex_submatch;
 
-/* One matching line. `path` and `line` alias session bytes (NOT NUL-terminated);
+/* One selected line. `path` and `line` alias session bytes (NOT NUL-terminated);
  * `submatches[0..nsubmatches]` alias per-line scratch. Everything a match points
- * at is valid ONLY during the callback that receives it — copy what you keep. */
+ * at is valid ONLY during the callback that receives it — copy what you keep.
+ * Context and IRREGEX_INVERT selections have zero submatches; `kind`
+ * distinguishes context from selected match lines. */
+#define IRREGEX_KIND_MATCH 0u
+#define IRREGEX_KIND_CONTEXT 1u
 typedef struct {
   const uint8_t *path;
   size_t path_len;
@@ -68,6 +81,7 @@ typedef struct {
   size_t line_len;
   const irregex_submatch *submatches;
   size_t nsubmatches;
+  uint32_t kind;
 } irregex_match;
 
 /* Per-line callback, invoked once per matching line while the session lock is
@@ -77,6 +91,17 @@ typedef struct {
  * of the corpus unscanned. The non-zero value is otherwise opaque to gist. */
 typedef int32_t (*irregex_match_fn)(void *ctx, const irregex_match *m);
 
+/* Complete options for irregex_search. Initialize
+ * struct_size to sizeof(irregex_search_options). Unknown sizes/flags fail
+ * closed with IRREGEX_INVALID rather than being silently ignored. */
+typedef struct {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t max_count;
+  uint64_t before_context;
+  uint64_t after_context;
+} irregex_search_options;
+
 /* Open a warm session over roots[0..nroots] (each a NUL-terminated path).
  * nroots == 0 means the ROOTLESS current-working-directory walk — the exact
  * tree a bare `gist <pattern>` walks (CWD-relative paths, no "./" prefix), so
@@ -84,13 +109,12 @@ typedef int32_t (*irregex_match_fn)(void *ctx, const irregex_match *m);
  * handle to *out and returns IRREGEX_OK; else a negative status, *out unchanged. */
 int32_t irregex_open(const char *const *roots, size_t nroots, irregex_session **out);
 
-/* Stream every matching line of pattern[0..pattern_len] over the warm corpus to
- * on_match. Returns IRREGEX_MATCH if any line matched, IRREGEX_OK if none, or a
- * negative status on error (IRREGEX_STALE => answer cold). on_match may return
- * non-zero to stop early — a bounded / first-match query then still returns
- * IRREGEX_MATCH without scanning the rest of the corpus. */
-int32_t irregex_search(irregex_session *s, const uint8_t *pattern, size_t pattern_len,
-                    uint32_t flags, irregex_match_fn on_match, void *ctx);
+/* Execute one complete, size-checked search shape. Selected records stream to
+ * on_match; a non-zero callback return stops early. Returns IRREGEX_MATCH,
+ * IRREGEX_OK, or a negative fail-closed status. */
+int32_t irregex_search(irregex_session *s, const uint8_t *pattern,
+                    size_t pattern_len, const irregex_search_options *options,
+                    irregex_match_fn on_match, void *ctx);
 
 /* Free a session opened by irregex_open. */
 void irregex_close(irregex_session *s);

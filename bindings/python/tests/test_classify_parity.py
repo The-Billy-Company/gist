@@ -166,7 +166,7 @@ def test_ffi_predicate_extends_uds_with_roots_unicode_and_auto() -> None:
     assert ffi_eligible(smart) is True
     # -w IS lowered into the C flags (IRREGEX_WORD), so it stays FFI-eligible.
     assert ffi_eligible(SearchRequest(pattern="TODO", word=True)) is True
-    # The additive payload-bearing C entry safely lowers -q and -m N, including
+    # The size-checked options entry safely lowers -q and -m N, including
     # falsy -m0; none may be lost to a truthiness sweep.
     for ffi_option in (
         SearchRequest(pattern="TODO", quiet=True),
@@ -180,6 +180,7 @@ def test_ffi_predicate_extends_uds_with_roots_unicode_and_auto() -> None:
     for req in _INELIGIBLE:
         ffi_extension = (
             req.invert
+            or bool(req.before or req.after or req.context)
             or bool(req.paths)
             or req.unicode is not None
             or req.engine is SearchEngine.AUTO

@@ -28,73 +28,17 @@
 //! pool, and the handle.
 
 const std = @import("std");
+const contract = @import("contract.zig");
+const Relay = @import("relay.zig").Relay;
 const resident = @import("../session/resident.zig");
 const request = @import("../session/request.zig");
 
 /// The FFI allocates through the C allocator so a host that already owns the C
 /// heap (the Python process) shares one arena, and teardown needs no Zig GPA.
 const gpa = std.heap.c_allocator;
-
-/// C-ABI status codes (the `i32` every entry returns). Non-negative = success
-/// (`ok` = ran, no match; `match` = at least one line matched); negative = a
-/// typed failure the caller recovers from (`stale` → answer cold).
-pub const Status = enum(i32) {
-    ok = 0,
-    match = 1,
-    /// The pattern is outside gist's linear-time syntax (or freshness could not
-    /// be proven): the caller answers cold, exactly as the daemon client does.
-    stale = -1,
-    out_of_memory = -2,
-    /// The session could not be opened (corpus/index build failed).
-    open_failed = -3,
-    /// A null/zero required argument.
-    invalid = -4,
-};
-
-/// `flags` bitset for `search` — the transport-neutral subset of the request
-/// contract the warm path accepts (mirrors `request.Request`).
-pub const flag_fixed: u32 = 1 << 0; // `-F`: fixed string, not a regex
-pub const flag_ignore_case: u32 = 1 << 1; // `-i`: case-insensitive
-pub const flag_word: u32 = 1 << 2; // `-w`: word-bounded match spans only
-
-/// The flag bits THIS entry implements. `search` fails closed (`.invalid`) on
-/// any other set bit, so a newer host can never have a flag silently dropped
-/// in-process (it must answer cold instead) — the same policy as the UDS
-/// protocol's `known_flags`. Deliberately NARROWER than the wire: smart-case
-/// (UDS bit 5) stays out until this entry lowers it through the session's
-/// `effectiveIgnoreCase` seam. Extending this mask is additive (no signature
-/// change), so the ABI version does not move — `flag_word` landed at ABI 2.
-pub const known_flags: u32 = flag_fixed | flag_ignore_case | flag_word;
-
-/// One submatch span, C-ABI layout. `text` aliases the line bytes (NOT
-/// NUL-terminated — use `len`); `[start,end)` are byte offsets within the line.
-pub const Submatch = extern struct {
-    text: [*]const u8,
-    len: usize,
-    start: usize,
-    end: usize,
-};
-
-/// One matching line, C-ABI layout. `path`/`line` alias session bytes (NOT
-/// NUL-terminated); `submatches[0..nsubmatches]` alias per-line scratch. All
-/// valid only for the duration of the callback that receives it.
-pub const Match = extern struct {
-    path: [*]const u8,
-    path_len: usize,
-    line_number: u64,
-    line: [*]const u8,
-    line_len: usize,
-    submatches: [*]const Submatch,
-    nsubmatches: usize,
-};
-
-/// The caller's per-line callback (C calling convention). Invoked once per
-/// matching line, synchronously, while the session lock is held — it MUST NOT
-/// re-enter the session. Return `0` to CONTINUE the stream, or NON-ZERO to stop
-/// it early (a bounded / first-match query): `search` then reports `.match` and
-/// leaves the rest of the corpus unscanned. `ctx` is the userdata passed to
-/// `search`.
-pub const MatchFn = *const fn (ctx: ?*anyopaque, m: *const Match) callconv(.c) i32;
+const Status = contract.Status;
+const SearchOptions = contract.SearchOptions;
+const MatchFn = contract.MatchFn;
 
 /// An opaque warm session: its threaded I/O and the resident engine over one
 /// corpus. Heap-allocated by `open` so the `std.Io.Threaded.io()` interface can
@@ -107,45 +51,6 @@ pub const Session = struct {
     threaded: std.Io.Threaded,
     io: std.Io,
     inner: resident.ResidentSession,
-};
-
-/// Marshals resident `MatchRecord`s into C `Match`/`Submatch` structs and fires
-/// the caller's callback, translating its C return into the sink's halt bool: a
-/// non-zero return stops the stream early (caller-requested). `subs` is a reused
-/// span buffer (cleared per line); an allocation failure sets `oom` and halts so
-/// `emit` stays infallible, and `search` maps `oom` to `out_of_memory` afterward.
-/// Satisfies `resident.search`'s duck-typed sink (a `pub fn emit(*Relay,
-/// MatchRecord) bool` method, comptime-bound — no `*anyopaque`, no cast back).
-const Relay = struct {
-    cb: MatchFn,
-    ctx: ?*anyopaque,
-    subs: std.ArrayList(Submatch) = .empty,
-    oom: bool = false,
-
-    pub fn emit(self: *Relay, rec: resident.MatchRecord) bool {
-        if (self.oom) return true;
-        self.subs.clearRetainingCapacity();
-        self.subs.ensureTotalCapacity(gpa, rec.spans.len) catch {
-            self.oom = true;
-            return true; // halt; `search` maps `oom` to `out_of_memory`
-        };
-        for (rec.spans) |sp| self.subs.appendAssumeCapacity(.{
-            .text = rec.text.ptr + sp.start,
-            .len = sp.end - sp.start,
-            .start = sp.start,
-            .end = sp.end,
-        });
-        const m = Match{
-            .path = rec.path.ptr,
-            .path_len = rec.path.len,
-            .line_number = rec.line_number,
-            .line = rec.text.ptr,
-            .line_len = rec.text.len,
-            .submatches = self.subs.items.ptr,
-            .nsubmatches = self.subs.items.len,
-        };
-        return self.cb(self.ctx, &m) != 0; // non-zero → caller asked to stop
-    }
 };
 
 /// Open a warm session over `roots[0..nroots]` (each a NUL-terminated path).
@@ -177,16 +82,17 @@ pub fn open(roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**Session) 
     return .ok;
 }
 
-/// Stream every matching line of `pattern[0..pattern_len]` over the warm corpus
-/// to `on_match`. Returns `.match` if any line matched, `.ok` if none, or a
-/// negative status (`.stale` → the caller answers cold, unchanged). `on_match`
-/// may return non-zero to stop early — a bounded / first-match query then still
-/// returns `.match` (a line was seen) without scanning the rest of the corpus.
-/// A null `pattern_ptr` with `pattern_len > 0` is `.invalid`, never a blind
-/// deref; `pattern_len == 0` never reads the pointer (the empty pattern keeps
-/// its engine-defined meaning).
-pub fn search(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, flags: u32, on_match: MatchFn, ctx: ?*anyopaque) Status {
-    if (flags & ~known_flags != 0) return .invalid; // fail closed: unknown flag bits are never silently dropped
+/// Execute one complete search shape. Null, wrongly-sized, or unknown options
+/// fail closed; unsupported patterns return `.stale` for authoritative fallback.
+pub fn search(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, options_ptr: ?*const SearchOptions, on_match: MatchFn, ctx: ?*anyopaque) Status {
+    const options = options_ptr orelse return .invalid;
+    if (options.struct_size != @sizeOf(SearchOptions) or options.flags & ~contract.known_flags != 0)
+        return .invalid;
+    const max_count: ?u64 = if (options.flags & contract.flag_max_count != 0) options.max_count else null;
+    return searchRequest(s, pattern_ptr, pattern_len, options.flags, max_count, options.before_context, options.after_context, on_match, ctx);
+}
+
+fn searchRequest(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, flags: u32, max_count: ?u64, before: u64, after: u64, on_match: MatchFn, ctx: ?*anyopaque) Status {
     const pattern: []const u8 = if (pattern_len == 0) "" else blk: {
         const p = pattern_ptr orelse return .invalid;
         break :blk p[0..pattern_len];
@@ -194,13 +100,20 @@ pub fn search(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, flags:
     const req = request.Request{
         .pattern = pattern,
         .mode = .files, // ignored by the match stream; any value compiles
-        .fixed = flags & flag_fixed != 0,
-        .ignore_case = flags & flag_ignore_case != 0,
-        .word = flags & flag_word != 0,
+        .fixed = flags & contract.flag_fixed != 0,
+        .ignore_case = flags & contract.flag_ignore_case != 0,
+        .smart_case = flags & contract.flag_smart_case != 0,
+        .unicode = flags & contract.flag_no_unicode == 0,
+        .word = flags & contract.flag_word != 0,
+        .invert = flags & contract.flag_invert != 0,
+        .before = before,
+        .after = after,
+        .quiet = flags & contract.flag_quiet != 0,
+        .max_count = max_count,
     };
 
-    var relay = Relay{ .cb = on_match, .ctx = ctx };
-    defer relay.subs.deinit(gpa);
+    var relay = Relay{ .callback = on_match, .context = ctx };
+    defer relay.deinit();
 
     // A fresh per-call arena for the transient candidate list — no session-wide
     // mutable state, so overlapping calls can't reset each other's scratch.
