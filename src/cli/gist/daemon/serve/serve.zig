@@ -261,9 +261,9 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
 }
 
 /// The socket path a daemon binds / a client dials: `$GIST_SESSION_SOCK` when
-/// set, else the per-repo default beside the index (`corpus.out_dir`). The
-/// returned slice is gpa-owned.
+/// set, else the per-repo default beside the index (`corpus.outDir()`, itself
+/// `$GIST_DIR`-overridable). The returned slice is gpa-owned.
 pub fn socketPath(gpa: std.mem.Allocator, env: *const std.process.Environ.Map) ![]u8 {
     if (env.get("GIST_SESSION_SOCK")) |p| return gpa.dupe(u8, p);
-    return std.fmt.allocPrint(gpa, "{s}/gistd.sock", .{corpus.out_dir});
+    return std.fmt.allocPrint(gpa, "{s}/gistd.sock", .{corpus.outDir()});
 }

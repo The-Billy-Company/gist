@@ -1,11 +1,7 @@
 //! gist resident session — the UDS wire-protocol codec suite (ADR-352 rung 2.5).
 //!
-//! The codec is pure (encode into / decode from byte slices), so the whole
-//! frame grammar is proven without opening a socket. Two properties matter: a
-//! round-trip is lossless (every request/result/handshake survives encode →
-//! decode byte-for-byte), and every malformed frame is a hard `error`, never a
-//! partial parse — the fail-closed contract that lets the daemon reject a
-//! hostile or truncated peer instead of answering garbage.
+//! Pure encode/decode over byte slices (no socket). Round-trips are lossless;
+//! malformed frames are hard errors.
 
 const std = @import("std");
 const protocol = @import("protocol.zig");
@@ -58,6 +54,51 @@ test "query encode/decode preserves mode, flags, and pattern" {
         try std.testing.expect(got.line_num);
         try std.testing.expectEqualStrings("needle", got.pattern);
     }
+}
+
+test "query v2 round-trips the raw smart_case bit independently of ignore_case" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const req = request.Request{ .pattern = "Needle", .mode = .lines, .smart_case = true };
+    try protocol.encodeQuery(&buf, gpa, req);
+
+    const p = try roundTrip(&buf);
+    const got = try protocol.decodeQuery(p.payload);
+    try std.testing.expect(got.smart_case);
+    try std.testing.expect(!got.ignore_case);
+    try std.testing.expect(!got.fixed);
+    try std.testing.expect(!got.word);
+    try std.testing.expectEqualStrings("Needle", got.pattern);
+}
+
+test "query v2 round-trips the word bit (lane 2) independently of the rest" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const req = request.Request{ .pattern = "run", .mode = .count, .word = true };
+    try protocol.encodeQuery(&buf, gpa, req);
+
+    const p = try roundTrip(&buf);
+    const got = try protocol.decodeQuery(p.payload);
+    try std.testing.expect(got.word);
+    try std.testing.expect(!got.fixed and !got.ignore_case and !got.smart_case and !got.line_num);
+    try std.testing.expectEqualStrings("run", got.pattern);
+}
+
+test "decodeQuery fails closed on every reserved-but-unimplemented flag bit" {
+    // Bits 4 (invert), 6 (quiet), 7 (max_count_present) are reserved: a set bit
+    // outside `known_flags` must be BadFrame (→ the daemon declines → the
+    // client answers cold), never a silent drop.
+    for ([_]u8{ 1 << 4, 1 << 6, 1 << 7, 0xFF & ~protocol.known_flags }) |bit| {
+        const payload = [_]u8{ @intFromEnum(request.Mode.lines), bit, 'n' };
+        try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&payload));
+    }
+    // The same unknown bit alongside known bits is equally rejected.
+    const mixed = [_]u8{ @intFromEnum(request.Mode.lines), protocol.known_flags | (1 << 4), 'n' };
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&mixed));
+    // The full known mask itself decodes fine (the boundary of the policy).
+    const all_known = [_]u8{ @intFromEnum(request.Mode.lines), protocol.known_flags, 'n' };
+    const got = try protocol.decodeQuery(&all_known);
+    try std.testing.expect(got.fixed and got.ignore_case and got.line_num and got.word and got.smart_case);
 }
 
 test "files result encode/decode yields every path in order" {

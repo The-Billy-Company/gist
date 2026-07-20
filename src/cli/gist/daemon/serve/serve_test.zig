@@ -114,6 +114,13 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/a.txt", .{root}), .data = "WalletService here\n" });
     try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/b.txt", .{root}), .data = "nothing\n" });
     try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/c.txt", .{root}), .data = "also WalletService\n" });
+    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/d.txt", .{root}), .data = "walletservice lower\n" });
+    // Word-boundary fixtures (lane 2): e has a word-valid `run` per line (the
+    // second only AFTER a word-rejected `rerun` occurrence), f only substring
+    // hits, g only a Unicode-neighbor-rejected hit (`é` beside the match).
+    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/e.txt", .{root}), .data = "run runner\nrerun run\n" });
+    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/f.txt", .{root}), .data = "runner only\n" });
+    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/g.txt", .{root}), .data = "\xc3\xa9run here\n" });
 
     const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
     const roots = try a.dupe([]const u8, &.{root});
@@ -162,6 +169,56 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
         const lr = try collectLines(gpa, fd, a, .{ .pattern = "NoSuchNeedleAnywhere", .mode = .lines, .fixed = true });
         try std.testing.expect(!lr.matched);
         try std.testing.expectEqualStrings("", lr.out);
+    }
+
+    // v2 smart-case over the wire: a lowercase pattern under -S folds caseless
+    // (all three casings match — identical to -i bytes), an uppercase pattern
+    // stays case-sensitive (the raw bit crossed the socket; the SESSION
+    // resolved it against the pattern).
+    {
+        const folded = try collectFiles(gpa, fd, a, .{ .pattern = "walletservice", .mode = .files, .fixed = true, .smart_case = true });
+        try std.testing.expectEqual(@as(usize, 3), folded.len);
+        try std.testing.expect(hasSuffix(folded, "a.txt"));
+        try std.testing.expect(hasSuffix(folded, "c.txt"));
+        try std.testing.expect(hasSuffix(folded, "d.txt"));
+    }
+    {
+        const exact = try collectFiles(gpa, fd, a, .{ .pattern = "WalletService", .mode = .files, .fixed = true, .smart_case = true });
+        try std.testing.expectEqual(@as(usize, 2), exact.len);
+        try std.testing.expect(!hasSuffix(exact, "d.txt"));
+    }
+
+    // v2 `-w` over the wire (lane 2): the word bit crosses the socket and the
+    // engine applies cold's post-match word rule — `runner` (substring hit)
+    // and `érun` (Unicode word neighbor) never make the file set, and the
+    // word-rejected `rerun` occurrence still finds the later ` run` on its line.
+    {
+        const w = try collectFiles(gpa, fd, a, .{ .pattern = "run", .mode = .files, .fixed = true, .word = true });
+        try std.testing.expectEqual(@as(usize, 1), w.len);
+        try std.testing.expect(hasSuffix(w, "e.txt"));
+        // Without -w the same pattern reaches f.txt and g.txt too.
+        const plain = try collectFiles(gpa, fd, a, .{ .pattern = "run", .mode = .files, .fixed = true });
+        try std.testing.expectEqual(@as(usize, 3), plain.len);
+    }
+    {
+        const lr = try collectLines(gpa, fd, a, .{ .pattern = "run", .mode = .lines, .fixed = true, .word = true });
+        try std.testing.expect(lr.matched);
+        const want = try std.fmt.allocPrint(a, "{s}/e.txt:run runner\n{s}/e.txt:rerun run\n", .{ root, root });
+        try std.testing.expectEqualStrings(want, lr.out);
+    }
+
+    // Fail-closed end-to-end: a query carrying a reserved-but-unimplemented
+    // flag bit (`invert`, 1<<4) comes back as DECLINE — the daemon never
+    // silently drops the flag, and the connection stays usable.
+    {
+        var qbuf: std.ArrayList(u8) = .empty;
+        defer qbuf.deinit(gpa);
+        const body = [_]u8{ @intFromEnum(request.Mode.files), 1 << 4, 'x' };
+        try protocol.writeFrame(&qbuf, gpa, .query, &body);
+        try std.testing.expect(protocol.writeAll(fd, qbuf.items));
+        var resp = try protocol.recvFrame(gpa, fd);
+        defer resp.deinit();
+        try std.testing.expectEqual(protocol.Opcode.decline, resp.op);
     }
 
     // PING → PONG.

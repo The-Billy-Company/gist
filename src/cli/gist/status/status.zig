@@ -73,14 +73,26 @@ fn mib(bytes: u64) f64 {
 
 /// Collect once for every presentation. A missing, incomplete, or invalid pair
 /// is an introspectable state rather than an error, matching historical status.
+/// `roots` in the returned snapshot are owned by `gpa` — release with
+/// `corpus_mod.freeRoots` (a ready index reports the roots it was BUILT over;
+/// an unavailable one reports what a build here WOULD cover).
 pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
     var p = (try persist.loadQuiet(gpa, io)) orelse return .{
         .state = .unavailable,
         .index = null,
         .freshness = .{ .anchor_unix_ns = null, .age_seconds = null },
-        .roots = &corpus_mod.default_roots,
+        .roots = try corpus_mod.resolveRoots(gpa),
     };
     defer p.deinit();
+
+    const roots = try gpa.alloc([]const u8, p.roots.items.len);
+    errdefer gpa.free(roots);
+    var duped: usize = 0;
+    errdefer for (roots[0..duped]) |r| gpa.free(r);
+    for (p.roots.items, roots) |src, *dst| {
+        dst.* = try gpa.dupe(u8, src);
+        duped += 1;
+    }
 
     const built_ns = fresh.readAnchor(gpa, io);
     // Sample after readAnchor's own future-anchor validation so a concurrent
@@ -89,19 +101,19 @@ pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
     return .{
         .state = .ready,
         .index = .{
-            .path = persist.index_file,
-            .paths_file = persist.paths_file,
+            .path = persist.indexFile(),
+            .paths_file = persist.pathsFile(),
             .files_indexed = p.paths.items.len,
             .distinct_trigrams = p.idx.dir_tri.len,
             .postings = p.idx.posting_count,
-            .index_bytes = fileSize(io, persist.index_file),
-            .paths_bytes = fileSize(io, persist.paths_file),
+            .index_bytes = fileSize(io, persist.indexFile()),
+            .paths_bytes = fileSize(io, persist.pathsFile()),
         },
         .freshness = .{
             .anchor_unix_ns = if (built_ns) |ns| @intCast(ns) else null,
             .age_seconds = if (built_ns) |ns| @as(f64, @floatFromInt(now_ns - ns)) / std.time.ns_per_s else null,
         },
-        .roots = &corpus_mod.default_roots,
+        .roots = roots,
     };
 }
 
@@ -109,7 +121,7 @@ fn renderHuman(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
     var buf: std.ArrayList(u8) = .empty;
     errdefer buf.deinit(gpa);
     const index = snapshot.index orelse {
-        try buf.appendSlice(gpa, "no index at " ++ persist.index_file ++ " — run `gist index` first\n");
+        try buf.print(gpa, "no index at {s} — run `gist index` first\n", .{persist.indexFile()});
         return buf.toOwnedSlice(gpa);
     };
     const avg_per_file: f64 = if (index.files_indexed == 0) 0 else @as(f64, @floatFromInt(index.postings)) / @as(f64, @floatFromInt(index.files_indexed));
@@ -154,6 +166,7 @@ fn renderJson(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
 /// human diagnostics, including when the index is unavailable.
 pub fn run(gpa: std.mem.Allocator, io: std.Io, json: bool) !void {
     const snapshot = try collect(gpa, io);
+    defer corpus_mod.freeRoots(gpa, snapshot.roots);
     const output = if (json) try renderJson(gpa, snapshot) else try renderHuman(gpa, snapshot);
     defer gpa.free(output);
     corpus_mod.emitStdout(output);

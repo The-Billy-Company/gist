@@ -107,16 +107,12 @@ fn appendSpec(a: std.mem.Allocator, out: *std.ArrayList(u8), spec: args.FlagSpec
     try out.appendSlice(a, "{\"spellings\":[");
     var first = true;
     if (spec.short) |short| {
-        const spelling = [_]u8{ '-', short };
-        try appendJsonString(a, out, &spelling);
+        try appendJsonString(a, out, &.{ '-', short });
         first = false;
     }
     for (spec.longs) |long| {
         if (!first) try out.append(a, ',');
-        try out.append(a, '"');
-        try out.appendSlice(a, "--");
-        try out.appendSlice(a, long);
-        try out.append(a, '"');
+        try out.print(a, "\"--{s}\"", .{long});
         first = false;
     }
     try out.append(a, ']');

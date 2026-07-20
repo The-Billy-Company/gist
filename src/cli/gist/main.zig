@@ -5,7 +5,7 @@
 //!   gist index                        build + persist the trigram index
 //!   gist status [--json]              read-only: is an index ready, how fresh, how big
 //!   gist codex <build|count|tally|status>  the exact existence/count tier over the
-//!                                     compressed self-index shelf (src/codex/)
+//!                                     compressed self-index shelf (src/index/codex/)
 //!
 //! Everything else is the search itself — no verb at all, the shape an agent's
 //! `rg <pattern>` reflex already takes:
@@ -45,7 +45,17 @@ const schema = gist.commands.schema; // `--schema` JSON manifest
 const search = gist.commands.search; // the unified search engine (bare shorthand + `gist rg`)
 const serve = gist.commands.serve; // `gist serve` — the resident warm daemon
 const client = gist.commands.client; // the warm CLI fast path (daemon dial + cold fallback)
-const default_roots = gist.corpus.default_roots;
+
+/// Canonicalize a `gist index ROOT` argument to the walk's path shape: strip
+/// any leading `./` and trailing `/` (so `./libs/` indexes as `libs` — the
+/// byte shape every query walker and root-scope compare emits); a root that
+/// reduces to nothing is the whole tree (`.`).
+fn normalizeRootArg(raw: []const u8) []const u8 {
+    var root = raw;
+    while (std.mem.startsWith(u8, root, "./")) root = root[2..];
+    root = std.mem.trimEnd(u8, root, "/");
+    return if (root.len == 0 or std.mem.eql(u8, root, ".")) "." else root;
+}
 
 /// Try the resident daemon for an eligible query; on a served answer this exits
 /// the process with rg's code and never returns. Any miss (ineligible argv, no
@@ -71,10 +81,12 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
             gist.corpus.finishOutput(); // announce a budget cut on the warm flush (idempotent, stderr-only)
             // A warm-served no-match (exit 1) gets the same stderr guidance the
             // cold engines emit. The classifier already parsed this argv to
-            // route it warm, so re-classifying recovers pattern + -F/-i without
-            // a second full flag parse; eligible requests are always rootless.
+            // route it warm, so re-classifying recovers pattern + -F and the
+            // RESOLVED case state (smart-case folds through the session's one
+            // resolution site) without a second full flag parse; eligible
+            // requests are always rootless.
             if (code == 1) if (gist.session.request.classify(argv)) |req| {
-                search.hints.noMatches(search.hints.shapeBare(req.pattern, req.fixed, req.ignore_case), null);
+                search.hints.noMatches(search.hints.shapeBare(req.pattern, req.fixed, req.effectiveIgnoreCase()), null);
             } else |_| {};
             std.process.exit(code);
         },
@@ -107,7 +119,8 @@ fn usage() void {
         \\  --no-index / --index    force the pure live walk / the index-accelerated path
         \\
         \\index lifecycle:
-        \\  gist index              build + persist the trigram index (optional, ~3 s)
+        \\  gist index [ROOT...]    build + persist the trigram index (optional, ~3 s);
+        \\                          no roots = this tree (GIST_ROOTS overrides)
         \\  gist status [--json]    is an index ready, how fresh, how big
         \\  gist serve [ROOT...]    resident warm daemon (auto-spawned; explicit run scopes it)
         \\  gist codex <build|count|tally|status>   exact corpus-wide counts off the
@@ -126,6 +139,9 @@ fn usage() void {
         \\  GIST_HINTS=0            mute stderr hints (results are untouched either way)
         \\  GIST_UNCAP=1            lift the ~25k-token soft output cap (also: --uncap)
         \\  GIST_MAX_OUTPUT_TOKENS / GIST_MAX_OUTPUT_BYTES   resize the output budget
+        \\  GIST_DIR                artifact home (default .local/gist-verify)
+        \\  GIST_SKIP / <GIST_DIR>/skips.list   extra skip dirs for the corpus walks
+        \\                          (index/freshness/relate only — search keeps rg parity)
         \\
     );
 }
@@ -162,12 +178,20 @@ pub fn main(init: std.process.Init) !void {
     // cold (the resident classifier declines it), so the flag still takes effect.
     gist.corpus.initOutputBudget(false);
 
+    // `gist index [ROOT...]` — explicit roots scope the index to those
+    // subtrees; with none, `corpus.resolveRoots` picks the corpus for THIS
+    // working directory (GIST_ROOTS → `.`, the whole tree).
     if (std.mem.eql(u8, mode, "index")) {
-        try indexer.run(gpa, io, &default_roots);
-        return;
+        var roots: std.ArrayList([]const u8) = .empty;
+        defer roots.deinit(gpa);
+        while (it.next()) |arg| try roots.append(gpa, normalizeRootArg(arg));
+        if (roots.items.len > 0) return indexer.run(gpa, io, roots.items);
+        const resolved = try gist.corpus.resolveRoots(gpa);
+        defer gist.corpus.freeRoots(gpa, resolved);
+        return indexer.run(gpa, io, resolved);
     }
     // `gist codex <build|count|tally|status>` — the exact existence/count tier
-    // over the compressed self-index (`src/codex/`): corpus-wide occurrence
+    // over the compressed self-index (`src/index/codex/`): corpus-wide occurrence
     // counts in O(|pattern|) with zero corpus I/O and zero false positives,
     // freshness-reported against the shelf's own build anchor.
     if (std.mem.eql(u8, mode, "codex")) {
@@ -205,12 +229,12 @@ pub fn main(init: std.process.Init) !void {
         try serve.run(gpa, io, roots.items, sock);
         return;
     }
-    // ── shed verbs: similar/dups/patterns live in the `hydra` binary now ──
+    // ── shed verbs: similar/dups/patterns live in the `relate` binary now ──
     // These verbs used to shadow a bare-literal search for their own names, so
     // a redirect stub regresses nothing a literal searcher could reach; it just
     // routes muscle memory (and agents replaying old argv) to the new face.
     if (std.mem.eql(u8, mode, "similar") or std.mem.eql(u8, mode, "dups") or std.mem.eql(u8, mode, "patterns")) {
-        std.debug.print("gist: '{s}' moved to the hydra binary — run `hydra {s} ...` (same flags; `make install-gist` installs both)\n", .{ mode, mode });
+        std.debug.print("gist: '{s}' moved to the relate binary — run `relate {s} ...` (same flags; `make install-gist` installs both)\n", .{ mode, mode });
         std.process.exit(2);
     }
 
@@ -222,14 +246,7 @@ pub fn main(init: std.process.Init) !void {
     // the bare shorthand, which IS documented there) and from `--schema`
     // (its flag surface is rg's own, not gist's native vocabulary), but it is
     // a fully supported, intentional entry point, not a hidden fallback.
-    if (std.mem.eql(u8, mode, "rg")) {
-        var rest: std.ArrayList([]const u8) = .empty;
-        defer rest.deinit(gpa);
-        while (it.next()) |arg| try rest.append(gpa, arg);
-        tryWarm(gpa, io, init.environ_map, rest.items);
-        try search.run(gpa, io, rest.items, init.environ_map);
-        return;
-    }
+    //
     // `search <pattern> [PATH...]` — the same engine addressed with the verb the
     // reflex reaches for. gist's canonical shape is verbless (`gist <pattern>`),
     // but `gist search foo` is a near-universal habit; without this it parses as
@@ -237,20 +254,7 @@ pub fn main(init: std.process.Init) !void {
     // — a faithful-to-rg but repeatedly baffling failure. A bare `gist search`
     // (no pattern after it) still searches for the literal word "search", so no
     // existing invocation regresses.
-    if (std.mem.eql(u8, mode, "search")) {
-        var rest: std.ArrayList([]const u8) = .empty;
-        defer rest.deinit(gpa);
-        while (it.next()) |arg| try rest.append(gpa, arg);
-        if (rest.items.len > 0) {
-            tryWarm(gpa, io, init.environ_map, rest.items);
-            try search.run(gpa, io, rest.items, init.environ_map);
-        } else {
-            tryWarm(gpa, io, init.environ_map, &.{mode});
-            try search.run(gpa, io, &.{mode}, init.environ_map);
-        }
-        return;
-    }
-
+    //
     // Implicit invocation: `gist <pattern> [PATH...] [flags]` with no explicit
     // verb — documented in `usage()` as the everyday shorthand: the shape an
     // agent's `rg <pattern>` reflex already takes, with zero setup (no `gist
@@ -261,10 +265,15 @@ pub fn main(init: std.process.Init) !void {
     // produced no stdout at all) or silently re-interpreting the pattern as an
     // indexed full-corpus `search`, which has no stdin path, requires an
     // index to exist, and diverges wildly from `rg`'s piped-stream behavior.
-    var implicit: std.ArrayList([]const u8) = .empty;
-    defer implicit.deinit(gpa);
-    try implicit.append(gpa, mode);
-    while (it.next()) |arg| try implicit.append(gpa, arg);
-    tryWarm(gpa, io, init.environ_map, implicit.items);
-    try search.run(gpa, io, implicit.items, init.environ_map);
+    const verbed = std.mem.eql(u8, mode, "rg") or std.mem.eql(u8, mode, "search");
+    var query: std.ArrayList([]const u8) = .empty;
+    defer query.deinit(gpa);
+    if (!verbed) try query.append(gpa, mode);
+    while (it.next()) |arg| try query.append(gpa, arg);
+    // A bare `gist search` keeps its literal-word meaning; a bare `gist rg`
+    // stays the empty argv the engine rejects itself.
+    if (query.items.len == 0 and std.mem.eql(u8, mode, "search"))
+        try query.append(gpa, mode);
+    tryWarm(gpa, io, init.environ_map, query.items);
+    try search.run(gpa, io, query.items, init.environ_map);
 }

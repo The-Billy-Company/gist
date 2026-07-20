@@ -19,52 +19,33 @@
 const std = @import("std");
 const corpus_mod = @import("../../corpus/tree/corpus.zig");
 const cli_args = @import("../../runtime/cold/argv/args.zig");
-const scope = @import("../../corpus/scope/glob.zig");
 const lexicon = @import("../../search/similarity/lexicon.zig");
 const zipper = @import("../../search/similarity/zipper.zig");
 const kinship = @import("kinship.zig");
 
 const die = cli_args.die;
-const oom = cli_args.oom;
 const nowNs = cli_args.nowNs;
 const ms = cli_args.ms;
 
-const jsonStr = kinship.jsonStr;
-
 pub fn runSearch(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
-    var query_text: ?[]const u8 = null;
-    var top: usize = 10;
-    var json = false;
+    var o: kinship.Opts = .{ .top = 10 };
     var roots: std.ArrayList([]const u8) = .empty;
     defer roots.deinit(gpa);
-
-    var i: usize = 0;
-    while (i < argv.len) : (i += 1) {
-        const arg = argv[i];
-        if (std.mem.eql(u8, arg, "--top")) {
-            i += 1;
-            if (i >= argv.len) die("--top needs a number\n", .{});
-            top = std.fmt.parseInt(usize, argv[i], 10) catch die("--top: bad number: {s}\n", .{argv[i]});
-        } else if (std.mem.eql(u8, arg, "--json")) {
-            json = true;
-        } else if (query_text == null) {
-            query_text = arg;
-        } else {
-            try roots.append(gpa, scope.normalizeRoot(arg));
-        }
-    }
-    const query = query_text orelse die("usage: relate search <text> [--top N] [--json] [ROOT...]\n", .{});
+    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .positional = true });
+    const query = o.arg orelse die("usage: relate search <text> [--top N] [--json] [ROOT...]\n", .{});
     if (query.len == 0) die("relate search: empty query\n", .{});
 
     const t0 = nowNs(io);
-    var corpus = try corpus_mod.load(gpa, io, if (roots.items.len == 0) &corpus_mod.default_roots else roots.items);
+    const rr = try kinship.rootsOf(gpa, roots.items);
+    defer rr.deinit(gpa);
+    var corpus = try corpus_mod.load(gpa, io, rr.items);
     defer corpus.deinit();
 
     var lex = try lexicon.Lexicon.build(gpa, corpus.docs);
     defer lex.deinit();
     const built_ns = nowNs(io);
 
-    const hits = try lex.retrieve(gpa, query, top);
+    const hits = try lex.retrieve(gpa, query, o.top);
     defer gpa.free(hits);
 
     const cold = zipper.coldBits(query);
@@ -72,13 +53,14 @@ pub fn runSearch(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
     defer buf.deinit(gpa);
     for (hits) |h| {
         const gain = if (cold > 0.0) 1.0 - h.cost.bits / cold else 0.0;
-        if (json) {
-            buf.appendSlice(gpa, "{\"path\":") catch oom();
-            jsonStr(&buf, gpa, corpus.paths[h.doc]);
-            buf.print(gpa, ",\"gain\":{d:.4},\"cost_bits\":{d:.1},\"bits_saved\":{d:.1},\"factors\":{d},\"literals\":{d}}}\n", .{ gain, h.cost.bits, h.bits_saved, h.cost.factors, h.cost.literals }) catch oom();
-        } else {
-            buf.print(gpa, "{d:.4}  {s}\n", .{ gain, corpus.paths[h.doc] }) catch oom();
-        }
+        kinship.emitRow(&buf, gpa, o.json, .{
+            .{ "path", "s", corpus.paths[h.doc] },
+            .{ "gain", "d:.4", gain },
+            .{ "cost_bits", "d:.1", h.cost.bits },
+            .{ "bits_saved", "d:.1", h.bits_saved },
+            .{ "factors", "d", h.cost.factors },
+            .{ "literals", "d", h.cost.literals },
+        }, "{d:.4}  {s}\n", .{ gain, corpus.paths[h.doc] });
     }
     corpus_mod.emitStdout(buf.items);
     std.debug.print("search: {d} files indexed · {d} hit(s) · index {d:.0} ms · query {d:.0} ms\n", .{

@@ -55,6 +55,16 @@ pub const Status = enum(i32) {
 /// contract the warm path accepts (mirrors `request.Request`).
 pub const flag_fixed: u32 = 1 << 0; // `-F`: fixed string, not a regex
 pub const flag_ignore_case: u32 = 1 << 1; // `-i`: case-insensitive
+pub const flag_word: u32 = 1 << 2; // `-w`: word-bounded match spans only
+
+/// The flag bits THIS entry implements. `search` fails closed (`.invalid`) on
+/// any other set bit, so a newer host can never have a flag silently dropped
+/// in-process (it must answer cold instead) — the same policy as the UDS
+/// protocol's `known_flags`. Deliberately NARROWER than the wire: smart-case
+/// (UDS bit 5) stays out until this entry lowers it through the session's
+/// `effectiveIgnoreCase` seam. Extending this mask is additive (no signature
+/// change), so the ABI version does not move — `flag_word` landed at ABI 2.
+pub const known_flags: u32 = flag_fixed | flag_ignore_case | flag_word;
 
 /// One submatch span, C-ABI layout. `text` aliases the line bytes (NOT
 /// NUL-terminated — use `len`); `[start,end)` are byte offsets within the line.
@@ -176,6 +186,7 @@ pub fn open(roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**Session) 
 /// deref; `pattern_len == 0` never reads the pointer (the empty pattern keeps
 /// its engine-defined meaning).
 pub fn search(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, flags: u32, on_match: MatchFn, ctx: ?*anyopaque) Status {
+    if (flags & ~known_flags != 0) return .invalid; // fail closed: unknown flag bits are never silently dropped
     const pattern: []const u8 = if (pattern_len == 0) "" else blk: {
         const p = pattern_ptr orelse return .invalid;
         break :blk p[0..pattern_len];
@@ -185,6 +196,7 @@ pub fn search(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, flags:
         .mode = .files, // ignored by the match stream; any value compiles
         .fixed = flags & flag_fixed != 0,
         .ignore_case = flags & flag_ignore_case != 0,
+        .word = flags & flag_word != 0,
     };
 
     var relay = Relay{ .cb = on_match, .ctx = ctx };

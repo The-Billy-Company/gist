@@ -1,34 +1,30 @@
 //! gist resident session — the Unix-domain-socket wire protocol (ADR-352 rung 2.5).
 //!
-//! A tiny length-prefixed framing over a stream socket: every frame is
-//! `[u32 len][u8 opcode][payload…]`, where `len` counts the opcode + payload.
-//! One request per query, one response back; a persistent client keeps the
-//! connection open across many queries (that reuse is the whole warm-session
-//! win). The codec is pure and transport-agnostic — encode into / decode from
-//! byte slices — with thin `sendFrame`/`recvFrame` helpers over a POSIX fd
-//! (raw `read`/`write`, the same blocking-syscall idiom the search path uses),
-//! so the frame grammar is unit-tested without opening a socket.
+//! Length-prefixed framing over a stream socket: `[u32 len][u8 opcode][payload…]`,
+//! where `len` counts the opcode + payload. One request per query, one response
+//! back; a persistent client keeps the connection open across many queries.
+//! The codec is pure (encode/decode byte slices) with thin `sendFrame`/
+//! `recvFrame` helpers over a POSIX fd, so the frame grammar is unit-tested
+//! without opening a socket.
 //!
-//! Fail-closed by construction: a frame longer than `max_frame` or a truncated
-//! payload is a hard `error`, never a partial parse; an unknown opcode is
-//! rejected. The server answers only `query`/`ping`/`shutdown`; anything it
-//! cannot serve warm comes back as `decline` and the client falls back to the
-//! certified cold subprocess.
+//! Fail-closed: oversized/truncated frames and unknown opcodes are hard errors.
+//! Anything the server cannot serve warm comes back as `decline` (client → cold).
 
 const std = @import("std");
 const builtin = @import("builtin");
 const request = @import("request.zig");
 
-pub const protocol_version: u8 = 1;
+/// Wire version. Unknown flag bits outside `known_flags` fail closed (BadFrame
+/// → decline → cold); a version-mismatched READY handshake also falls open cold.
+pub const protocol_version: u8 = 2;
 
-/// Frames larger than this are refused before allocation (a 16 MiB ceiling
-/// dwarfs any real file-set response while capping a hostile/looping peer).
+/// Refused before allocation — dwarfs any real file-set response, caps a hostile peer.
 pub const max_frame: u32 = 16 << 20;
 
 pub const Opcode = enum(u8) {
     hello = 1, // C→S: [u8 proto_version]
     ready = 2, // S→C: [u8 proto][u64 daemon_gen][u64 session_gen][u32 n][gen bytes]
-    query = 3, // C→S: [u8 mode][u8 flags][pattern bytes]
+    query = 3, // C→S: [u8 mode][u8 flags][if flags&max_count_present: u64 LE][pattern bytes]
     result = 4, // S→C: [u8 mode] then files/count/lines body
     decline = 5, // S→C: (no payload) — answer this request cold
     err = 6, // S→C: [message bytes]
@@ -36,57 +32,49 @@ pub const Opcode = enum(u8) {
     status = 8, // C→S: (no payload) → S replies `ready`
     ping = 9, // C→S: (no payload)
     pong = 10, // S→C: (no payload)
-    // ADDITIVE (protocol stays v1): a `lines` answer streams as zero or more
-    // `chunk` frames of raw pre-rendered output bytes, then one terminal
-    // `result` frame `[mode=lines][u8 matched]`. Chunking keeps every frame
-    // under `max_frame` for an arbitrarily large answer; an OLD daemon never
-    // emits `chunk` (it declines the unknown `lines` mode byte first), and an
-    // old client never requests it — so v1 peers interop unchanged.
+    // `lines` streams as zero+ `chunk` frames then a terminal `result`
+    // `[mode=lines][u8 matched]`. Keeps every frame under `max_frame`.
     chunk = 11, // S→C: [raw output bytes]
-
-    pub fn fromByte(b: u8) ?Opcode {
-        return std.enums.fromInt(Opcode, b);
-    }
 };
 
+// Query flags byte. Reserved bits join `known_flags` only with their engine semantics.
 const flag_fixed: u8 = 1 << 0;
 const flag_ignore_case: u8 = 1 << 1;
-const flag_line_num: u8 = 1 << 2; // `-n` (meaningful for `lines` mode only)
+const flag_line_num: u8 = 1 << 2; // `-n` (lines mode)
+const flag_word: u8 = 1 << 3; // `-w`
+const flag_invert: u8 = 1 << 4; // `-v` (reserved)
+const flag_smart_case: u8 = 1 << 5; // `-S` (raw; session resolves — see request.zig)
+const flag_quiet: u8 = 1 << 6; // `-q` (reserved)
+const flag_max_count_present: u8 = 1 << 7; // `-m` (reserved; u64 LE follows flags)
 
-/// Chunk payload budget for a streamed `lines` answer — comfortably under
-/// `max_frame` while keeping per-frame overhead negligible.
+/// Flag bits this daemon implements. Any other set bit → `BadFrame` → decline → cold.
+pub const known_flags: u8 = flag_fixed | flag_ignore_case | flag_line_num | flag_word | flag_smart_case;
+
+/// Chunk payload budget for a streamed `lines` answer — under `max_frame`.
 pub const chunk_bytes: usize = 4 << 20;
 
 pub const WireError = error{ FrameTooLarge, Truncated, BadOpcode, BadFrame, ConnClosed, Io, OutOfMemory };
 
-// ─────────────────────────── frame codec ───────────────────────────
-
 /// Append a `[len][opcode][payload]` frame to `buf`.
 pub fn writeFrame(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, op: Opcode, payload: []const u8) !void {
-    const len: u32 = @intCast(1 + payload.len);
-    var hdr: [4]u8 = undefined;
-    std.mem.writeInt(u32, &hdr, len, .little);
-    try buf.appendSlice(gpa, &hdr);
+    try appendInt(u32, buf, gpa, @intCast(1 + payload.len));
     try buf.append(gpa, @intFromEnum(op));
     try buf.appendSlice(gpa, payload);
 }
 
 pub const Parsed = struct { op: Opcode, payload: []const u8, consumed: usize };
 
-/// Parse one frame from the front of `bytes`, or `null` when `bytes` doesn't yet
-/// hold a whole frame (the caller reads more). `FrameTooLarge`/`BadOpcode` are
-/// hard errors (fail-closed).
+/// Parse one frame from the front of `bytes`, or `null` when incomplete.
+/// `FrameTooLarge`/`BadOpcode` are hard errors.
 pub fn parseFrame(bytes: []const u8) WireError!?Parsed {
     if (bytes.len < 4) return null;
     const len = std.mem.readInt(u32, bytes[0..4], .little);
     if (len == 0 or len > max_frame) return WireError.FrameTooLarge;
     const total = 4 + @as(usize, len);
     if (bytes.len < total) return null;
-    const op = Opcode.fromByte(bytes[4]) orelse return WireError.BadOpcode;
+    const op = std.enums.fromInt(Opcode, bytes[4]) orelse return WireError.BadOpcode;
     return .{ .op = op, .payload = bytes[5..total], .consumed = total };
 }
-
-// ─────────────────────────── query encode/decode ───────────────────────────
 
 pub fn encodeQuery(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, req: request.Request) !void {
     var body: std.ArrayList(u8) = .empty;
@@ -96,17 +84,20 @@ pub fn encodeQuery(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, req: request
     if (req.fixed) flags |= flag_fixed;
     if (req.ignore_case) flags |= flag_ignore_case;
     if (req.line_num) flags |= flag_line_num;
+    if (req.word) flags |= flag_word;
+    if (req.smart_case) flags |= flag_smart_case;
     try body.append(gpa, flags);
     try body.appendSlice(gpa, req.pattern);
     try writeFrame(buf, gpa, .query, body.items);
 }
 
-/// Decode a `query` payload. `pattern` aliases into `payload` (the caller keeps
-/// the frame buffer alive for the query's duration).
+/// Decode a `query` payload. `pattern` aliases into `payload` (caller keeps the
+/// frame buffer alive). Any flag bit outside `known_flags` → `BadFrame`.
 pub fn decodeQuery(payload: []const u8) WireError!request.Request {
     if (payload.len < 2) return WireError.BadFrame;
     const mode = std.enums.fromInt(request.Mode, payload[0]) orelse return WireError.BadFrame;
     const flags = payload[1];
+    if (flags & ~known_flags != 0) return WireError.BadFrame;
     const pattern = payload[2..];
     if (pattern.len == 0) return WireError.BadFrame;
     return .{
@@ -115,18 +106,18 @@ pub fn decodeQuery(payload: []const u8) WireError!request.Request {
         .fixed = flags & flag_fixed != 0,
         .ignore_case = flags & flag_ignore_case != 0,
         .line_num = flags & flag_line_num != 0,
+        .word = flags & flag_word != 0,
+        .smart_case = flags & flag_smart_case != 0,
     };
 }
-
-// ─────────────────────────── result encode/decode ───────────────────────────
 
 pub fn encodeFiles(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, files: []const []const u8) !void {
     var body: std.ArrayList(u8) = .empty;
     defer body.deinit(gpa);
     try body.append(gpa, @intFromEnum(request.Mode.files));
-    try appendU32(&body, gpa, @intCast(files.len));
+    try appendInt(u32, &body, gpa, @intCast(files.len));
     for (files) |f| {
-        try appendU32(&body, gpa, @intCast(f.len));
+        try appendInt(u32, &body, gpa, @intCast(f.len));
         try body.appendSlice(gpa, f);
     }
     try writeFrame(buf, gpa, .result, body.items);
@@ -139,10 +130,8 @@ pub fn encodeCount(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, count: u64) 
     try writeFrame(buf, gpa, .result, &body);
 }
 
-/// Frame a whole pre-rendered `lines` answer: `out` split into `chunk` frames
-/// of at most `chunk_bytes`, then the terminal `result` frame carrying only the
-/// matched flag (the exit-code boolean). Zero chunks for a no-output answer is
-/// legal — the terminal frame alone says "ran warm, nothing matched".
+/// Frame a pre-rendered `lines` answer: `out` split into ≤`chunk_bytes` `chunk`
+/// frames, then a terminal `result` with the matched flag. Zero chunks is legal.
 pub fn encodeLines(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, out: []const u8, matched: bool) !void {
     var rest = out;
     while (rest.len > 0) {
@@ -157,30 +146,18 @@ pub fn encodeLines(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, out: []const
 pub const ResultView = union(request.Mode) {
     files: FileIter,
     count: u64,
-    /// The terminal frame of a chunk-streamed `lines` answer: whether any file
-    /// matched (the output bytes themselves arrived in prior `chunk` frames).
+    /// Terminal `lines` frame: whether any file matched (bytes arrived in prior `chunk`s).
     lines: bool,
 };
 
-/// Zero-copy view over a decoded `result` payload; `FileIter` yields each path
-/// as a slice into `payload`.
+/// Zero-copy view over a decoded `result` payload; `FileIter` yields slices into `payload`.
 pub fn decodeResult(payload: []const u8) WireError!ResultView {
     if (payload.len < 1) return WireError.BadFrame;
     const mode = std.enums.fromInt(request.Mode, payload[0]) orelse return WireError.BadFrame;
     return switch (mode) {
-        .count => blk: {
-            if (payload.len < 9) return WireError.BadFrame;
-            break :blk .{ .count = std.mem.readInt(u64, payload[1..9], .little) };
-        },
-        .files => blk: {
-            if (payload.len < 5) return WireError.BadFrame;
-            const n = std.mem.readInt(u32, payload[1..5], .little);
-            break :blk .{ .files = .{ .rest = payload[5..], .remaining = n } };
-        },
-        .lines => blk: {
-            if (payload.len < 2) return WireError.BadFrame;
-            break :blk .{ .lines = payload[1] != 0 };
-        },
+        .count => if (payload.len < 9) WireError.BadFrame else .{ .count = std.mem.readInt(u64, payload[1..9], .little) },
+        .files => if (payload.len < 5) WireError.BadFrame else .{ .files = .{ .rest = payload[5..], .remaining = std.mem.readInt(u32, payload[1..5], .little) } },
+        .lines => if (payload.len < 2) WireError.BadFrame else .{ .lines = payload[1] != 0 },
     };
 }
 
@@ -204,9 +181,9 @@ pub fn encodeReady(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, daemon_gen: 
     var body: std.ArrayList(u8) = .empty;
     defer body.deinit(gpa);
     try body.append(gpa, protocol_version);
-    try appendU64(&body, gpa, daemon_gen);
-    try appendU64(&body, gpa, session_gen);
-    try appendU32(&body, gpa, @intCast(index_gen.len));
+    try appendInt(u64, &body, gpa, daemon_gen);
+    try appendInt(u64, &body, gpa, session_gen);
+    try appendInt(u32, &body, gpa, @intCast(index_gen.len));
     try body.appendSlice(gpa, index_gen);
     try writeFrame(buf, gpa, .ready, body.items);
 }
@@ -225,29 +202,16 @@ pub fn decodeReady(payload: []const u8) WireError!Ready {
     };
 }
 
-fn appendU32(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, v: u32) !void {
-    var b: [4]u8 = undefined;
-    std.mem.writeInt(u32, &b, v, .little);
+fn appendInt(comptime T: type, buf: *std.ArrayList(u8), gpa: std.mem.Allocator, v: T) !void {
+    var b: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+    std.mem.writeInt(T, &b, v, .little);
     try buf.appendSlice(gpa, &b);
 }
 
-fn appendU64(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, v: u64) !void {
-    var b: [8]u8 = undefined;
-    std.mem.writeInt(u64, &b, v, .little);
-    try buf.appendSlice(gpa, &b);
-}
-
-// ─────────────────────────── fd transport ───────────────────────────
-
-/// Write every byte of `bytes` to `fd`, retrying short writes; false on a dead
-/// peer (EPIPE) or error — the caller drops the connection. The send never
-/// raises SIGPIPE: a write to a half-closed socket must cost the daemon/client
-/// one dropped connection, never a fatal signal that kills the whole process.
-/// Linux uses MSG_NOSIGNAL per send; Darwin/BSD has no such flag, so SO_NOSIGPIPE
-/// is armed on the fd (idempotent — kept here so server, client, and tests
-/// inherit the guard without touching each socket's birthplace). Only the socket
-/// path is affected; the CLI's stdout SIGPIPE (the `gist | head` early exit) is
-/// deliberately left intact.
+/// Write all of `bytes` to `fd`, retrying short writes; false on a dead peer.
+/// Never raises SIGPIPE: Linux uses MSG_NOSIGNAL; Darwin/BSD arms SO_NOSIGPIPE
+/// here (idempotent) so server/client/tests inherit the guard. CLI stdout
+/// SIGPIPE (`gist | head`) is left intact.
 pub fn writeAll(fd: std.posix.fd_t, bytes: []const u8) bool {
     if (comptime builtin.os.tag.isDarwin()) {
         const on: c_int = 1;
@@ -262,9 +226,7 @@ pub fn writeAll(fd: std.posix.fd_t, bytes: []const u8) bool {
     return true;
 }
 
-/// One SIGPIPE-safe `send` (see `writeAll`); byte count, ≤ 0 on a dead peer/error.
-/// Both paths use `sendto` so the `[*]const u8` buffer type matches without
-/// `@ptrCast` — Darwin has no MSG_NOSIGNAL (SO_NOSIGPIPE is armed in `writeAll`).
+/// One SIGPIPE-safe `send` (see `writeAll`); byte count, ≤ 0 on dead peer/error.
 fn sendNoSigpipe(fd: std.posix.fd_t, ptr: [*]const u8, len: usize) isize {
     const flags: u32 = if (comptime builtin.os.tag == .linux) std.posix.MSG.NOSIGNAL else 0;
     return @bitCast(std.posix.system.sendto(fd, ptr, len, flags, null, 0));
@@ -292,7 +254,7 @@ pub const Frame = struct {
     }
 };
 
-/// Read exactly `n` bytes into `dst`, false on EOF/short read (closed peer).
+/// Read exactly `n` bytes into `dst`; false on EOF/short read.
 fn readExact(fd: std.posix.fd_t, dst: []u8) bool {
     var off: usize = 0;
     while (off < dst.len) {
@@ -303,8 +265,8 @@ fn readExact(fd: std.posix.fd_t, dst: []u8) bool {
     return true;
 }
 
-/// Receive one whole frame from `fd`, allocating its backing bytes. `ConnClosed`
-/// on a clean/again-truncated peer; `FrameTooLarge`/`BadOpcode` fail closed.
+/// Receive one whole frame from `fd`. `ConnClosed` on truncated peer;
+/// `FrameTooLarge`/`BadOpcode` fail closed.
 pub fn recvFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!Frame {
     var hdr: [4]u8 = undefined;
     if (!readExact(fd, &hdr)) return WireError.ConnClosed;
@@ -315,6 +277,6 @@ pub fn recvFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!Frame {
     errdefer gpa.free(bytes);
     @memcpy(bytes[0..4], &hdr);
     if (!readExact(fd, bytes[4..])) return WireError.ConnClosed;
-    const op = Opcode.fromByte(bytes[4]) orelse return WireError.BadOpcode;
+    const op = std.enums.fromInt(Opcode, bytes[4]) orelse return WireError.BadOpcode;
     return .{ .op = op, .bytes = bytes, .gpa = gpa };
 }

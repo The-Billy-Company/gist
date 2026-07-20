@@ -96,18 +96,11 @@ pub const QueryError = error{
 /// One eligible query's answer. `files` aliases session-owned path strings
 /// (mirror path table or overlay keys) valid until the next reconcile; the
 /// caller (daemon frame builder / test) copies them out under the session lock.
-pub const Result = struct {
-    mode: Mode,
-    files: []const []const u8 = &.{},
-    count: u64 = 0,
-};
+pub const Result = struct { mode: Mode, files: []const []const u8 = &.{}, count: u64 = 0 };
 
 /// A `lines`-mode answer: the pre-rendered output bytes (owned by the caller's
 /// arena) and whether any file matched (cold's exit-code boolean).
-pub const Lines = struct {
-    out: []const u8,
-    matched: bool,
-};
+pub const Lines = struct { out: []const u8, matched: bool };
 
 /// One streamed match: a matching LINE (ADR-352 rung 3 — the in-process FFI's
 /// output unit). `path` aliases the mirror path table / overlay key; `text` is
@@ -117,12 +110,7 @@ pub const Lines = struct {
 /// 1-based over rg's line model, and every span is a non-empty `[start,end)`
 /// byte range within `text`, byte-identical to the cold `gist --json` submatch
 /// stream (`runtime/cold/emit/json.zig`).
-pub const MatchRecord = struct {
-    path: []const u8,
-    line_number: u64,
-    text: []const u8,
-    spans: []const Span,
-};
+pub const MatchRecord = struct { path: []const u8, line_number: u64, text: []const u8, spans: []const Span };
 
 // The caller's streaming sink for `search` — the FFI's no-stdout, no-exit
 // output channel. Any pointer type `*Sink` with a `pub fn emit(self: *Sink,
@@ -137,21 +125,19 @@ pub const MatchRecord = struct {
 /// A candidate doc gathered before answering so results leave in a
 /// deterministic path order. `bytes` aliases mirror/overlay memory; `nul` is
 /// the first-NUL byte offset (null ⇒ text), driving each mode's binary rule.
-const DocRef = struct {
-    path: []const u8,
-    bytes: []const u8,
-    nul: ?usize = null,
+/// Shape-shared with the renderer's `render.Doc`, so the `lines` face hands
+/// its gathered slice straight through without a copy.
+const DocRef = render.Doc;
 
-    /// Separator-aware path order — the SAME `pathLess` cold's `--sort path`
-    /// comparator uses (`runtime/cold/engine/serial.zig::cmpFiles`). Cold's default
-    /// parallel pipeline emits in worker-discovery order (nondeterministic);
-    /// warm canonicalizes to this deterministic total order instead — per-file
-    /// bytes stay identical, and the rgsuite oracle's own equivalence
-    /// (`sort_lines(gist) == sort_lines(rg)`) certifies the file-order freedom.
-    fn less(_: void, a: DocRef, b: DocRef) bool {
-        return run.pathLess(a.path, b.path);
-    }
-};
+/// Separator-aware path order — the SAME `pathLess` cold's `--sort path`
+/// comparator uses (`runtime/cold/engine/serial.zig::cmpFiles`). Cold's default
+/// parallel pipeline emits in worker-discovery order (nondeterministic);
+/// warm canonicalizes to this deterministic total order instead — per-file
+/// bytes stay identical, and the rgsuite oracle's own equivalence
+/// (`sort_lines(gist) == sort_lines(rg)`) certifies the file-order freedom.
+fn docLess(_: void, a: DocRef, b: DocRef) bool {
+    return run.pathLess(a.path, b.path);
+}
 
 /// Which docs a gather admits: the FFI record stream skips what cold `--json`
 /// skips (its 8 KiB `isBinary` window); the `lines` renderer admits every doc
@@ -236,13 +222,12 @@ pub const ResidentSession = struct {
         // doesn't fail init (the daemon may still come up); the first reconcile
         // re-walks and declines the query if the error persists. A short-lived
         // arena owns the path list just for the read.
-        var sel_arena = std.heap.ArenaAllocator.init(gpa);
-        const sel = run.defaultFileSet(sel_arena.allocator(), io, owned_roots);
-        var mir = corpus.load(gpa, io, sel.paths) catch |e| {
-            sel_arena.deinit();
-            return e;
+        var mir = blk: {
+            var sel_arena = std.heap.ArenaAllocator.init(gpa);
+            defer sel_arena.deinit();
+            const sel = run.defaultFileSet(sel_arena.allocator(), io, owned_roots);
+            break :blk try corpus.load(gpa, io, sel.paths);
         };
-        sel_arena.deinit();
         errdefer mir.deinit();
         var idx = try Index.build(gpa, mir.docs);
         errdefer idx.deinit();
@@ -255,19 +240,7 @@ pub const ResidentSession = struct {
         const gen = try readGen(gpa, io);
         errdefer gpa.free(gen);
 
-        return .{
-            .gpa = gpa,
-            .io = io,
-            .roots_arena = roots_arena,
-            .roots = owned_roots,
-            .mir = mir,
-            .idx = idx,
-            .by_path = by_path,
-            .index_gen = gen,
-            .fresh_ns = load_ns,
-            .overlay = std.StringHashMap(Overlay).init(gpa),
-            .dirty_log = dirtylog.DirtyLog.init(gpa),
-        };
+        return .{ .gpa = gpa, .io = io, .roots_arena = roots_arena, .roots = owned_roots, .mir = mir, .idx = idx, .by_path = by_path, .index_gen = gen, .fresh_ns = load_ns, .overlay = std.StringHashMap(Overlay).init(gpa), .dirty_log = dirtylog.DirtyLog.init(gpa) };
     }
 
     pub fn deinit(self: *ResidentSession) void {
@@ -281,14 +254,15 @@ pub const ResidentSession = struct {
         self.roots_arena.deinit();
     }
 
+    fn freeOverlayValue(self: *ResidentSession, ov: Overlay) void {
+        if (ov == .doc) self.gpa.free(ov.doc.bytes);
+    }
+
     fn clearOverlay(self: *ResidentSession) void {
         var it = self.overlay.iterator();
         while (it.next()) |e| {
             self.gpa.free(e.key_ptr.*);
-            switch (e.value_ptr.*) {
-                .doc => |d| self.gpa.free(d.bytes),
-                .tombstone => {},
-            }
+            self.freeOverlayValue(e.value_ptr.*);
         }
         self.overlay.clearRetainingCapacity();
     }
@@ -297,10 +271,7 @@ pub const ResidentSession = struct {
     fn putOverlay(self: *ResidentSession, path: []const u8, ov: Overlay) !void {
         const gop = try self.overlay.getOrPut(path);
         if (gop.found_existing) {
-            switch (gop.value_ptr.*) {
-                .doc => |d| self.gpa.free(d.bytes),
-                .tombstone => {},
-            }
+            self.freeOverlayValue(gop.value_ptr.*);
         } else {
             gop.key_ptr.* = self.gpa.dupe(u8, path) catch |e| {
                 _ = self.overlay.remove(path);
@@ -412,8 +383,7 @@ pub const ResidentSession = struct {
         defer drained.deinit(self.gpa);
         const scoped_eligible = self.watcher_active and !poisoned and
             self.full_pass_done and drained.exact and !drained.doubt;
-        var applied = false;
-        if (scoped_eligible) applied = try self.reconcileScoped(drained.paths);
+        const applied = scoped_eligible and try self.reconcileScoped(drained.paths);
         if (applied) {
             self.scoped_reconciles += 1;
         } else {
@@ -612,20 +582,32 @@ pub const ResidentSession = struct {
     fn tombstoneVanished(self: *ResidentSession, cur_set: *const std.StringHashMap(void)) QueryError!void {
         var gone: std.ArrayList([]const u8) = .empty;
         defer gone.deinit(self.gpa);
-        for (self.mir.paths) |p| {
-            if (cur_set.contains(p)) continue;
-            if (self.overlay.get(p)) |ov| if (ov == .tombstone) continue; // already gone
-            try gone.append(self.gpa, p);
-        }
-        var it = self.overlay.iterator();
-        while (it.next()) |e| switch (e.value_ptr.*) {
-            .doc => if (!cur_set.contains(e.key_ptr.*)) try gone.append(self.gpa, e.key_ptr.*),
-            .tombstone => {},
-        };
+        var keys = self.liveKeys();
+        while (keys.next()) |k| if (!cur_set.contains(k)) try gone.append(self.gpa, k);
         for (gone.items) |p| try self.putOverlay(p, .tombstone);
     }
 
     // ── the query ──
+
+    /// Compile the request's pattern for `mode` through the shared core; a
+    /// pattern it declines is `error.Stale` (→ certified cold fallback).
+    /// Case state lowers through `effectiveIgnoreCase` — the single smart-case
+    /// resolution site — so the engine fold AND the compiled query's
+    /// `caseless` (which drives the trigram-prefilter decline) both see the
+    /// RESOLVED value, exactly as cold's finalize fold produces it.
+    fn compileFor(self: *ResidentSession, req: Request, mode: Mode) QueryError!CompiledQuery {
+        return CompiledQuery.compile(self.gpa, .{
+            .pattern = req.pattern,
+            .mode = mode,
+            .fixed = req.fixed,
+            .ignore_case = req.effectiveIgnoreCase(),
+            // `-w`: the shared core owns the word-valid span decision, so every
+            // face (docMatches for -l, countLines for -c, collectSpans for the
+            // record stream) applies cold's exact rule. The word check runs on
+            // the ORIGINAL bytes regardless of the case fold above.
+            .word = req.word,
+        }) catch return QueryError.Stale;
+    }
 
     /// Answer an eligible `-l`/`-c` request over the warm engine. `arena` owns
     /// the returned `files` slice (the path strings themselves alias session
@@ -643,12 +625,7 @@ pub const ResidentSession = struct {
         // the SAME compile → prefilter → match kernels the cold CLI is built on,
         // but returning errors instead of `die()`ing. A pattern outside the
         // linear-time syntax surfaces as `error.Stale` → certified cold fallback.
-        var cq = CompiledQuery.compile(self.gpa, .{
-            .pattern = req.pattern,
-            .mode = req.mode,
-            .fixed = req.fixed,
-            .ignore_case = req.ignore_case,
-        }) catch return QueryError.Stale;
+        var cq = try self.compileFor(req, req.mode);
         defer cq.deinit(self.gpa);
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
@@ -658,13 +635,8 @@ pub const ResidentSession = struct {
         // watcher-clean path a live watcher has tombstoned every delete, so trust
         // it (microsecond no-stat path); otherwise confirm each matched path still
         // exists (a cheap stat per hit) so a just-removed file is never reported.
-        var acc = Accumulator{
-            .mode = req.mode,
-            .arena = arena,
-            .io = self.io,
-            .verify_existence = !self.clean.load(.acquire),
-        };
-        try self.answer(&acc, &cq, &sc);
+        var acc = Accumulator{ .mode = req.mode, .arena = arena, .io = self.io, .verify_existence = !self.clean.load(.acquire), .cq = &cq, .sc = &sc };
+        try self.eachCandidate(&cq, &acc);
 
         if (req.mode == .files) std.mem.sort([]const u8, acc.files.items, {}, lessPath);
         return .{ .mode = req.mode, .files = acc.files.items, .count = acc.count };
@@ -675,7 +647,7 @@ pub const ResidentSession = struct {
     /// buffer through the cold engine's OWN Emitter (`render.zig`) so the bytes
     /// cannot drift from a piped cold run. Same reconcile + freshness barrier +
     /// trigram prefilter + fail-closed existence check as `query`; docs render
-    /// in the warm canonical `pathLess` file order (see `DocRef.less`); binary
+    /// in the warm canonical `pathLess` file order (see `docLess`); binary
     /// docs get cold's exact NUL-cut policy. `arena` owns the returned bytes.
     /// A pattern outside the linear
     /// engine (or a mid-render OOM) is `error.Stale`/`OutOfMemory` → the daemon
@@ -685,12 +657,7 @@ pub const ResidentSession = struct {
         defer self.mutex.unlock(self.io);
         try self.reconcile();
 
-        var cq = CompiledQuery.compile(self.gpa, .{
-            .pattern = req.pattern,
-            .mode = .files, // the whole-doc gate; presentation is render's job
-            .fixed = req.fixed,
-            .ignore_case = req.ignore_case,
-        }) catch return QueryError.Stale;
+        var cq = try self.compileFor(req, .files); // the whole-doc gate; presentation is render's job
         defer cq.deinit(self.gpa);
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
@@ -700,11 +667,8 @@ pub const ResidentSession = struct {
         // whose only match sits past its NUL buffer renders to nothing, exactly
         // as cold's emit loop produces nothing for it.
         const docs = try self.matchingDocs(arena, &cq, &sc, .lines);
-        const rdocs = try arena.alloc(render.Doc, docs.len);
-        for (docs, rdocs) |d, *r| r.* = .{ .path = d.path, .bytes = d.bytes, .nul = d.nul };
-
         var out: std.ArrayList(u8) = .empty;
-        const matched = render.renderLines(arena, req, rdocs, &out) catch |e| switch (e) {
+        const matched = render.renderLines(arena, req, docs, &out) catch |e| switch (e) {
             error.OutOfMemory => return QueryError.OutOfMemory,
             error.Unsupported => return QueryError.Stale,
         };
@@ -733,12 +697,7 @@ pub const ResidentSession = struct {
         try self.reconcile();
 
         // Mode is irrelevant to span emission — compile the cheap `files` body.
-        var cq = CompiledQuery.compile(self.gpa, .{
-            .pattern = req.pattern,
-            .mode = .files,
-            .fixed = req.fixed,
-            .ignore_case = req.ignore_case,
-        }) catch return QueryError.Stale;
+        var cq = try self.compileFor(req, .files);
         defer cq.deinit(self.gpa);
         // Two per-query scratches: the boolean sim is the whole-doc reject gate,
         // the span VM only ever fires on a doc already proven to match. A trigram
@@ -774,41 +733,38 @@ pub const ResidentSession = struct {
     /// fail-closed stat-per-hit `query` uses) so a file removed in the
     /// walk→report window is never reported. `admit` selects the binary policy
     /// (see `Admit`). The sort is `run.pathLess` — the warm canonical file
-    /// order (see `DocRef.less`) — so downstream output is deterministic.
+    /// order (see `docLess`) — so downstream output is deterministic.
     fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, sc: *Scratch, admit: Admit) QueryError![]const DocRef {
-        const check_exists = !self.clean.load(.acquire);
-        var docs: std.ArrayList(DocRef) = .empty;
+        var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .check_exists = !self.clean.load(.acquire) };
+        try self.eachCandidate(cq, &g);
+        std.mem.sort(DocRef, g.docs.items, {}, docLess);
+        return g.docs.items;
+    }
+
+    /// Walk every candidate doc through `v.visit(path, bytes, nul)`: first the
+    /// trigram-pruned base docs (`candidateIds`) that are not overlaid, then
+    /// the overlay's replacement docs — the visitor verifies each with the
+    /// shared match kernel. Overlay docs (changed/new since the build) are
+    /// always visited directly — the index is stale for exactly those. Shared
+    /// by the files/count fold (`Accumulator`) and the doc gather (`Gather`),
+    /// so every answer face prunes candidates identically.
+    fn eachCandidate(self: *ResidentSession, cq: *const CompiledQuery, v: anytype) QueryError!void {
         var cand_buf: ?[]u32 = null;
         defer if (cand_buf) |c| self.gpa.free(c);
-        const cand = try self.candidateIds(cq, &cand_buf);
-        for (cand) |id| {
-            const path = self.mir.paths[id];
-            if (self.overlay.contains(path)) continue; // overlay handled below
-            try considerDoc(&docs, arena, .{ .path = path, .bytes = self.mir.docs[id], .nul = self.mir.nuls[id] }, cq, sc, admit, check_exists, self);
+        for (try self.candidateIds(cq, &cand_buf)) |id| {
+            if (self.overlay.contains(self.mir.paths[id])) continue; // handled below
+            try v.visit(self.mir.paths[id], self.mir.docs[id], self.mir.nuls[id]);
         }
         var it = self.overlay.iterator();
         while (it.next()) |e| switch (e.value_ptr.*) {
             .tombstone => {},
-            .doc => |d| try considerDoc(&docs, arena, .{ .path = e.key_ptr.*, .bytes = d.bytes, .nul = d.nul }, cq, sc, admit, check_exists, self),
+            // A reconcile tombstones any overlay path that left the walk set, but
+            // (as for base docs) a delete can still race the walk→report window.
+            // Off the watcher-clean path each visitor existence-checks its match
+            // (the same fail-closed stat-per-hit the base docs get); the clean
+            // path already tombstoned any delete, keeping the no-stat path.
+            .doc => |d| try v.visit(e.key_ptr.*, d.bytes, d.nul),
         };
-        std.mem.sort(DocRef, docs.items, {}, DocRef.less);
-        return docs.items;
-    }
-
-    /// Prune candidates with the compiled query's sound trigram prefilter (a
-    /// single required literal → `queryLiteral`; an alternation cover →
-    /// `queryAny`; nothing prunable → every doc), then verify each with the
-    /// shared match kernel. Overlay docs (changed/new since the build) are always
-    /// verified directly — the index is stale for exactly those.
-    fn answer(self: *ResidentSession, acc: *Accumulator, cq: *const CompiledQuery, sc: *Scratch) QueryError!void {
-        var cand_buf: ?[]u32 = null;
-        defer if (cand_buf) |c| self.gpa.free(c);
-        const cand = try self.candidateIds(cq, &cand_buf);
-        for (cand) |id| {
-            if (self.overlay.contains(self.mir.paths[id])) continue; // handled below
-            try acc.consider(self.mir.paths[id], self.mir.docs[id], self.mir.nuls[id], cq, sc, acc.verify_existence);
-        }
-        try self.considerOverlay(acc, cq, sc);
     }
 
     /// The base-doc candidate ids for `cq`: the sound trigram prefilter's index
@@ -820,40 +776,18 @@ pub const ResidentSession = struct {
     fn candidateIds(self: *ResidentSession, cq: *const CompiledQuery, buf: *?[]u32) QueryError![]const u32 {
         var one: [1][]const u8 = undefined;
         const pf = cq.prefilter(&one);
-        if (pf.len == 1) {
-            if (self.idx.queryLiteral(self.gpa, pf[0])) |c| {
-                buf.* = c;
-                return c;
-            } else |_| {}
-        } else if (pf.len > 1) {
-            if (self.idx.queryAny(self.gpa, pf)) |c| {
-                buf.* = c;
-                return c;
-            } else |_| {}
-        }
-        return try self.allDocIds(buf);
-    }
-
-    /// Verify the mutation overlay (changed base docs + brand-new files) directly
-    /// — the index is stale for exactly these, so they never rely on it.
-    fn considerOverlay(self: *ResidentSession, acc: *Accumulator, cq: *const CompiledQuery, sc: *Scratch) QueryError!void {
-        var it = self.overlay.iterator();
-        while (it.next()) |e| switch (e.value_ptr.*) {
-            .tombstone => {},
-            // A reconcile tombstones any overlay path that left the walk set, but
-            // (as for base docs) a delete can still race the walk→report window.
-            // Off the watcher-clean path, existence-check the match (same
-            // fail-closed stat-per-hit the base docs use); the clean path already
-            // tombstoned any delete, so it keeps the microsecond no-stat path.
-            .doc => |d| try acc.consider(e.key_ptr.*, d.bytes, d.nul, cq, sc, acc.verify_existence),
+        const hit: ?[]u32 = switch (pf.len) {
+            0 => null,
+            1 => self.idx.queryLiteral(self.gpa, pf[0]) catch null,
+            else => self.idx.queryAny(self.gpa, pf) catch null,
         };
-    }
-
-    fn allDocIds(self: *ResidentSession, buf: *?[]u32) QueryError![]const u32 {
-        const all = try self.gpa.alloc(u32, self.mir.docs.len);
-        for (all, 0..) |*x, i| x.* = @intCast(i);
-        buf.* = all;
-        return all;
+        const c = hit orelse blk: {
+            const all = try self.gpa.alloc(u32, self.mir.docs.len);
+            for (all, 0..) |*x, i| x.* = @intCast(i);
+            break :blk all;
+        };
+        buf.* = c;
+        return c;
     }
 };
 
@@ -865,17 +799,26 @@ fn fileExists(io: std.Io, path: []const u8) bool {
     return true;
 }
 
-/// One `matchingDocs` admission decision: binary policy, whole-doc gate,
-/// existence check, append. Free function (not a method) so the hot loop's
-/// shape is explicit at both call sites.
-fn considerDoc(docs: *std.ArrayList(DocRef), arena: std.mem.Allocator, d: DocRef, cq: *const CompiledQuery, sc: *Scratch, admit: Admit, check_exists: bool, session: *const ResidentSession) QueryError!void {
-    // Cold `--json` skips a doc its 8 KiB `isBinary` window flags; a doc whose
-    // first NUL sits past the window is streamed in full. Match that exactly.
-    if (admit == .json_stream and d.nul != null and corpus_mod.isBinary(d.bytes)) return;
-    if (!cq.docMatches(d.bytes, sc)) return; // trigram false positive / no match
-    if (check_exists and !fileExists(session.io, d.path)) return;
-    try docs.append(arena, d);
-}
+/// The `matchingDocs` visitor — one admission decision per candidate doc:
+/// binary policy, whole-doc gate, existence check, append.
+const Gather = struct {
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cq: *const CompiledQuery,
+    sc: *Scratch,
+    admit: Admit,
+    check_exists: bool,
+    docs: std.ArrayList(DocRef) = .empty,
+
+    fn visit(self: *Gather, path: []const u8, bytes: []const u8, nul: ?usize) QueryError!void {
+        // Cold `--json` skips a doc its 8 KiB `isBinary` window flags; a doc whose
+        // first NUL sits past the window is streamed in full. Match that exactly.
+        if (self.admit == .json_stream and nul != null and corpus_mod.isBinary(bytes)) return;
+        if (!self.cq.docMatches(bytes, self.sc)) return; // trigram false positive / no match
+        if (self.check_exists and !fileExists(self.io, path)) return;
+        try self.docs.append(self.arena, .{ .path = path, .bytes = bytes, .nul = nul });
+    }
+};
 
 /// One doc's emission outcome: whether it had a matching line, and whether the
 /// sink asked to halt the whole stream on one of them.
@@ -919,10 +862,12 @@ const Accumulator = struct {
     arena: std.mem.Allocator,
     io: std.Io,
     verify_existence: bool,
+    cq: *const CompiledQuery,
+    sc: *Scratch,
     files: std.ArrayList([]const u8) = .empty,
     count: u64 = 0,
 
-    fn consider(self: *Accumulator, path: []const u8, bytes: []const u8, nul: ?usize, cq: *const CompiledQuery, sc: *Scratch, check_exists: bool) QueryError!void {
+    fn visit(self: *Accumulator, path: []const u8, bytes: []const u8, nul: ?usize) QueryError!void {
         switch (self.mode) {
             .files => {
                 // Binary `-l` observes only complete buffers before the one that
@@ -930,8 +875,8 @@ const Accumulator = struct {
                 // a match past the cut must not turn the file into a false path.
                 const gated = if (nul) |n| bytes[0 .. (n / grepfile.BUFCAP) * grepfile.BUFCAP] else bytes;
                 if (gated.len == 0) return; // NUL in the first buffer ⇒ cold sees zero lines
-                if (!cq.docMatches(gated, sc)) return;
-                if (check_exists and !fileExists(self.io, path)) return;
+                if (!self.cq.docMatches(gated, self.sc)) return;
+                if (self.verify_existence and !fileExists(self.io, path)) return;
                 try self.files.append(self.arena, path);
             },
             .count => {
@@ -939,9 +884,9 @@ const Accumulator = struct {
                 // scans, detects the NUL, drops the count) — whole-body NUL,
                 // exactly the offset the mirror recorded at ingest.
                 if (nul != null) return;
-                const n = cq.countLines(bytes, sc);
+                const n = self.cq.countLines(bytes, self.sc);
                 if (n == 0) return;
-                if (check_exists and !fileExists(self.io, path)) return;
+                if (self.verify_existence and !fileExists(self.io, path)) return;
                 self.count += n;
             },
             // The lines presentation never routes through the fold — `query`
@@ -961,7 +906,7 @@ fn lessPath(_: void, a: []const u8, b: []const u8) bool {
 /// The published `pair.gen` (gpa-owned; "" when absent). A rebuilt index changes
 /// this, triggering `maybeReload`.
 fn readGen(gpa: std.mem.Allocator, io: std.Io) ![]u8 {
-    const buf = Dir.cwd().readFileAlloc(io, persist.generation_file, gpa, .limited(128)) catch
+    const buf = Dir.cwd().readFileAlloc(io, persist.generationFile(), gpa, .limited(128)) catch
         return gpa.alloc(u8, 0);
     const trimmed = std.mem.trimEnd(u8, buf, "\r\n");
     if (trimmed.len == buf.len) return buf;

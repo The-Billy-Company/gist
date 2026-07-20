@@ -1,6 +1,6 @@
 //! relate --schema — the deterministic, machine-readable capability manifest.
 //!
-//! relate's verb surface is closed and static (seven query verbs + the two
+//! relate's verb surface is closed and static (eight query verbs + the two
 //! lifecycle verbs over the relate engine + irregex primitives), so unlike
 //! gist's manifest — which renders its rg-flag buckets from the parser
 //! catalog — this one is a single comptime document. The JSON validity test
@@ -13,7 +13,7 @@ const manifest =
     \\{
     \\  "tool": "relate",
     \\  "version": "0.1.0",
-    \\  "summary": "compression-as-search: retrieval by conditional description length (search), anti-redundant context packing (pack), corpus-global quotation (quote), kinship (similar/dups/clusters), multi-pattern attribution (patterns), and an owned warm tier (index/status)",
+    \\  "summary": "compression-as-search: retrieval by conditional description length (search), anti-redundant context packing (pack), corpus-global quotation (quote), kinship (similar/dups/clusters), structural DRY candidates (echoes), multi-pattern attribution (patterns), and an owned warm tier (index/status)",
     \\  "verbs": {
     \\    "search": {
     \\      "summary": "which files would describe this text most cheaply? two-stage compression retrieval: a corpus-priced fingerprint lexicon nominates, an exact suffix-automaton cross-parse decides; score = coding gain in [0,1], higher = closer",
@@ -31,9 +31,9 @@ const manifest =
     \\      "flags": [{"name": "--json", "type": "bool", "default": false, "description": "summary object then NDJSON {text, occurrences, bits, source} phrase rows"}]
     \\    },
     \\    "similar": {
-    \\      "summary": "nearest files to <path> by compression kinship (LZ dictionary distance, closest first); answers from the kinship atlas when one is fresh-foldable, live otherwise — identical answers",
+    \\      "summary": "nearest files to <path> by compression kinship, closest first; --lens picks the distance channel — bytes (LZJD over raw bytes, default), structure (winnowed normalized-token silhouette: renamed Type-2 twins surface), or fused (min of both); answers from the kinship atlas when one is fresh-foldable, live otherwise — identical answers",
     \\      "args": [{"name": "path", "type": "string", "required": true, "description": "the probe file"}, {"name": "ROOT...", "type": "string[]", "required": false, "description": "corpus roots (default: the index roots)"}],
-    \\      "flags": [{"name": "--top", "type": "int", "default": 20, "description": "rows surfaced"}, {"name": "--json", "type": "bool", "default": false, "description": "NDJSON {path, distance} rows"}, {"name": "--no-index", "type": "bool", "default": false, "description": "force the live corpus build (skip the atlas)"}]
+    \\      "flags": [{"name": "--lens", "type": "string", "default": "bytes", "description": "distance channel: bytes | structure | fused"}, {"name": "--top", "type": "int", "default": 20, "description": "rows surfaced"}, {"name": "--json", "type": "bool", "default": false, "description": "NDJSON {path, distance} rows"}, {"name": "--no-index", "type": "bool", "default": false, "description": "force the live corpus build (skip the atlas)"}]
     \\    },
     \\    "dups": {
     \\      "summary": "near-duplicate file pairs across the corpus, closest first (copy-paste drift, forked fixtures); atlas-accelerated like similar",
@@ -45,13 +45,18 @@ const manifest =
     \\      "args": [{"name": "ROOT...", "type": "string[]", "required": false, "description": "corpus roots (default: the index roots)"}],
     \\      "flags": [{"name": "--max-distance", "type": "float", "default": 0.25, "description": "edge admission threshold in [0,1]"}, {"name": "--min-size", "type": "int", "default": 2, "description": "smallest family surfaced"}, {"name": "--top", "type": "int", "default": 50, "description": "families surfaced"}, {"name": "--json", "type": "bool", "default": false, "description": "NDJSON {size, max_distance, paths[]} rows"}, {"name": "--no-index", "type": "bool", "default": false, "description": "force the live corpus build (skip the atlas)"}]
     \\    },
+    \\    "echoes": {
+    \\      "summary": "DRY candidates dups cannot see: file pairs far apart in bytes but close in structure (echo = byte_distance − structure_distance), widest gap first — same skeleton under different vocabulary (Type-2 clones), the abstraction-candidate report; candidates nominate via silhouette seed buckets, every emitted pair exactly verified against both channels",
+    \\      "args": [{"name": "ROOT...", "type": "string[]", "required": false, "description": "corpus roots (default: the index roots)"}],
+    \\      "flags": [{"name": "--min-echo", "type": "float", "default": 0.15, "description": "smallest bytes−structure gap surfaced, in [0,1]"}, {"name": "--top", "type": "int", "default": 50, "description": "rows surfaced"}, {"name": "--json", "type": "bool", "default": false, "description": "NDJSON {a, b, echo, bytes, structure} rows"}, {"name": "--no-index", "type": "bool", "default": false, "description": "force the live corpus build (skip the atlas)"}]
+    \\    },
     \\    "patterns": {
     \\      "summary": "N patterns, one pass, exact per-pattern attribution; index-elides reads when every pattern has a sound trigram prefilter",
     \\      "args": [{"name": "ROOT...", "type": "string[]", "required": false, "description": "corpus roots (default: the index roots)"}],
     \\      "flags": [{"name": "-e/--regexp", "type": "string[]", "default": null, "description": "a pattern (repeatable)"}, {"name": "-f/--file", "type": "string", "default": null, "description": "newline-separated pattern file"}, {"name": "-F/--fixed-strings", "type": "bool", "default": false, "description": "patterns are literals"}, {"name": "-i/--ignore-case", "type": "bool", "default": false, "description": "case-insensitive (disables index elision)"}, {"name": "--by", "type": "string", "default": null, "description": "group rows into counts: pattern | file"}, {"name": "--under", "type": "string", "default": null, "description": "keep rows whose path matches this glob"}, {"name": "--top", "type": "int", "default": 0, "description": "cap rows/groups (0 = all)"}, {"name": "--json", "type": "bool", "default": false, "description": "NDJSON rows ({path, line, pattern_id, pattern}) or groups ({label, count})"}]
     \\    },
     \\    "index": {
-    \\      "summary": "build + persist the kinship atlas (one LZJD sketch per corpus file; the sketch verbs then answer warm, folding fresh changes in at query time); --shelf also rebuilds the codex shelf quote reads",
+    \\      "summary": "build + persist the kinship atlas (one LZJD sketch + one structure silhouette per corpus file; the sketch verbs then answer warm, folding fresh changes in at query time); --shelf also rebuilds the codex shelf quote reads",
     \\      "args": [],
     \\      "flags": [{"name": "--shelf", "type": "bool", "default": false, "description": "also build the codex shelf (the same artifact `gist codex build` writes)"}]
     \\    },
@@ -62,7 +67,7 @@ const manifest =
     \\    }
     \\  },
     \\  "corpus_policy": "the index corpus — every non-binary file under the roots minus VCS/build subtrees (corpus.load), the same policy `gist index` uses; corpus analytics, not a gitignore-precedence walk",
-    \\  "warm_tier": "the kinship atlas (kinship.atlas) persists per-file LZJD sketches; queries fold in every file changed since the build anchor and gate emitted rows against deletion — an accelerator, never an authority (--no-index forces the live build, identical answers)",
+    \\  "warm_tier": "the kinship atlas (kinship.atlas) persists per-file LZJD sketches + structure silhouettes; queries fold in every file changed since the build anchor and gate emitted rows against deletion — an accelerator, never an authority (--no-index forces the live build, identical answers)",
     \\  "output_stream": {"results": "stdout", "diagnostics": "stderr"},
     \\  "exit_codes": {"0": "verb ran (rows may be empty)", "1": "status: atlas unavailable", "2": "usage, parse, path, or pattern error"}
     \\}
@@ -74,12 +79,12 @@ pub fn emit() void {
     corpus_mod.emitStdout(manifest);
 }
 
-test "relate --schema is valid JSON naming all nine verbs" {
+test "relate --schema is valid JSON naming all ten verbs" {
     const t = std.testing;
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, manifest, .{});
     defer parsed.deinit();
     const verbs = parsed.value.object.get("verbs").?.object;
-    for ([_][]const u8{ "search", "pack", "quote", "similar", "dups", "clusters", "patterns", "index", "status" }) |v| {
+    for ([_][]const u8{ "search", "pack", "quote", "similar", "dups", "clusters", "echoes", "patterns", "index", "status" }) |v| {
         try t.expect(verbs.contains(v));
     }
     try t.expectEqualStrings("relate", parsed.value.object.get("tool").?.string);

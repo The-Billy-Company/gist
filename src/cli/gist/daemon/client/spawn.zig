@@ -44,18 +44,15 @@ pub fn maybeSpawn(
     if (comptime !can_spawn) return;
     // Opt-outs: an explicit disable, a parity-gate context (which must exercise
     // the raw engine, not a served answer), or a caller managing its own daemon.
-    if (env.get("GIST_NO_AUTOSERVE") != null) return;
-    if (env.get("GIST_NO_PARALLEL") != null) return;
-    if (env.get("GIST_SESSION_SOCK") != null) return;
+    for ([_][]const u8{ "GIST_NO_AUTOSERVE", "GIST_NO_PARALLEL", "GIST_SESSION_SOCK" }) |k|
+        if (env.get(k) != null) return;
     // Only the shapes the daemon can actually accelerate are worth warming for.
     const req = request.classify(argv) catch return;
     // The client declines these shapes up front (`client.attempt`), so a daemon
     // would never serve them: `-c` stays cold (per-file layout), a TTY stdout
     // gets cold's interactive presentation, and a readable stdin is a stream
     // search. Don't burn a resident corpus warming for a shape that can't land.
-    if (req.mode == .count) return;
-    if (std.Io.File.stdout().isTty(io) catch false) return;
-    if (run.readableStdin()) return;
+    if (req.mode == .count or (std.Io.File.stdout().isTty(io) catch false) or run.readableStdin()) return;
     // A daemon may have come up since the client's dial (a coworker's spawn, or
     // one still binding). Probe once; if it answers, leave it be.
     if (net.UnixAddress.init(socket_path)) |ua| {
@@ -76,7 +73,7 @@ pub fn maybeSpawn(
 /// No root arg: bare `gist serve` serves the rootless CWD walk, and the child
 /// inherits this CLI's working directory, so the daemon's served tree is exactly
 /// the tree this rootless query walks cold — the basis of warm==cold parity. The
-/// CWD-relative socket path (`.local/gist-verify/gistd.sock`) means a daemon
+/// CWD-relative socket path (`<outDir()>/gistd.sock`) means a daemon
 /// started from a different directory binds a different socket, never crossing
 /// scopes.
 fn spawnDetached(gpa: std.mem.Allocator, io: std.Io) !void {

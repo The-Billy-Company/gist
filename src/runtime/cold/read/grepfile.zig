@@ -23,18 +23,56 @@ const Emitter = output.Emitter;
 const Regex = @import("../../../search/match/regex/linear/core.zig").Regex;
 const Matcher = @import("../../../search/match/regex/linear/matcher.zig").Matcher;
 
-/// ripgrep's default read-buffer capacity. Binary detection scans buffer-sized
-/// reads for a NUL; a match in the buffer that first contains the NUL is NOT
-/// printed (rg has already scanned ahead), so the emission cutoff is the start
-/// of that buffer — `(nul_offset / BUFCAP) * BUFCAP`.
+/// ripgrep's default read-buffer capacity. Binary detection scans each fill's
+/// newly-read bytes for a NUL; the searched region is what `committedPrefix`
+/// computes from that fill geometry.
 pub const BUFCAP: usize = 65536;
+
+/// How many bytes of a NUL-bearing implicit file ripgrep actually SEARCHES
+/// before its quit strategy stops it. Not a 64K-aligned cut: rg's line buffer
+/// sits behind a BOM-sniffing decoder whose FIRST read returns ≤ 3 bytes, and
+/// each fill() then reads into the free buffer (64 KiB, doubling only when a
+/// line outgrows it) until a `\n` lands in the newly-read bytes. A fill
+/// commits — and the searcher consumes — only up to the LAST `\n` it read;
+/// the remainder rolls into the next fill. The NUL scan runs per newly-read
+/// chunk BEFORE the terminator scan, and a hit discards that entire fill
+/// unsearched (even complete lines it had just read). So the searched prefix
+/// is the last committed boundary before the fill that would read the NUL —
+/// e.g. `P5\n16 16\n255\n<NUL>…` commits exactly 3 (`P5\n` from the sniff
+/// read), and a 67-KiB text prefix commits its last newline under 64 KiB.
+pub fn committedPrefix(body: []const u8, nul: usize) usize {
+    var committed: usize = 0; // absolute searched/consumed boundary (ends at \n+1)
+    var buf_start: usize = 0; // absolute offset of the buffer's first byte
+    var end: usize = 0; // absolute end of everything read so far
+    var cap: usize = BUFCAP;
+    var first = true;
+    while (true) { // one fill() per iteration
+        while (true) { // fill's inner read loop
+            var free = cap - (end - buf_start);
+            while (free == 0) : (free = cap - (end - buf_start)) cap *= 2;
+            var n = @min(free, body.len - end);
+            if (first) {
+                n = @min(3, n);
+                first = false;
+            }
+            if (n == 0) return body.len; // EOF (unreachable while nul < len; keeps the fn total)
+            const lo = end;
+            end += n;
+            if (nul >= lo and nul < end) return committed; // NUL in newbytes ⇒ fill discarded
+            if (std.mem.lastIndexOfScalar(u8, body[lo..end], '\n')) |i| {
+                committed = lo + i + 1;
+                buf_start = committed; // roll: consumed up to the last terminator
+                break;
+            }
+        }
+    }
+}
 
 /// Strip a leading UTF-8 BOM (ripgrep transparently skips it so `^` anchors to
 /// the first real byte). Downstream of `decodeBom` this is a no-op for files (the
 /// BOM is already gone); it still guards the stdin path, which isn't BOM-decoded.
 pub fn stripBom(buf: []const u8) []const u8 {
-    if (buf.len >= 3 and buf[0] == 0xEF and buf[1] == 0xBB and buf[2] == 0xBF) return buf[3..];
-    return buf;
+    return if (std.mem.startsWith(u8, buf, "\xEF\xBB\xBF")) buf[3..] else buf;
 }
 
 /// BOM-driven encoding auto-detection, applied once per file at ingest — ripgrep's
@@ -43,10 +81,9 @@ pub fn stripBom(buf: []const u8) []const u8 {
 /// UTF-16 NULs never trip binary detection. BOM-less UTF-16 is NOT sniffed (rg
 /// needs explicit `-E utf-16` for that, which stays NA); anything else is bytes.
 pub fn decodeBom(a: std.mem.Allocator, buf: []const u8) []const u8 {
-    if (buf.len >= 3 and buf[0] == 0xEF and buf[1] == 0xBB and buf[2] == 0xBF) return buf[3..];
-    if (buf.len >= 2 and buf[0] == 0xFF and buf[1] == 0xFE) return utf16ToUtf8(a, buf[2..], .little);
-    if (buf.len >= 2 and buf[0] == 0xFE and buf[1] == 0xFF) return utf16ToUtf8(a, buf[2..], .big);
-    return buf;
+    if (std.mem.startsWith(u8, buf, "\xFF\xFE")) return utf16ToUtf8(a, buf[2..], .little);
+    if (std.mem.startsWith(u8, buf, "\xFE\xFF")) return utf16ToUtf8(a, buf[2..], .big);
+    return stripBom(buf);
 }
 
 /// Transcode UTF-16 (BOM already consumed) to UTF-8, resolving surrogate pairs;
@@ -58,12 +95,10 @@ pub fn utf16ToUtf8(a: std.mem.Allocator, bytes: []const u8, endian: std.builtin.
     while (i + 1 < bytes.len) : (i += 2) {
         var cp: u21 = std.mem.readInt(u16, bytes[i..][0..2], endian);
         if (cp >= 0xD800 and cp <= 0xDBFF) { // high surrogate → need a low one
-            if (i + 3 < bytes.len) {
-                const lo: u16 = std.mem.readInt(u16, bytes[i + 2 ..][0..2], endian);
-                if (lo >= 0xDC00 and lo <= 0xDFFF) {
-                    cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
-                    i += 2;
-                } else cp = 0xFFFD;
+            const lo: u16 = if (i + 3 < bytes.len) std.mem.readInt(u16, bytes[i + 2 ..][0..2], endian) else 0;
+            if (lo >= 0xDC00 and lo <= 0xDFFF) {
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                i += 2;
             } else cp = 0xFFFD;
         } else if (cp >= 0xDC00 and cp <= 0xDFFF) cp = 0xFFFD; // stray low surrogate
         var enc: [4]u8 = undefined;
@@ -86,104 +121,105 @@ pub fn utf16ToUtf8(a: std.mem.Allocator, bytes: []const u8, endian: std.builtin.
 /// scale with the corpus, not just one file.
 pub fn collectLines(a: std.mem.Allocator, buf: []const u8, term: u8, out: *std.ArrayList([]const u8)) void {
     out.ensureUnusedCapacity(a, std.mem.count(u8, buf, &.{term}) + 1) catch oom();
-    var rest = buf;
-    while (true) {
-        const nl = std.mem.indexOfScalar(u8, rest, term);
-        const end = nl orelse rest.len;
-        if (nl != null or end > 0) out.appendAssumeCapacity(rest[0..end]);
-        if (nl == null) break;
-        rest = rest[end + 1 ..];
-    }
+    var it = std.mem.splitScalar(u8, buf, term);
+    while (it.next()) |line| out.appendAssumeCapacity(line);
+    // split's tail after a trailing terminator (or on empty input) is rg's phantom empty line — drop it.
+    if (buf.len == 0 or buf[buf.len - 1] == term) _ = out.pop();
+}
+
+/// Is a NUL at `nul` "binary" to rg's `-U` slice searcher? That searcher
+/// sniffs only the first `min(len, 64K)` bytes up front: a NUL inside the
+/// sniff quits BEFORE searching anything; a NUL beyond it is never noticed —
+/// the implicit file is searched as ordinary text, matches after the NUL
+/// included, `binary_offset` null.
+pub fn multilineBinary(body_len: usize, nul: usize) bool {
+    return nul < @min(body_len, BUFCAP);
 }
 
 /// ripgrep binary-file handling (a NUL is present, no `--text`/`--null-data`).
-/// Emits matching lines that start before the NUL-containing buffer, then either
-/// the implicit WARNING (files reached via the walk / glob) or the explicit
-/// `binary file matches` summary (an explicit path arg or stdin). Returns whether
-/// the file counts as a match (drives the process exit code).
+///
+/// Two geometries, selected exactly as rg's `multi_line_with_matcher` does:
+/// the SLICE model (`-U` whose pattern can actually match `\n`) sniffs
+/// `min(len, 64K)` up front — see `handleBinaryMulti`; everything else —
+/// line mode, and `-U` whose pattern provably can't match the terminator —
+/// is the LINE model: an implicit (walked) file is searched only through
+/// `committedPrefix` (the bytes rg's quit strategy consumed before the
+/// NUL-bearing fill) with the WARNING note after a printed match; an explicit
+/// path arg or stdin is searched in full ("convert" strategy), but the
+/// standard printer suppresses match lines once binary is reported — so only
+/// the prefix's lines print, plus the `binary file matches` summary.
+/// Returns whether the file counts as a match (drives the exit code).
 pub fn handleBinary(a: std.mem.Allocator, re: *const Matcher, o: Opts, out: *std.ArrayList(u8), em: *Emitter, path: []const u8, explicit: bool, body: []const u8, nul: usize, show_name: bool) bool {
-    const cut = (nul / BUFCAP) * BUFCAP; // start of the buffer that holds the NUL
-    // Under `-U` the emitter renders whole byte ranges, not split lines — route
-    // to the buffer path with the same NUL cutoff so binary handling stays
-    // engine-neutral while the proven per-line path below is untouched.
-    if (em.re.multiline()) return handleBinaryMulti(a, re, o, out, em, path, explicit, body, nul, cut, show_name);
+    if (em.re.multiline() and em.re.canMatchNewline())
+        return handleBinaryMulti(a, re, o, out, em, path, explicit, body, nul, show_name);
 
-    // `-l` can observe only complete buffers before the one that revealed the
-    // first NUL. Do not split/scan the discarded tail (often a multi-megabyte
-    // image, font, audio clip, or model artifact).
-    if (o.files_only and !explicit) {
-        var visible: std.ArrayList([]const u8) = .empty;
-        defer visible.deinit(a);
-        collectLines(a, body[0..cut], o.term(), &visible);
-        return em.file(path, visible.items) > 0;
-    }
-
-    var lines: std.ArrayList([]const u8) = .empty;
-    defer lines.deinit(a);
-    collectLines(a, body, o.term(), &lines);
-    var cutoff: usize = lines.items.len;
-    for (lines.items, 0..) |line, k| {
-        if (@intFromPtr(line.ptr) - @intFromPtr(body.ptr) >= cut) {
-            cutoff = k;
-            break;
-        }
-    }
-    const head = lines.items[0..cutoff];
-
-    // -l/--files-with-matches scans an explicit file as text and emits no binary
-    // warning. Walked files returned through the bounded fast path above.
-    if (o.files_only) return em.file(path, lines.items) > 0;
-
-    // -c/--count: implicit files are suppressed entirely (rg scans fully, detects
-    // binary, drops the count); an explicit file counts every match across the
-    // whole body (rg treats an explicit binary as text for counting).
-    if (o.count_only or o.count_matches) {
-        if (!explicit) return false;
-        return em.file(path, lines.items) > 0;
-    }
-
-    const before = out.items.len;
-    const hits = em.file(path, head);
-    if (explicit) {
-        // Explicit path / stdin: the summary fires if the file matches anywhere
-        // (including after the NUL — rg reports the whole file as a binary match).
-        if (anyLinesMatch(a, re, o, lines.items)) {
-            binNote(a, out, o, path, nul, show_name, "binary file matches");
-            return true;
-        }
-        out.shrinkRetainingCapacity(before);
-        return false;
-    }
-    // Implicit (walk/glob): a WARNING only when we actually printed a match before
-    // the NUL buffer; otherwise rg quits silently (no output, no match).
-    if (hits > 0) {
+    const prefix = body[0..committedPrefix(body, nul)];
+    if (!explicit) {
+        // Implicit (walk/glob): only the committed prefix was ever searched —
+        // every mode (-l included) answers from it, and `-c`/`--count-matches`
+        // are suppressed entirely (rg's Summary printer drops binary files).
+        if (o.count_only or o.count_matches) return false;
+        const hits = emitRegion(a, em, o, path, prefix);
+        if (o.files_only) return hits > 0;
+        // A WARNING only when we actually printed a match in the prefix;
+        // otherwise rg quits silently (no output, no match).
+        if (hits == 0) return false;
         binNote(a, out, o, path, nul, show_name, "WARNING: stopped searching binary file after match");
         return true;
     }
+
+    // -l/--files-with-matches scans an explicit file as text and emits no binary
+    // warning; -c counts every match across the whole body (rg's convert strategy
+    // treats an explicit binary as text).
+    if (o.files_only or o.count_only or o.count_matches)
+        return emitRegion(a, em, o, path, body) > 0;
+
+    const before = out.items.len;
+    _ = emitRegion(a, em, o, path, prefix);
+    if (regionMatches(a, re, o, em, body)) {
+        binNote(a, out, o, path, nul, show_name, "binary file matches");
+        return true;
+    }
+    out.shrinkRetainingCapacity(before);
     return false;
 }
 
-/// The `-U` twin of `handleBinary`: same NUL-cutoff policy over whole byte
-/// ranges (the multiline emitter owns line splitting). Matches emitted only for
-/// the head before the NUL buffer; the explicit summary reflects a whole-buffer
-/// match. `-c`/`-l` mirror the line path (implicit files suppressed, explicit
-/// treated as text).
-fn handleBinaryMulti(a: std.mem.Allocator, re: *const Matcher, o: Opts, out: *std.ArrayList(u8), em: *Emitter, path: []const u8, explicit: bool, body: []const u8, nul: usize, cut: usize, show_name: bool) bool {
-    if (o.files_only) return em.buffer(path, if (explicit) body else body[0..cut]) > 0;
-    if (o.count_only or o.count_matches) return if (explicit) em.buffer(path, body) > 0 else false;
+/// Render a body region through the emitter in the run's own shape — split rg
+/// lines for the per-line model, the whole-buffer emitter under `-U` (a `-U`
+/// run downgraded to line-model binary semantics still RENDERS whole-buffer;
+/// its pattern can't cross lines, so the two shapes coincide). Returns hits.
+fn emitRegion(a: std.mem.Allocator, em: *Emitter, o: Opts, path: []const u8, region: []const u8) usize {
+    if (em.re.multiline()) return em.buffer(path, region);
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(a);
+    collectLines(a, region, o.term(), &lines);
+    return em.file(path, lines.items);
+}
 
-    const before = out.items.len;
-    const hits = em.buffer(path, body[0..cut]);
-    if (explicit) {
-        if (bufAnyMatch(a, re, body)) {
-            binNote(a, out, o, path, nul, show_name, "binary file matches");
-            return true;
-        }
-        out.shrinkRetainingCapacity(before);
-        return false;
-    }
-    if (hits > 0) {
-        binNote(a, out, o, path, nul, show_name, "WARNING: stopped searching binary file after match");
+/// Does the pattern match anywhere in the FULL body? (Drives the explicit
+/// binary summary — rg reports the whole file as a binary match even when the
+/// only hits sit past the NUL.)
+fn regionMatches(a: std.mem.Allocator, re: *const Matcher, o: Opts, em: *Emitter, body: []const u8) bool {
+    if (em.re.multiline()) return bufAnyMatch(a, re, body);
+    var lines: std.ArrayList([]const u8) = .empty;
+    defer lines.deinit(a);
+    collectLines(a, body, o.term(), &lines);
+    return anyLinesMatch(a, re, o, lines.items);
+}
+
+/// The slice-model twin of `handleBinary` (`-U` whose pattern can match `\n`).
+/// An implicit file never gets here with a beyond-sniff NUL (the engines fall
+/// through to the text path — see `multilineBinary`), so implicit ⇒ the sniff
+/// quit: nothing searched, nothing printed, no match. An explicit file is
+/// searched in full (`-c`/`-l` treat it as text), but the slice searcher
+/// reports binary BEFORE searching, so the standard printer suppresses every
+/// match line — only the summary prints.
+fn handleBinaryMulti(a: std.mem.Allocator, re: *const Matcher, o: Opts, out: *std.ArrayList(u8), em: *Emitter, path: []const u8, explicit: bool, body: []const u8, nul: usize, show_name: bool) bool {
+    if (!explicit) return false;
+    // -l / -c treat the explicit file as text over the FULL body (convert).
+    if (o.files_only or o.count_only or o.count_matches) return em.buffer(path, body) > 0;
+    if (bufAnyMatch(a, re, body)) {
+        binNote(a, out, o, path, nul, show_name, "binary file matches");
         return true;
     }
     return false;
@@ -235,11 +271,9 @@ pub const Stats = struct {
     /// tallies; the count fields are all additive, `bytes_printed` is set last
     /// by whoever owns the final output buffer).
     pub fn add(self: *Stats, other: Stats) void {
-        self.matches += other.matches;
-        self.matched_lines += other.matched_lines;
-        self.files_with_match += other.files_with_match;
-        self.files_searched += other.files_searched;
-        self.bytes_searched += other.bytes_searched;
+        inline for (@typeInfo(Stats).@"struct".fields) |f| if (comptime !std.mem.eql(u8, f.name, "bytes_printed")) {
+            @field(self, f.name) += @field(other, f.name);
+        };
     }
 };
 
@@ -272,17 +306,11 @@ pub fn fileMatchStats(re: *const Matcher, a: std.mem.Allocator, o: Opts, body: [
         var line_hit = false;
         while (from <= mv.len) {
             const sp = re.matchSpan(&ss, mv, from) orelse break;
-            if (sp.end == sp.start) {
-                from = sp.start + 1;
-                continue;
-            }
-            if (o.word and !output.wordOk(mv, sp.start, sp.end)) {
-                from = sp.end;
-                continue;
-            }
+            from = if (sp.end == sp.start) sp.start + 1 else sp.end;
+            if (sp.end == sp.start) continue;
+            if (o.word and !output.wordOk(o.unicode, mv, sp.start, sp.end)) continue;
             m += 1;
             line_hit = true;
-            from = sp.end;
         }
         if (line_hit) l += 1;
         if (o.max_per_file != 0 and l >= o.max_per_file) {
@@ -340,6 +368,28 @@ pub fn printWalkError(rel: []const u8, e: anyerror) void {
     std.debug.print("gist: {s}: {s}\n", .{ rel, pathErrNote(e) });
 }
 
+/// ripgrep's `-L` cycle report (walk_entry_err in its ignore crate): a symlink
+/// directory pointing at an ancestor of the walk is announced with both
+/// DISPLAY paths and refused — the walk continues past it, exit 2 (errored).
+pub fn printLoopError(link: []const u8, ancestor: []const u8) void {
+    std.debug.print("gist: File system loop found: {s} points to an ancestor {s}\n", .{ link, ancestor });
+}
+
+/// ripgrep's implicit-path heuristic (`eprint_nothing_searched`, main.rs): the
+/// walk of the GUESSED path — no PATH args, CWD assumed — yielded zero
+/// searchable files, so some filter (type/glob/ignore/hidden) excluded
+/// everything. rg treats this as an error (stderr message + exit 2), never a
+/// silent exit-1 "no matches"; an EXPLICIT path stays silent by design (rg:
+/// "it can otherwise be noisy when it is intended that there is nothing to
+/// search"). Both engines print through here so the wording cannot drift.
+pub fn printNothingSearched() void {
+    std.debug.print(
+        \\gist: No files were searched, which means gist probably applied a filter you didn't expect.
+        \\gist: try -uu (fold hidden + gitignored files in), or `gist --files` to see what the walk admits.
+        \\
+    , .{});
+}
+
 /// One candidate's raw bytes: POSIX open/read/close into the caller's reused
 /// `scratch` (sized `corpus.per_file_cap`); a file that fills `scratch`
 /// completely is ambiguous (exactly cap-sized, or bigger), so `readTail` keeps
@@ -359,14 +409,21 @@ pub fn readFileRaw(a: std.mem.Allocator, scratch: []u8, disk: []const u8) ?[]con
 /// `readFileRaw` for callers that own a fixed per-worker buffer.
 pub fn readFileInto(path: []const u8, scratch: []u8) ?usize {
     const fd = std.posix.openat(std.posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0) catch return null;
-    defer {
-        _ = std.posix.system.close(fd);
-    }
+    defer _ = std.posix.system.close(fd);
+    return drain(fd, scratch);
+}
+
+/// Fill `buf` from `fd`; returns bytes read. A short read on a regular
+/// local file means EOF (the walk only yields regular files, and gist's
+/// corpus model is a local filesystem — see `corpus/README.md`), so the
+/// common sub-cap file costs ONE read syscall, not read-then-read-zero.
+fn drain(fd: std.posix.fd_t, buf: []u8) usize {
     var n: usize = 0;
-    while (n < scratch.len) {
-        const r = std.posix.read(fd, scratch[n..]) catch break;
-        if (r == 0) break;
+    while (n < buf.len) {
+        const want = buf.len - n;
+        const r = std.posix.read(fd, buf[n..]) catch break;
         n += r;
+        if (r < want) break;
     }
     return n;
 }
@@ -406,21 +463,6 @@ pub const StagedFile = struct {
     pub fn close(self: *const StagedFile) void {
         _ = std.posix.system.close(self.fd);
     }
-
-    /// Fill `buf` from `fd`; returns bytes read. A short read on a regular
-    /// local file means EOF (the walk only yields regular files, and gist's
-    /// corpus model is a local filesystem — see `corpus/README.md`), so the
-    /// common sub-cap file costs ONE read syscall, not read-then-read-zero.
-    fn drain(fd: std.posix.fd_t, buf: []u8) usize {
-        var n: usize = 0;
-        while (n < buf.len) {
-            const want = buf.len - n;
-            const r = std.posix.read(fd, buf[n..]) catch break;
-            n += r;
-            if (r < want) break;
-        }
-        return n;
-    }
 };
 
 /// `scratch` (already full) plus whatever remains on `fd`, as one contiguous
@@ -443,11 +485,9 @@ pub fn readTail(a: std.mem.Allocator, fd: std.posix.fd_t, scratch: []const u8) ?
     var out: std.ArrayList(u8) = .empty;
     out.appendSlice(a, scratch) catch return null;
     var tmp: [64 * 1024]u8 = undefined;
-    while (true) {
-        const r = std.posix.read(fd, &tmp) catch break;
-        if (r == 0) break;
+    var r = std.posix.read(fd, &tmp) catch 0;
+    while (r > 0) : (r = std.posix.read(fd, &tmp) catch 0)
         out.appendSlice(a, tmp[0..r]) catch return null;
-    }
     return out.toOwnedSlice(a) catch null;
 }
 
@@ -485,12 +525,8 @@ pub fn lstatPath(path: []const u8) ?RawStat {
 fn statAt(path: []const u8, nofollow: bool) ?RawStat {
     const cpath = std.posix.toPosixPath(path) catch return null;
     if (comptime builtin.os.tag == .linux) {
-        const linux = std.os.linux;
-        var stx: linux.Statx = undefined;
-        const flags: u32 = if (nofollow) linux.AT.SYMLINK_NOFOLLOW else 0;
-        const rc = linux.statx(linux.AT.FDCWD, &cpath, flags, statx_mask, &stx);
-        if (linux.errno(rc) != .SUCCESS) return null;
-        return fromStatx(stx);
+        const flags: u32 = if (nofollow) std.os.linux.AT.SYMLINK_NOFOLLOW else 0;
+        return statxCall(std.os.linux.AT.FDCWD, &cpath, flags);
     }
     var st: std.posix.Stat = undefined;
     const flags: u32 = if (nofollow) std.posix.AT.SYMLINK_NOFOLLOW else 0;
@@ -501,15 +537,21 @@ fn statAt(path: []const u8, nofollow: bool) ?RawStat {
 /// `fstat(2)` on an already-open fd — stdin classification and mmap sizing.
 pub fn statFd(fd: std.posix.fd_t) ?RawStat {
     if (comptime builtin.os.tag == .linux) {
-        const linux = std.os.linux;
-        var stx: linux.Statx = undefined;
-        const rc = linux.statx(fd, "", linux.AT.EMPTY_PATH, statx_mask, &stx);
-        if (linux.errno(rc) != .SUCCESS) return null;
-        return fromStatx(stx);
+        return statxCall(fd, "", std.os.linux.AT.EMPTY_PATH);
     }
     var st: std.posix.Stat = undefined;
     if (std.c.fstat(fd, &st) != 0) return null;
     return fromStat(st);
+}
+
+/// The one `statx(2)` invocation both Linux legs ride (path-relative and
+/// fd-only via `AT.EMPTY_PATH`); null on any errno.
+fn statxCall(dirfd: std.posix.fd_t, path: [*:0]const u8, flags: u32) ?RawStat {
+    const linux = std.os.linux;
+    var stx: linux.Statx = undefined;
+    const rc = linux.statx(dirfd, path, flags, statx_mask, &stx);
+    if (linux.errno(rc) != .SUCCESS) return null;
+    return fromStatx(stx);
 }
 
 /// Exactly the fields `RawStat` projects — BTIME rides along; the kernel's
@@ -523,10 +565,7 @@ fn fromStatx(stx: std.os.linux.Statx) RawStat {
         .dev = (@as(i128, stx.dev_major) << 32) | stx.dev_minor,
         .mode = stx.mode,
         .size = stx.size,
-        .birthtime_ns = if (stx.mask.BTIME)
-            @as(i96, stx.btime.sec) * std.time.ns_per_s + stx.btime.nsec
-        else
-            null,
+        .birthtime_ns = if (stx.mask.BTIME) @as(i96, stx.btime.sec) * std.time.ns_per_s + stx.btime.nsec else null,
     };
 }
 
@@ -537,10 +576,7 @@ fn fromStat(st: std.posix.Stat) RawStat {
         .size = std.math.cast(u64, st.size) orelse 0,
         // Darwin records birth time in `struct stat` itself; gist declines to
         // invent one on libc targets that don't (matching ripgrep).
-        .birthtime_ns = if (comptime builtin.os.tag.isDarwin()) blk: {
-            const bt = st.birthtime();
-            break :blk @as(i96, bt.sec) * std.time.ns_per_s + bt.nsec;
-        } else null,
+        .birthtime_ns = if (comptime builtin.os.tag.isDarwin()) @as(i96, st.birthtime().sec) * std.time.ns_per_s + st.birthtime().nsec else null,
     };
 }
 
@@ -608,23 +644,30 @@ test "walked -l stops at the NUL buffer without scanning its tail" {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(t.allocator);
     const o = Opts{ .files_only = true };
-    var em = Emitter{
-        .a = t.allocator,
-        .re = &m,
-        .o = o,
-        .show_name = true,
-        .out = &out,
-    };
+    var em = Emitter{ .a = t.allocator, .re = &m, .o = o, .show_name = true, .out = &out };
 
     const same_buffer = "panic\x00panic after cutoff";
     try t.expect(!handleBinary(t.allocator, &m, o, &out, &em, "same.bin", false, same_buffer, 5, true));
     try t.expectEqual(@as(usize, 0), out.items.len);
 
-    const prior_buffer = try t.allocator.alloc(u8, BUFCAP + 1);
-    defer t.allocator.free(prior_buffer);
-    @memset(prior_buffer, 'x');
-    @memcpy(prior_buffer[0..5], "panic");
-    prior_buffer[BUFCAP] = 0;
-    try t.expect(handleBinary(t.allocator, &m, o, &out, &em, "prior.bin", false, prior_buffer, BUFCAP, true));
-    try t.expectEqualStrings("prior.bin\n", out.items);
+    // No line terminator ever lands before the NUL ⇒ no fill commits ⇒ rg
+    // searches ZERO bytes — even though the match sits a full buffer before
+    // the NUL (verified against rg: `-l` exits 1, stats say bytes_searched:0).
+    const uncommitted = try t.allocator.alloc(u8, BUFCAP + 1);
+    defer t.allocator.free(uncommitted);
+    @memset(uncommitted, 'x');
+    @memcpy(uncommitted[0..5], "panic");
+    uncommitted[BUFCAP] = 0;
+    try t.expect(!handleBinary(t.allocator, &m, o, &out, &em, "uncommitted.bin", false, uncommitted, BUFCAP, true));
+    try t.expectEqual(@as(usize, 0), out.items.len);
+
+    // A committed line before the NUL-bearing fill IS searched: `panic\n`
+    // commits in the first fill, the NUL discards only the next one.
+    const committed = try t.allocator.alloc(u8, BUFCAP + 1);
+    defer t.allocator.free(committed);
+    @memset(committed, 'x');
+    @memcpy(committed[0..6], "panic\n");
+    committed[BUFCAP] = 0;
+    try t.expect(handleBinary(t.allocator, &m, o, &out, &em, "committed.bin", false, committed, BUFCAP, true));
+    try t.expectEqualStrings("committed.bin\n", out.items);
 }
