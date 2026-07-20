@@ -35,7 +35,9 @@ def corpus(tmp_path, monkeypatch):
     (sub / "d.py").write_text("x = 1  # todo lowercase\nTODO upper TODO twice\n")
     # -w adverse shapes: substring hits, rejected-then-valid on one line,
     # -F adjacent repeats, Unicode neighbors, and a punctuation-only match.
-    (tmp_path / "w.txt").write_text("run runner\nrerun run\naa aaa\naaaa\nérun 中run\na . b\n.dot\n")
+    (tmp_path / "w.txt").write_text(
+        "run runner\nrerun run\naa aaa\naaaa\nérun 中run\na . b\n.dot\n"
+    )
     (tmp_path / "unicode.txt").write_text("café\nCAFÉ\n")
     monkeypatch.chdir(tmp_path)
     return tmp_path

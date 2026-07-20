@@ -141,6 +141,16 @@ const cmsg_data_off = std.mem.alignForward(usize, @sizeOf(cmsghdr), cmsg_align);
 const cmsg_len = cmsg_data_off + fd_size; // CMSG_LEN(fd)
 const cmsg_space = cmsg_data_off + std.mem.alignForward(usize, fd_size, cmsg_align); // CMSG_SPACE(fd)
 
+/// Overlay a `cmsghdr` on a CMSG_SPACE-sized control buffer. The buffer is
+/// sized and aligned for the target's `cmsghdr`; intFromPtr/ptrFromInt keeps
+/// the libc CMSG_FIRSTHDR seam free of `@ptrCast` (same discipline as watch.zig).
+fn cmsgHdr(ctrl: *align(cmsg_align) [cmsg_space]u8) *cmsghdr {
+    return @ptrFromInt(@intFromPtr(ctrl));
+}
+fn cmsgHdrConst(ctrl: *align(cmsg_align) const [cmsg_space]u8) *const cmsghdr {
+    return @ptrFromInt(@intFromPtr(ctrl));
+}
+
 /// Send `bytes` as one message carrying `pass_fd` in an SCM_RIGHTS control
 /// message. The fd is delivered with the message's first byte, so a partial
 /// first send finishes plain (`writeAll`) with the fd already across. Same
@@ -153,7 +163,7 @@ pub fn sendWithFd(fd: std.posix.fd_t, bytes: []const u8, pass_fd: std.posix.fd_t
     var iov = [_]std.posix.iovec_const{.{ .base = bytes.ptr, .len = bytes.len }};
     var ctrl: [cmsg_space]u8 align(cmsg_align) = undefined;
     @memset(&ctrl, 0);
-    const chdr: *cmsghdr = @ptrCast(@alignCast(&ctrl));
+    const chdr = cmsgHdr(&ctrl);
     chdr.len = @intCast(cmsg_len);
     chdr.level = @intCast(std.c.SOL.SOCKET);
     chdr.type = @intCast(std.c.SCM.RIGHTS);
@@ -220,7 +230,7 @@ fn recvExactMsg(fd: std.posix.fd_t, dst: []u8, out_fd: *?std.posix.fd_t) bool {
         const n = recvmsg(fd, &msg, 0);
         if (n <= 0) return false;
         if (out_fd.* == null and @as(usize, @intCast(msg.controllen)) >= cmsg_len) {
-            const chdr: *const cmsghdr = @ptrCast(@alignCast(&ctrl));
+            const chdr = cmsgHdrConst(&ctrl);
             if (chdr.level == @as(i32, @intCast(std.c.SOL.SOCKET)) and chdr.type == @as(i32, @intCast(std.c.SCM.RIGHTS))) {
                 var got: std.posix.fd_t = undefined;
                 @memcpy(std.mem.asBytes(&got), ctrl[cmsg_data_off..][0..fd_size]);

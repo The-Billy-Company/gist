@@ -20,18 +20,18 @@ annotation in [§ References](#references).
 
 ## 0. Where cited in the tree
 
-| citation | role in gist | code / docs |
-|---|---|---|
-| [Cox 2012](#r-cox-trigram) / [codesearch](#r-codesearch) | required-trigram candidate filter | `src/index/trigrams/`, `src/search/match/regex/analysis/`, CLI README |
-| [ripgrep](#r-ripgrep) | CLI face, ignore dialect, rgsuite oracle | `src/runtime/cold/`, `bench/rgsuite/`, `src/cli/gist/` |
-| [Thompson](#r-thompson) / [Cox re1](#r-cox-re1) / [RE2](#r-re2) / [rust-regex](#r-rust-regex) | linear NFA → DFA / Pike lane + UTF-8 ranges | `src/search/match/regex/` |
-| [PCRE2](#r-pcre2) | opt-in backtracking (`-P` / `--engine auto`) | `src/search/match/regex/pcre2/` |
-| [memchr](#r-memchr) | first+last-byte SIMD presence for `-F` | `src/search/match/scan/simd.zig` |
-| [Cormack et al. 2009](#r-rrf) | weighted RRF for `--rank` | `src/search/rank/rank.zig` |
-| [tgrep](#r-tgrep) / [Zoekt](#r-zoekt) / [Blackbird](#r-blackbird) | closest indexed / agent shapes we measured against | CLI README § Prior art, Certificate |
-| [ugrep](#r-ugrep) / [ag](#r-ag) / [GNU grep](#r-gnu-grep) / [git grep](#r-git-grep) | PCRE-capable *scan* peers (no index) | package README evidence §1 |
-| [pg_trgm](#r-pg-trgm) / RE2 `FilteredRE2` | trigram-family siblings that share the literal-free hole | package README + crest dossier |
-| [qgrep](#r-qgrep) / [Hound](#r-hound) / [livegrep](#r-livegrep) | neighboring indexed designs | this file §3 |
+| citation                                                                                      | role in gist                                             | code / docs                                                           |
+| --------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------- |
+| [Cox 2012](#r-cox-trigram) / [codesearch](#r-codesearch)                                      | required-trigram candidate filter                        | `src/index/trigrams/`, `src/search/match/regex/analysis/`, CLI README |
+| [ripgrep](#r-ripgrep)                                                                         | CLI face, ignore dialect, rgsuite oracle                 | `src/runtime/cold/`, `bench/rgsuite/`, `src/cli/gist/`                |
+| [Thompson](#r-thompson) / [Cox re1](#r-cox-re1) / [RE2](#r-re2) / [rust-regex](#r-rust-regex) | linear NFA → DFA / Pike lane + UTF-8 ranges              | `src/search/match/regex/`                                             |
+| [PCRE2](#r-pcre2)                                                                             | opt-in backtracking (`-P` / `--engine auto`)             | `src/search/match/regex/pcre2/`                                       |
+| [memchr](#r-memchr)                                                                           | first+last-byte SIMD presence for `-F`                   | `src/search/match/scan/simd.zig`                                      |
+| [Cormack et al. 2009](#r-rrf)                                                                 | weighted RRF for `--rank`                                | `src/search/rank/rank.zig`                                            |
+| [tgrep](#r-tgrep) / [Zoekt](#r-zoekt) / [Blackbird](#r-blackbird)                             | closest indexed / agent shapes we measured against       | CLI README § Prior art, Certificate                                   |
+| [ugrep](#r-ugrep) / [ag](#r-ag) / [GNU grep](#r-gnu-grep) / [git grep](#r-git-grep)           | PCRE-capable _scan_ peers (no index)                     | package README evidence §1                                            |
+| [pg_trgm](#r-pg-trgm) / RE2 `FilteredRE2`                                                     | trigram-family siblings that share the literal-free hole | package README + crest dossier                                        |
+| [qgrep](#r-qgrep) / [Hound](#r-hound) / [livegrep](#r-livegrep)                               | neighboring indexed designs                              | this file §3                                                          |
 
 Codex FM-index math, Hyperscan-vs-`patterns`, and compression kinship are
 **relate** (and the shared `src/index/codex/` module) — see
@@ -106,7 +106,7 @@ transformation engine.
 
 ## 2. Unindexed grep peers (CLI face and oracle)
 
-These tools *scan* the tree. They are the field's PCRE-capable half — and
+These tools _scan_ the tree. They are the field's PCRE-capable half — and
 the shape gist deliberately copies for argv, ignore rules, stdout, and exit
 codes — while adding a sound candidate index the peers lack.
 
@@ -178,7 +178,7 @@ or browser interface.
 
 ### qgrep
 
-[qgrep](#r-qgrep) searches a compressed, incrementally updated indexed *copy*
+[qgrep](#r-qgrep) searches a compressed, incrementally updated indexed _copy_
 of source data and supports content, path, and fuzzy file queries. Gist
 keeps live source files authoritative for grep-shaped search and uses its
 trigram/crest indexes only to avoid reads that cannot match. (`gist codex`
@@ -260,7 +260,7 @@ its limits:
 - [Gibney & Thankachan 2021](#r-gibney) — conditional lower bounds for regex indexing
 - [Zhang et al. 2025](#r-zhang) — modern n-gram selection strategies (PVLDB)
 
-The whole trigram/n-gram *presence* family — csearch, pg_trgm, RE2's
+The whole trigram/n-gram _presence_ family — csearch, pg_trgm, RE2's
 prefilter, Zoekt, Blackbird, gist's own — shares one blind spot: literal-free
 class repetitions concede a full scan. That hole is Crest's object — see
 [`../crest/PRIOR_ART.md`](../crest/PRIOR_ART.md).
@@ -298,254 +298,214 @@ Annotated bibliography for every external source above. Anchor ids match the
 in-body citation links.
 
 <span id="r-cursor-search"></span>
+
 1. **Cursor.**
    [Agent search documentation](https://cursor.com/docs/agent/tools/search).
-   *Annotation:* Agent-selected Instant Grep + semantic retrieval + file
+   _Annotation:_ Agent-selected Instant Grep + semantic retrieval + file
    reads — gist owns only the deterministic exact/regex leg.
 
-<span id="r-cursor-semsearch"></span>
-2. **Cursor.**
-   [Semantic search report](https://cursor.com/blog/semsearch).
-   *Annotation:* Hybrid grep + embedding evaluation; gist does not claim
-   the semantic half.
+<span id="r-cursor-semsearch"></span> 2. **Cursor.**
+[Semantic search report](https://cursor.com/blog/semsearch).
+_Annotation:_ Hybrid grep + embedding evaluation; gist does not claim
+the semantic half.
 
-<span id="r-tgrep"></span>
-3. **Microsoft tgrep.**
-   [github.com/microsoft/tgrep](https://github.com/microsoft/tgrep).
-   *Annotation:* Closest public local-agent trigram+grep shape;
-   client/server + watchers — gist keeps cold subprocess authoritative.
+<span id="r-tgrep"></span> 3. **Microsoft tgrep.**
+[github.com/microsoft/tgrep](https://github.com/microsoft/tgrep).
+_Annotation:_ Closest public local-agent trigram+grep shape;
+client/server + watchers — gist keeps cold subprocess authoritative.
 
-<span id="r-trigrep"></span>
-4. **Moderne Trigrep.**
-   [moderne.ai — Trigrep](https://www.moderne.ai/moderne-agent-tools/trigrep).
-   *Annotation:* Org-scoped multi-repo search over Zoekt-compatible indexes
-   enriched from OpenRewrite LSTs — portfolio plane gist does not have.
+<span id="r-trigrep"></span> 4. **Moderne Trigrep.**
+[moderne.ai — Trigrep](https://www.moderne.ai/moderne-agent-tools/trigrep).
+_Annotation:_ Org-scoped multi-repo search over Zoekt-compatible indexes
+enriched from OpenRewrite LSTs — portfolio plane gist does not have.
 
-<span id="r-trigrep-docs"></span>
-5. **Moderne.**
-   [Trigrep user documentation](https://github.com/moderneinc/moderne-docs/blob/main/docs/user-documentation/agent-tools/trigrep.md).
-   *Annotation:* Query dialects, structural filters, CLI/MCP delivery for
-   Trigrep.
+<span id="r-trigrep-docs"></span> 5. **Moderne.**
+[Trigrep user documentation](https://github.com/moderneinc/moderne-docs/blob/main/docs/user-documentation/agent-tools/trigrep.md).
+_Annotation:_ Query dialects, structural filters, CLI/MCP delivery for
+Trigrep.
 
-<span id="r-ripgrep"></span>
-6. **BurntSushi / ripgrep.**
-   [github.com/BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep).
-   *Annotation:* Primary CLI mental model and live rgsuite oracle —
-   ignore dialect, exit codes, Unicode defaults; gist is a tested subset.
+<span id="r-ripgrep"></span> 6. **BurntSushi / ripgrep.**
+[github.com/BurntSushi/ripgrep](https://github.com/BurntSushi/ripgrep).
+_Annotation:_ Primary CLI mental model and live rgsuite oracle —
+ignore dialect, exit codes, Unicode defaults; gist is a tested subset.
 
-<span id="r-ugrep"></span>
-7. **ugrep.**
-   [github.com/Genivia/ugrep](https://github.com/Genivia/ugrep).
-   *Annotation:* PCRE-capable scanner peer — lookaround/backrefs by tree
-   walk, no sound candidate index.
+<span id="r-ugrep"></span> 7. **ugrep.**
+[github.com/Genivia/ugrep](https://github.com/Genivia/ugrep).
+_Annotation:_ PCRE-capable scanner peer — lookaround/backrefs by tree
+walk, no sound candidate index.
 
-<span id="r-ag"></span>
-8. **The Silver Searcher (ag).**
-   [github.com/ggreer/the_silver_searcher](https://github.com/ggreer/the_silver_searcher).
-   *Annotation:* Fast code-oriented scanner; peer in the unindexed PCRE
-   half of the field.
+<span id="r-ag"></span> 8. **The Silver Searcher (ag).**
+[github.com/ggreer/the_silver_searcher](https://github.com/ggreer/the_silver_searcher).
+_Annotation:_ Fast code-oriented scanner; peer in the unindexed PCRE
+half of the field.
 
-<span id="r-gnu-grep"></span>
-9. **GNU grep.**
-   [gnu.org/software/grep](https://www.gnu.org/software/grep/).
-   *Annotation:* `grep -P` PCRE scan path — same capability class as
-   ripgrep/ugrep without an index.
+<span id="r-gnu-grep"></span> 9. **GNU grep.**
+[gnu.org/software/grep](https://www.gnu.org/software/grep/).
+_Annotation:_ `grep -P` PCRE scan path — same capability class as
+ripgrep/ugrep without an index.
 
-<span id="r-git-grep"></span>
-10. **git grep.**
-    [git-scm.com/docs/git-grep](https://git-scm.com/docs/git-grep).
-    *Annotation:* VCS-scoped scanner; peer for PCRE/`-P` workloads that
-    never build a persisted candidate index.
+<span id="r-git-grep"></span> 10. **git grep.**
+[git-scm.com/docs/git-grep](https://git-scm.com/docs/git-grep).
+_Annotation:_ VCS-scoped scanner; peer for PCRE/`-P` workloads that
+never build a persisted candidate index.
 
-<span id="r-cox-trigram"></span>
-11. **Cox (2012).**
-    [*Regular Expression Matching with a Trigram Index*](https://swtch.com/~rsc/regexp/regexp4.html).
-    *Annotation:* Required-trigram extraction + Boolean candidate query +
-    verify — direct algorithmic ancestry for gist's candidate index.
+<span id="r-cox-trigram"></span> 11. **Cox (2012).**
+[_Regular Expression Matching with a Trigram Index_](https://swtch.com/~rsc/regexp/regexp4.html).
+_Annotation:_ Required-trigram extraction + Boolean candidate query +
+verify — direct algorithmic ancestry for gist's candidate index.
 
-<span id="r-codesearch"></span>
-12. **Google codesearch.**
-    [github.com/google/codesearch](https://github.com/google/codesearch).
-    *Annotation:* Open `cindex` / `csearch` implementation of Cox's design.
+<span id="r-codesearch"></span> 12. **Google codesearch.**
+[github.com/google/codesearch](https://github.com/google/codesearch).
+_Annotation:_ Open `cindex` / `csearch` implementation of Cox's design.
 
-<span id="r-zoekt"></span>
-13. **Zoekt.**
-    [github.com/sourcegraph/zoekt](https://github.com/sourcegraph/zoekt).
-    *Annotation:* Production positional-trigram code search with ranking and
-    multi-repo shards — hosted scale gist does not claim.
+<span id="r-zoekt"></span> 13. **Zoekt.**
+[github.com/sourcegraph/zoekt](https://github.com/sourcegraph/zoekt).
+_Annotation:_ Production positional-trigram code search with ranking and
+multi-repo shards — hosted scale gist does not claim.
 
-<span id="r-zoekt-design"></span>
-14. **Zoekt.**
-    [Design document](https://github.com/sourcegraph/zoekt/blob/main/doc/design.md).
-    *Annotation:* Index layout and query planning details for Zoekt.
+<span id="r-zoekt-design"></span> 14. **Zoekt.**
+[Design document](https://github.com/sourcegraph/zoekt/blob/main/doc/design.md).
+_Annotation:_ Index layout and query planning details for Zoekt.
 
-<span id="r-sourcegraph"></span>
-15. **Sourcegraph.**
-    [Admin architecture](https://sourcegraph.com/docs/admin/architecture).
-    *Annotation:* Platform around Zoekt — sync, permissions, navigation;
-    gist is a local locator only.
+<span id="r-sourcegraph"></span> 15. **Sourcegraph.**
+[Admin architecture](https://sourcegraph.com/docs/admin/architecture).
+_Annotation:_ Platform around Zoekt — sync, permissions, navigation;
+gist is a local locator only.
 
-<span id="r-blackbird"></span>
-16. **GitHub.**
-    [The technology behind GitHub's new code search](https://github.blog/engineering/architecture-optimization/the-technology-behind-githubs-new-code-search/).
-    *Annotation:* Blackbird — sparse variable-length n-grams at global
-    scale; gist uses fixed local trigrams.
+<span id="r-blackbird"></span> 16. **GitHub.**
+[The technology behind GitHub's new code search](https://github.blog/engineering/architecture-optimization/the-technology-behind-githubs-new-code-search/).
+_Annotation:_ Blackbird — sparse variable-length n-grams at global
+scale; gist uses fixed local trigrams.
 
-<span id="r-blackbird-hist"></span>
-17. **GitHub.**
-    [A brief history of code search at GitHub](https://github.blog/engineering/architecture-optimization/a-brief-history-of-code-search-at-github/).
-    *Annotation:* Blob dedup and symbol-metadata history for GitHub search.
+<span id="r-blackbird-hist"></span> 17. **GitHub.**
+[A brief history of code search at GitHub](https://github.blog/engineering/architecture-optimization/a-brief-history-of-code-search-at-github/).
+_Annotation:_ Blob dedup and symbol-metadata history for GitHub search.
 
-<span id="r-livegrep"></span>
-18. **livegrep.**
-    [github.com/livegrep/livegrep](https://github.com/livegrep/livegrep).
-    *Annotation:* Interactive RE2 over prebuilt indexes via a long-running
-    backend — shared-repo scale, not agent working-tree loop.
+<span id="r-livegrep"></span> 18. **livegrep.**
+[github.com/livegrep/livegrep](https://github.com/livegrep/livegrep).
+_Annotation:_ Interactive RE2 over prebuilt indexes via a long-running
+backend — shared-repo scale, not agent working-tree loop.
 
-<span id="r-hound"></span>
-19. **Hound.**
-    [github.com/hound-search/hound](https://github.com/hound-search/hound).
-    *Annotation:* Per-repo trigram index + Go API/UI following Cox; gist
-    omits the service/browser face.
+<span id="r-hound"></span> 19. **Hound.**
+[github.com/hound-search/hound](https://github.com/hound-search/hound).
+_Annotation:_ Per-repo trigram index + Go API/UI following Cox; gist
+omits the service/browser face.
 
-<span id="r-qgrep"></span>
-20. **zeux/qgrep.**
-    [github.com/zeux/qgrep](https://github.com/zeux/qgrep).
-    *Annotation:* Searches a compressed indexed *copy* of source; gist
-    keeps live files authoritative for grep-shaped search. (Codex /
-    Shannon–Manzini self-index literature → relate dossier.)
+<span id="r-qgrep"></span> 20. **zeux/qgrep.**
+[github.com/zeux/qgrep](https://github.com/zeux/qgrep).
+_Annotation:_ Searches a compressed indexed _copy_ of source; gist
+keeps live files authoritative for grep-shaped search. (Codex /
+Shannon–Manzini self-index literature → relate dossier.)
 
-<span id="r-lsp"></span>
-21. **Language Server Protocol 3.17.**
-    [Specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/).
-    *Annotation:* Live editor↔server symbols/defs/refs — semantic
-    intelligence, not byte/regex search.
+<span id="r-lsp"></span> 21. **Language Server Protocol 3.17.**
+[Specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/).
+_Annotation:_ Live editor↔server symbols/defs/refs — semantic
+intelligence, not byte/regex search.
 
-<span id="r-lsif"></span>
-22. **LSIF.**
-    [lsif.dev](https://lsif.dev/).
-    *Annotation:* Persisted code-intelligence format (archived; SCIP
-    successor).
+<span id="r-lsif"></span> 22. **LSIF.**
+[lsif.dev](https://lsif.dev/).
+_Annotation:_ Persisted code-intelligence format (archived; SCIP
+successor).
 
-<span id="r-scip"></span>
-23. **SCIP.**
-    [github.com/scip-code/scip](https://github.com/scip-code/scip).
-    *Annotation:* Language-agnostic persisted navigation protocol —
-    definitions/refs/impls, not grep.
+<span id="r-scip"></span> 23. **SCIP.**
+[github.com/scip-code/scip](https://github.com/scip-code/scip).
+_Annotation:_ Language-agnostic persisted navigation protocol —
+definitions/refs/impls, not grep.
 
-<span id="r-ctags"></span>
-24. **Universal Ctags.**
-    [github.com/universal-ctags/ctags](https://github.com/universal-ctags/ctags).
-    *Annotation:* Compact tag indexes for symbol navigation; gist's
-    `--rank` boost is not a tag database.
+<span id="r-ctags"></span> 24. **Universal Ctags.**
+[github.com/universal-ctags/ctags](https://github.com/universal-ctags/ctags).
+_Annotation:_ Compact tag indexes for symbol navigation; gist's
+`--rank` boost is not a tag database.
 
-<span id="r-semgrep"></span>
-25. **Semgrep.**
-    [Philosophy](https://semgrep.dev/docs/contributing/semgrep-philosophy).
-    *Annotation:* Syntax-aware pattern matching for analysis — compose with
-    gist, do not conflate.
+<span id="r-semgrep"></span> 25. **Semgrep.**
+[Philosophy](https://semgrep.dev/docs/contributing/semgrep-philosophy).
+_Annotation:_ Syntax-aware pattern matching for analysis — compose with
+gist, do not conflate.
 
-<span id="r-astgrep"></span>
-26. **ast-grep.**
-    [ast-grep.github.io](https://ast-grep.github.io/).
-    *Annotation:* tree-sitter structural search/lint/rewrite.
+<span id="r-astgrep"></span> 26. **ast-grep.**
+[ast-grep.github.io](https://ast-grep.github.io/).
+_Annotation:_ tree-sitter structural search/lint/rewrite.
 
-<span id="r-comby"></span>
-27. **Comby.**
-    [comby.dev](https://comby.dev/).
-    *Annotation:* Lightweight language-aware templates for structural
-    search and replacement.
+<span id="r-comby"></span> 27. **Comby.**
+[comby.dev](https://comby.dev/).
+_Annotation:_ Lightweight language-aware templates for structural
+search and replacement.
 
-<span id="r-openrewrite"></span>
-28. **OpenRewrite.**
-    [docs.openrewrite.org](https://docs.openrewrite.org/).
-    *Annotation:* Recipe-driven automated refactoring over LSTs.
+<span id="r-openrewrite"></span> 28. **OpenRewrite.**
+[docs.openrewrite.org](https://docs.openrewrite.org/).
+_Annotation:_ Recipe-driven automated refactoring over LSTs.
 
-<span id="r-lst"></span>
-29. **OpenRewrite.**
-    [Lossless Semantic Trees](https://docs.openrewrite.org/concepts-and-explanations/lossless-semantic-trees).
-    *Annotation:* Format-preserving, type-attributed ASTs — Trigrep
-    enrichment source; not gist's index.
+<span id="r-lst"></span> 29. **OpenRewrite.**
+[Lossless Semantic Trees](https://docs.openrewrite.org/concepts-and-explanations/lossless-semantic-trees).
+_Annotation:_ Format-preserving, type-attributed ASTs — Trigrep
+enrichment source; not gist's index.
 
-<span id="r-thompson"></span>
-30. **Thompson (1968).**
-    [*Regular Expression Search Algorithm*](https://doi.org/10.1145/363347.363387)
-    (CACM).
-    *Annotation:* Linear-time NFA simulation ancestry for the default
-    matcher lane.
+<span id="r-thompson"></span> 30. **Thompson (1968).**
+[_Regular Expression Search Algorithm_](https://doi.org/10.1145/363347.363387)
+(CACM).
+_Annotation:_ Linear-time NFA simulation ancestry for the default
+matcher lane.
 
-<span id="r-cox-re1"></span>
-31. **Cox.**
-    [*Regular Expression Matching Can Be Simple And Fast*](https://swtch.com/~rsc/regexp/regexp1.html).
-    *Annotation:* Pike-VM / RE2-family linear matching pedagogy gist
-    follows for the default engine.
+<span id="r-cox-re1"></span> 31. **Cox.**
+[_Regular Expression Matching Can Be Simple And Fast_](https://swtch.com/~rsc/regexp/regexp1.html).
+_Annotation:_ Pike-VM / RE2-family linear matching pedagogy gist
+follows for the default engine.
 
-<span id="r-re2"></span>
-32. **RE2.**
-    [github.com/google/re2](https://github.com/google/re2).
-    *Annotation:* Production linear regex engine; FilteredRE2 is the
-    presence-prefilter cousin Crest complements.
+<span id="r-re2"></span> 32. **RE2.**
+[github.com/google/re2](https://github.com/google/re2).
+_Annotation:_ Production linear regex engine; FilteredRE2 is the
+presence-prefilter cousin Crest complements.
 
-<span id="r-rust-regex"></span>
-33. **rust-regex.**
-    [github.com/rust-lang/regex](https://github.com/rust-lang/regex).
-    *Annotation:* UTF-8 range decomposition lineage and lazy powerset
-    trade that gist's eager DFA knowingly differs from.
+<span id="r-rust-regex"></span> 33. **rust-regex.**
+[github.com/rust-lang/regex](https://github.com/rust-lang/regex).
+_Annotation:_ UTF-8 range decomposition lineage and lazy powerset
+trade that gist's eager DFA knowingly differs from.
 
-<span id="r-memchr"></span>
-34. **BurntSushi / memchr.**
-    [github.com/BurntSushi/memchr](https://github.com/BurntSushi/memchr).
-    *Annotation:* Generic SIMD first+last-byte presence gate behind
-    caseful `-F` (`scan/simd.zig`).
+<span id="r-memchr"></span> 34. **BurntSushi / memchr.**
+[github.com/BurntSushi/memchr](https://github.com/BurntSushi/memchr).
+_Annotation:_ Generic SIMD first+last-byte presence gate behind
+caseful `-F` (`scan/simd.zig`).
 
-<span id="r-pcre2"></span>
-35. **PCRE2.**
-    [pcre.org documentation](https://www.pcre.org/current/doc/html/).
-    *Annotation:* Vendored backtracking engine for `-P` / `--engine auto`
-    (lookaround, backreferences) with resource caps.
+<span id="r-pcre2"></span> 35. **PCRE2.**
+[pcre.org documentation](https://www.pcre.org/current/doc/html/).
+_Annotation:_ Vendored backtracking engine for `-P` / `--engine auto`
+(lookaround, backreferences) with resource caps.
 
-<span id="r-rrf"></span>
-36. **Cormack, Clarke & Büttcher (2009).**
-    [*Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods*](https://doi.org/10.1145/1571941.1572114)
-    (SIGIR).
-    *Annotation:* Weighted RRF behind gist's bounded `--rank` view —
-    heuristic text ranking, not name resolution.
+<span id="r-rrf"></span> 36. **Cormack, Clarke & Büttcher (2009).**
+[_Reciprocal Rank Fusion Outperforms Condorcet and Individual Rank Learning Methods_](https://doi.org/10.1145/1571941.1572114)
+(SIGIR).
+_Annotation:_ Weighted RRF behind gist's bounded `--rank` view —
+heuristic text ranking, not name resolution.
 
-<span id="r-cho"></span>
-37. **Cho & Rajagopalan (2002).**
-    [*A Fast Regular Expression Indexing Engine*](https://doi.org/10.1109/ICDE.2002.994755)
-    (ICDE).
-    *Annotation:* Selective multi-gram indexes for regex filtering —
-    presence-family literature.
+<span id="r-cho"></span> 37. **Cho & Rajagopalan (2002).**
+[_A Fast Regular Expression Indexing Engine_](https://doi.org/10.1109/ICDE.2002.994755)
+(ICDE).
+_Annotation:_ Selective multi-gram indexes for regex filtering —
+presence-family literature.
 
-<span id="r-kim"></span>
-38. **Kim, Woo, Park & Shim (2010).**
-    [*Efficient processing of substring match queries with inverted q-gram indexes*](https://doi.org/10.1109/ICDE.2010.5447866)
-    (ICDE).
-    *Annotation:* Posting-list plans for q-gram substring search.
+<span id="r-kim"></span> 38. **Kim, Woo, Park & Shim (2010).**
+[_Efficient processing of substring match queries with inverted q-gram indexes_](https://doi.org/10.1109/ICDE.2010.5447866)
+(ICDE).
+_Annotation:_ Posting-list plans for q-gram substring search.
 
-<span id="r-pg-trgm"></span>
-39. **PostgreSQL `pg_trgm`.**
-    [`trgm_regexp.c` (source)](https://github.com/postgres/postgres/blob/master/contrib/pg_trgm/trgm_regexp.c).
-    *Annotation:* Color-trigram graph from the regex CFA — same no-literal
-    degeneration to full scan as Cox/Zoekt.
+<span id="r-pg-trgm"></span> 39. **PostgreSQL `pg_trgm`.**
+[`trgm_regexp.c` (source)](https://github.com/postgres/postgres/blob/master/contrib/pg_trgm/trgm_regexp.c).
+_Annotation:_ Color-trigram graph from the regex CFA — same no-literal
+degeneration to full scan as Cox/Zoekt.
 
-<span id="r-swe17"></span>
-40. **Google.**
-    [*Software Engineering at Google*, chapter 17](https://abseil.io/resources/swe-book/html/ch17.html).
-    *Annotation:* Production Code Search evolution: trigrams → suffix
-    arrays → sparse n-grams; index-size/query-cost trade-off.
+<span id="r-swe17"></span> 40. **Google.**
+[_Software Engineering at Google_, chapter 17](https://abseil.io/resources/swe-book/html/ch17.html).
+_Annotation:_ Production Code Search evolution: trigrams → suffix
+arrays → sparse n-grams; index-size/query-cost trade-off.
 
-<span id="r-gibney"></span>
-41. **Gibney & Thankachan (2021).**
-    [*Text Indexing for Regular Expression Matching*](https://doi.org/10.3390/a14050133)
-    (*Algorithms*).
-    *Annotation:* Conditional lower bounds and preprocessing/query
-    trade-offs for general regex indexing.
+<span id="r-gibney"></span> 41. **Gibney & Thankachan (2021).**
+[_Text Indexing for Regular Expression Matching_](https://doi.org/10.3390/a14050133)
+(_Algorithms_).
+_Annotation:_ Conditional lower bounds and preprocessing/query
+trade-offs for general regex indexing.
 
-<span id="r-zhang"></span>
-42. **Zhang et al. (2025).**
-    [*An Evaluation of N-Gram Selection Strategies for Regular Expression Indexing*](https://www.vldb.org/pvldb/vol18/p5703-zhang.pdf)
-    (PVLDB).
-    *Annotation:* Modern n-gram *selection* over the same presence test —
-    still concedes the literal-free class-repetition hole (Crest's object).
+<span id="r-zhang"></span> 42. **Zhang et al. (2025).**
+[_An Evaluation of N-Gram Selection Strategies for Regular Expression Indexing_](https://www.vldb.org/pvldb/vol18/p5703-zhang.pdf)
+(PVLDB).
+_Annotation:_ Modern n-gram _selection_ over the same presence test —
+still concedes the literal-free class-repetition hole (Crest's object).

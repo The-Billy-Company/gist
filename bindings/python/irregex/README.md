@@ -15,19 +15,19 @@ Implementation of `import irregex` (distribution name `billy-irregex`). Parent
 [`../README.md`](../README.md) is the user-facing guide; this README maps the
 modules for people changing the binding.
 
-| Module | Job |
-| ------ | --- |
-| `__init__.py` | Public surface: `search` / `files` / `count` / `run` / `rank` / `summary` / `status` |
-| `request.py` | `SearchRequest`, `Match`, rank kinds — the shared shape |
-| `engine.py` | Subprocess transport (authoritative) + result parsing |
-| `session.py` | UDS warm-session client (fail-open accelerator) |
-| `_ffi.py` | In-process `libirregex` cffi (fail-open; rootless or explicit roots) |
-| `contract.py` | Mirrored constants from `contract/search_api.toml` |
-| `aggregate.py` | `summary` / tally helpers over a hit stream |
-| `introspection.py` | `status` / `capabilities` / index freshness |
-| `agent.py` | `request_from_tool` — loose agent dict → `SearchRequest` |
-| `kinship.py` | Relate-backed `similar` / `dups` / `patterns` operations |
-| `errors.py` | Typed errors (`UnsupportedPatternError`, …) |
+| Module             | Job                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------ |
+| `__init__.py`      | Public surface: `search` / `files` / `count` / `run` / `rank` / `summary` / `status` |
+| `request.py`       | `SearchRequest`, `Match`, rank kinds — the shared shape                              |
+| `engine.py`        | Subprocess transport (authoritative) + result parsing                                |
+| `session.py`       | UDS warm-session client (fail-open accelerator)                                      |
+| `_ffi.py`          | In-process `libirregex` cffi (fail-open; rootless or explicit roots)                 |
+| `contract.py`      | Mirrored constants from `contract/search_api.toml`                                   |
+| `aggregate.py`     | `summary` / tally helpers over a hit stream                                          |
+| `introspection.py` | `status` / `capabilities` / index freshness                                          |
+| `agent.py`         | `request_from_tool` — loose agent dict → `SearchRequest`                             |
+| `kinship.py`       | Relate-backed `similar` / `dups` / `patterns` operations                             |
+| `errors.py`        | Typed errors (`UnsupportedPatternError`, …)                                          |
 
 ## Transport rule
 

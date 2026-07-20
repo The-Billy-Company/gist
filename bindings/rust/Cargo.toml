@@ -24,8 +24,8 @@ name = "gist"
 # resolves the library beside the kernel (or `$GIST_LIB_DIR`). Default stays a
 # pure subprocess transport so the tree lifts out cleanly for the OSS release.
 [features]
-default = []
-native = []
+default = [  ]
+native = [  ]
 
 [dependencies]
 # ripgrep's `--json` record stream is the wire format; serde is the idiomatic,

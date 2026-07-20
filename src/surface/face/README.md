@@ -18,10 +18,10 @@ verb, and shapes stdout/stderr — they do **not** own matching, walking, or
 index formats. If a decision changes what matches, it belongs under
 `search/`, `corpus/`, `index/`, or `runtime/`.
 
-| Face | Binary | Question it answers |
-| ---- | ------ | ------------------- |
-| [`gist/`](gist) | `gist` | Where is this exact pattern? (rg-DEFAULT locator + index/status/serve/codex lifecycle) |
-| [`relate/`](relate) | `relate` | What is this text like / which files cover it / what forked? (compression-as-search) |
+| Face                  | Binary    | Question it answers                                                                                                                                     |
+| --------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`gist/`](gist)       | `gist`    | Where is this exact pattern? (rg-DEFAULT locator + index/status/serve/codex lifecycle)                                                                  |
+| [`relate/`](relate)   | `relate`  | What is this text like / which files cover it / what forked? (compression-as-search)                                                                    |
 | [`irregex/`](irregex) | `irregex` | The questions that need BOTH engines: exact match narrows a candidate set, compression reasons inside it (`context` · `family` · `provenance`; ADR-367) |
 
 `gist` and `relate` are the direct faces; `irregex` composes their kernels over

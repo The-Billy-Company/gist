@@ -28,7 +28,7 @@ generation-publishes four things into `.local/gist-verify/`:
 1. the mmap-friendly index blob
 2. the doc-id → path table (NUL-separated, doc-id order)
 3. the build roots (`roots.list`, NUL-separated) — queries and freshness
-   walks scope to *these*, so an index built anywhere stays self-describing
+   walks scope to _these_, so an index built anywhere stays self-describing
 4. the T3 freshness wall-clock anchor (`index/trigrams/fresh.zig`)
 
 Roots are never hardcoded: `gist index [ROOT...]` takes them positionally,

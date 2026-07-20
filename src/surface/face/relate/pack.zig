@@ -50,7 +50,7 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
     if (query.len == 0) die("relate pack: empty query\n", .{});
 
     const t0 = nowNs(io);
-    if (try retrieval.pack(gpa, io, query, roots.items, o.top)) |indexed_value| {
+    if (try retrieval.pack(gpa, io, query, roots.items, o.top, .load)) |indexed_value| {
         var indexed = indexed_value;
         defer indexed.deinit();
         var buf: std.ArrayList(u8) = .empty;

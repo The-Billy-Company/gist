@@ -60,9 +60,7 @@ def test_unknown_option_is_a_loud_error() -> None:
         request_from_tool({"pattern": "x", "gloob": "*.py"})
     assert "gloob" in str(exc.value)
     # Routing keys remain ignored (place adapter owns them), not hard errors.
-    assert request_from_tool({"pattern": "x", "place": "machine"}) == SearchRequest(
-        pattern="x"
-    )
+    assert request_from_tool({"pattern": "x", "place": "machine"}) == SearchRequest(pattern="x")
 
 
 def test_alias_and_canonical_agree() -> None:

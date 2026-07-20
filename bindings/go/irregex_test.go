@@ -9,7 +9,7 @@
 // canceled context surfaces as ctx.Err() without crashing the host, an
 // unsupported pattern is a catchable error, and records outlive both handles.
 //
-// Skips cleanly when no `gist` binary resolves (the cold oracle).
+// Requires a resolvable `gist` binary (the cold oracle); fails closed without it.
 package irregex
 
 import (
@@ -170,7 +170,9 @@ func requireBin(t *testing.T) string {
 	t.Helper()
 	bin := gistBin()
 	if bin == "" {
-		t.Skip("no gist binary (build with `make build-gist`)")
+		// Fail closed — the cold oracle is load-bearing for these bindings.
+		// Build with `make build-gist` or set GIST_BIN; do not Skip (test-bandaid).
+		t.Fatal("gist binary required (build with `make build-gist` or set GIST_BIN)")
 	}
 	return bin
 }

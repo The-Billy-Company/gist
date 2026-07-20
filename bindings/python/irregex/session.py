@@ -1,7 +1,7 @@
 """Persistent resident-session client (ADR-352 rung 2.5).
 
 Long-lived Unix-socket connection to a `gist serve` daemon. Same wire protocol
-as `src/runtime/session/protocol.zig` / the Zig CLI. Fail-open: connect miss,
+as `src/surface/exec/session/protocol.zig` / the Zig CLI. Fail-open: connect miss,
 ineligible request, or `decline` → cold subprocess (`engine.files`/`engine.count`).
 """
 
@@ -34,6 +34,7 @@ DEFAULT_OUT_DIR = ".local/gist-verify"
 def _default_socket() -> str:
     out_dir = os.environ.get("GIST_DIR", "").rstrip("/") or DEFAULT_OUT_DIR
     return f"{out_dir}/gistd.sock"
+
 
 # Soft deadline for connect/handshake/query (Zig: `client_io_timeout_ms`).
 # `socket.timeout` is an `OSError` → existing wire handlers route to cold.
@@ -161,7 +162,7 @@ def ensure_serve(
     (now) reachable. Fail-open by construction: a missing binary, a spawn
     error, or a daemon that never binds within ``timeout`` returns ``False``,
     and the caller's `Session` still answers cold. Mirrors the Zig auto-spawn
-    (`src/cli/gist/daemon/client/spawn.zig`): opt out with ``GIST_NO_AUTOSERVE``, and
+    (`src/surface/face/gist/daemon/client/spawn.zig`): opt out with ``GIST_NO_AUTOSERVE``, and
     it is herd-safe because the daemon's advisory `flock` admits exactly one
     racer (the losers exit at once without touching the winner's live socket).
     """
@@ -283,7 +284,7 @@ class Session:
             _send(s, _OP_STATUS, b"")
             op, payload = _recv(s)
             current = _decode_ready(payload) if op == _OP_READY else None
-        except (OSError, _WireError):
+        except OSError, _WireError:
             self._drop()
             return None
         if current is None:

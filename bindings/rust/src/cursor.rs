@@ -33,7 +33,7 @@ pub const DEFAULT_BATCH: usize = 64;
 /// A thread-safe cooperative stop shared into [`Engine`] searches via [`Run::cancel`].
 ///
 /// One thread may [`cancel`](Self::cancel) while another is blocked in
-/// [`Engine::search`] (the native scan holds no Rust lock the canceller needs);
+/// [`Engine::search`] (the native scan holds no Rust lock the canceler needs);
 /// the scan stops at its next record boundary, keeping whatever it gathered. A
 /// token is reusable across searches until dropped.
 pub struct CancelToken {

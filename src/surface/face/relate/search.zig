@@ -40,7 +40,7 @@ pub fn runSearch(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
     if (query.len == 0) die("relate search: empty query\n", .{});
 
     const t0 = nowNs(io);
-    if (try retrieval.retrieve(gpa, io, query, roots.items, o.top)) |indexed_value| {
+    if (try retrieval.retrieve(gpa, io, query, roots.items, o.top, .load)) |indexed_value| {
         var indexed = indexed_value;
         defer indexed.deinit();
         const cold = zipper.coldBits(query);

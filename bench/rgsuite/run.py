@@ -46,9 +46,9 @@ spec = json.loads((HERE / "spec.json").read_text())
 
 
 def score(rec, engine_env=None):
-    """Bucket one mined case against live ripgrep, dispatched by the stream its
-    upstream `rgtest!` asserted on (`terminal`).
+    """Bucket one mined case against live ripgrep.
 
+    Dispatched by the stream its upstream `rgtest!` asserted on (`terminal`).
     A case with no replayable argv (a `control-flow`/`fixture-helper` miner skip)
     stays SKIP — those are credited through the coverage manifest, not replayed
     here. Everything else runs on BOTH tools and is scored at the *upstream test's
@@ -102,10 +102,12 @@ def _score_exit(rec, rc_g, err_g, rc_rg, err_rg):
 
 
 def _score_stderr(rc_g, err_g, rc_rg, err_rg):
-    """`assert_non_empty_stderr`: ripgrep warned/errored on stderr. gist must
-    reach the same exit class AND emit its own (non-empty) diagnostic — a silent
-    accept where rg warns is a real gap. Exact wording is gist's own (color.zig
-    sibling: diagnostics are gist's voice), so only presence + exit are compared.
+    """Score `assert_non_empty_stderr` against ripgrep's diagnostic.
+
+    gist must reach the same exit class AND emit its own (non-empty) diagnostic —
+    a silent accept where rg warns is a real gap. Exact wording is gist's own
+    (color.zig sibling: diagnostics are gist's voice), so only presence + exit
+    are compared.
     """
     if rc_g != rc_rg:
         return "FAIL", f"exit rc gist={rc_g} rg={rc_rg}"
@@ -115,10 +117,11 @@ def _score_stderr(rc_g, err_g, rc_rg, err_rg):
 
 
 def _score_output(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg):
-    """`.output()`/`.raw_output()`: ripgrep inspects stdout + stderr + status
-    together. Assert stdout byte-parity (at the case's own cmp bar), exit-code
-    parity, and that a diagnostic rg prints isn't dropped silently — the exact
-    diagnostic text stays gist's own (see `_score_stderr`).
+    """Score `.output()`/`.raw_output()` (stdout + stderr + status).
+
+    Assert stdout byte-parity (at the case's own cmp bar), exit-code parity, and
+    that a diagnostic rg prints isn't dropped silently — the exact diagnostic
+    text stays gist's own (see `_score_stderr`).
     """
     bucket, detail = _cmp_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg)
     if bucket != "PASS":
@@ -143,8 +146,10 @@ def _score_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg):
 
 
 def _cmp_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg):
-    """Byte-diff gist vs rg stdout (with the case's normalizations + the honest
-    design-boundary re-bucketing), returning one of PASS/ORDER/NA/FAIL.
+    """Byte-diff gist vs rg stdout.
+
+    Applies the case's normalizations plus honest design-boundary re-bucketing;
+    returns one of PASS/ORDER/NA/FAIL.
     """
     if "--stats" in rec["argv"]:
         out_g, out_rg = O.norm_time(out_g), O.norm_time(out_rg)

@@ -13,7 +13,7 @@ doc_radar:
 
 The flat, versioned header non-Zig hosts compile against. One file:
 [`irregex.h`](irregex.h). Implementation lives in
-[`../src/runtime/ffi/`](../src/runtime/ffi/); `src/root.zig` re-exports the
+[`../src/surface/ffi/`](../src/surface/ffi/); `src/root.zig` re-exports the
 symbols the shared library ships.
 
 ## What the ABI covers

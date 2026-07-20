@@ -82,14 +82,13 @@ pub fn parseOpts(
         if (cfg.max_dist and std.mem.eql(u8, arg, "--max-distance")) {
             opts.max_dist = flags.unitFloat(flags.need(argv, &i, "--max-distance needs a number in [0,1]\n"), "--max-distance");
         } else if (cfg.min_size and std.mem.eql(u8, arg, "--min-size")) {
-            opts.min_size = std.fmt.parseInt(usize, flags.need(argv, &i, "--min-size needs a number ≥ 2\n"), 10) catch die("--min-size: bad number: {s}\n", .{argv[i]});
-            if (opts.min_size < 2) die("--min-size: a family needs at least 2 members\n", .{});
+            opts.min_size = flags.minSize(argv, &i);
         } else if (cfg.lens and std.mem.eql(u8, arg, "--lens")) {
             opts.lens = std.meta.stringToEnum(Lens, flags.need(argv, &i, "--lens needs bytes|structure|fused\n")) orelse die("--lens: bytes, structure, or fused, not {s}\n", .{argv[i]});
         } else if (cfg.min_echo and std.mem.eql(u8, arg, "--min-echo")) {
             opts.min_echo = flags.unitFloat(flags.need(argv, &i, "--min-echo needs a number in [0,1]\n"), "--min-echo");
         } else if (std.mem.eql(u8, arg, "--top")) {
-            opts.top = std.fmt.parseInt(usize, flags.need(argv, &i, "--top needs a number\n"), 10) catch die("--top: bad number: {s}\n", .{argv[i]});
+            opts.top = flags.count(argv, &i, "--top");
         } else if (std.mem.eql(u8, arg, "--json")) {
             opts.json = true;
         } else if (cfg.no_index and std.mem.eql(u8, arg, "--no-index")) {

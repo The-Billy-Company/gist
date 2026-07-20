@@ -3,7 +3,7 @@
 `dlopen`s `libirregex.{dylib,so}` in ABI mode (no C compiler, dev headers, or
 per-Python build) and drives the `irregex_open` / `irregex_search` /
 `irregex_close` C ABI (`../../../include/irregex.h`,
-implemented in `src/runtime/ffi/session.zig`). It holds one corpus WARM in this
+implemented in `src/surface/ffi/session.zig`). It holds one corpus WARM in this
 very process — no subprocess, Unix socket, `stdout`, or `exit` — and streams
 full `Match` records over a callback, byte-identical to the cold `gist --json`
 stream (and to the UDS daemon).
@@ -173,7 +173,7 @@ def _try_load() -> tuple[FFI, object] | None:
         _ = lib.irregex_search
         if lib.irregex_abi_version() != _ABI_VERSION:
             return None  # header/library ABI drift — decline, answer cold
-    except (AttributeError, OSError):
+    except AttributeError, OSError:
         return None
     return (ffi, lib)
 
@@ -184,9 +184,12 @@ def available() -> bool:
 
 
 def load() -> tuple[FFI, object] | None:
-    """The loaded `(ffi, lib)` pair, or None when the in-process library is
-    absent / ABI-skewed. The idiomatic `Engine`/`Cursor` surface (`cursor.py`)
-    drives the pull-cursor symbols off this same handle the push session uses."""
+    """Return the loaded `(ffi, lib)` pair, or None if unavailable.
+
+    None when the in-process library is absent / ABI-skewed. The idiomatic
+    `Engine`/`Cursor` surface (`cursor.py`) drives the pull-cursor symbols off
+    this same handle the push session uses.
+    """
     return _load()
 
 

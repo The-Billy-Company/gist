@@ -109,11 +109,11 @@ def test_cancel_from_another_thread_is_safe(corpus) -> None:
     with irregex.Engine(str(corpus)) as eng, eng.cancel_token() as tok:
         barrier = threading.Barrier(2)
 
-        def canceller() -> None:
+        def canceler() -> None:
             barrier.wait()
             tok.cancel()
 
-        t = threading.Thread(target=canceller)
+        t = threading.Thread(target=canceler)
         t.start()
         barrier.wait()
         got = list(eng.search("TODO", cancel=tok))

@@ -165,6 +165,7 @@ class CancelToken:
     __slots__ = ("_ffi", "_lib", "_token")
 
     def __init__(self) -> None:
+        """Allocate a native cancellation token."""
         self._ffi, self._lib = _require_abi()
         out = self._ffi.new("irregex_cancel **")
         if self._lib.irregex_cancel_new(out) != _OK:
@@ -184,12 +185,15 @@ class CancelToken:
             self._lib.irregex_cancel_free(token)
 
     def __enter__(self) -> CancelToken:
+        """Return self for ``with CancelToken() as tok:``."""
         return self
 
     def __exit__(self, *_exc: object) -> None:
+        """Close the token on context exit."""
         self.close()
 
     def __del__(self) -> None:
+        """Best-effort free if the caller never closed."""
         with contextlib.suppress(Exception):
             self.close()
 
@@ -206,6 +210,7 @@ class Cursor:
     __slots__ = ("_cursor", "_engine", "_ffi", "_lib", "_matched")
 
     def __init__(self, ffi: FFI, lib: object, engine: Engine, handle: object) -> None:
+        """Wrap a native cursor handle owned by *engine*."""
         self._ffi = ffi
         self._lib = lib
         self._engine = engine  # retained so the engine outlives its cursors
@@ -214,16 +219,20 @@ class Cursor:
 
     @property
     def matched(self) -> bool:
-        """Whether any file matched (cold's exit-code boolean), even if a budget
-        cut the scan short. Stable for the cursor's lifetime."""
+        """Whether any file matched (cold's exit-code boolean).
+
+        True even if a budget cut the scan short. Stable for the cursor's lifetime.
+        """
         if self._matched is None:
             self._matched = bool(self._lib.irregex_cursor_matched(self._cursor))
         return self._matched
 
     def __iter__(self) -> Cursor:
+        """Iterate match records one at a time."""
         return self
 
     def __next__(self) -> Match:
+        """Return the next match, or raise ``StopIteration`` when exhausted."""
         if not self._cursor:
             raise StopIteration
         rec = self._ffi.new("irregex_match *")
@@ -262,12 +271,15 @@ class Cursor:
             self._lib.irregex_cursor_close(cursor)
 
     def __enter__(self) -> Cursor:
+        """Return self for ``with cursor:``."""
         return self
 
     def __exit__(self, *_exc: object) -> None:
+        """Close the cursor on context exit."""
         self.close()
 
     def __del__(self) -> None:
+        """Best-effort free if the caller never closed."""
         with contextlib.suppress(Exception):
             self.close()
 
@@ -284,6 +296,7 @@ class Engine:
     __slots__ = ("_engine", "_ffi", "_lib", "_lock")
 
     def __init__(self, *paths: str | os.PathLike[str]) -> None:
+        """Open a warm engine over *paths* (empty = rootless CWD walk)."""
         self._ffi, self._lib = _require_abi()
         self._lock = threading.Lock()
         out = self._ffi.new("irregex_engine **")
@@ -386,12 +399,15 @@ class Engine:
                 self._lib.irregex_engine_close(engine)
 
     def __enter__(self) -> Engine:
+        """Return self for ``with Engine(...) as eng:``."""
         return self
 
     def __exit__(self, *_exc: object) -> None:
+        """Close the engine on context exit."""
         self.close()
 
     def __del__(self) -> None:
+        """Best-effort free if the caller never closed."""
         with contextlib.suppress(Exception):
             self.close()
 

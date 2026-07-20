@@ -15,15 +15,15 @@ Implementation of the standalone `gist` crate. Parent
 [`../README.md`](../README.md) is the crate guide; this README maps modules
 for people changing the binding.
 
-| Module | Job |
-| ------ | --- |
-| `lib.rs` | Public re-exports and crate docs |
-| `request.rs` | `SearchRequest`, match / rank kinds |
-| `engine.rs` | Subprocess transport (authoritative) |
-| `session.rs` | UDS warm-session client (fail-open) |
-| `contract.rs` | Mirrored constants from `contract/search_api.toml` |
-| `aggregate.rs` | Summary / tally helpers |
-| `error.rs` | Typed errors (`UnsupportedPattern`, …) |
+| Module         | Job                                                |
+| -------------- | -------------------------------------------------- |
+| `lib.rs`       | Public re-exports and crate docs                   |
+| `request.rs`   | `SearchRequest`, match / rank kinds                |
+| `engine.rs`    | Subprocess transport (authoritative)               |
+| `session.rs`   | UDS warm-session client (fail-open)                |
+| `contract.rs`  | Mirrored constants from `contract/search_api.toml` |
+| `aggregate.rs` | Summary / tally helpers                            |
+| `error.rs`     | Typed errors (`UnsupportedPattern`, …)             |
 
 Parity tests live in [`../tests/`](../tests/) — especially `contract.rs`,
 which asserts this crate's constants against the TOML and the live binary.

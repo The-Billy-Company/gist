@@ -25,13 +25,13 @@ code path, and a single-engine run has already once missed a real regression
 `rg 15.1.0`, 441 mined `rgtest!` cases (invocations; a multi-command `rgtest!`
 mines one case per command), replayed against **both** engines:
 
-| Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                          |
+| Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                         |
 | --------- | ------------------------: | -----------------: | ------------------------------------------------------------------------------- |
-| **PASS**  |                       391 |                391 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)      |
-| **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole         |
-| **FAIL**  |                        14 |                 14 | a supported-surface divergence, each phase-tracked in `coverage_manifest.toml`   |
-| NA        |                        16 |                 16 | unsupported **by design** (see boundaries below)                                 |
-| SKIP      |                        20 |                 20 | not replayable as one argv — each mapped to a companion proof / upstream reason  |
+| **PASS**  |                       391 |                391 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)     |
+| **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole        |
+| **FAIL**  |                        14 |                 14 | a supported-surface divergence, each phase-tracked in `coverage_manifest.toml`  |
+| NA        |                        16 |                 16 | unsupported **by design** (see boundaries below)                                |
+| SKIP      |                        20 |                 20 | not replayable as one argv — each mapped to a companion proof / upstream reason |
 
 **Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 391/405 = 96.5%
 on both engines** — identical on whichever engine a given case dispatches to. The

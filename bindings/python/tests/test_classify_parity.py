@@ -1,7 +1,7 @@
 """Cross-language eligibility parity (ADR-352 rung 2.5).
 
 `session.warm_eligible` (a cheap pure-Python predicate on `SearchRequest`) and
-`src/runtime/session/request.zig::classify` (the daemon's argv authority) are two
+`src/surface/exec/session/request.zig::classify` (the daemon's argv authority) are two
 independent projections of ONE contract: which requests the resident path may
 answer warm. They take different inputs — request fields vs an rg argv — so they
 cannot share code, only agree. This suite is the mechanical guard the plan

@@ -6,10 +6,10 @@ corpus-root resolution, and result-row emission. It lives here, a sibling of
 verb-support) share one spelling of a flag value, one root-boundary rule, and
 one JSON escaper instead of forking them per binary.
 
-| File | Owns |
-| ---- | ---- |
+| File        | Owns                                                                                                                                                                                                                                            |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `flags.zig` | Argv → values + roots: `need` (value after a flag), `count`/`minSize`/`unitFloat` (bounded number parses), `onlyFlag` (lifecycle parse), `Roots`/`rootsOf` (positional → corpus roots), `stripDotSlash` + `underAnyRoot` (path/root membership) |
-| `emit.zig` | Result rows: `jsonStr` (the one NDJSON escaper, re-exported from the cold emit floor), `jsonRow` (one object from a comptime field spec), `emitRow` (text vs `--json` off one bool) |
+| `emit.zig`  | Result rows: `jsonStr` (the one NDJSON escaper, re-exported from the cold emit floor), `jsonRow` (one object from a comptime field spec), `emitRow` (text vs `--json` off one bool)                                                             |
 
 ## Why it sits beside `face/`, not inside it
 

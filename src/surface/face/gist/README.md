@@ -107,17 +107,17 @@ replace `rg` with `gist` without stopping to translate the search. The
 force the differential oracle, reuse a warm corpus, or query the compressed
 codex. Start in the first lane; cross over only when the question changes.
 
-| Intent | Muscle-memory form | Gist-native choice |
-| --- | --- | --- |
-| Find matching lines | `rg PATTERN [PATH...]` | `gist PATTERN [PATH...]` |
-| Narrow the corpus | `-t`, `-T`, `-g`, `--iglob`, explicit paths | same flags and positional paths |
-| Shape familiar output | `-n`, `-l`, `-c`, `-o`, `-A/-B/-C`, `--json` | same output contract |
-| Find the best definition or use | inspect ordinary grep output | `--rank[=N]` |
-| Use lookaround or backreferences | `-P` | `-P`, or `--engine auto` to escalate only when needed |
-| Prove acceleration changed nothing | run another scanner | `--no-index`; its answer is the oracle for the indexed path |
-| Avoid repeated startup | external wrapper or server | do nothing; eligible searches transparently use the resident session |
-| Count an exact literal without source-file I/O | scan the tree | `gist codex count LITERAL` on a clean shelf |
-| Ask what this binary supports | prose or remembered flags | `gist --schema`, generated from the live flag catalog |
+| Intent                                         | Muscle-memory form                           | Gist-native choice                                                   |
+| ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------- |
+| Find matching lines                            | `rg PATTERN [PATH...]`                       | `gist PATTERN [PATH...]`                                             |
+| Narrow the corpus                              | `-t`, `-T`, `-g`, `--iglob`, explicit paths  | same flags and positional paths                                      |
+| Shape familiar output                          | `-n`, `-l`, `-c`, `-o`, `-A/-B/-C`, `--json` | same output contract                                                 |
+| Find the best definition or use                | inspect ordinary grep output                 | `--rank[=N]`                                                         |
+| Use lookaround or backreferences               | `-P`                                         | `-P`, or `--engine auto` to escalate only when needed                |
+| Prove acceleration changed nothing             | run another scanner                          | `--no-index`; its answer is the oracle for the indexed path          |
+| Avoid repeated startup                         | external wrapper or server                   | do nothing; eligible searches transparently use the resident session |
+| Count an exact literal without source-file I/O | scan the tree                                | `gist codex count LITERAL` on a clean shelf                          |
+| Ask what this binary supports                  | prose or remembered flags                    | `gist --schema`, generated from the live flag catalog                |
 
 ### The default move
 

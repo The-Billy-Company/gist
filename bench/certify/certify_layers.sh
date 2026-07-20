@@ -51,7 +51,9 @@ done
 run_root() { # <abs-bin> [args…] — 0 on success, 1 if skipped/unavailable
   local bin="$1"
   shift
-  if [[ "$(id -u)" -eq 0 ]]; then
+  local uid
+  uid="$(id -u)"
+  if [[ "${uid}" -eq 0 ]]; then
     (cd "${REPO}" && "${bin}" "$@")
     return $?
   fi
@@ -78,7 +80,10 @@ run_root() { # <abs-bin> [args…] — 0 on success, 1 if skipped/unavailable
 }
 
 # Layer B′ — measured port bound (always run; labels measured/not in JSON)
-if ! run_root "${PORTBOUND}"; then
+# Invoke run_root outside `if`/`!` so `set -e` still sees its status (SC2310).
+run_root "${PORTBOUND}"
+root_rc=$?
+if [[ "${root_rc}" -ne 0 ]]; then
   (cd "${REPO}" && "${PORTBOUND}") || die "gist-portbound failed"
 fi
 
@@ -89,7 +94,9 @@ llvm_bin="$(brew --prefix llvm 2> /dev/null || true)"
 bash "${HERE}/../portcert/portcert.sh" || note "portcert skipped/degraded (see above)"
 
 # Layer C — STREAM ceiling (+ optional root for measured clock)
-if ! run_root "${ROOFLINE}"; then
+run_root "${ROOFLINE}"
+root_rc=$?
+if [[ "${root_rc}" -ne 0 ]]; then
   (cd "${REPO}" && "${ROOFLINE}") || die "gist-roofline failed"
 fi
 python3 "${HERE}/../roofline/roofline_report.py" \

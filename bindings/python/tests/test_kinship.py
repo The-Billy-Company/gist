@@ -38,8 +38,8 @@ def corpus(tmp_path):
     (tmp_path / "a.py").write_text(py_a)
     (tmp_path / "b.py").write_text(py_a.replace("route", "dispatch"))
     (tmp_path / "c.zig").write_text(
-        "const std = @import(\"std\");\npub fn main() !void {\n"
-        + "".join(f"    std.debug.print(\"{i}\", .{{}});\n" for i in range(40))
+        'const std = @import("std");\npub fn main() !void {\n'
+        + "".join(f'    std.debug.print("{i}", .{{}});\n' for i in range(40))
         + "}\n"
     )
     (tmp_path / "hits.txt").write_text("alpha beta\nbeta only\nneither\nalpha again\n")

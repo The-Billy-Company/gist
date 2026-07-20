@@ -267,7 +267,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         } else if (std.mem.eql(u8, arg, "--under")) {
             under = flags.need(argv, &i, "--under needs a glob\n");
         } else if (std.mem.eql(u8, arg, "--top")) {
-            top = std.fmt.parseInt(usize, flags.need(argv, &i, "--top needs a number\n"), 10) catch die("--top: bad number: {s}\n", .{argv[i]});
+            top = flags.count(argv, &i, "--top");
         } else if (std.mem.eql(u8, arg, "--json")) {
             json = true;
         } else if (std.mem.startsWith(u8, arg, "-")) {

@@ -31,7 +31,7 @@ results come from the same engine the CLI uses, never a second matcher.
 
 Subprocess is the default transport (ADR-352): the CLI engine fails loud on
 unsupported input via `die()` → `process::exit(2)`, which would terminate a host
-that linked *it* in-process. Here a bad pattern exits the _child_ and surfaces as a
+that linked _it_ in-process. Here a bad pattern exits the _child_ and surfaces as a
 typed `Error::UnsupportedPattern` — the host is never touched.
 
 The binary is resolved at call time: env `GIST_BIN`, then `gist` on `PATH`, then
@@ -80,7 +80,7 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 (`gist::warm_eligible(&req)` is `false` for scoped roots, globs/types, context,
 or any rich flag), or a wire hiccup transparently falls back to the
 byte-identical cold subprocess. The wire protocol is the same one
-`src/runtime/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
+`src/surface/exec/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
 three frame-match against the one daemon.
 
 ## Find, then aggregate

@@ -43,7 +43,7 @@ if err := cur.Err(); err != nil { /* mid-stream failure */ }
 for m, err := range cur.All() { /* … */ }       // or range-over-func (Go 1.23+)
 ```
 
-`Request` carries only match-finding *intent* the ABI has a field for — `Pattern`,
+`Request` carries only match-finding _intent_ the ABI has a field for — `Pattern`,
 `Fixed`, `IgnoreCase`/`SmartCase`/`Unicode`, `Word`, `Invert`, `Quiet`,
 `Before`/`After`/`Context`, `MaxCount`. Glob/type scoping, multiline, and ranking
 stay CLI-only; a query needing them uses the `gist` binary. Records are copied into

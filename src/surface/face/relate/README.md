@@ -116,17 +116,17 @@ these are not grep-shaped questions. Its ergonomic contract is instead one
 question per verb, with a small shared vocabulary for scope, result count,
 machine output, and acceleration.
 
-| If your reflex is to… | What you actually want | Native Relate choice |
-| --- | --- | --- |
-| search several vague terms and inspect every hit | files that best explain some text | `relate search TEXT` |
-| collect a top-K list and deduplicate it by hand | a non-redundant context set | `relate pack TEXT` |
-| ask where a pasted passage came from | corpus-attributed verbatim provenance | `relate quote TEXT` |
-| diff one file against many candidates | nearest files to one known file | `relate similar PATH` |
-| compare likely duplicate files | verified near-duplicate candidates | `relate dups` |
-| reconnect duplicate pairs yourself | complete fork families | `relate clusters` |
-| miss renamed copy-paste with byte similarity | shared structure under different vocabulary | `relate echoes` |
-| find the same FUNCTION duplicated across files | function-level families or a concept probe | `relate concepts [TEXT]` |
-| run N independent exact searches | one attributed walk for N patterns | `relate patterns -e A -e B …` |
+| If your reflex is to…                            | What you actually want                      | Native Relate choice          |
+| ------------------------------------------------ | ------------------------------------------- | ----------------------------- |
+| search several vague terms and inspect every hit | files that best explain some text           | `relate search TEXT`          |
+| collect a top-K list and deduplicate it by hand  | a non-redundant context set                 | `relate pack TEXT`            |
+| ask where a pasted passage came from             | corpus-attributed verbatim provenance       | `relate quote TEXT`           |
+| diff one file against many candidates            | nearest files to one known file             | `relate similar PATH`         |
+| compare likely duplicate files                   | verified near-duplicate candidates          | `relate dups`                 |
+| reconnect duplicate pairs yourself               | complete fork families                      | `relate clusters`             |
+| miss renamed copy-paste with byte similarity     | shared structure under different vocabulary | `relate echoes`               |
+| find the same FUNCTION duplicated across files   | function-level families or a concept probe  | `relate concepts [TEXT]`      |
+| run N independent exact searches                 | one attributed walk for N patterns          | `relate patterns -e A -e B …` |
 
 ### The default move
 

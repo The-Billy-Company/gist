@@ -18,7 +18,7 @@ from .request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
 
 DEFAULT_TIMEOUT = 30.0
 # stderr phrases the engine prints when a pattern/flag is outside its
-# linear-time syntax (see src/runtime/cold/{argv/args,engine/serial}.zig `die` messages).
+# linear-time syntax (see src/surface/exec/cold/{argv/args,engine/serial}.zig `die` messages).
 _UNSUPPORTED_MARKERS = (
     "unsupported",
     "use ripgrep",
@@ -80,7 +80,7 @@ def _build_cli(zig: str, kernel: Path) -> None:
             timeout=600,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except OSError, subprocess.TimeoutExpired:
         pass
 
 

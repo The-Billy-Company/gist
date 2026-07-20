@@ -112,7 +112,9 @@ pub fn searchCursor(engine: *api.Engine, req_ptr: ?*const contract.SearchRequest
         .max_count = if (flags & contract.flag_max_count != 0) req.max_count else null,
     };
     const run = api.RunOptions{
-        .cancel = if (req.cancel) |c| @ptrCast(@alignCast(c)) else null,
+        // Opaque host cancel handle → typed token; intFromPtr/ptrFromInt keeps
+        // the FFI seam free of `@ptrCast` (same discipline as watch.zig).
+        .cancel = if (req.cancel) |c| @as(*const api.CancelToken, @ptrFromInt(@intFromPtr(c))) else null,
         .timeout_ns = if (req.timeout_ns == 0) null else req.timeout_ns,
         .max_results = if (req.max_results == 0) null else req.max_results,
     };
