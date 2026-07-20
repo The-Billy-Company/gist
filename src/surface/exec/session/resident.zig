@@ -55,8 +55,8 @@
 //!     `die()`; the client's dropped connection then falls back cold and the
 //!     next query re-spawns a fresh daemon — fail-open too.)
 //!
-//! Queries are serialized by `mutex`; the watcher only ever touches the atomic
-//! `dirty_seq`/`clean` pair, never the overlay, so the barrier is a lock-free
+//! Queries are serialized by `mutex`; the watcher only ever touches the shared
+//! `Seqlock` (`seqlock.zig`), never the overlay, so the barrier is a lock-free
 //! seqlock over a mutex-guarded engine.
 
 const std = @import("std");
@@ -73,6 +73,7 @@ const parallel = @import("../../../kernel/primitives/parallel.zig");
 const run = @import("../cold/engine/serial.zig");
 const grepfile = @import("../cold/read/grepfile.zig");
 const dirtylog = @import("dirty.zig");
+const Seqlock = @import("seqlock.zig").Seqlock;
 const delta_mod = @import("delta.zig");
 const persist = @import("../../../corpus/index/trigrams/persist.zig");
 const Index = @import("../../../corpus/index/trigrams/trigram.zig").Index;
@@ -182,17 +183,11 @@ pub const ResidentSession = struct {
     overlay: std.StringHashMap(Overlay),
 
     mutex: std.Io.Mutex = .init,
-    /// Set by a watcher that is actively proving quiescence; without one the
-    /// session reconciles on every query (correct, just not microsecond-fast).
-    watcher_active: bool = false,
-    /// Bumped by the watcher on every filesystem event (seqlock counter).
-    dirty_seq: std.atomic.Value(u64) = .init(0),
-    /// True only when a watcher has proven no event since the last reconcile.
-    clean: std.atomic.Value(bool) = .init(false),
-    /// Set once by a watcher backend that lost coverage it cannot recover (an
-    /// inotify queue overflow, an unwatchable new directory): the clean fast
-    /// path is permanently disabled and every query reconciles (fail-closed).
-    poisoned: std.atomic.Value(bool) = .init(false),
+    /// The freshness barrier: the watcher-driven seqlock (event counter, clean
+    /// witness, permanent-doubt latch) whose subtle memory ordering lives once
+    /// in `seqlock.zig`. Without a live watcher it never proves clean, so every
+    /// query reconciles (correct, just not microsecond-fast).
+    seqlock: Seqlock = .{},
 
     /// The exact dirty-path hand-off from a path-reporting watcher backend
     /// (macOS FSEvents today). When its drain is exact and doubt-free, the
@@ -298,21 +293,19 @@ pub const ResidentSession = struct {
     /// event counted by a reconcile's pre-drain seq read is already visible
     /// to that drain.
     pub fn markDirty(self: *ResidentSession) void {
-        _ = self.dirty_seq.fetchAdd(1, .monotonic);
-        self.clean.store(false, .release);
+        self.seqlock.markDirty();
     }
 
     /// The watcher lost event coverage it cannot win back (inotify queue
     /// overflow, an unwatchable new directory): permanently disable the clean
     /// fast path. Every later query reconciles — slower, never stale.
     pub fn markDoubtForever(self: *ResidentSession) void {
-        self.poisoned.store(true, .release);
-        self.markDirty();
+        self.seqlock.markDoubtForever();
     }
 
     /// Declare that a watcher is live and proving quiescence.
     pub fn armWatcher(self: *ResidentSession) void {
-        self.watcher_active = true;
+        self.seqlock.arm();
     }
 
     // ── freshness + reload ──
@@ -349,11 +342,11 @@ pub const ResidentSession = struct {
         // Move the fresh engine's data fields into place, field-by-field, and
         // leave the synchronization + identity fields alone: `mutex` is HELD by
         // the caller (a whole-struct `self.* = fresh` reset it to `.unlocked`,
-        // so the caller's `defer unlock` hit `unreachable`); the watcher seqlock
-        // (`dirty_seq`/`clean`) stays monotonic; `gpa`/`io`/`daemon_gen`/
-        // `watcher_active` are unchanged. `fresh`'s own mutex/atomics/identity
-        // are default-initialized and unused, and every owning field has been
-        // moved out of it, so it needs no deinit.
+        // so the caller's `defer unlock` hit `unreachable`); the `seqlock`
+        // (event counter, clean witness, arm/poison state) stays monotonic;
+        // `gpa`/`io`/`daemon_gen` are unchanged. `fresh`'s own mutex/seqlock/
+        // identity are default-initialized and unused, and every owning field
+        // has been moved out of it, so it needs no deinit.
         self.roots_arena = fresh.roots_arena;
         self.roots = fresh.roots;
         self.mir = fresh.mir;
@@ -378,10 +371,9 @@ pub const ResidentSession = struct {
     /// as `error.Stale` (→ cold fallback); see the module header on walk OOM.
     fn reconcile(self: *ResidentSession) QueryError!void {
         try self.maybeReload();
-        const poisoned = self.poisoned.load(.acquire);
-        if (self.watcher_active and !poisoned and self.clean.load(.acquire)) return;
+        if (self.seqlock.skip()) return;
 
-        const seq0 = self.dirty_seq.load(.acquire);
+        const seq0 = self.seqlock.enter();
         const now = std.Io.Clock.now(.real, self.io).nanoseconds;
 
         // Drain the exact dirty set (always — even a full walk must consume
@@ -391,22 +383,22 @@ pub const ResidentSession = struct {
         // no poison, and one prior full pass that overlapped the stream.
         var drained = self.dirty_log.drain(self.gpa);
         defer drained.deinit(self.gpa);
-        const scoped_eligible = self.watcher_active and !poisoned and
+        const scoped_eligible = self.seqlock.eligible() and
             self.full_pass_done and drained.exact and !drained.doubt;
         const applied = scoped_eligible and try self.reconcileScoped(drained.paths);
         if (applied) {
             self.scoped_reconciles += 1;
         } else {
             try self.reconcileFull();
-            if (self.watcher_active) self.full_pass_done = true;
+            if (self.seqlock.active) self.full_pass_done = true;
             self.full_reconciles += 1;
         }
 
         self.fresh_ns = now;
-        // Only trust the clean short-circuit if a watcher is live AND no event
-        // raced this reconcile (seqlock recheck). Without a watcher, stay dirty.
-        if (self.watcher_active and !poisoned and self.dirty_seq.load(.acquire) == seq0)
-            self.clean.store(true, .release);
+        // Republish the clean short-circuit only if a watcher is live AND no
+        // event raced this reconcile (the seqlock recheck). Without a watcher,
+        // `commit` is a no-op and the session stays dirty.
+        self.seqlock.commit(seq0);
     }
 
     /// The O(tree) barrier: re-derive the whole authoritative set and diff it
@@ -652,7 +644,7 @@ pub const ResidentSession = struct {
         // watcher-clean path a live watcher has tombstoned every delete, so trust
         // it (microsecond no-stat path); otherwise confirm each matched path still
         // exists (a cheap stat per hit) so a just-removed file is never reported.
-        const verify = !self.clean.load(.acquire);
+        const verify = !self.seqlock.provenClean();
 
         // The trigram base candidate ids, shared by the serial and the sharded
         // base fold. A common token yields a LARGE candidate set whose serial fold
@@ -780,7 +772,7 @@ pub const ResidentSession = struct {
         @memset(is_cand, false);
         for (cand) |id| is_cand[id] = true;
 
-        var inv = InvertFold{ .mode = req.mode, .arena = arena, .io = self.io, .cap = req.max_count, .verify_existence = !self.clean.load(.acquire) };
+        var inv = InvertFold{ .mode = req.mode, .arena = arena, .io = self.io, .cap = req.max_count, .verify_existence = !self.seqlock.provenClean() };
         for (self.mir.paths, self.mir.docs, self.mir.nuls, self.mir.lines, 0..) |path, bytes, nul, nlines, i| {
             if (nlines == 0) continue; // empty / NUL-in-first-buffer: cold suppresses it
             if (self.overlay.contains(path)) continue; // the overlay pass owns it
@@ -903,7 +895,7 @@ pub const ResidentSession = struct {
             .sc = &sc,
             .msc = &msc,
             .invert = req.invert,
-            .verify_existence = !self.clean.load(.acquire),
+            .verify_existence = !self.seqlock.provenClean(),
         };
         defer ex.spans.deinit(self.gpa);
         if (req.invert) try self.eachDoc(&ex) else try self.eachCandidate(&cq, &ex);
@@ -1075,7 +1067,7 @@ pub const ResidentSession = struct {
     /// (see `Admit`). The sort is `run.pathLess` — the warm canonical file
     /// order (see `docLess`) — so downstream output is deterministic.
     fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, sc: *Scratch, admit: Admit, invert: bool) QueryError![]const DocRef {
-        var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .require_match = !invert, .check_exists = !self.clean.load(.acquire) };
+        var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .require_match = !invert, .check_exists = !self.seqlock.provenClean() };
         if (invert) try self.eachDoc(&g) else try self.eachCandidate(cq, &g);
         std.mem.sort(DocRef, g.docs.items, {}, docLess);
         return g.docs.items;
@@ -1434,13 +1426,4 @@ fn lessPath(_: void, a: []const u8, b: []const u8) bool {
     return run.pathLess(a, b);
 }
 
-/// The published `pair.gen` (gpa-owned; "" when absent). A rebuilt index changes
-/// this, triggering `maybeReload`.
-fn readGen(gpa: std.mem.Allocator, io: std.Io) ![]u8 {
-    const buf = Dir.cwd().readFileAlloc(io, persist.generationFile(), gpa, .limited(128)) catch
-        return gpa.alloc(u8, 0);
-    const trimmed = std.mem.trimEnd(u8, buf, "\r\n");
-    if (trimmed.len == buf.len) return buf;
-    defer gpa.free(buf);
-    return gpa.dupe(u8, trimmed);
-}
+const readGen = persist.readPublishedGeneration;

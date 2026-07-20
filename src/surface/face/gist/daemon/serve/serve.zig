@@ -102,7 +102,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     watcher.start();
     defer watcher.stop();
     note("gist serve: watcher {s}, exact dirty log {s}\n", .{
-        if (session.watcher_active) "armed" else "unavailable (reconcile-always)",
+        if (session.seqlock.active) "armed" else "unavailable (reconcile-always)",
         if (session.dirty_log.exact) "on" else "off",
     });
 
@@ -272,8 +272,7 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
         // `queryLines` + `chunk` path unchanged.
         if ((caps & protocol.caps_supported & protocol.cap_fd_transport) != 0) {
             switch (session.queryLinesShm(arena.allocator(), req, protocol.fd_transport_floor) catch
-                return protocol.sendFrame(gpa, fd, .decline, ""))
-            {
+                return protocol.sendFrame(gpa, fd, .decline, "")) {
                 .fd => |shl| {
                     var buffer = shl.buffer;
                     defer buffer.close();
