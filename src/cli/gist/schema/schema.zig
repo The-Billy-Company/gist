@@ -7,6 +7,7 @@
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const args = @import("../../../runtime/cold/argv/args.zig");
+const jsonstr = @import("../../../runtime/cold/emit/jsonstr.zig");
 
 const manifest_prefix =
     \\{
@@ -90,24 +91,11 @@ const buckets = [_]Bucket{
     .{ .name = "unsupported-fail-loud", .compatibility = .unsupported_fail_loud },
 };
 
-fn appendJsonString(a: std.mem.Allocator, out: *std.ArrayList(u8), value: []const u8) !void {
-    try out.append(a, '"');
-    for (value) |c| switch (c) {
-        '"' => try out.appendSlice(a, "\\\""),
-        '\\' => try out.appendSlice(a, "\\\\"),
-        '\n' => try out.appendSlice(a, "\\n"),
-        '\r' => try out.appendSlice(a, "\\r"),
-        '\t' => try out.appendSlice(a, "\\t"),
-        else => try out.append(a, c),
-    };
-    try out.append(a, '"');
-}
-
 fn appendSpec(a: std.mem.Allocator, out: *std.ArrayList(u8), spec: args.FlagSpec) !void {
     try out.appendSlice(a, "{\"spellings\":[");
     var first = true;
     if (spec.short) |short| {
-        try appendJsonString(a, out, &.{ '-', short });
+        jsonstr.write(out, a, &.{ '-', short });
         first = false;
     }
     for (spec.longs) |long| {
@@ -118,7 +106,7 @@ fn appendSpec(a: std.mem.Allocator, out: *std.ArrayList(u8), spec: args.FlagSpec
     try out.append(a, ']');
     if (spec.note) |note| {
         try out.appendSlice(a, ",\"note\":");
-        try appendJsonString(a, out, note);
+        jsonstr.write(out, a, note);
     }
     try out.append(a, '}');
 }
@@ -130,7 +118,7 @@ fn render(a: std.mem.Allocator) ![]u8 {
     for (buckets, 0..) |bucket, bucket_i| {
         if (bucket_i > 0) try out.appendSlice(a, ",\n");
         try out.appendSlice(a, "        ");
-        try appendJsonString(a, &out, bucket.name);
+        jsonstr.write(&out, a, bucket.name);
         try out.appendSlice(a, ": [");
         var first = true;
         for (args.flag_catalog) |spec| {

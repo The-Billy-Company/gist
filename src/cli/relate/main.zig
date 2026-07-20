@@ -7,8 +7,8 @@
 //!
 //!   relate search <text> [--top N] [--json] [ROOT...]
 //!       which files would describe this text most cheaply? — the two-stage
-//!       compression retrieval (fingerprint lexicon → suffix-automaton
-//!       cross-parse; search/similarity/lexicon.zig + search/similarity/zipper.zig)
+//!       compression retrieval (persisted codebook nomination → bounded
+//!       suffix-automaton cross-parse; runtime/cold/engine/retrieval.zig)
 //!   relate pack <text> [--top N] [--json] [ROOT...]
 //!       the SET of files that jointly describes <text> cheapest — greedy
 //!       submodular coverage, each pick priced by what it ADDS (cli/relate/pack.zig)
@@ -50,53 +50,83 @@ const quote = irregex.commands.relate_quote; // the corpus-global cross-parse ve
 const pack = irregex.commands.relate_pack; // the anti-redundant context packer
 const family = irregex.commands.relate_family; // the fork-family clusters verb
 const echoes = irregex.commands.relate_echoes; // the structure-vs-bytes DRY verb
+const conceptsv = irregex.commands.relate_concepts; // function-level concept discovery
 const lifecycle = irregex.commands.relate_lifecycle; // index / status
 const schema = irregex.commands.relate_schema; // `--schema` JSON manifest
 
 fn usage() void {
-    std.debug.print(
+    irregex.corpus.emitStdout(
         \\relate — compression-as-search over the irregex primitives
         \\
-        \\usage:
+        \\ergonomics — ask the question, then choose the verb:
+        \\  vague text -> ranked files       search
+        \\  compact non-redundant context    pack
+        \\  pasted text -> provenance        quote
+        \\  one file -> nearest neighbors    similar
+        \\  duplicate pairs                  dups
+        \\  complete duplicate families      clusters
+        \\  same shape, renamed vocabulary   echoes
+        \\  same FUNCTION across files       concepts
+        \\  N exact patterns, one walk       patterns
+        \\
+        \\query verbs:
         \\  relate search <text> [--top N] [--json] [ROOT...]
-        \\      which files would describe this text most cheaply?
-        \\      (two-stage compression retrieval; score = coding gain in [0,1])
+        \\      independent file rank by coding gain; higher is better, and a
+        \\      worse-than-cold candidate may score below zero
         \\  relate pack <text> [--top N] [--json] [ROOT...]
-        \\      the SET of files that jointly describes <text> cheapest —
-        \\      each pick scored by the bits it ADDS beyond the picks before it
+        \\      set-valued context; each pick pays only for bits not covered earlier
         \\  relate quote <text> [--json]
-        \\      rewrite <text> as quotations from the WHOLE corpus, priced in
-        \\      bits (Ziv-Merhav cross-parse on the codex shelf; O(|text|) —
-        \\      needs `relate index --shelf` or `gist codex build`)
+        \\      whole-corpus verbatim attribution priced against the codex shelf
         \\  relate similar <path> [--lens bytes|structure|fused] [--top N] [--json]
         \\                 [--no-index] [ROOT...]
-        \\      nearest files by compression kinship; the lens picks the distance
-        \\      channel — raw bytes (LZJD, default), normalized structure
-        \\      (renamed twins surface), or their min (fused)
+        \\      nearest files; lower distance is closer
         \\  relate dups [--max-distance T] [--top N] [--json] [--no-index] [ROOT...]
-        \\      near-duplicate file pairs, closest first
+        \\      verified near-duplicate pairs at distance <= T
         \\  relate clusters [--max-distance T] [--min-size N] [--top N] [--json]
         \\                  [--no-index] [ROOT...]
-        \\      fork families — connected components of the dup graph, largest first
+        \\      connected components of the same verified duplicate graph
         \\  relate echoes [--min-echo E] [--top N] [--json] [--no-index] [ROOT...]
-        \\      DRY candidates dups cannot see — pairs far apart in bytes but
-        \\      close in structure (echo = bytes − structure), widest gap first
+        \\      byte_distance - structure_distance >= E; higher exposes stronger
+        \\      renamed-twin / shared-skeleton candidates
+        \\  relate concepts [TEXT] [--lens structure|bytes|echo] [--max-distance T]
+        \\                  [--min-lines N] [--min-size N] [--top N] [--brief]
+        \\                  [--json] [--no-index] [ROOT...]
+        \\      function-level families of the same idea (no TEXT), or the nearest
+        \\      function fragments to TEXT; --brief trims to exemplar + count
         \\  relate patterns -e P [-e P...] [-f FILE] [-F] [-i]
         \\                 [--by pattern|file] [--under GLOB] [--top N] [--json] [ROOT...]
-        \\      one walk, N patterns, per-pattern attribution
+        \\      one walk with exact per-pattern attribution; --by groups counts
         \\
-        \\  relate index [--shelf]   build + persist the kinship atlas (and the
-        \\                           codex shelf with --shelf); the sketch verbs
-        \\                           then answer warm, folding in fresh changes
-        \\  relate status [--json]   atlas + shelf readiness and freshness
+        \\niche choices:
+        \\  similar --lens bytes      vocabulary/copy-paste kinship (default)
+        \\  similar --lens structure  normalized renamed-twin kinship
+        \\  similar --lens fused      whichever channel sees the stronger relation
+        \\  dups vs clusters          raw pairs vs complete transitive families
+        \\  echoes                    use when byte similarity misses renamed structure
+        \\  search vs pack            independent ranking vs jointly useful context
+        \\  --no-index                live differential oracle for atlas-backed verbs
+        \\  ROOT...                   scope the index corpus; quote always uses the whole shelf
+        \\  --json                    deterministic NDJSON on stdout; diagnostics stay on stderr
         \\
-        \\  relate --schema     a JSON capability manifest for agents
-        \\  relate --version
+        \\lifecycle:
+        \\  relate index [--shelf]    build the kinship atlas; --shelf also builds
+        \\                            the codex required by quote
+        \\  relate status [--json]    atlas + shelf readiness and freshness
+        \\  missing/corrupt atlas     answer live; acceleration never changes results
+        \\  search / pack             reuse Gist's mmap-backed trigram codebook
+        \\  narrow kinship scope      sketches live when cheaper than atlas load
         \\
-        \\Corpus policy: the index corpus (same roots and policy as `gist index`);
-        \\results on stdout (--json = NDJSON), diagnostics on stderr.
+        \\introspection:
+        \\  relate --help / -h         this ergonomics guide
+        \\  relate --schema            versioned JSON verb contract for agents
+        \\  relate --version / -V
         \\
-    , .{});
+        \\channels & corpus:
+        \\  results -> stdout · diagnostics -> stderr
+        \\  GIST_UNCAP=1 / GIST_MAX_OUTPUT_*   shared agent-output budget controls
+        \\  analytics read the wider index corpus, not gist's rg-parity gitignore walk
+        \\
+    );
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -135,6 +165,7 @@ pub fn main(init: std.process.Init) !void {
         .{ "dups", verbs.runDups },
         .{ "clusters", family.runClusters },
         .{ "echoes", echoes.runEchoes },
+        .{ "concepts", conceptsv.runConcepts },
         .{ "patterns", verbs.runPatterns },
         .{ "index", lifecycle.runIndex },
         .{ "status", lifecycle.runStatus },
@@ -149,6 +180,6 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    std.debug.print("relate: unknown verb '{s}' (search | pack | quote | similar | dups | clusters | echoes | patterns | index | status; --help)\n", .{mode});
+    std.debug.print("relate: unknown verb '{s}' (search | pack | quote | similar | dups | clusters | echoes | concepts | patterns | index | status; --help)\n", .{mode});
     std.process.exit(2);
 }

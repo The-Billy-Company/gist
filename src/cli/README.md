@@ -1,20 +1,20 @@
 ---
 doc_radar:
   counts:
-    - description: "cli keeps exactly two product faces: gist · relate"
+    - description: "cli keeps exactly three product faces: gist · relate · irregex"
       glob: pkg/kernels/irregex/src/cli/*
       unit: dirs
-      equals: 2
+      equals: 3
   sentinels:
-    - description: "relate's nine verbs stay on the unknown-verb help line"
+    - description: "relate's eleven verbs stay on the unknown-verb help line"
       file: pkg/kernels/irregex/src/cli/relate/main.zig
-      contains: "search | pack | quote | similar | dups | clusters | patterns | index | status"
+      contains: "search | pack | quote | similar | dups | clusters | echoes | concepts | patterns | index | status"
 ---
 
 # `src/cli/` — the product faces
 
-Thin argv faces over the shared floor. Both binaries classify flags, pick a
-verb, and shape stdout/stderr — they do **not** own matching, walking, or
+Thin argv faces over the shared floor. Every binary classifies flags, picks a
+verb, and shapes stdout/stderr — they do **not** own matching, walking, or
 index formats. If a decision changes what matches, it belongs under
 `search/`, `corpus/`, `index/`, or `runtime/`.
 
@@ -22,6 +22,10 @@ index formats. If a decision changes what matches, it belongs under
 | ---- | ------ | ------------------- |
 | [`gist/`](gist) | `gist` | Where is this exact pattern? (rg-DEFAULT locator + index/status/serve/codex lifecycle) |
 | [`relate/`](relate) | `relate` | What is this text like / which files cover it / what forked? (compression-as-search) |
+| [`irregex/`](irregex) | `irregex` | The questions that need BOTH engines: exact match narrows a candidate set, compression reasons inside it (`context` · `family` · `provenance`; ADR-367) |
+
+`gist` and `relate` are the direct faces; `irregex` composes their kernels over
+one loaded corpus and forwards none of their verbs.
 
 ## When to edit here
 
@@ -41,5 +45,6 @@ drift the cold/warm/FFI faces apart the moment one face forks them.
 - Contract authority for request options and relate verbs:
   [`../../contract/search_api.toml`](../../contract/search_api.toml).
 
-See [`gist/README.md`](gist/README.md) and [`relate/README.md`](relate/README.md)
-for the per-face verb map and lifecycle.
+See [`gist/README.md`](gist/README.md), [`relate/README.md`](relate/README.md),
+and [`irregex/README.md`](irregex/README.md) for the per-face verb map and
+lifecycle.
