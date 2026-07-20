@@ -6,27 +6,27 @@ doc_radar:
       description: The documented matcher controls remain canonical request options.
 ---
 
-# billy-gist — the importable search API
+# billy-irregex — the importable kernel API
 
 ## What it is
 
-The Python face of [GIST](../../README.md), Billy's dogfooded, `ripgrep`-parity
-code-search kernel. One clean, script-friendly `search()` (plus `files()`,
-`count()`, `status()`) that any repository automation can import instead of
-hand-rolling `subprocess` argv and output parsing per site.
+The Python face of [irregex](../../README.md), covering Gist's `ripgrep`-parity
+search and Relate's corpus kinship operations through one package. Repository
+automation imports the kernel once instead of learning binary-specific Python
+names or hand-rolling subprocess parsing.
 
 ```python
-import gist
+import irregex
 
-for m in gist.search(r"func\s+\w+\(", paths=["services/backend"]):
+for m in irregex.search(r"func\s+\w+\(", paths=["services/backend"]):
     print(f"{m.path}:{m.line_number}: {m.text}")
 
-hits  = gist.files("TODO", types=["py"])         # files-with-matches (-l)
-total = gist.count("panic", paths=["services"])  # total matching lines
-refs  = gist.search(r"(?<=class )\w+", engine="auto")  # PCRE2 when needed
+hits  = irregex.files("TODO", types=["py"])         # files-with-matches (-l)
+total = irregex.count("panic", paths=["services"])  # total matching lines
+refs  = irregex.search(r"(?<=class )\w+", engine="auto")  # PCRE2 when needed
 ```
 
-Distribution name is `billy-gist`; it imports as `gist`.
+Distribution name is `billy-irregex`; it imports as `irregex`.
 
 ## One request shape, at every face
 
@@ -37,11 +37,11 @@ reuse it — or map it straight from an agent tool payload:
 ```python
 # Billy's fs_search(place, query, glob, context_lines, semantic, at) — or any
 # coding-agent search call — is the same actor asking "find these matches here".
-req = gist.request_from_tool({"query": "panic", "glob": "*.go", "context_lines": 2})
+req = irregex.request_from_tool({"query": "panic", "glob": "*.go", "context_lines": 2})
 #   aliases  : query→pattern, glob→globs, context_lines→context
 #   dropped  : place / at / semantic  (transport + ranking = the place adapter's
 #              call, NOT GIST's — one semantic API does not require one transport)
-matches = gist.run(req)                 # local place: run it here
+matches = irregex.run(req)                 # local place: run it here
 #                                        # remote place: forward `req` to the
 #                                        # machine/bridge that owns the tree
 ```
@@ -62,15 +62,15 @@ it is distributed_ — the question an agent asks next — by searching, then
 grouping the matches into buckets ranked by count:
 
 ```python
-hot = gist.summary("TODO", paths=["services"], by="dir")   # search + aggregate
+hot = irregex.summary("TODO", paths=["services"], by="dir")   # search + aggregate
 for g in hot.top(5):
     print(f"{g.count:4}  {g.key}")          # busiest directories first
 
 # which ADRs does the tree cite most? — bucket by the literal that matched
-gist.summary(r"ADR-\d+", by="match").top(10)
+irregex.summary(r"ADR-\d+", by="match").top(10)
 
 # a custom axis is any Callable[[Match], str]
-gist.summary("panic", by=lambda m: m.path.split("/")[0])    # top-level component
+irregex.summary("panic", by=lambda m: m.path.split("/")[0])    # top-level component
 ```
 
 `by` is a named axis — `"file"` · `"dir"` · `"ext"` · `"match"` — or a callable.
@@ -89,10 +89,10 @@ its 200 call sites and **demotes generated files** (which the repo forbids
 editing, so they're never the target):
 
 ```python
-for r in gist.rank("SearchRequest", limit=8):
+for r in irregex.rank("SearchRequest", limit=8):
     print(f"{r.count:>3} [{r.kind}]  {r.path}:{r.line_number}")   # def | use | gen
 
-authored = [r for r in gist.rank("apperr.New") if not r.generated]  # skip codegen
+authored = [r for r in irregex.rank("apperr.New") if not r.generated]  # skip codegen
 ```
 
 Each `Ranked` row carries the engine's own `def`/`use`/`gen` classification
@@ -131,20 +131,20 @@ calls, so an eligible query skips the cold subprocess's process + index-mmap +
 candidate-read startup entirely:
 
 ```python
-with gist.Session() as s:                      # dials $GIST_SESSION_SOCK / the repo default
+with irregex.Session() as s:                      # dials $GIST_SESSION_SOCK / the repo default
     s.connect()
     generation = s.generation                 # daemon/session/index identity
-    hot   = s.files(gist.SearchRequest("TODO"))       # -l, warm
-    total = s.count(gist.SearchRequest("panic"))      # -c matching lines, warm
-    rich  = s.run(gist.SearchRequest("TODO"))         # full Match records, warm in-process (FFI)
-    cold  = s.run(gist.SearchRequest("TODO", context=2))  # rich flag → cold subprocess
+    hot   = s.files(irregex.SearchRequest("TODO"))       # -l, warm
+    total = s.count(irregex.SearchRequest("panic"))      # -c matching lines, warm
+    rich  = s.run(irregex.SearchRequest("TODO"))         # full Match records, warm in-process (FFI)
+    cold  = s.run(irregex.SearchRequest("TODO", context=2))  # rich flag → cold subprocess
 ```
 
 It is **fail-open by construction**: no daemon listening, an ineligible request
-(`gist.warm_eligible(req)` is `False` for scoped roots, globs/types, context, or
+(`irregex.warm_eligible(req)` is `False` for scoped roots, globs/types, context, or
 any rich flag), or a wire hiccup transparently falls back to the byte-identical
 cold subprocess — the daemon is a pure accelerator, never a new failure mode.
-The wire protocol is the same one `src/gist/session/protocol.zig` defines and the Zig
+The wire protocol is the same one `src/runtime/session/protocol.zig` defines and the Zig
 CLI + Rust clients speak, so all three frame-match against the one daemon.
 `refresh_generation()` reads the daemon's current three-part generation; a
 reconnect, daemon restart, or index publication is visible through
@@ -155,12 +155,20 @@ reconnect, daemon restart, or index publication is visible through
 When the host process already holds the shared library and `cffi` (e.g. the AI
 service, which depends on `cffi` via the sibling kernels), a `Session`
 transparently serves eligible queries **in-process** over the
-`irregex_open`/`irregex_search`/`irregex_close` C ABI (`gist/_ffi.py` over
-`libirregex.{dylib,so}`) — no subprocess, no socket. Unlike the UDS transport
-(files/count only), it streams full `Match` records, so `Session.run` gains a
-warm path for the first time; `files`/`count`/`absent` prefer it too. Its answer
-is byte-identical to the cold `gist --json` stream (records, `-l`, `-c` — a line
-with repeated hits still counts once), proven by `tests/test_ffi_parity.py`.
+`irregex_open` / payload-bearing `irregex_search_with_options` /
+`irregex_close` C ABI (`irregex/_ffi.py` over `libirregex.{dylib,so}`) — no
+subprocess or socket. Unlike the UDS transport (files/count only), it streams
+full `Match` records, so `Session.run` gains a warm path for the first time;
+`files`/`count`/`absent` prefer it too. Raw smart-case, explicit Unicode/ASCII
+mode, invert-match, quiet, and the `u64` per-file max-count cross a size-checked
+options struct without breaking older ABI callers; invert records carry zero
+submatches, exactly like cold JSON. Explicit `paths` become the C session's root
+array, with handles bounded and keyed by `(cwd, roots)` so scopes cannot
+cross-contaminate. `engine="auto"` tries this linear FFI path first and falls
+through on `IRREGEX_STALE` when PCRE2 is required. Zig remains the sole
+case/class authority. Its answer is byte-identical to the cold `gist --json`
+stream (records, `-l`, `-c` — a line with repeated hits still counts once),
+proven by `tests/test_ffi_parity.py`.
 
 `cffi` is **never required**: `_ffi` fails open to the UDS daemon, then the cold
 subprocess, when the library or `cffi` is absent — so the shipped wheel stays
@@ -168,8 +176,8 @@ pure-Python and dependency-free. Opt out with `GIST_NO_FFI`; point at a specific
 library with `GIST_LIB`. A bad pattern surfaces as a decline (`IRREGEX_STALE`), so
 the in-process path can never abort the host — the property rung 3 gated on.
 
-A batch caller need not manage the daemon itself: `gist.opening_session()`
-wraps `gist.ensure_serve()` (best-effort detached `gist serve` spawn — herd-safe
+A batch caller need not manage the daemon itself: `irregex.opening_session()`
+wraps `irregex.ensure_serve()` (best-effort detached `gist serve` spawn — herd-safe
 via the daemon `flock`, opt-out with `GIST_NO_AUTOSERVE`, fail-open to cold) and
 yields a connected `Session`. First consumers: the doc-radar `still_here` count
 batch prunes tree-absent sentinels with a warm `Session.absent()` before any cold
@@ -185,11 +193,11 @@ observed status, and `capabilities()`/`schema()` parse the binary-generated
 `--schema` manifest into typed, queryable records:
 
 ```python
-state = gist.status()
+state = irregex.status()
 if not state.ready:
-    state = gist.index()
+    state = irregex.index()
 
-if gist.capabilities().supports("-P"):
+if irregex.capabilities().supports("-P"):
     print("PCRE2 available")
 ```
 
@@ -197,5 +205,5 @@ if gist.capabilities().supports("-P"):
 
 Wraps the same engine as `rg` (the tool it is a drop-in for); the request/result
 contract mirrors ripgrep's `--json` record stream. The cffi transport
-(`gist/_ffi.py`) follows the sibling kernel bindings' ABI-mode `dlopen` loader
+(`irregex/_ffi.py`) follows the sibling kernel bindings' ABI-mode `dlopen` loader
 (`lamina`, `principia`, `billog`).

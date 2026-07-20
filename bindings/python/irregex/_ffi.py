@@ -1,11 +1,12 @@
 """In-process cffi transport for the warm search session (ADR-352 rung 3).
 
-`dlopen`s `libirregex.{dylib,so}` in ABI mode (no C compiler, no dev headers, no
-per-Python build) and drives the `irregex_open`/`irregex_search`/`irregex_close` C ABI
-(`../../../include/irregex.h`, implemented in `src/ffi/session.zig`). It holds one
-corpus WARM in this very process — no subprocess, no Unix socket, no `stdout`,
-no `exit` — and streams full `Match` records over a callback, byte-identical to
-the cold `gist --json` stream (and to the UDS daemon).
+`dlopen`s `libirregex.{dylib,so}` in ABI mode (no C compiler, dev headers, or
+per-Python build) and drives the `irregex_open` / payload-bearing
+`irregex_search_with_options` / `irregex_close` C ABI (`../../../include/irregex.h`,
+implemented in `src/runtime/ffi/session.zig`). It holds one corpus WARM in this
+very process — no subprocess, Unix socket, `stdout`, or `exit` — and streams
+full `Match` records over a callback, byte-identical to the cold `gist --json`
+stream (and to the UDS daemon).
 
 **Fail-open by construction.** Every entry returns `None` (never raises) when
 the library is absent, `cffi` is missing, the ABI version disagrees, the corpus
@@ -13,11 +14,11 @@ can't open, or the engine returns `IRREGEX_STALE` (an unsupported pattern) — s
 caller answers cold and the in-process path is a pure accelerator that never
 adds a failure mode. Opt out entirely with `GIST_NO_FFI`.
 
-**Rootless only.** A handle opens the rootless CWD walk (`nroots == 0`), which
-is byte-identical to a rootless cold run *of the same process CWD*. So a handle
-is cached per process-CWD and used only when the caller's effective `cwd` is the
-process CWD — otherwise the cold subprocess (which sets its own child `cwd`)
-answers, preserving parity.
+**Exact roots only.** A handle opens either the rootless CWD walk (`nroots == 0`)
+or the request's explicit root array. Handles are cached by `(process CWD,
+roots)` and used only when the caller's effective `cwd` is the process CWD —
+otherwise the cold subprocess answers. This preserves path rendering without
+binding-side normalization.
 """
 
 from __future__ import annotations
@@ -52,10 +53,16 @@ typedef struct {
   const irregex_submatch *submatches; size_t nsubmatches;
 } irregex_match;
 typedef int32_t (*irregex_match_fn)(void *ctx, const irregex_match *m);
+typedef struct {
+  uint32_t struct_size; uint32_t flags; uint64_t max_count;
+} irregex_search_options;
 uint32_t irregex_abi_version(void);
 int32_t irregex_open(const char *const *roots, size_t nroots, irregex_session **out);
 int32_t irregex_search(irregex_session *s, const uint8_t *pattern, size_t pattern_len,
                     uint32_t flags, irregex_match_fn on_match, void *ctx);
+int32_t irregex_search_with_options(irregex_session *s, const uint8_t *pattern,
+                    size_t pattern_len, const irregex_search_options *options,
+                    irregex_match_fn on_match, void *ctx);
 void irregex_close(irregex_session *s);
 """
 
@@ -66,7 +73,9 @@ void irregex_close(irregex_session *s);
 # wants every match — so the abort path is exercised only by future consumers.
 _ABI_VERSION = 2
 _CONTINUE = 0  # a match-callback return of 0 keeps the stream going
-_FLAG_FIXED, _FLAG_IGNORE_CASE = 1 << 0, 1 << 1
+_FLAG_FIXED, _FLAG_IGNORE_CASE, _FLAG_WORD, _FLAG_QUIET = 1 << 0, 1 << 1, 1 << 2, 1 << 3
+_FLAG_MAX_COUNT, _FLAG_SMART_CASE = 1 << 4, 1 << 5
+_FLAG_NO_UNICODE, _FLAG_INVERT = 1 << 6, 1 << 7
 _GIST_OK = 0  # ran, no match; a negative status (e.g. IRREGEX_STALE=-1) → cold.
 
 
@@ -130,9 +139,13 @@ def _try_load() -> tuple[FFI, object] | None:
     ffi.cdef(_CDEF)
     try:
         lib = ffi.dlopen(lib_path)
+        # The options entry is additive, so an older ABI-v2 library can match
+        # the version yet lack the symbol. Resolve it eagerly: a stale library
+        # declines here instead of raising on the first query.
+        getattr(lib, "irregex_search_with_options")
         if lib.irregex_abi_version() != _ABI_VERSION:
             return None  # header/library ABI drift — decline, answer cold
-    except OSError:
+    except (AttributeError, OSError):
         return None
     return (ffi, lib)
 
@@ -143,7 +156,7 @@ def available() -> bool:
 
 
 class Handle:
-    """A warm in-process corpus over the rootless CWD walk.
+    """A warm in-process corpus over one exact root tuple.
 
     Guarded by a lock: the Zig session serializes its own queries, and the
     lock also covers the per-handle arena the Zig `search` resets before
@@ -152,13 +165,16 @@ class Handle:
     them via `__del__`.
     """
 
-    def __init__(self, ffi: FFI, lib: object) -> None:
+    def __init__(self, ffi: FFI, lib: object, roots: tuple[str, ...]) -> None:
         self._ffi = ffi
         self._lib = lib
         self._lock = threading.Lock()
         out = ffi.new("irregex_session **")
-        # nroots == 0 → rootless CWD walk; pass a valid (unused) empty array.
-        rc = lib.irregex_open(ffi.NULL, 0, out)
+        # Keep each C string alive through open; Zig copies the root bytes into
+        # session-owned storage before returning.
+        root_bufs = [ffi.new("char[]", os.fsencode(root)) for root in roots]
+        root_ptr = ffi.new("char *[]", root_bufs) if root_bufs else ffi.NULL
+        rc = lib.irregex_open(root_ptr, len(root_bufs), out)
         self._session = out[0] if rc == _GIST_OK else ffi.NULL
 
     def ok(self) -> bool:
@@ -171,15 +187,30 @@ class Handle:
         None if closed, else the raw status (negative = the caller answers
         cold).
         """
-        if not self._session:
-            return None
         pattern = request.pattern.encode()
-        flags = (_FLAG_FIXED if request.fixed else 0) | (
-            _FLAG_IGNORE_CASE if request.ignore_case else 0
+        flags = (
+            (_FLAG_FIXED if request.fixed else 0)
+            | (_FLAG_IGNORE_CASE if request.ignore_case else 0)
+            | (_FLAG_SMART_CASE if request.smart_case else 0)
+            | (_FLAG_NO_UNICODE if request.unicode is False else 0)
+            | (_FLAG_WORD if request.word else 0)
+            | (_FLAG_INVERT if request.invert else 0)
+            | (_FLAG_QUIET if request.quiet else 0)
+            | (_FLAG_MAX_COUNT if request.max_count is not None else 0)
+        )
+        options = self._ffi.new(
+            "irregex_search_options *",
+            {
+                "struct_size": self._ffi.sizeof("irregex_search_options"),
+                "flags": flags,
+                "max_count": request.max_count or 0,
+            },
         )
         with self._lock:
-            return self._lib.irregex_search(
-                self._session, pattern, len(pattern), flags, callback, self._ffi.NULL
+            if not self._session:
+                return None
+            return self._lib.irregex_search_with_options(
+                self._session, pattern, len(pattern), options, callback, self._ffi.NULL
             )
 
     def search(self, request: SearchRequest) -> list[Match] | None:
@@ -242,9 +273,10 @@ class Handle:
 
     def close(self) -> None:
         """Free the warm corpus, index, and handle (idempotent)."""
-        if self._session:
-            self._lib.irregex_close(self._session)
-            self._session = self._ffi.NULL
+        with self._lock:
+            if self._session:
+                self._lib.irregex_close(self._session)
+                self._session = self._ffi.NULL
 
     def __del__(self) -> None:
         with contextlib.suppress(Exception):  # teardown must never raise
@@ -260,26 +292,31 @@ def _decode(buf: object) -> str:
     return bytes(buf).decode("utf-8", errors="surrogateescape")
 
 
-# One warm handle per process CWD (the tree a rootless query answers over). Keyed
-# by the resolved CWD so a `chdir` opens a fresh corpus rather than serving the
-# wrong tree. The handle reconciles the tree on every query (read-your-writes),
-# so reuse stays correct as files change.
-_handles: dict[str, Handle | None] = {}
+# Warm handles are keyed by process CWD + the exact root tuple, so neither a
+# `chdir` nor a differently-scoped request can reuse the wrong corpus. Bound the
+# cache: root scopes may be user-provided, and warm state must not grow without
+# limit. Handles reconcile on every query, preserving read-your-writes.
+_MAX_HANDLES = 8
+_handles: dict[tuple[str, tuple[str, ...]], Handle | None] = {}
 _handles_lock = threading.Lock()
 
 
-def _handle_for_cwd() -> Handle | None:
+def _handle_for(request: SearchRequest) -> Handle | None:
     loaded = _load()
     if loaded is None:
         return None
-    key = str(Path.cwd())
+    key = (str(Path.cwd()), request.paths)
     with _handles_lock:
         if key in _handles:
             return _handles[key]
         ffi, lib = loaded
-        handle: Handle | None = Handle(ffi, lib)
+        handle: Handle | None = Handle(ffi, lib, request.paths)
         if not handle.ok():
             handle = None
+        if len(_handles) >= _MAX_HANDLES:
+            evicted = _handles.pop(next(iter(_handles)))
+            if evicted is not None:
+                evicted.close()
         _handles[key] = handle
         return handle
 
@@ -287,8 +324,8 @@ def _handle_for_cwd() -> Handle | None:
 def _uses_process_cwd(cwd: str | os.PathLike[str] | None) -> bool:
     """Whether `cwd` resolves to this process's CWD.
 
-    The only case where the in-process rootless walk is byte-identical to
-    the cold subprocess (which sets its own child `cwd`).
+    Relative explicit roots and the rootless walk resolve against process CWD;
+    this must equal the cold subprocess's child CWD.
     """
     if cwd is None:
         return True
@@ -298,15 +335,17 @@ def _uses_process_cwd(cwd: str | os.PathLike[str] | None) -> bool:
 def _eligible_handle(request: SearchRequest, cwd: str | os.PathLike[str] | None) -> Handle | None:
     """The warm handle to serve `request` in-process, or None (→ cold).
 
-    Declines unless the request is warm-eligible AND `cwd` is the process CWD.
+    Declines unless the request is FFI-eligible AND `cwd` is the process CWD.
     """
-    # Lazy import avoids a cycle (session imports _ffi) and keeps the eligibility
-    # predicate single-sourced with the UDS transport.
-    from .session import warm_eligible
+    # Lazy import avoids a cycle (session imports _ffi). `ffi_eligible` is the
+    # STRICT predicate: the options ABI carries the complete warm request
+    # subset; every later unsupported family must decline here, never be
+    # silently dropped.
+    from .session import ffi_eligible
 
-    if not warm_eligible(request) or not _uses_process_cwd(cwd):
+    if not ffi_eligible(request) or not _uses_process_cwd(cwd):
         return None
-    return _handle_for_cwd()
+    return _handle_for(request)
 
 
 def run(request: SearchRequest, *, cwd: str | os.PathLike[str] | None) -> list[Match] | None:

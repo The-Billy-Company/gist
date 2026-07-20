@@ -8,7 +8,7 @@ forwards (a plain dict, as it arrives over a tool boundary) into that one shape.
 It deliberately does **not** execute or route: *where* the repository lives —
 this host, a sandbox, or a bridged user machine — is the tool layer's
 place-routing decision. One semantic API does not require one transport
-(ADR-352). Local callers hand the mapped request straight to `gist.run`; a
+(ADR-352). Local callers hand the mapped request straight to `irregex.run`; a
 place-routed caller ships the identical request to the owning machine.
 """
 

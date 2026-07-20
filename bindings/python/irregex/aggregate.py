@@ -1,4 +1,4 @@
-r"""Result-side aggregation over GIST matches (ADR-352). `search`/`files`/`count` answer *where* a pattern occurs; aggregation answers *how it is distributed* — the question an agent asks next: which files carry the most `TODO`s, which directories concentrate a `panic`, what distinct error codes match `apperr\\.\\w+`, which ADRs the tree cites most. It is a pure post-processing layer over the `Match` records the engine already returns: it never widens `SearchRequest` (the contract stays match-finding-only — presentation and stats are deliberately *not* request options) and never runs a second matcher. from gist import search, tally tally(search("TODO", paths=["services"]), by="dir").top(5) `by` selects the axis — a named one (`"file"` · `"dir"` · `"ext"` · `"match"`) or any `Callable[[Match], str]` for a custom bucketing. Only `MatchKind.MATCH` lines are counted; `-A/-B/-C` context lines are display neighborhood, not matches, so they never inflate a tally."""
+r"""Result-side aggregation over GIST matches (ADR-352). `search`/`files`/`count` answer *where* a pattern occurs; aggregation answers *how it is distributed* — the question an agent asks next: which files carry the most `TODO`s, which directories concentrate a `panic`, what distinct error codes match `apperr\\.\\w+`, which ADRs the tree cites most. It is a pure post-processing layer over the `Match` records the engine already returns: it never widens `SearchRequest` (the contract stays match-finding-only — presentation and stats are deliberately *not* request options) and never runs a second matcher. from irregex import search, tally tally(search("TODO", paths=["services"]), by="dir").top(5) `by` selects the axis — a named one (`"file"` · `"dir"` · `"ext"` · `"match"`) or any `Callable[[Match], str]` for a custom bucketing. Only `MatchKind.MATCH` lines are counted; `-A/-B/-C` context lines are display neighborhood, not matches, so they never inflate a tally."""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ class Tally:
 
 
 def tally(matches: Iterable[Match], *, by: str | GroupKey = "file") -> Tally:
-    """Bucket `matches` along `by` and rank the buckets by descending count. Pure and binary-free: it consumes `Match` records, so it composes with `gist.search(...)` or any other source of them and is unit-testable without the engine. Context lines (`MatchKind.CONTEXT`) are skipped, so a request with `-A/-B/-C` context still tallies only the true matches."""
+    """Bucket `matches` along `by` and rank the buckets by descending count. Pure and binary-free: it consumes `Match` records, so it composes with `irregex.search(...)` or any other source of them and is unit-testable without the engine. Context lines (`MatchKind.CONTEXT`) are skipped, so a request with `-A/-B/-C` context still tallies only the true matches."""
     axis = resolve_axis(by)
     buckets: dict[str, list[Match]] = {}
     for m in matches:

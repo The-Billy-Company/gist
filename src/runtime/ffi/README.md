@@ -3,19 +3,20 @@ doc_radar:
   sentinels:
     - description: "C ABI session symbols stay exported from the package root"
       file: pkg/kernels/irregex/src/root.zig
-      contains: ["export fn irregex_open", "export fn irregex_search", "export fn irregex_close"]
+      contains: ["export fn irregex_open", "export fn irregex_search", "export fn irregex_search_with_options", "export fn irregex_close"]
     - description: "public header mirrors the session surface"
       file: pkg/kernels/irregex/include/irregex.h
-      contains: ["int32_t irregex_open(", "int32_t irregex_search(", "void irregex_close("]
+      contains: ["int32_t irregex_open(", "int32_t irregex_search(", "int32_t irregex_search_with_options(", "void irregex_close("]
 ---
 
 # runtime/ffi — in-process C-ABI search session (ADR-352 rung 3)
 
 The package binding for non-Zig hosts. `session.zig` exposes
-`irregex_open` / `irregex_search` / `irregex_close` so a caller (the Python
-`cffi` transport in `bindings/python/gist/_ffi.py`, or any C host) can hold one
-corpus warm **in its own process** and stream match records over a callback —
-no subprocess, no Unix socket, no `stdout`, no `exit`.
+`irregex_open` / `irregex_search` / `irregex_search_with_options` /
+`irregex_close` so a caller (the Python `cffi` transport in
+`bindings/python/irregex/_ffi.py`, or any C host) can hold one corpus warm **in its
+own process** and stream match records over a callback — no subprocess, Unix
+socket, `stdout`, or `exit`.
 
 It is the in-process sibling of the socket-served resident daemon
 ([`../../cli/gist/daemon/serve`](../../cli/gist/daemon/serve)) and draws on the same shared
@@ -33,11 +34,12 @@ dead process. The cold CLI keeps its fatal shell; this path does not touch it.
 
 ## Shape
 
-| Symbol | Role |
-| --- | --- |
-| `irregex_open(roots, nroots, out)` | stand up a warm session (its own I/O + corpus + index) |
+| Symbol                                            | Role                                                                                      |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `irregex_open(roots, nroots, out)`                | stand up a warm session (its own I/O + corpus + index)                                    |
 | `irregex_search(s, pattern, len, flags, cb, ctx)` | stream one `irregex_match` per matching line; cb returns 0 to continue / non-zero to stop |
-| `irregex_close(s)` | tear down corpus, index, I/O pool, and handle |
+| `irregex_search_with_options(…)`                  | size-checked entry for case/Unicode mode, invert, quiet, and per-file max-count             |
+| `irregex_close(s)`                                | tear down corpus, index, I/O pool, and handle                                             |
 
 The three `export fn` shims live in [`../../../root.zig`](../../../root.zig);
 `session.zig` owns the handle, the `Match` / `Submatch` `extern` layout, the
@@ -48,5 +50,5 @@ the C-ABI smoke test in [`../../../../build.zig`](../../../../build.zig).
 
 Every pointer handed to the callback (`path`, `line`, each submatch `text`)
 aliases session/scratch memory valid **only** for that callback invocation —
-the caller copies anything it keeps. Index *build* stays a CLI verb; a session
+the caller copies anything it keeps. Index _build_ stays a CLI verb; a session
 searches the live tree.

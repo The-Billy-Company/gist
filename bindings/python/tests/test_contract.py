@@ -1,4 +1,4 @@
-"""The contract mirror in `gist.contract` must not drift from the canonical
+"""The contract mirror in `irregex.contract` must not drift from the canonical
 `contract/search_api.toml`, nor from the driven binary (ADR-352).
 """
 
@@ -9,17 +9,17 @@ import tomllib
 
 import pytest
 
-import gist
-from gist import contract
-from gist.request import SearchRequest
+import irregex
+from irregex import contract
+from irregex.request import SearchRequest
 
 
 def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        gist.binary()
-    except gist.GistNotFoundError:
+        irregex.binary()
+    except irregex.GistNotFoundError:
         return False
     return True
 
@@ -77,4 +77,4 @@ def test_tool_boundary_mirror_matches_toml() -> None:
 
 @pytest.mark.skipif(not _HAVE_BINARY, reason="no gist binary available")
 def test_engine_version_matches_contract() -> None:
-    assert gist.version() == contract.ENGINE_VERSION
+    assert irregex.version() == contract.ENGINE_VERSION

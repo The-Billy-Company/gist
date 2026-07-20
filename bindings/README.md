@@ -11,7 +11,7 @@ doc_radar:
       contains: ["[request_options]", "[transports]"]
 ---
 
-# `bindings/` — importable search faces
+# `bindings/` — importable kernel faces
 
 Language packages that speak the **same** `SearchRequest → Match` shape as
 the `gist` CLI ([ADR-352](../../../../docs/architecture/3-decisions/352-gist-unified-search-api.md)).
@@ -19,7 +19,7 @@ They are conveniences over the certified engine — not a second matcher.
 
 | Package | Import / crate | Role |
 | ------- | -------------- | ---- |
-| [`python/`](python) | `billy-gist` → `import gist` | Script-friendly `search` / `files` / `count` / `rank` / `Session` |
+| [`python/`](python) | `billy-irregex` → `import irregex` | Gist search + Relate kinship through one package |
 | [`rust/`](rust) | crate `gist` | Same surface for Rust hosts + contract parity tests |
 
 ## Transport ladder

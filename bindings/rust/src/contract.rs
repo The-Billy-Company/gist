@@ -15,7 +15,7 @@ pub const ABI_VERSION: u32 = 2;
 /// Engine semver (tracks `src/root.zig` `version_string`).
 pub const ENGINE_VERSION: &str = "0.1.0";
 /// The Python distribution name (this crate is the Rust face of the same contract).
-pub const PACKAGE_DIST: &str = "billy-gist";
+pub const PACKAGE_DIST: &str = "billy-irregex";
 /// The Python import name.
 pub const PACKAGE_IMPORT: &str = "gist";
 
@@ -28,6 +28,7 @@ pub const REQUEST_OPTIONS: &[&str] = &[
     "ignore_case",
     "smart_case",
     "word",
+    "quiet",
     "invert",
     "globs",
     "iglobs",

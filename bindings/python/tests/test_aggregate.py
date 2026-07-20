@@ -3,7 +3,7 @@
 Two layers, mirroring the rest of the suite. The pure layer drives `tally`
 over synthetic `Match` records — no binary, so it always runs and pins the
 grouping/ranking/skip-context contract exactly. The integration layer runs
-`gist.summary` over a throwaway corpus through the real engine and asserts the
+`irregex.summary` over a throwaway corpus through the real engine and asserts the
 aggregate agrees with the flat `search` it is derived from.
 """
 
@@ -13,17 +13,17 @@ import shutil
 
 import pytest
 
-import gist
-from gist.aggregate import Group, Tally, resolve_axis, tally
-from gist.request import Match, MatchKind, Submatch
+import irregex
+from irregex.aggregate import Group, Tally, resolve_axis, tally
+from irregex.request import Match, MatchKind, Submatch
 
 
 def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        gist.binary()
-    except gist.GistNotFoundError:
+        irregex.binary()
+    except irregex.GistNotFoundError:
         return False
     return True
 
@@ -169,8 +169,8 @@ def test_summary_by_file_agrees_with_flat_search(corpus) -> None:
     every bucket's count sums to the flat match total, and the ranking puts the
     busiest file first.
     """
-    flat = gist.search("TODO", cwd=corpus)
-    t = gist.summary("TODO", by="file", cwd=corpus)
+    flat = irregex.search("TODO", cwd=corpus)
+    t = irregex.summary("TODO", by="file", cwd=corpus)
     assert t.total == len(flat)
     assert t.groups[0].key.endswith("a.py")  # a.py has two TODOs → the head
     assert t.groups[0].count == 2
@@ -178,7 +178,7 @@ def test_summary_by_file_agrees_with_flat_search(corpus) -> None:
 
 @needs_gist
 def test_summary_by_dir_concentrates_the_root(corpus) -> None:
-    t = gist.summary("TODO", by="dir", cwd=corpus)
+    t = irregex.summary("TODO", by="dir", cwd=corpus)
     # a.py + b.py sit at the corpus root; pkg/d.py under pkg/ — the root bucket wins.
     assert t.groups[0].count == 3
 
@@ -189,6 +189,6 @@ def test_summary_forwards_search_options(corpus) -> None:
     `.py` files match and the `.txt` file is pruned before it can enter the
     tally, so the ext axis has exactly one `.py` bucket.
     """
-    t = gist.summary("TODO", by="ext", types=["py"], cwd=corpus)
+    t = irregex.summary("TODO", by="ext", types=["py"], cwd=corpus)
     assert [g.key for g in t.groups] == [".py"]
     assert t.total == 4  # a.py x2, b.py x1, pkg/d.py x1

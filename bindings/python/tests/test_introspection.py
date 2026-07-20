@@ -6,16 +6,16 @@ import shutil
 
 import pytest
 
-import gist
-from gist.introspection import IndexState, IndexStatus, parse_status
+import irregex
+from irregex.introspection import IndexState, IndexStatus, parse_status
 
 
 def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        gist.binary()
-    except gist.GistNotFoundError:
+        irregex.binary()
+    except irregex.GistNotFoundError:
         return False
     return True
 
@@ -49,24 +49,26 @@ def test_parse_status_returns_every_structured_field() -> None:
 
 @needs_gist
 def test_capability_schema_is_typed_and_queryable() -> None:
-    schema = gist.capabilities()
+    schema = irregex.capabilities()
     assert schema.tool == "gist"
-    assert schema.version == gist.version()
+    assert schema.version == irregex.version()
     assert schema.supports("-P")
     assert schema.supports("--multiline")
     assert schema.supports("--no-unicode")
     assert schema.compatibility("--definitely-unknown") is None
-    assert gist.schema() == schema
+    assert irregex.schema() == schema
 
 
 @needs_gist
 def test_index_lifecycle_returns_observed_status(tmp_path) -> None:
     (tmp_path / "libs").mkdir()
     (tmp_path / "libs" / "sample.py").write_text("needle\n")
-    assert not gist.status(cwd=tmp_path).ready
-    state = gist.index(cwd=tmp_path)
+    assert not irregex.status(cwd=tmp_path).ready
+    state = irregex.index(cwd=tmp_path)
     assert state.ready
     assert state.files == 1
     assert state.freshness_anchor
-    assert "libs" in state.roots
-    assert gist.status(cwd=tmp_path).path == state.path
+    # No tree layout is assumed: a bare `gist index` resolves to `.` (the
+    # whole tree) unless GIST_ROOTS or positional roots say otherwise.
+    assert state.roots == (".",)
+    assert irregex.status(cwd=tmp_path).path == state.path

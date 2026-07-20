@@ -80,6 +80,7 @@ class SearchRequest:
     ignore_case: bool = False
     smart_case: bool = False
     word: bool = False
+    quiet: bool = False
     invert: bool = False
     globs: tuple[str, ...] = ()
     iglobs: tuple[str, ...] = ()
@@ -88,7 +89,9 @@ class SearchRequest:
     before: int = 0
     after: int = 0
     context: int = 0
-    max_count: int = 0
+    # `None` = unset; an int (including `0`, rg's "match nothing") = an explicit
+    # `-m N` cap, so the falsy `-m0` is distinguishable from no cap at all.
+    max_count: int | None = None
     max_depth: int = 0
     hidden: bool = False
     no_ignore: bool = False
@@ -118,6 +121,8 @@ class SearchRequest:
             argv.append("-S")
         if self.word:
             argv.append("-w")
+        if self.quiet:
+            argv.append("-q")
         if self.invert:
             argv.append("-v")
         if self.hidden:
@@ -155,7 +160,7 @@ class SearchRequest:
             argv += ["-A", str(self.after)]
         if self.context and not (self.before or self.after):
             argv += ["-C", str(self.context)]
-        if self.max_count:
+        if self.max_count is not None:
             argv += ["-m", str(self.max_count)]
         if self.max_depth:
             argv += ["--max-depth", str(self.max_depth)]

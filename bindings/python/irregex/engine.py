@@ -41,7 +41,7 @@ def _resolve(name: str, env_var: str) -> str:
     on_path = shutil.which(name)
     if on_path:
         return on_path
-    # pkg/kernels/irregex/bindings/python/gist/engine.py → kernel root is parents[3]
+    # pkg/kernels/irregex/bindings/python/irregex/engine.py → kernel root is parents[3]
     kernel = Path(__file__).resolve().parents[3]
     built = kernel / "zig-out" / "bin" / name
     if built.is_file():
@@ -80,7 +80,7 @@ def _build_cli(zig: str, kernel: Path) -> None:
             timeout=600,
             check=False,
         )
-    except OSError, subprocess.TimeoutExpired:
+    except (OSError, subprocess.TimeoutExpired):
         pass
 
 
@@ -202,7 +202,7 @@ def count(
 
     rg `-c`/`--count`, one line counted once regardless of how many times the
     pattern hits it — the semantic every other count surface shares
-    (`gist.count`/`Session.count` docstrings, the resident daemon's
+    (`irregex.count`/`Session.count` docstrings, the resident daemon's
     `countLines`, the in-process FFI's per-line stream). Was
     `--count-matches` (per-occurrence), which over-counted a line with
     repeated hits and silently diverged from the warm transports.

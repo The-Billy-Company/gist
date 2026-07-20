@@ -3,7 +3,7 @@
 Two layers. The pure layer drives `engine._parse_rank` over captured rank rows —
 no binary, so it pins the row grammar (rank index, `path:line`, `[def|use|gen]`,
 the per-file count, snippet) and the `def`/`use`/`gen` classification exactly. The
-integration layer builds a throwaway index and asserts `gist.rank` reads it back
+integration layer builds a throwaway index and asserts `irregex.rank` reads it back
 with the engine's own classification — never a Python reclassifier.
 """
 
@@ -14,17 +14,17 @@ import subprocess
 
 import pytest
 
-import gist
-from gist.engine import _parse_rank
-from gist.request import Ranked, RankKind
+import irregex
+from irregex.engine import _parse_rank
+from irregex.request import Ranked, RankKind
 
 
 def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        gist.binary()
-    except gist.GistNotFoundError:
+        irregex.binary()
+    except irregex.GistNotFoundError:
         return False
     return True
 
@@ -89,7 +89,7 @@ def indexed_corpus(tmp_path):
     (tmp_path / "libs" / "a.py").write_text("def widget():\n    return TODO\n")
     (lib / "b.py").write_text("x = TODO\nTODO again\n")
     build = subprocess.run(  # noqa: S603 — fixed argv, no shell
-        [gist.binary(), "index"], cwd=tmp_path, capture_output=True, text=True, check=False
+        [irregex.binary(), "index"], cwd=tmp_path, capture_output=True, text=True, check=False
     )
     if build.returncode != 0:
         pytest.skip(f"index build failed: {build.stderr.strip()}")
@@ -98,7 +98,7 @@ def indexed_corpus(tmp_path):
 
 @needs_gist
 def test_rank_reads_the_index_with_engine_classification(indexed_corpus) -> None:
-    rows = gist.rank("TODO", cwd=indexed_corpus, limit=10)
+    rows = irregex.rank("TODO", cwd=indexed_corpus, limit=10)
     assert rows, "expected ranked rows over the built index"
     assert all(isinstance(r, Ranked) for r in rows)
     assert all(isinstance(r.kind, RankKind) for r in rows)
@@ -110,7 +110,7 @@ def test_rank_reads_the_index_with_engine_classification(indexed_corpus) -> None
 @needs_gist
 def test_rank_forwards_search_options(indexed_corpus) -> None:
     """A `def widget` search resolves the definition; the option flows through."""
-    rows = gist.rank("widget", cwd=indexed_corpus, limit=5)
+    rows = irregex.rank("widget", cwd=indexed_corpus, limit=5)
     assert any(r.path.endswith("a.py") and r.kind is RankKind.DEF for r in rows)
 
 
@@ -119,7 +119,7 @@ def test_rank_without_index_live_ranks(tmp_path) -> None:
     """No persisted index falls back to the same live corpus, never emptiness."""
     (tmp_path / "libs").mkdir()
     (tmp_path / "libs" / "a.py").write_text("TODO here\n")
-    rows = gist.rank("TODO", cwd=tmp_path, limit=5)
+    rows = irregex.rank("TODO", cwd=tmp_path, limit=5)
     assert len(rows) == 1
     assert rows[0].path == "libs/a.py"
     assert rows[0].count == 1

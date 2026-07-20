@@ -1,4 +1,4 @@
-"""Cross-language eligibility parity (ADR-352 rung 2.5 · plan Phase 3).
+"""Cross-language eligibility parity (ADR-352 rung 2.5).
 
 `session.warm_eligible` (a cheap pure-Python predicate on `SearchRequest`) and
 `src/runtime/session/request.zig::classify` (the daemon's argv authority) are two
@@ -20,17 +20,18 @@ import subprocess
 
 import pytest
 
-import gist
-from gist import warm_eligible
-from gist.request import SearchEngine, SearchRequest
+import irregex
+from irregex import warm_eligible
+from irregex.request import SearchEngine, SearchRequest
+from irregex.session import ffi_eligible
 
 
 def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        gist.binary()
-    except gist.GistNotFoundError:
+        irregex.binary()
+    except irregex.GistNotFoundError:
         return False
     return True
 
@@ -47,13 +48,37 @@ def corpus(tmp_path):
 
 
 # Every eligible clause `classify` accepts: literal / caseless / plain-regex, over
-# the rootless default tree with no scoping and no rich flag.
+# the rootless default tree with no scoping and no rich flag. v2: smart_case is
+# UDS-eligible (the raw bit crosses the wire; the Zig session resolves it) —
+# with an uppercase AND a lowercase pattern, since the verdict must not depend
+# on the resolution (that happens server-side, at compile time).
 _ELIGIBLE: list[SearchRequest] = [
     SearchRequest(pattern="TODO"),
     SearchRequest(pattern="TODO", fixed=True),
     SearchRequest(pattern="TODO", ignore_case=True),
     SearchRequest(pattern="TODO", fixed=True, ignore_case=True),
     SearchRequest(pattern=r"def\s+\w+"),  # plain (linear) regex, still warm
+    SearchRequest(pattern="TODO", smart_case=True),  # uppercase → resolves sensitive
+    SearchRequest(pattern="todo", smart_case=True),  # lowercase → resolves caseless
+    SearchRequest(pattern="todo", fixed=True, smart_case=True),
+    # v2 lane 2: -w is warm-eligible (the session applies cold's post-match
+    # word rule), alone and composed with -F / -i / -S.
+    SearchRequest(pattern="TODO", word=True),
+    SearchRequest(pattern="TODO", fixed=True, word=True),
+    SearchRequest(pattern="todo", ignore_case=True, word=True),
+    SearchRequest(pattern="todo", smart_case=True, word=True),
+    # v2 lane 4: -q (existence early-halt) and -m N/-m0 (per-file cap) are
+    # UDS-eligible — the session halts at the first match / caps per file, and
+    # `-m0` short-circuits to the cold-mirrored no-match. Alone and composed.
+    SearchRequest(pattern="TODO", quiet=True),
+    SearchRequest(pattern="TODO", fixed=True, quiet=True),
+    SearchRequest(pattern="todo", ignore_case=True, quiet=True),
+    SearchRequest(pattern="TODO", word=True, quiet=True),
+    SearchRequest(pattern="TODO", max_count=3),
+    SearchRequest(pattern="TODO", max_count=1),
+    SearchRequest(pattern="TODO", max_count=0),  # rg's `-m0`: matches nothing
+    SearchRequest(pattern="todo", ignore_case=True, max_count=2),
+    SearchRequest(pattern="TODO", word=True, max_count=2),
 ]
 
 # One request per ineligible DIMENSION — every field/scope that must fall to cold,
@@ -65,8 +90,6 @@ _INELIGIBLE: list[SearchRequest] = [
     SearchRequest(pattern="TODO", iglobs=("*.PY",)),
     SearchRequest(pattern="TODO", types=("py",)),
     SearchRequest(pattern="TODO", not_types=("py",)),
-    SearchRequest(pattern="TODO", smart_case=True),
-    SearchRequest(pattern="TODO", word=True),
     SearchRequest(pattern="TODO", invert=True),
     SearchRequest(pattern="TODO", hidden=True),
     SearchRequest(pattern="TODO", no_ignore=True),
@@ -75,7 +98,6 @@ _INELIGIBLE: list[SearchRequest] = [
     SearchRequest(pattern="TODO", before=2),
     SearchRequest(pattern="TODO", after=2),
     SearchRequest(pattern="TODO", context=2),
-    SearchRequest(pattern="TODO", max_count=3),
     SearchRequest(pattern="TODO", max_depth=2),
     SearchRequest(pattern="TODO", multiline=True),
     SearchRequest(pattern="TODO", multiline_dotall=True),
@@ -96,7 +118,7 @@ def _binary_verdict(req: SearchRequest, cwd) -> bool:
     `[ineligible]` line is printed before any dial or walk, so this is the pure
     classify verdict — no daemon required.
     """
-    argv = [gist.binary(), *req.to_argv(), req.pattern, *req.paths]
+    argv = [irregex.binary(), *req.to_argv(), req.pattern, *req.paths]
     env = {**os.environ, "GIST_DEBUG_WARM": "1", "GIST_NO_AUTOSERVE": "1"}
     proc = subprocess.run(  # noqa: S603 — trusted binary, list argv, no shell
         argv, cwd=str(cwd), env=env, capture_output=True, text=True
@@ -134,3 +156,34 @@ def test_pattern_shape_boundary_is_cold_without_a_binary() -> None:
     assert warm_eligible(SearchRequest(pattern="a\nb")) is False
     assert warm_eligible(SearchRequest(pattern="a\x00b")) is False
     assert warm_eligible(SearchRequest(pattern="")) is False
+
+
+def test_ffi_predicate_extends_uds_with_roots_unicode_and_auto() -> None:
+    # The in-process options ABI carries the complete UDS request subset, and
+    # irregex_open additionally accepts explicit root arrays.
+    smart = SearchRequest(pattern="todo", smart_case=True)
+    assert warm_eligible(smart) is True
+    assert ffi_eligible(smart) is True
+    # -w IS lowered into the C flags (IRREGEX_WORD), so it stays FFI-eligible.
+    assert ffi_eligible(SearchRequest(pattern="TODO", word=True)) is True
+    # The additive payload-bearing C entry safely lowers -q and -m N, including
+    # falsy -m0; none may be lost to a truthiness sweep.
+    for ffi_option in (
+        SearchRequest(pattern="TODO", quiet=True),
+        SearchRequest(pattern="TODO", max_count=3),
+        SearchRequest(pattern="TODO", max_count=0),
+    ):
+        assert warm_eligible(ffi_option) is True
+        assert ffi_eligible(ffi_option) is True
+    for req in _ELIGIBLE:
+        assert ffi_eligible(req) is warm_eligible(req)
+    for req in _INELIGIBLE:
+        ffi_extension = (
+            req.invert
+            or bool(req.paths)
+            or req.unicode is not None
+            or req.engine is SearchEngine.AUTO
+        )
+        assert ffi_eligible(req) is ffi_extension
+    assert ffi_eligible(SearchRequest(pattern="TODO", paths=("",))) is False
+    assert ffi_eligible(SearchRequest(pattern="TODO", paths=("bad\x00root",))) is False

@@ -1,10 +1,10 @@
-r"""gist — the importable face of Billy's code-search kernel (ADR-352). One clean, script-friendly search API over the certified `gist` engine, sharing the exact `SearchRequest` shape the CLI and Billy's agent tool speak. Results are produced by the same rg-parity engine the CLI uses — this package drives it, it does not reimplement it. import gist for m in gist.search(r"func\\s+\\w+\\(", paths=["services/backend"]): print(f"{m.path}:{m.line_number}: {m.text}") hits   = gist.files("TODO", types=["py"])       # files-with-matches total  = gist.count("panic", paths=["services"]) # total matching lines report = gist.status()                            # index freshness report Beyond *where* a pattern occurs, `summary` answers *how it is distributed* — search then aggregate in one call — and `rank` answers *which hit matters most*, gist's definition-first view (a symbol's declaration ahead of its call sites, codegen demoted), with no rg equivalent: hot = gist.summary("TODO", paths=["services"], by="dir")   # ranked buckets for g in hot.top(5): print(f"{g.count:4}  {g.key}") for r in gist.rank("SearchRequest", limit=5):              # def-first, engine-classified print(f"[{r.kind}] {r.path}:{r.line_number}")          # skip r.generated for codegen Every convenience wrapper accepts the same keyword options as `SearchRequest`; pass a `SearchRequest` to `gist.run` when you want to build it once and reuse it (e.g. across faces, or through the agent adapter `request_from_tool`)."""
+r"""irregex — the importable face of Billy's search and kinship kernel (ADR-352). One script-friendly API drives the certified `gist` and `relate` engines without reimplementing either. import irregex for m in irregex.search(r"func\\s+\\w+\\(", paths=["services/backend"]): print(f"{m.path}:{m.line_number}: {m.text}") hits = irregex.files("TODO", types=["py"]) total = irregex.count("panic", paths=["services"]) neighbors = irregex.similar("services/backend/api/main.go") Every search convenience accepts the same options as `SearchRequest`; build one explicitly for reuse through `irregex.run` or `request_from_tool`. `summary` aggregates matches, `rank` provides Gist's definition-first view, and `similar` / `dups` / `patterns` expose Relate's native corpus operations."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import aggregate, engine, irregex
+from . import aggregate, engine, kinship
 from .aggregate import Group, Tally, tally
 from .contract import ABI_VERSION, ENGINE_VERSION
 from .errors import (
@@ -31,7 +31,7 @@ from .request import (
     SearchRequest,
     Submatch,
 )
-from .irregex import (
+from .kinship import (
     DupPair,
     PatternCount,
     PatternHit,
@@ -45,6 +45,7 @@ from .session import (
     Session,
     SessionGeneration,
     ensure_serve,
+    ffi_eligible,
     opening_session,
     warm_eligible,
 )
@@ -91,9 +92,10 @@ __all__ = [
     "count_matches",
     "dups",
     "ensure_serve",
+    "ffi_eligible",
     "files",
     "index",
-    "irregex",
+    "kinship",
     "opening_session",
     "pattern_counts",
     "patterns",
@@ -193,7 +195,7 @@ def rank(
 
 
 def request_from_tool(payload: Mapping[str, object]) -> SearchRequest:
-    """Map an agent tool payload (a dict) into a `SearchRequest`. Lazy import keeps `gist.agent` off the hot path for plain script callers."""
+    """Map an agent tool payload (a dict) into a `SearchRequest`. Lazy import keeps `irregex.agent` off the hot path for plain script callers."""
     from .agent import request_from_tool as _rft
 
     return _rft(payload)

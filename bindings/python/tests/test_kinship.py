@@ -3,7 +3,7 @@
 These drive the real `gist` binary over a throwaway corpus, so they skip
 cleanly where no binary is built — the same discipline as `test_search.py`.
 The oracle for attribution is independent single-pattern searches through the
-established `gist.files` face, never the verb's own output.
+established `irregex.files` face, never the verb's own output.
 """
 
 from __future__ import annotations
@@ -12,15 +12,15 @@ import shutil
 
 import pytest
 
-import gist
+import irregex
 
 
 def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        gist.binary()
-    except gist.GistNotFoundError:
+        irregex.binary()
+    except irregex.GistNotFoundError:
         return False
     return True
 
@@ -48,7 +48,7 @@ def corpus(tmp_path):
 
 @needs_gist
 def test_similar_ranks_the_near_twin_first(corpus):
-    out = gist.similar("a.py", roots=["."], top=3, cwd=corpus)
+    out = irregex.similar("a.py", roots=["."], top=3, cwd=corpus)
     assert out, "expected at least one neighbor"
     # The target itself never appears; its rename-twin ranks first, closer
     # than either unrelated file.
@@ -60,7 +60,7 @@ def test_similar_ranks_the_near_twin_first(corpus):
 
 @needs_gist
 def test_dups_finds_the_pair_and_orders_it(corpus):
-    pairs = gist.dups(roots=["."], max_distance=0.8, cwd=corpus)
+    pairs = irregex.dups(roots=["."], max_distance=0.8, cwd=corpus)
     names = [{p.a.removeprefix("./"), p.b.removeprefix("./")} for p in pairs]
     assert {"a.py", "b.py"} in names
     unrelated = {"c.zig", "hits.txt"}
@@ -70,19 +70,19 @@ def test_dups_finds_the_pair_and_orders_it(corpus):
 @needs_gist
 def test_patterns_attribution_matches_single_pattern_oracle(corpus):
     specs = ["alpha", "beta", "route\\("]
-    hits = gist.patterns(specs, roots=["."], cwd=corpus)
+    hits = irregex.patterns(specs, roots=["."], cwd=corpus)
     got = {(h.path, h.line, h.pattern_id) for h in hits}
     # Oracle: one independent single-pattern search per spec.
     want = set()
     for pid, spec in enumerate(specs):
-        for m in gist.search(spec, paths=["."], cwd=corpus):
+        for m in irregex.search(spec, paths=["."], cwd=corpus):
             want.add((m.path, m.line_number, pid))
     assert got == want
 
 
 @needs_gist
 def test_pattern_counts_group_engine_side(corpus):
-    counts = gist.pattern_counts(["alpha", "beta"], by="pattern", roots=["."], cwd=corpus)
+    counts = irregex.pattern_counts(["alpha", "beta"], by="pattern", roots=["."], cwd=corpus)
     tally = {c.label: c.count for c in counts}
     assert tally == {"alpha": 2, "beta": 2}
     # descending, label-tiebroken ordering is the loom's contract
@@ -92,4 +92,4 @@ def test_pattern_counts_group_engine_side(corpus):
 @needs_gist
 def test_patterns_requires_a_spec():
     with pytest.raises(ValueError, match="at least one pattern"):
-        gist.patterns([])
+        irregex.patterns([])

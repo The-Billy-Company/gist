@@ -23,7 +23,7 @@ let scoped = gist::SearchRequest::new("Wallet")      // the deep builder
 
 ## Why it exists — and why subprocess, not FFI
 
-This crate and the Python `billy-gist` package realize the **same**
+This crate and the Python `billy-irregex` package realize the **same**
 `SearchRequest → Match` contract (`../../contract/search_api.toml`, ADR-352) over
 the **same** certified `gist` binary. It builds the exact rg-parity argv the CLI
 accepts, runs the binary with `--json`, and parses the JSON-lines stream — so
@@ -53,7 +53,7 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 (`gist::warm_eligible(&req)` is `false` for scoped roots, globs/types, context,
 or any rich flag), or a wire hiccup transparently falls back to the
 byte-identical cold subprocess. The wire protocol is the same one
-`src/gist/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
+`src/runtime/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
 three frame-match against the one daemon.
 
 ## Find, then aggregate

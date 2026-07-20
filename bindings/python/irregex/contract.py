@@ -8,7 +8,7 @@ from pathlib import Path
 # Mirrors `[meta]` in contract/search_api.toml.
 ABI_VERSION = 2
 ENGINE_VERSION = "0.1.0"
-PACKAGE_DIST = "billy-gist"
+PACKAGE_DIST = "billy-irregex"
 PACKAGE_IMPORT = "gist"
 
 # Mirrors `[request_options]` keys — the deep SearchRequest surface.
@@ -20,6 +20,7 @@ REQUEST_OPTIONS: frozenset[str] = frozenset(
         "ignore_case",
         "smart_case",
         "word",
+        "quiet",
         "invert",
         "globs",
         "iglobs",

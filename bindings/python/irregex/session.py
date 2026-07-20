@@ -1,4 +1,9 @@
-"""Persistent resident-session client (ADR-352 rung 2.5). A long-lived Unix-socket connection to a `gist serve` daemon, reused across many queries so an eligible request answers warm — without re-paying the cold subprocess's process + index-mmap + candidate-read startup on every call. This is the Python leg of the same wire protocol `src/gist/session/protocol.zig` defines and the Zig CLI client speaks; the daemon is the single source of truth, so both clients frame-match by construction. Fail-open, always: a `Session` that cannot connect, whose request is ineligible, or that receives a `decline` transparently falls back to the certified cold subprocess (`engine.files`/`engine.count`) and returns the byte-identical answer. The daemon is a pure accelerator — it never adds a failure mode a caller must handle, only removes latency when one is listening."""
+"""Persistent resident-session client (ADR-352 rung 2.5).
+
+Long-lived Unix-socket connection to a `gist serve` daemon. Same wire protocol
+as `src/runtime/session/protocol.zig` / the Zig CLI. Fail-open: connect miss,
+ineligible request, or `decline` → cold subprocess (`engine.files`/`engine.count`).
+"""
 
 from __future__ import annotations
 
@@ -21,33 +26,35 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-PROTOCOL_VERSION = 1
-DEFAULT_SOCKET = ".local/gist-verify/gistd.sock"
+PROTOCOL_VERSION = 2  # must match `protocol.protocol_version`
+# `$GIST_SESSION_SOCK`, else `$GIST_DIR/gistd.sock` (default `.local/gist-verify`).
+DEFAULT_OUT_DIR = ".local/gist-verify"
 
-# Soft deadline for every socket wait (connect, handshake, query round-trip) —
-# the Python twin of the Zig client's `client_io_timeout_ms`. A wedged, busy,
-# or pre-multiplex daemon must cost the caller at most this long before the
-# fail-open cold path answers; `socket.timeout` is an `OSError`, so every
-# existing wire-failure handler already routes it to cold.
+
+def _default_socket() -> str:
+    out_dir = os.environ.get("GIST_DIR", "").rstrip("/") or DEFAULT_OUT_DIR
+    return f"{out_dir}/gistd.sock"
+
+# Soft deadline for connect/handshake/query (Zig: `client_io_timeout_ms`).
+# `socket.timeout` is an `OSError` → existing wire handlers route to cold.
 SESSION_IO_TIMEOUT = 2.0
 
-# Opcodes — mirror `protocol.zig::Opcode`.
+# Mirror `protocol.zig::Opcode` / `request.Mode` / `flag_*`.
 _OP_HELLO, _OP_READY, _OP_QUERY, _OP_RESULT, _OP_DECLINE = 1, 2, 3, 4, 5
 _OP_ERR, _OP_SHUTDOWN, _OP_STATUS, _OP_PING, _OP_PONG = 6, 7, 8, 9, 10
-
-# Mode bytes — `request.Mode` enum order (files, count).
 _MODE_FILES, _MODE_COUNT = 0, 1
-# Query flag bits — `protocol.zig::flag_*`.
-_FLAG_FIXED, _FLAG_IGNORE_CASE = 1 << 0, 1 << 1
+# `smart_case` ships raw; Zig resolves via `effectiveIgnoreCase`. `quiet` is the
+# existence early-halt; `max_count` sets bit 7 AND writes a `u64 LE` after the
+# flags byte (the only flag carrying a payload — mirror `protocol.zig`).
+_FLAG_FIXED, _FLAG_IGNORE_CASE, _FLAG_WORD, _FLAG_SMART_CASE = 1 << 0, 1 << 1, 1 << 3, 1 << 5
+_FLAG_QUIET, _FLAG_MAX_COUNT = 1 << 6, 1 << 7
+_MAX_FRAME = 16 << 20  # `protocol.max_frame`
 
-_MAX_FRAME = 16 << 20  # matches `protocol.max_frame`; a hostile/looping peer cap.
-
-# The rich request fields that make a query ineligible for the warm fast path
-# (the daemon serves only default-roots `-l`/`-c`, literal/plain-regex, ±case).
-# Any of these set → cold. Mirrors `session/request.zig::classify`.
+# Warm-ineligible fields — projection of `session/request.zig::classify`
+# (`tests/test_classify_parity.py`). `quiet`/`max_count` are NOT here: the UDS
+# daemon and the payload-bearing FFI options entry both serve them (existence
+# early-halt and per-file cap).
 _INELIGIBLE_FIELDS = (
-    "smart_case",
-    "word",
     "invert",
     "hidden",
     "no_ignore",
@@ -56,11 +63,13 @@ _INELIGIBLE_FIELDS = (
     "before",
     "after",
     "context",
-    "max_count",
     "max_depth",
     "multiline",
     "multiline_dotall",
 )
+# The FFI options entry additionally carries invert-match; unlike the rootless
+# daemon, its record stream can represent selected lines with zero submatches.
+_FFI_INELIGIBLE_FIELDS = tuple(field for field in _INELIGIBLE_FIELDS if field != "invert")
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,21 +87,51 @@ class SessionGeneration:
 
 def default_socket_path() -> str:
     """`$GIST_SESSION_SOCK`, else the per-repo default beside the index."""
-    return os.environ.get("GIST_SESSION_SOCK") or DEFAULT_SOCKET
+    return os.environ.get("GIST_SESSION_SOCK") or _default_socket()
 
 
-def warm_eligible(request: SearchRequest) -> bool:
-    """True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping. Every clause mirrors `session/request.zig::classify` term-for-term (a `\\n`/`\\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
+def _eligible(
+    request: SearchRequest,
+    ineligible_fields: tuple[str, ...],
+    *,
+    explicit_roots: bool = False,
+    explicit_unicode: bool = False,
+    auto_engine: bool = False,
+) -> bool:
+    """The shared eligibility core both transport predicates project through."""
     if not request.pattern or "\n" in request.pattern or "\x00" in request.pattern:
         return False
-    if request.paths or request.globs or request.iglobs or request.types or request.not_types:
+    if (request.paths and not explicit_roots) or any(
+        not path or "\x00" in path for path in request.paths
+    ):
+        return False
+    if request.globs or request.iglobs or request.types or request.not_types:
         return False
     if request.extra_flags:
         return False
+    engine_ok = request.engine is SearchEngine.LINEAR or (
+        auto_engine and request.engine is SearchEngine.AUTO
+    )
     return (
-        request.engine is SearchEngine.LINEAR
-        and request.unicode is None
-        and not any(getattr(request, f) for f in _INELIGIBLE_FIELDS)
+        engine_ok
+        and (request.unicode is None or explicit_unicode)
+        and not any(getattr(request, f) for f in ineligible_fields)
+    )
+
+
+def warm_eligible(request: SearchRequest) -> bool:
+    r"""True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping — ±case including `smart_case` (sent raw; the Zig session resolves it), ±`word` (the session applies cold's exact post-match word rule), ±`quiet` (the existence early-halt) and ±`max_count` including `-m0` (the per-file cap, resolved in the resident session). Every clause mirrors `session/request.zig::classify` term-for-term (a `\n`/`\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
+    return _eligible(request, _INELIGIBLE_FIELDS)
+
+
+def ffi_eligible(request: SearchRequest) -> bool:
+    """True iff FFI can attempt `request`. Beyond the daemon subset, it serves invert-match, opens explicit roots, carries Unicode/ASCII mode, and accelerates the linear-compatible arm of `engine="auto"`; `IRREGEX_STALE` falls through to cold PCRE2."""
+    return _eligible(
+        request,
+        _FFI_INELIGIBLE_FIELDS,
+        explicit_roots=True,
+        explicit_unicode=True,
+        auto_engine=True,
     )
 
 
@@ -121,7 +160,7 @@ def ensure_serve(
     (now) reachable. Fail-open by construction: a missing binary, a spawn
     error, or a daemon that never binds within ``timeout`` returns ``False``,
     and the caller's `Session` still answers cold. Mirrors the Zig auto-spawn
-    (`src/gist/faces/cli/daemon/client/spawn.zig`): opt out with ``GIST_NO_AUTOSERVE``, and
+    (`src/cli/gist/daemon/client/spawn.zig`): opt out with ``GIST_NO_AUTOSERVE``, and
     it is herd-safe because the daemon's advisory `flock` admits exactly one
     racer (the losers exit at once without touching the winner's live socket).
     """
@@ -243,7 +282,7 @@ class Session:
             _send(s, _OP_STATUS, b"")
             op, payload = _recv(s)
             current = _decode_ready(payload) if op == _OP_READY else None
-        except OSError, _WireError:
+        except (OSError, _WireError):
             self._drop()
             return None
         if current is None:
@@ -357,10 +396,16 @@ class Session:
             if s is None:
                 return None
             try:
-                flags = (_FLAG_FIXED if request.fixed else 0) | (
-                    _FLAG_IGNORE_CASE if request.ignore_case else 0
+                flags = (
+                    (_FLAG_FIXED if request.fixed else 0)
+                    | (_FLAG_IGNORE_CASE if request.ignore_case else 0)
+                    | (_FLAG_WORD if request.word else 0)
+                    | (_FLAG_SMART_CASE if request.smart_case else 0)
+                    | (_FLAG_QUIET if request.quiet else 0)
+                    | (_FLAG_MAX_COUNT if request.max_count is not None else 0)
                 )
-                body = bytes([mode, flags]) + request.pattern.encode()
+                cap = struct.pack("<Q", request.max_count) if request.max_count is not None else b""
+                body = bytes([mode, flags]) + cap + request.pattern.encode()
                 _send(s, _OP_QUERY, body)
                 op, payload = _recv(s)
             except (OSError, _WireError) as _:
