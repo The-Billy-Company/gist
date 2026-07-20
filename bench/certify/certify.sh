@@ -118,19 +118,27 @@ echo
 # One hyperfine JSON per (class, tool). A gist cell additionally takes its
 # official-rg oracle and must prove an exact, order-insensitive file set first.
 bench_one() { # <class> <tool> <cmd> [rg-oracle] → 0 timed, 1 rejected
-  local class="$1" tool="$2" cmd="$3" oracle="${4:-}"
+  local class="$1" tool="$2" cmd="$3" oracle="${4:-}" attempt log
   [[ -z "${cmd}" || "${cmd}" = "false" ]] && return 0
   if [[ -n "${oracle}" ]]; then
     compete_precheck_equivalent "${cmd}" "${oracle}" "${class}/${tool}" || return 1
   else
     compete_precheck_status "${cmd}" "${class}/${tool}" || return 1
   fi
-  if ! compete_hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
-    --export-json "${WORK}/${class}__${tool}.json" \
-    "${cmd}" > /dev/null 2>&1; then
-    echo "  CELL FAILED during timing ${class}/${tool}: ${cmd}" >&2
-    return 1
-  fi
+  log="${WORK}/${class}__${tool}.hyperfine.log"
+  for attempt in 1 2; do
+    rm -f "${WORK}/${class}__${tool}.json"
+    if compete_hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
+      --export-json "${WORK}/${class}__${tool}.json" \
+      "${cmd}" > /dev/null 2> "${log}"; then
+      rm -f "${log}"
+      return 0
+    fi
+    [[ "${attempt}" = 1 ]] && echo "  transient timing failure ${class}/${tool}; retrying clean cell…" >&2
+  done
+  echo "  CELL FAILED during timing ${class}/${tool}: ${cmd}" >&2
+  awk 'NR <= 20 { print "    " $0 }' "${log}" >&2
+  return 1
 }
 
 cd "${REPO}" || exit 1

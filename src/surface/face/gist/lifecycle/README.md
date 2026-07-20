@@ -53,9 +53,9 @@ captured _before_ the corpus read, so a file touched during the build has
 mtime ≥ anchor and is re-verified on the next query.
 
 **Who consumes it.** The unified engine's read-elision path
-([`runtime/cold/engine/serial.zig`](../../../runtime/cold/engine/serial.zig)
+([`surface/exec/cold/engine/serial.zig`](../../../exec/cold/engine/serial.zig)
 `IndexSkip`) and the `--rank` view
-([`runtime/cold/engine/ranked.zig`](../../../runtime/cold/engine/ranked.zig))
+([`surface/exec/cold/engine/ranked.zig`](../../../exec/cold/engine/ranked.zig))
 mmap these artifacts. A missing index is never fatal for search — the engine
 live-scans — but `gist status` reports it as an actionable `unavailable` state.
 See [`../status/`](../status) for the matching read-only verb.

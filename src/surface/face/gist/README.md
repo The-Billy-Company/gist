@@ -193,7 +193,7 @@ This section teaches selection, not a second flag registry. The checked-in
 ## The search contract
 
 The cold runtime's
-[`flag_catalog`](../../runtime/cold/argv/args.zig) is the source of truth for both argv
+[`flag_catalog`](../../exec/cold/argv/args.zig) is the source of truth for both argv
 handling and `gist --schema`. It separates the public surface into exact
 support, support with documented differences, accepted no-ops, and unknown
 flags that fail with exit 2. I do **not** claim every option ripgrep ever
@@ -354,9 +354,9 @@ handling, streams, and resident-versus-cold answers.
 
 The tracked ripgrep 15.1.0 snapshot contains 441 invocations per walk engine:
 
-- **Mined upstream suite:** 391 PASS, 0 ORDER, 14 FAIL, 16 NA, and 20 SKIP.
-  Supported-surface parity is **391/405 = 96.5%**, not 100%; every known
-  divergence remains visible and assigned.
+- **Mined upstream suite:** 405 PASS, 0 ORDER, 0 FAIL, 16 NA, and 20 SKIP.
+  Supported-surface parity is **405/405 = 100%**; every supported-surface case
+  matches ripgrep, with zero deferred divergences.
 - **Multiline:** 30/30 adversarial cases pass for stdout, exit code, and
   indexed-versus-`--no-index` equality.
 - **PCRE2:** 30/30 adversarial cases pass the same three-way oracle, including
@@ -372,7 +372,8 @@ Parallel and serial results are reported separately because they share a
 contract but not an implementation path; they are not added together to
 inflate the case count. NA is a deliberate product boundary. SKIP is an
 accounted companion, boundary, or irreplayable obligation. Neither is called a
-pass, and `--allow-fail` never converts the 14 known failures into success.
+pass, and with zero FAIL rows the strict `check_results.py` gate is green
+without `--allow-fail`.
 
 Reproduce the cited results from
 [`bench/rgsuite`](../../../bench/rgsuite/README.md):
@@ -503,7 +504,7 @@ harness, and the committed certificate are authoritative.
 
 - [`main.zig`](main.zig) dispatches the bare search and lifecycle verbs; the
   authoritative search implementation lives in
-  [`runtime/cold/`](../../runtime/cold/).
+  [`surface/exec/cold/`](../../exec/cold/).
 - [`daemon/`](daemon) owns UDS serving, client routing, auto-spawn, and cold
   fallback.
 - [`lifecycle/`](lifecycle) owns trigram-index and codex lifecycle commands.

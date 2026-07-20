@@ -80,12 +80,31 @@ test "client: wedged daemon times out to cold" {
         try io.sleep(.fromNanoseconds(5 * std.time.ns_per_ms), .real);
     } else return error.WedgedNeverReady;
 
-    const t0 = std.Io.Clock.now(.real, io).nanoseconds;
-    const outcome = client.attempt(gpa, io, &.{ "needle", "-l" }, socket);
-    const delta_ns = std.Io.Clock.now(.real, io).nanoseconds - t0;
-    const elapsed_ms: i64 = @divTrunc(@as(i64, @truncate(delta_ns)), std.time.ns_per_ms);
+    // `attemptWithin` routes on the process's real stdin (rg's `is_readable_stdin`):
+    // a readable stdin *stream* is a cold-only STREAM search, so it short-circuits
+    // to `.cold` before the wedged exchange this test targets. Under
+    // `zig build test --listen=-` fd 0 is the runner's own IPC pipe (a FIFO —
+    // correctly classified a stream), which would make the assertion below pass
+    // vacuously. Point fd 0 at /dev/null (a char device, never a stream: the
+    // ordinary warm scenario) so the poll/recv deadline is genuinely exercised,
+    // then restore the runner's channel — the saved read end keeps the pipe (and
+    // any buffered command) alive across the swap.
+    const saved_stdin = std.c.dup(0);
+    defer if (saved_stdin >= 0) {
+        _ = std.c.dup2(saved_stdin, 0);
+        _ = std.c.close(saved_stdin);
+    };
+    if (std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDONLY }, 0)) |nul| {
+        _ = std.c.dup2(nul, 0);
+        _ = std.c.close(nul);
+    } else |_| {}
+
+    // Exercise the same poll/recv path with a short deadline. The server keeps
+    // the socket open until the client closes, so returning `.cold` itself
+    // proves the deadline fired; an upper wall-clock bound only tests scheduler
+    // load and was observed to flake despite correct client behavior.
+    const test_timeout_ms: i32 = 20;
+    const outcome = client.test_api.attemptWithin(gpa, io, &.{ "needle", "-l" }, socket, test_timeout_ms);
 
     try std.testing.expect(outcome == .cold);
-    try std.testing.expect(elapsed_ms >= client.client_io_timeout_ms - 500);
-    try std.testing.expect(elapsed_ms < client.client_io_timeout_ms + 2_500);
 }

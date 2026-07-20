@@ -21,11 +21,12 @@ Builds a throwaway, hermetic corpus (signal + noise + a `.gitignore`d file +
 a hidden file), indexes it, then for a battery of query shapes (literal,
 regex, caseless, word, count, files-with(out), context, invert,
 only-matching, type-/path-scoped) asserts the auto-indexed run's stdout and
-exit code are byte-identical to the same query run with `--no-index` — plus a
-post-index-edit case proving the freshness overlay still finds a needle that
-arrived after the index was built. Any divergence means the index is
-altering _results_, not just skipping reads, which breaks gist's core safety
-claim.
+exit code have the same byte-exact line multiset as the same query run with
+`--no-index` — duplicates remain significant, while the parallel walk's
+incidental cross-file scheduling order is normalized. A post-index-edit case
+also proves the freshness overlay still finds a needle that arrived after the
+index was built. Any divergence means the index is altering _results_, not just
+skipping reads, which breaks gist's core safety claim.
 
 ```bash
 cd pkg/kernels/irregex

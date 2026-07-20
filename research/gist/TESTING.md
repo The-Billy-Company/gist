@@ -1,8 +1,8 @@
 ---
 doc_radar:
   occurrences:
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 391}
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 14}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 405}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
     - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "NA"', equals: 16}
     - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 20}
     - {file: pkg/kernels/irregex/bench/matrix/matrix.toml, pattern: '\[\[shape\]\]', equals: 19}
@@ -17,11 +17,10 @@ doc_radar:
 
 # Gist — the evidence story
 
-Gist has several independent evidence layers. They do not all make the same
-claim, and the tracked ripgrep replay is **not currently fully green**:
-391/405 scoreable mined cases pass on each walk engine; 14 are known,
-phase-tracked failures. This document distinguishes a passing parity proof
-from complete accounting of known gaps.
+Gist has several independent evidence layers. The tracked ripgrep replay is
+**fully green**: 405/405 scoreable mined cases pass on each walk engine, with
+zero deferred divergences. This document distinguishes a passing parity proof
+from complete accounting of the surface.
 
 The properties under test are:
 
@@ -70,16 +69,16 @@ The tracked ripgrep 15.1.0 snapshot contains 441 invocations **per engine**:
 
 | bucket | count | meaning                                                   |
 | ------ | ----: | --------------------------------------------------------- |
-| PASS   |   391 | Gist matches the oracle at the upstream test's own bar    |
+| PASS   |   405 | Gist matches the oracle at the upstream test's own bar    |
 | ORDER  |     0 | byte-exact case differs only by order                     |
-| FAIL   |    14 | in-scope divergence, each assigned to a deferred phase    |
+| FAIL   |     0 | in-scope divergence                                       |
 | NA     |    16 | deliberate, documented product boundary                   |
 | SKIP   |    20 | accounted companion, boundary, or irreplayable obligation |
 
-Supported-surface parity is therefore **391/405 = 96.5%**, not 100%.
-`check_results.py --allow-fail` proves that every FAIL/SKIP is accounted for
-and that the README and result artifact agree; it does **not** turn the 14
-FAIL rows into passes.
+Supported-surface parity is therefore **405/405 = 100%**.
+`check_results.py` proves that every PASS/NA/SKIP is accounted for and that the
+README and result artifact agree; with zero FAIL rows the strict gate passes
+without `--allow-fail`.
 
 Companion suites exercise surfaces the mined replay cannot freeze cleanly:
 
@@ -133,10 +132,8 @@ mode/flag/transform companions, the CLI-shape matrix, line and Unicode
 parity, index-elision parity, fail-closed behavior, and filesystem freshness.
 
 If any default correctness gate fails, the performance phase is skipped.
-Because the tracked rgsuite presently has 14 FAIL rows, a normal invocation
-does not produce an all-green verdict. `--allow-known` passes
-`--allow-fail` only to the rgsuite accounting check so developers can inspect
-later performance gates without pretending those gaps are closed.
+The tracked rgsuite now has zero FAIL rows, so a normal invocation produces an
+all-green correctness verdict without `--allow-known`.
 
 The performance phase validates the committed artifact bundle and cold ratio
 floors, resident-session floors, matrix floors, compressed-input speed floor,
@@ -147,7 +144,7 @@ focused proofs but are not all scheduled by `ci_order.sh`.
 ```bash
 # from pkg/kernels/irregex/
 ./bench/gates/ci_order.sh
-# development traversal past the tracked rgsuite gaps:
+# escape hatch (no tracked rgsuite gaps remain, so this is now a no-op):
 ./bench/gates/ci_order.sh --allow-known
 ```
 

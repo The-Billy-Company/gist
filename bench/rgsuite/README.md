@@ -1,9 +1,9 @@
 # gist ⇄ ripgrep drop-in proof (`rgsuite`)
 
 This is the honest, reproducible measurement of how close gist's `rg` verb is to
-a **drop-in ripgrep** on the surface it claims to support (currently **96.5%
-supported-surface parity** with every remaining divergence explained and
-phase-tracked — see the scoreboard), benchmarked against real ripgrep as both
+a **drop-in ripgrep** on the surface it claims to support (currently **100%
+supported-surface parity** — every replayed supported-surface case matches
+ripgrep, with zero deferred divergences — see the scoreboard), benchmarked against real ripgrep as both
 the **correctness oracle** and the **performance baseline**.
 `run.py` replays the whole suite once per **engine** — the parallel
 work-stealing walk (`pipeline.zig`, gist's default recursive-walk dispatch)
@@ -27,20 +27,19 @@ mines one case per command), replayed against **both** engines:
 
 | Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                         |
 | --------- | ------------------------: | -----------------: | ------------------------------------------------------------------------------- |
-| **PASS**  |                       391 |                391 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)     |
+| **PASS**  |                       405 |                405 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)     |
 | **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole        |
-| **FAIL**  |                        14 |                 14 | a supported-surface divergence, each phase-tracked in `coverage_manifest.toml`  |
+| **FAIL**  |                         0 |                  0 | a supported-surface divergence, each phase-tracked in `coverage_manifest.toml`  |
 | NA        |                        16 |                 16 | unsupported **by design** (see boundaries below)                                |
 | SKIP      |                        20 |                 20 | not replayable as one argv — each mapped to a companion proof / upstream reason |
 
-**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 391/405 = 96.5%
-on both engines** — identical on whichever engine a given case dispatches to. The
-14 FAILs are not hidden behind a shrunken denominator: each is an explained,
-adverse-tested divergence recorded once in `coverage_manifest.toml` and tracked
-to the deferred entry that owns its fix. Together the 441 mined obligations account
-completely — every case is replayed (PASS/ORDER/FAIL/NA) or claimed by exactly
-one manifest entry (SKIP) — and `check_results.py` fails the build on any orphan
-skip, double credit, undeferred FAIL, undocumented divergence, or README drift.
+**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 405/405 = 100.0%
+on both engines** — identical on whichever engine a given case dispatches to.
+There are zero FAILs and zero deferred divergences: every supported-surface case
+is replayed and matches ripgrep byte-for-byte. Together the 441 mined obligations
+account completely — every case is replayed (PASS/ORDER/FAIL/NA) or claimed by
+exactly one manifest entry (SKIP) — and `check_results.py` fails the build on any
+orphan skip, double credit, undeferred FAIL, undocumented divergence, or README drift.
 
 ### Complete obligation accounting (no misleading denominator)
 
@@ -49,7 +48,7 @@ live `rg` as one argv, and what it accounts for out-of-band in
 `coverage_manifest.toml` (`tomllib`-parsed, gate-enforced):
 
 - **405 replayed** — executed against real ripgrep and bucketed above
-  (391 PASS + 14 FAIL); NA (16) are replayed too but fall outside the parity
+  (405 PASS + 0 FAIL); NA (16) are replayed too but fall outside the parity
   denominator as announced design refusals.
 - **20 SKIP, each claimed once** by a manifest entry: **companion** (the miner
   couldn't lower a control-flow `rgtest!` to one argv, but a sibling proof —
@@ -57,8 +56,8 @@ live `rg` as one argv, and what it accounts for out-of-band in
   **boundary** (a purposeful decline whose adverse test is the loud exit-2
   itself), or **irreplayable** (the mined JSON can't encode the case, e.g. a
   non-UTF-8 filename).
-- **14 FAIL, each claimed once** by a **deferred** manifest entry naming the plan
-  phase that closes it (`rich-output`, `walk-scope`, `hard-paths`).
+- **0 FAIL** — the deferred list is empty; the `rich-output`, `walk-scope`, and
+  `hard-paths` divergences that once lived here are all closed and now PASS.
 
 `check_results.py` is the anti-gaming gate: it rejects a SKIP no companion
 claims, a case credited twice, a FAIL missing a `[[deferred]]` entry, a stale
@@ -181,8 +180,8 @@ gist is built for, geomean speedup, gist wins:
 | GNU grep |     ~5460× | 20/20 |
 | ugrep    |     ~6600× | 20/20 |
 
-The honest headline: gist is a **near-drop-in rg (96.5% supported-surface parity
-on both engines, with every remaining divergence explained and phase-tracked)**
+The honest headline: gist is a **drop-in rg (100% supported-surface parity
+on both engines, with zero remaining divergences)**
 that is **~3.3× faster cold** and **~1770× faster warm-resident** than ripgrep —
 the "40×" claim sits comfortably between the one-shot and resident models and is
 conservative for gist's intended long-lived agent-session use.

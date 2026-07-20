@@ -2186,48 +2186,48 @@
  {
   "name": "include_zero#1",
   "file": "misc.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--count",
    "--include-zero",
    "nada"
   ],
-  "detail": "exit rc gist=2 rg=1 \u00b7 rg stderr=''"
+  "detail": ""
  },
  {
   "name": "include_zero#2",
   "file": "misc.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--count",
    "--include-zero",
    "nada"
   ],
-  "detail": "stdout differs (gist 0B rc=2 \u00b7 rg 11B rc=1)"
+  "detail": ""
  },
  {
   "name": "include_zero_override#1",
   "file": "misc.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--count",
    "--include-zero",
    "--no-include-zero",
    "nada"
   ],
-  "detail": "exit rc gist=2 rg=1 \u00b7 rg stderr=''"
+  "detail": ""
  },
  {
   "name": "include_zero_override#2",
   "file": "misc.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--count",
    "--include-zero",
    "--no-include-zero",
    "nada"
   ],
-  "detail": "stdout matched but exit rc gist=2 rg=1"
+  "detail": ""
  },
  {
   "name": "files_with_matches",
@@ -3459,13 +3459,13 @@
  {
   "name": "r2711#4",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--hidden",
    "--files",
    "a/b"
   ],
-  "detail": "exit rc gist=0 rg=1 \u00b7 rg stderr=''"
+  "detail": ""
  },
  {
   "name": "r2711#5",
@@ -4108,7 +4108,7 @@
  {
   "name": "r1573#1",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--pcre2",
    "--multiline",
@@ -4116,12 +4116,12 @@
    "(?s)def (\\w+);(?=.*use \\w+)",
    "foo"
   ],
-  "detail": "stdout differs (gist 0B rc=1 \u00b7 rg 2B rc=0)"
+  "detail": ""
  },
  {
   "name": "r1573#2",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--pcre2",
    "--multiline",
@@ -4129,7 +4129,7 @@
    "(?s)def (\\w+);(?=.*use \\w+)",
    "foo"
   ],
-  "detail": "stdout differs (gist 0B rc=1 \u00b7 rg 2B rc=0)"
+  "detail": ""
  },
  {
   "name": "r1638",
@@ -4211,11 +4211,11 @@
  {
   "name": "r1838_nul_error_with_binary_detection#1",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "foo\\x00?"
   ],
-  "detail": "exit rc gist=0 rg=2 \u00b7 rg stderr='rg: pattern contains \"\\\\0\" but it is impossible to match\\n\\nConsider enabling text '"
+  "detail": ""
  },
  {
   "name": "r1838_nul_error_with_binary_detection#2",
@@ -4360,26 +4360,26 @@
  {
   "name": "r1878#3",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--no-mmap",
    "(?-m)^baz",
    "test"
   ],
-  "detail": "exit rc gist=0 rg=1 \u00b7 rg stderr=''"
+  "detail": ""
  },
  {
   "name": "r1878#4",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "-U",
    "--mmap",
    "(?-m)^baz",
    "test"
   ],
-  "detail": "exit rc gist=0 rg=1 \u00b7 rg stderr=''"
+  "detail": ""
  },
  {
   "name": "r1878#5",
@@ -4487,11 +4487,11 @@
  {
   "name": "r2236",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "test"
   ],
-  "detail": "exit rc gist=0 rg=2 \u00b7 rg stderr='rg: No files were searched, which means ripgrep probably applied a filter you di'"
+  "detail": ""
  },
  {
   "name": "r2480#1",
@@ -4607,12 +4607,12 @@
  {
   "name": "r2770_gitignore_error#2",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "-l",
    "quux"
   ],
-  "detail": "exit rc gist=0 rg=2 \u00b7 rg stderr='rg: No files were searched, which means ripgrep probably applied a filter you di'"
+  "detail": ""
  },
  {
   "name": "r2944_incorrect_bytes_searched",
@@ -4795,19 +4795,19 @@
  {
   "name": "r3139_multiline_lookahead_files_with_matches#1",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--multiline",
    "--pcre2",
    "(?s)Start(?=.*thing2)",
    "test"
   ],
-  "detail": "stdout differs (gist 0B rc=1 \u00b7 rg 7B rc=0)"
+  "detail": ""
  },
  {
   "name": "r3139_multiline_lookahead_files_with_matches#2",
   "file": "regression.rs",
-  "bucket": "FAIL",
+  "bucket": "PASS",
   "argv": [
    "--multiline",
    "--pcre2",
@@ -4815,7 +4815,7 @@
    "(?s)Start(?=.*thing2)",
    "test"
   ],
-  "detail": "stdout differs (gist 0B rc=1 \u00b7 rg 5B rc=0)"
+  "detail": ""
  },
  {
   "name": "r3173_hidden_whitelist_only_dot#1",

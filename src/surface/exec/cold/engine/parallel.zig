@@ -82,6 +82,10 @@ const Dir = std.Io.Dir;
 pub fn eligible(io: std.Io, parsed: args.Parsed, o: Opts) bool {
     if (args.envSpan("GIST_NO_PARALLEL") != null) return false;
     if (o.follow or o.json or o.quiet or o.stats or o.files_without or o.replace != null or o.max_filesize != 0 or o.multiline) return false;
+    // `--include-zero` must emit a `path:0` line for EVERY searched file, so it
+    // needs the serial engine's whole-file loop with the literal gate + index
+    // elision disabled — the streaming sink here culls non-matching files.
+    if (o.include_zero) return false;
     // A globally ordered result (`--sort`/`--sortr`) and a device-bounded walk
     // (`--one-file-system`) both need cross-file state the streaming sink can't
     // give, so they run on the serial engine — which still reads in parallel,

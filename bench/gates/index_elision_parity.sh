@@ -3,11 +3,14 @@
 # safety claim: the persisted trigram index is an ACCELERATION structure only,
 # never a semantic one. `gist <pattern>` uses the index solely to elide *reading*
 # files the live walk already found but that provably can't match (see
-# `src/runtime/cold/engine/serial.zig` `IndexSkip`); the walk stays the sole authority
-# on the file set, ignore semantics, ordering, and output. So for every query,
-# the index-accelerated run MUST be byte-for-byte identical to the same run with
-# `--no-index` (a full live read of every walked file). This gate proves exactly
-# that — the differential twin of `scan_regress.sh` (which proves the live scan
+# `src/surface/exec/cold/engine/serial.zig` `IndexSkip`); the walk stays the sole
+# authority on the file set, ignore semantics, and per-file output. So for every
+# query, the index-accelerated run MUST have the same byte-exact line multiset as
+# `--no-index` (a full live read of every walked file). The parallel engine
+# intentionally streams worker-discovery order, so independent runs compare the
+# line multiset (C-locale sorted, duplicates retained), not incidental cross-file
+# scheduling order. This gate proves exactly that — the differential twin of
+# `scan_regress.sh` (which proves the live scan
 # ≡ rg) and rgsuite (which proves the walk ≡ rg): here the oracle is gist's own
 # `--no-index` path, so "the index only changes speed, never results" is
 # continuously verified, not merely asserted (sins.mdc: truth, not vibes).
@@ -60,7 +63,9 @@ echo "indexing throwaway corpus…"
 }
 
 fails=0
-# One case: assert auto-index stdout == --no-index stdout, byte-for-byte.
+# One case: assert auto-index stdout has the same line multiset as --no-index.
+# Every emitted line remains byte-exact and duplicate counts remain load-bearing;
+# only cross-file scheduling order is normalized.
 chk() {
   local label="$1"
   shift
@@ -73,13 +78,15 @@ chk() {
     fails=$((fails + 1))
     return
   fi
-  if diff -q "${WORK}/.a" "${WORK}/.b" > /dev/null; then
+  LC_ALL=C sort "${WORK}/.a" > "${WORK}/.a.norm"
+  LC_ALL=C sort "${WORK}/.b" > "${WORK}/.b.norm"
+  if diff -q "${WORK}/.a.norm" "${WORK}/.b.norm" > /dev/null; then
     local lines
     lines=$(wc -l < "${WORK}/.a" | tr -d ' ')
     printf "  ok    %-22s (%s lines)\n" "${label}" "${lines}"
   else
     printf "  FAIL  %-22s stdout differs:\n" "${label}"
-    diff "${WORK}/.a" "${WORK}/.b" | head -12 | sed 's/^/        /'
+    diff "${WORK}/.a.norm" "${WORK}/.b.norm" | head -12 | sed 's/^/        /'
     fails=$((fails + 1))
   fi
 }
@@ -112,7 +119,7 @@ chk "freshness-lines" -n needle_alpha
 
 echo
 if [[ "${fails}" -eq 0 ]]; then
-  echo "PROVEN: every query's index-accelerated output is byte-identical to its --no-index full read — the index changes speed, never results (freshness overlay verified)."
+  echo "PROVEN: every query's index-accelerated output has the same byte-exact line multiset as its --no-index full read — the index changes speed, never results (freshness overlay verified)."
 else
   echo "FAILED: ${fails} case(s) diverged — the index is altering results, not just accelerating. See the table above."
   exit 1

@@ -18,7 +18,7 @@ moved.
 
 **Source of truth, not a copy.** The four ripgrep compatibility buckets are
 rendered straight from
-[`runtime/cold/argv/args.zig`](../../../runtime/cold/argv/args.zig)'s
+[`surface/exec/cold/argv/args.zig`](../../../exec/cold/argv/args.zig)'s
 `flag_catalog` — the same rows that build the short- and long-flag dispatch
 tables. If a flag is parseable, it appears here; if it appears here, the parser
 honors it. Drift between `--help` prose and the machine surface is impossible

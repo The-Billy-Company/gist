@@ -41,6 +41,17 @@ fn dial(io: std.Io, socket: []const u8) !net.Stream {
     return error.DaemonNeverCameUp;
 }
 
+/// Stop a test daemon before joining it. This belongs in `defer`, not at the
+/// happy-path tail: an assertion or protocol error must not strand `join()` on
+/// the daemon's ten-minute idle TTL.
+fn shutdownAndJoin(gpa: std.mem.Allocator, io: std.Io, socket: []const u8, thread: std.Thread) void {
+    if (dial(io, socket)) |stream| {
+        defer stream.close(io);
+        protocol.sendFrame(gpa, stream.socket.handle, .shutdown, "") catch {};
+    } else |_| {}
+    thread.join();
+}
+
 fn collectFiles(gpa: std.mem.Allocator, fd: std.posix.fd_t, arena: std.mem.Allocator, req: request.Request) ![]const []const u8 {
     var qbuf: std.ArrayList(u8) = .empty;
     defer qbuf.deinit(gpa);
@@ -201,7 +212,7 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
     const roots = try a.dupe([]const u8, &.{root});
 
     const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
-    defer t.join();
+    defer shutdownAndJoin(gpa, io, socket, t);
     defer shm.force_fail_for_test.store(false, .monotonic); // never leak the fault flag
 
     // "payload" occurs ONLY in big.txt, so the emit-heavy answer is a single doc
@@ -282,7 +293,7 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     const roots = try a.dupe([]const u8, &.{root});
 
     const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
-    defer t.join();
+    defer shutdownAndJoin(gpa, io, socket, t);
 
     const stream = try dial(io, socket);
     defer stream.close(io);
@@ -435,8 +446,7 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
         try std.testing.expectEqual(protocol.Opcode.pong, pong.op);
     }
 
-    // SHUTDOWN stops the accept loop; the daemon thread joins via `defer`.
-    try protocol.sendFrame(gpa, fd, .shutdown, "");
+    // Deferred teardown sends SHUTDOWN and joins even if an assertion above fails.
 }
 
 /// Wait until `fd` is readable, bounded — a regression back to the serial
@@ -475,7 +485,7 @@ test "serve: an idle persistent client does not starve a second connection" {
     const roots = try a.dupe([]const u8, &.{root});
 
     const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
-    defer t.join();
+    defer shutdownAndJoin(gpa, io, socket, t);
 
     // Client A: handshake, then go idle WITHOUT disconnecting — the exact shape
     // of a long-lived warm `Session` an agent batch holds open for minutes.
@@ -499,5 +509,5 @@ test "serve: an idle persistent client does not starve a second connection" {
     defer pong.deinit();
     try std.testing.expectEqual(protocol.Opcode.pong, pong.op);
 
-    try protocol.sendFrame(gpa, b_fd, .shutdown, "");
+    // Deferred teardown sends SHUTDOWN and joins even if an assertion above fails.
 }

@@ -1,8 +1,8 @@
 //! gist --schema — the deterministic, machine-readable capability manifest.
 //!
 //! Search compatibility is not prose copied from the parser. The four ripgrep
-//! buckets are rendered directly from `runtime/cold/argv/args.zig`'s declarative catalog,
-//! the same rows that build the short- and long-flag dispatch tables.
+//! buckets are rendered directly from `surface/exec/cold/argv/args.zig`'s declarative
+//! catalog, the same rows that build the short- and long-flag dispatch tables.
 
 const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
@@ -49,7 +49,7 @@ const manifest_prefix =
     \\    ],
     \\    "flag_surface": "broad, tested ripgrep-compatible subset; not full ripgrep compatibility. Unsupported and unknown flags fail loud with exit 2.",
     \\    "ripgrep_compatibility": {
-    \\      "source_of_truth": "src/runtime/cold/argv/args.zig:flag_catalog",
+    \\      "source_of_truth": "src/surface/exec/cold/argv/args.zig:flag_catalog",
     \\      "unknown_flags": "unsupported-fail-loud",
     \\      "buckets": {
 ;
@@ -162,4 +162,16 @@ test "--schema is valid JSON derived from the parser catalog" {
     try t.expect(std.mem.indexOf(u8, manifest, "\\\\b/\\\\w") != null);
     try t.expect(std.mem.indexOf(u8, manifest, "98" ++ ".6") == null);
     try t.expect(std.mem.indexOf(u8, manifest, "known " ++ "FAIL") == null);
+
+    // The advertised `source_of_truth` must name the LIVE catalog location, not
+    // the pre-move `runtime/cold` path. `@embedFile` on the SAME relative path
+    // the module imports (`args` above) is a COMPILE-TIME existence proof: if the
+    // catalog is relocated again, this fails to build, forcing the public string
+    // below to be updated in lockstep — the manifest can never silently outlive
+    // its authority.
+    comptime {
+        _ = @embedFile("../../../exec/cold/argv/args.zig");
+    }
+    try t.expect(std.mem.indexOf(u8, manifest, "\"source_of_truth\": \"src/surface/exec/cold/argv/args.zig:flag_catalog\"") != null);
+    try t.expect(std.mem.indexOf(u8, manifest, "runtime/cold") == null); // no stale pre-move pointer survives
 }

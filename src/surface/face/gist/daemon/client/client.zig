@@ -33,6 +33,7 @@
 //!     never pays the FIFO poll.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const request = @import("../../../../exec/session/request.zig");
 const protocol = @import("../../../../exec/session/protocol.zig");
 const shm = @import("../../../../exec/session/shm.zig");
@@ -74,30 +75,34 @@ pub const Outcome = union(enum) {
 /// timed out / poll error — caller falls through to cold. Prefer `poll` over
 /// `SO_RCVTIMEO`: the latter's `timeval` ABI is easy to get wrong across libc
 /// cuts, and a silent setsockopt failure used to leave the CLI blocked forever.
-fn waitReadable(fd: std.posix.fd_t) bool {
+fn waitReadable(fd: std.posix.fd_t, timeout_ms: i32) bool {
     var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
-    const n = std.posix.poll(&pfd, client_io_timeout_ms) catch return false;
+    const n = std.posix.poll(&pfd, timeout_ms) catch return false;
     // Only IN means "bytes ready". HUP/ERR alone must not look like a READY
     // frame — that would skip the deadline and race a closing peer to cold.
     return n > 0 and (pfd[0].revents & std.posix.POLL.IN) != 0;
 }
 
 /// Receive one frame, but never block longer than `client_io_timeout_ms`.
-fn recvFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t) !protocol.Frame {
-    if (!waitReadable(fd)) return error.TimedOut;
+fn recvFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i32) !protocol.Frame {
+    if (!waitReadable(fd, timeout_ms)) return error.TimedOut;
     return protocol.recvFrame(gpa, fd);
 }
 
 /// Like `recvFrameDeadline`, but over `recvmsg` so a `chunk_fd` answer's passed
 /// shm fd is captured (null for every other frame). Used for the query response
 /// once we've advertised `cap_fd_transport`.
-fn recvFdFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t) !protocol.FdFrame {
-    if (!waitReadable(fd)) return error.TimedOut;
+fn recvFdFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i32) !protocol.FdFrame {
+    if (!waitReadable(fd, timeout_ms)) return error.TimedOut;
     return protocol.recvFrameWithFd(gpa, fd);
 }
 
 /// Try to answer `argv` warm. Never errors: any failure is `.cold`.
 pub fn attempt(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, socket_path: []const u8) Outcome {
+    return attemptWithDeadline(gpa, io, argv, socket_path, client_io_timeout_ms);
+}
+
+fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, socket_path: []const u8, timeout_ms: i32) Outcome {
     const req = request.classify(argv) catch return .cold;
     // The wire count is a corpus-wide total; rg's `-c` is per-file — cold owns
     // it. But `-q` overrides the mode entirely (it answers existence, prints
@@ -118,8 +123,16 @@ pub fn attempt(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, soc
     // FIFO poll (`readableStdin` may wait up to its short poll window).
     if (run.readableStdin()) return .cold;
 
-    return exchange(gpa, fd, req) catch .cold;
+    return exchange(gpa, fd, req, timeout_ms) catch .cold;
 }
+
+/// Test-only seam for exercising fail-open behavior without spending the
+/// production two-second budget in a scheduler-sensitive wall-clock assertion.
+pub const test_api = if (builtin.is_test) struct {
+    pub fn attemptWithin(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, socket_path: []const u8, timeout_ms: i32) Outcome {
+        return attemptWithDeadline(gpa, io, argv, socket_path, timeout_ms);
+    }
+} else struct {};
 
 /// One request/response over an open connection: handshake, send the query, and
 /// emit the answer — a `result(files)` frame becomes the sorted path list; a
@@ -129,14 +142,14 @@ pub fn attempt(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, soc
 /// wire failure still degrades to a clean cold run with no duplicated output).
 /// A `decline`/`err` frame (or any wire error / deadline) propagates so
 /// `attempt` degrades to cold.
-fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request) !Outcome {
+fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request, timeout_ms: i32) !Outcome {
     // Handshake: HELLO → READY. The second HELLO byte advertises our transport
     // capabilities (`cap_fd_transport` on a supported target); an old daemon
     // ignores it and simply never sends `chunk_fd`. A daemon speaking another
     // protocol version is not one we can trust to frame-match, so bail to cold.
     try protocol.sendFrame(gpa, fd, .hello, &.{ protocol.protocol_version, advertisedCaps() });
     {
-        var ready = try recvFrameDeadline(gpa, fd);
+        var ready = try recvFrameDeadline(gpa, fd, timeout_ms);
         defer ready.deinit();
         if (ready.op != .ready) return .cold;
         const r = protocol.decodeReady(ready.payload()) catch return .cold;
@@ -151,7 +164,7 @@ fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request) !O
     var lines_out: std.ArrayList(u8) = .empty;
     defer lines_out.deinit(gpa);
     while (true) {
-        const got = try recvFdFrameDeadline(gpa, fd);
+        const got = try recvFdFrameDeadline(gpa, fd, timeout_ms);
         var resp = got.frame;
         defer resp.deinit();
         // Only `chunk_fd` legitimately carries an fd; a stray one on any other
