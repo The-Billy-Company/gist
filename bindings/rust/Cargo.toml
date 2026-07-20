@@ -1,10 +1,12 @@
 # Standalone crate — deliberately EXCLUDED from the repo-root Cargo workspace
-# (see `[workspace] exclude` in /Cargo.toml). Unlike the sibling C-ABI bindings
-# (principia / lamina / billog) this crate links NO native archive: it is a
-# subprocess transport over the certified `gist` binary (ADR-352), so it needs
-# neither `make build-gist` nor `zig-out/`. It is standalone anyway so the whole
+# (see `[workspace] exclude` in /Cargo.toml). By default it links NO native
+# archive: it is a subprocess transport over the certified `gist` binary
+# (ADR-352), so it needs neither `make build-gist` nor `zig-out/`, and the whole
 # `bindings/rust/` tree lifts out cleanly for the public OSS release with its own
-# `Cargo.lock` + toolchain, never dragging the workspace graph along.
+# `Cargo.lock` + toolchain. The opt-in `native` feature is the graduation rung:
+# it links the self-contained `libirregex` and adds the in-process warm
+# `Engine`/`Cursor` surface (like the sibling principia / lamina / billog
+# bindings), still with the subprocess API intact beside it.
 [package]
 name = "gist"
 version = "0.1.0"                                                                                                  # x-release-please-version
@@ -16,6 +18,14 @@ description = "Importable, rg-parity search API over the GIST code-search kernel
 
 [lib]
 name = "gist"
+
+# `native` (opt-in) links the self-contained `libirregex` and exposes the
+# in-process pull-cursor `Engine`/`Cursor` surface (ADR-352); its `build.rs`
+# resolves the library beside the kernel (or `$GIST_LIB_DIR`). Default stays a
+# pure subprocess transport so the tree lifts out cleanly for the OSS release.
+[features]
+default = []
+native = []
 
 [dependencies]
 # ripgrep's `--json` record stream is the wire format; serde is the idiomatic,

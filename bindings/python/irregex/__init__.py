@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from . import aggregate, engine, kinship
 from .aggregate import Group, Tally, tally
 from .contract import ABI_VERSION, ENGINE_VERSION
+from .cursor import CancelToken, Cursor, Engine
 from .errors import (
     GistError,
     GistNotFoundError,
@@ -22,15 +23,6 @@ from .introspection import (
     index,
     status,
 )
-from .request import (
-    Match,
-    MatchKind,
-    Ranked,
-    RankKind,
-    SearchEngine,
-    SearchRequest,
-    Submatch,
-)
 from .kinship import (
     DupPair,
     PatternCount,
@@ -40,6 +32,15 @@ from .kinship import (
     pattern_counts,
     patterns,
     similar,
+)
+from .request import (
+    Match,
+    MatchKind,
+    Ranked,
+    RankKind,
+    SearchEngine,
+    SearchRequest,
+    Submatch,
 )
 from .session import (
     Session,
@@ -62,12 +63,15 @@ if TYPE_CHECKING:
 __all__ = [
     "ABI_VERSION",
     "ENGINE_VERSION",
+    "CancelToken",
+    "Capabilities",
+    "Cursor",
     "DupPair",
+    "Engine",
+    "FlagCapability",
     "GistError",
     "GistNotFoundError",
     "Group",
-    "Capabilities",
-    "FlagCapability",
     "IndexState",
     "IndexStatus",
     "Match",
@@ -76,12 +80,12 @@ __all__ = [
     "PatternHit",
     "RankKind",
     "Ranked",
-    "Similar",
-    "SearchFailedError",
     "SearchEngine",
+    "SearchFailedError",
     "SearchRequest",
     "Session",
     "SessionGeneration",
+    "Similar",
     "Submatch",
     "Tally",
     "UnsupportedPatternError",
@@ -100,11 +104,11 @@ __all__ = [
     "pattern_counts",
     "patterns",
     "rank",
-    "similar",
     "request_from_tool",
     "run",
-    "search",
     "schema",
+    "search",
+    "similar",
     "status",
     "summary",
     "tally",

@@ -29,13 +29,40 @@ the **same** certified `gist` binary. It builds the exact rg-parity argv the CLI
 accepts, runs the binary with `--json`, and parses the JSON-lines stream — so
 results come from the same engine the CLI uses, never a second matcher.
 
-Subprocess is the authoritative transport (ADR-352): the engine fails loud on
+Subprocess is the default transport (ADR-352): the CLI engine fails loud on
 unsupported input via `die()` → `process::exit(2)`, which would terminate a host
-that linked it in-process. Here a bad pattern exits the _child_ and surfaces as a
+that linked *it* in-process. Here a bad pattern exits the _child_ and surfaces as a
 typed `Error::UnsupportedPattern` — the host is never touched.
 
 The binary is resolved at call time: env `GIST_BIN`, then `gist` on `PATH`, then
 the repo's `zig-out/bin/gist`. Build it with `make install-gist`.
+
+## In-process warm engine — the `native` feature
+
+The pull-cursor C ABI (ADR-352) is the graduation rung, and it never `die()`s:
+every failure is the same typed `Error`. Build with `--features native` and the
+crate additionally links the self-contained `libirregex` and exposes a warm
+`Engine` held open across queries, each yielding a pull `Cursor` of owned
+`Match` records — the callback-free sibling of the daemon `Session`:
+
+```rust
+let engine = gist::Engine::open(["services/backend"])?;   // none = rootless CWD walk
+for m in engine.search(&gist::SearchRequest::new("TODO"))? {
+    let m = m?;                                            // Iterator<Item = Result<Match>>
+    println!("{}:{}: {}", m.path, m.line_number, m.text);
+}
+
+let tok = engine.cancel_token()?;                          // trip from another thread
+let cur = engine.run(&req, gist::Run::default().max_results(100).cancel(&tok))?;
+for batch in cur.batches(64) { /* amortize the FFI crossing */ }
+```
+
+`Engine::search` is serialized (single-writer), but the cursors it returns own
+their records and iterate independently. An option the ABI can't carry
+(glob/type scoping, multiline, a non-linear engine) is a typed
+`Error::Unrepresentable` — use `SearchRequest::run` (subprocess) for the full CLI
+surface. The `build.rs` resolves `libirregex` beside the kernel or at
+`$GIST_LIB_DIR`; build it with `make install-gist`.
 
 ## Warm path — persistent `Session` (ADR-352 rung 2.5, Unix)
 
@@ -112,22 +139,23 @@ index there is nothing to rank and the result is empty. The `limit` caps the row
 
 ## Standalone by design
 
-Unlike the sibling C-ABI bindings (`principia` / `lamina` / `billog`), this crate
-links **no** native archive — it drives a process — so it needs neither
-`make build-gist` nor `zig-out/`. It is nonetheless a standalone crate (own
-`Cargo.lock` + toolchain, excluded from the repo workspace) so the whole
-`bindings/rust/` tree lifts out cleanly for the public OSS release without
-dragging the workspace graph along.
+By **default** this crate links no native archive — it drives a process — so it
+needs neither `make build-gist` nor `zig-out/`, and the whole `bindings/rust/`
+tree lifts out cleanly for the public OSS release (own `Cargo.lock` + toolchain,
+excluded from the repo workspace). The opt-in `native` feature is where it joins
+the sibling C-ABI bindings (`principia` / `lamina` / `billog`) and links
+`libirregex`.
 
 ```bash
 cd pkg/kernels/irregex/bindings/rust
-cargo test           # behavioral + rg-parity (skips cleanly without gist/rg)
-cargo clippy         # -D warnings clean
+cargo test                    # subprocess: behavioral + rg-parity (skips without gist/rg)
+cargo test --features native  # + in-process Engine/Cursor parity vs cold (needs libirregex)
+cargo clippy --all-features   # clean
 ```
 
 ## Prior art
 
 Drives the same engine as `rg` (the tool it is a drop-in for); the
 request/result contract mirrors ripgrep's `--json` record stream. The Python
-face lives at [`../python`](../python); the C-ABI FFI rung follows the sibling
-kernel bindings once the engine's error path is refactored.
+face lives at [`../python`](../python), the Go face at [`../go`](../go); all
+realize the one `SearchRequest → Match` contract over the same engine.

@@ -1,10 +1,10 @@
 ---
 doc_radar:
   counts:
-    - description: "bindings keep Python and Rust faces"
+    - description: "bindings keep Python, Rust, and Go faces"
       glob: pkg/kernels/irregex/bindings/*
       unit: dirs
-      equals: 2
+      equals: 3
   sentinels:
     - description: "both faces mirror the unified search contract"
       file: pkg/kernels/irregex/contract/search_api.toml
@@ -21,13 +21,15 @@ They are conveniences over the certified engine — not a second matcher.
 | ------- | -------------- | ---- |
 | [`python/`](python) | `billy-irregex` → `import irregex` | Gist search + Relate kinship through one package |
 | [`rust/`](rust) | crate `gist` | Same surface for Rust hosts + contract parity tests |
+| [`go/`](go) | module `…/bindings/go` | Pull-cursor cgo binding: warm `Engine`, `context`-driven `Cursor` |
 
 ## Transport ladder
 
 1. **Subprocess** — authoritative; drives the installed `gist` binary.
 2. **UDS warm session** — fail-open accelerator when `gist serve` is up.
-3. **In-process FFI** (Python cffi over `libirregex`) — fail-open; never
-   aborts the host on a bad pattern.
+3. **In-process FFI** over `libirregex` — Python cffi, the Rust `native`
+   feature, and the Go cgo binding all ride the pull-cursor C ABI (ADR-352);
+   fail-open, and a bad pattern is a typed error, never a host abort.
 
 Constants and option names are mirrored from
 [`../contract/search_api.toml`](../contract/search_api.toml) and asserted in
@@ -41,4 +43,4 @@ change first, bindings second.
 - Aggregate helpers (`rank`, `summary`, tool-payload adapters).
 
 Per-language docs: [`python/README.md`](python/README.md),
-[`rust/README.md`](rust/README.md).
+[`rust/README.md`](rust/README.md), [`go/README.md`](go/README.md).

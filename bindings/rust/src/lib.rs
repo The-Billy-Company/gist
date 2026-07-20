@@ -37,25 +37,51 @@
 //! ## Why subprocess, not FFI
 //!
 //! The engine fails loud on unsupported input via `die()` → `process::exit(2)`,
-//! which is fatal for a naive in-process link. This crate is therefore a
-//! **subprocess transport** — the authoritative one today: a bad pattern exits
-//! the child and surfaces as [`Error::UnsupportedPattern`], never a terminated
-//! host. A resident in-process FFI session is GIST's specified graduation rung;
-//! when it lands, this same API swaps its transport underneath unchanged.
+//! which is fatal for a naive in-process link. The default crate is therefore a
+//! **subprocess transport**: a bad pattern exits the child and surfaces as
+//! [`Error::UnsupportedPattern`], never a terminated host. It carries no native
+//! archive, so it lifts out cleanly for an OSS release.
 //!
 //! The binary is resolved at call time: env `GIST_BIN`, then `gist` on `PATH`,
 //! then the repo's `zig-out/bin/gist`. Build it with `make install-gist`.
+//!
+//! ## The `native` feature — an in-process warm engine
+//!
+//! Opt into `native` and the crate additionally links the self-contained
+//! `libirregex` shared library and exposes the pull-cursor surface (ADR-352): a
+//! warm [`Engine`] held open across many queries, each yielding a pull [`Cursor`]
+//! that iterates owned [`Match`] records, with a thread-safe [`CancelToken`] and
+//! per-operation [`Run`] budgets. It never `die()`s — every failure is the same
+//! typed [`Error`]. The `build.rs` resolves the library beside the kernel (or at
+//! `$GIST_LIB_DIR`); build it with `make install-gist`.
+//!
+//! ```no_run
+//! # #[cfg(feature = "native")] {
+//! let engine = gist::Engine::open(["services/backend"])?;
+//! for m in engine.search(&gist::SearchRequest::new("TODO"))? {
+//!     let m = m?;
+//!     println!("{}:{}: {}", m.path, m.line_number, m.text);
+//! }
+//! # }
+//! # Ok::<(), gist::Error>(())
+//! ```
 
 mod aggregate;
 pub mod contract;
+#[cfg(feature = "native")]
+mod cursor;
 mod engine;
 mod error;
 mod request;
 #[cfg(unix)]
 mod session;
+#[cfg(feature = "native")]
+mod sys;
 
 pub use aggregate::{Axis, Group, Tally, tally, tally_by};
 pub use contract::{Match, MatchKind, RankKind, Ranked, Submatch};
+#[cfg(feature = "native")]
+pub use cursor::{Batches, CancelToken, Cursor, Engine, Run, DEFAULT_BATCH};
 pub use error::{Error, Result};
 pub use request::{SearchEngine, SearchRequest};
 #[cfg(unix)]

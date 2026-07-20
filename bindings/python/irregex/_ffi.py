@@ -64,14 +64,43 @@ int32_t irregex_search(irregex_session *s, const uint8_t *pattern,
                     size_t pattern_len, const irregex_search_options *options,
                     irregex_match_fn on_match, void *ctx);
 void irregex_close(irregex_session *s);
+
+/* the pull-cursor surface (ADR-352): open an engine, materialize a cursor,
+   walk it with next / next_batch — no C-to-Python callback, so cffi releases
+   the GIL for the duration of each native pull. */
+typedef struct irregex_engine irregex_engine;
+typedef struct irregex_cursor irregex_cursor;
+typedef struct irregex_cancel irregex_cancel;
+typedef struct {
+  uint32_t struct_size; uint32_t flags; uint64_t max_count;
+  uint64_t before_context; uint64_t after_context;
+  const uint8_t *pattern; size_t pattern_len;
+  uint64_t timeout_ns; size_t max_results; irregex_cancel *cancel;
+} irregex_search_request;
+int32_t irregex_engine_open(const char *const *roots, size_t nroots, irregex_engine **out);
+void irregex_engine_close(irregex_engine *engine);
+int32_t irregex_cancel_new(irregex_cancel **out);
+void irregex_cancel_request(irregex_cancel *token);
+void irregex_cancel_free(irregex_cancel *token);
+int32_t irregex_search_cursor(irregex_engine *engine, const irregex_search_request *request,
+                              irregex_cursor **out);
+int32_t irregex_cursor_next(irregex_cursor *cursor, irregex_match *out);
+int32_t irregex_cursor_next_batch(irregex_cursor *cursor, irregex_match *out, size_t cap,
+                                  size_t *written);
+int32_t irregex_cursor_matched(irregex_cursor *cursor);
+void irregex_cursor_close(irregex_cursor *cursor);
+const char *irregex_status_message(int32_t code);
 """
 
-# The C-ABI symbol version the loader gates on (`root.zig::abi`). ABI 1 is the
-# coherent open/search/close interface. This is distinct from the contract's
-# `search_api.toml` `[meta].abi_version` (`gist.ABI_VERSION`), which they may
-# diverge from. Callbacks below always return 0 (CONTINUE) — the Python API
-# wants every match — so the abort path is exercised only by future consumers.
-_ABI_VERSION = 1
+# The C-ABI symbol version the loader gates on (`root.zig::abi`). ABI 2 is the
+# open/search/close interface whose match callback (`irregex_match_fn`) returns
+# an `i32` abort code — the breaking signature change that stepped it 1 → 2
+# (ADR-352). This is the same integer the contract's `search_api.toml`
+# `[meta].abi_version` (`gist.ABI_VERSION`) mirrors; the semantic contract
+# revision and format axes version independently. Callbacks below always return
+# 0 (CONTINUE) — the Python API wants every match — so the abort path is
+# exercised only by future consumers.
+_ABI_VERSION = 2
 _CONTINUE = 0  # a match-callback return of 0 keeps the stream going
 _FLAG_FIXED, _FLAG_IGNORE_CASE, _FLAG_WORD, _FLAG_QUIET = 1 << 0, 1 << 1, 1 << 2, 1 << 3
 _FLAG_MAX_COUNT, _FLAG_SMART_CASE = 1 << 4, 1 << 5
@@ -140,8 +169,8 @@ def _try_load() -> tuple[FFI, object] | None:
     try:
         lib = ffi.dlopen(lib_path)
         # Resolve the required search entry eagerly; a stale library declines
-        # here instead of raising on the first query.
-        getattr(lib, "irregex_search")
+        # here (AttributeError) instead of raising on the first query.
+        _ = lib.irregex_search
         if lib.irregex_abi_version() != _ABI_VERSION:
             return None  # header/library ABI drift — decline, answer cold
     except (AttributeError, OSError):
@@ -152,6 +181,13 @@ def _try_load() -> tuple[FFI, object] | None:
 def available() -> bool:
     """Whether the in-process transport can be used (library loaded, ABI matches)."""
     return _load() is not None
+
+
+def load() -> tuple[FFI, object] | None:
+    """The loaded `(ffi, lib)` pair, or None when the in-process library is
+    absent / ABI-skewed. The idiomatic `Engine`/`Cursor` surface (`cursor.py`)
+    drives the pull-cursor symbols off this same handle the push session uses."""
+    return _load()
 
 
 class Handle:

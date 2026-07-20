@@ -5,8 +5,8 @@
  * irregex_open / irregex_search / irregex_close
  * stream match records to a callback with no subprocess, socket, stdout, or
  * exit. Every session call returns a status code instead of aborting, so a bad
- * query never terminates the host. Index BUILD lifecycle stays a Zig/CLI
- * surface (a session searches the live tree). */
+ * query never terminates the host. Index
+ * BUILD lifecycle stays a Zig/CLI surface (a session searches the live tree). */
 #ifndef IRREGEX_H
 #define IRREGEX_H
 
@@ -118,6 +118,83 @@ int32_t irregex_search(irregex_session *s, const uint8_t *pattern,
 
 /* Free a session opened by irregex_open. */
 void irregex_close(irregex_session *s);
+
+/* ── the pull-cursor surface (ADR-352) ─────────────────────────────────────
+ * The triad above PUSHES matches to on_match; these PULL. A host opens an
+ * irregex_engine, runs irregex_search_cursor to materialize an irregex_cursor,
+ * then walks it with irregex_cursor_next / _next_batch — inverting control for a
+ * caller (Go's cgo, an async runtime, a REPL) that can't hand its stack to a
+ * callback. Cancellation is an irregex_cancel handle any thread may trip mid
+ * search. Additive over the triad, so irregex_abi_version stays 2; every entry
+ * still returns a status and never terminates the host. */
+
+/* Opaque owned handles. Each has exactly one NULL-safe destructor. */
+typedef struct irregex_engine irregex_engine;
+typedef struct irregex_cursor irregex_cursor;
+typedef struct irregex_cancel irregex_cancel;
+
+/* One complete cursor search shape. Initialize struct_size to
+ * sizeof(irregex_search_request); it is append-only, so a newer field is a
+ * forward-compatible extension and an unknown size/flag fails closed with
+ * IRREGEX_INVALID. Budgets use 0 = "unset"; cancel is an optional irregex_cancel
+ * (NULL = none). Flag bits reuse the IRREGEX_* set above. */
+typedef struct {
+  uint32_t struct_size;
+  uint32_t flags;
+  uint64_t max_count;
+  uint64_t before_context;
+  uint64_t after_context;
+  const uint8_t *pattern;
+  size_t pattern_len;
+  uint64_t timeout_ns;  /* monotonic wall-clock budget; 0 = no deadline */
+  size_t max_results;   /* result-count budget; 0 = unbounded */
+  irregex_cancel *cancel;
+} irregex_search_request;
+
+/* Open a warm engine over roots[0..nroots] (NUL-terminated; nroots == 0 = the
+ * rootless CWD walk). Writes the handle to *out; IRREGEX_OK or a negative status. */
+int32_t irregex_engine_open(const char *const *roots, size_t nroots, irregex_engine **out);
+
+/* Free an engine opened by irregex_engine_open. */
+void irregex_engine_close(irregex_engine *engine);
+
+/* Allocate a fresh (unset) cancellation token; writes it to *out. */
+int32_t irregex_cancel_new(irregex_cancel **out);
+
+/* Request cancellation of any in-flight search using this token (thread-safe;
+ * the search stops at its next record boundary). */
+void irregex_cancel_request(irregex_cancel *token);
+
+/* Free a token from irregex_cancel_new (after searches using it complete). */
+void irregex_cancel_free(irregex_cancel *token);
+
+/* Run one search and materialize a pull cursor; writes it to *out. Returns
+ * IRREGEX_OK, or a negative fail-closed status (IRREGEX_STALE = answer cold). */
+int32_t irregex_search_cursor(irregex_engine *engine, const irregex_search_request *request,
+                              irregex_cursor **out);
+
+/* Fill *out with the next record. Returns IRREGEX_MATCH (a record was written),
+ * IRREGEX_OK (end of stream; *out untouched), or a negative status. The view
+ * BORROWS: path/line alias the cursor arena (valid until irregex_cursor_close),
+ * submatches alias reusable scratch (valid only until the next next/_next_batch). */
+int32_t irregex_cursor_next(irregex_cursor *cursor, irregex_match *out);
+
+/* Fill up to cap records into out[0..cap]; writes the count to *written. Returns
+ * IRREGEX_MATCH (>=1 written), IRREGEX_OK (end, 0 written), or a negative status.
+ * All views in a batch share the cursor scratch — valid only until the next call. */
+int32_t irregex_cursor_next_batch(irregex_cursor *cursor, irregex_match *out, size_t cap,
+                                  size_t *written);
+
+/* Whether any file matched (cold's exit-code boolean), even if a budget cut the
+ * scan short: 1 matched, 0 none. */
+int32_t irregex_cursor_matched(irregex_cursor *cursor);
+
+/* Free a cursor from irregex_search_cursor. */
+void irregex_cursor_close(irregex_cursor *cursor);
+
+/* A stable, static, NUL-terminated human message for a status code (for logs;
+ * the typed code stays the contract). Never NULL. */
+const char *irregex_status_message(int32_t code);
 
 #ifdef __cplusplus
 }

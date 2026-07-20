@@ -22,6 +22,12 @@ pub enum Error {
     /// unreadable directory, a missing explicit path) — fail-loud, never a
     /// silent empty result.
     Failed(String),
+    /// A [`crate::SearchRequest`] option the in-process cursor ABI cannot honor
+    /// (glob/type scoping, multiline, `no_index`, a non-linear `engine`, …). The
+    /// in-process `Engine` carries only match-finding intent the C ABI has a
+    /// field for; run the full CLI surface through [`crate::SearchRequest::run`]
+    /// instead. Only reachable under the `native` feature.
+    Unrepresentable(String),
     /// The child process could not be spawned or its pipes could not be read.
     Io(std::io::Error),
 }
@@ -35,6 +41,7 @@ impl fmt::Display for Error {
             Self::NotFound(m) => write!(f, "gist binary not found: {m}"),
             Self::UnsupportedPattern(m) => write!(f, "unsupported pattern: {m}"),
             Self::Failed(m) => write!(f, "gist search failed: {m}"),
+            Self::Unrepresentable(m) => write!(f, "option not representable in-process: {m}"),
             Self::Io(e) => write!(f, "gist io error: {e}"),
         }
     }

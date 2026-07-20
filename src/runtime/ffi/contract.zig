@@ -56,3 +56,29 @@ pub const Match = extern struct {
 };
 
 pub const MatchFn = *const fn (ctx: ?*anyopaque, match: *const Match) callconv(.c) i32;
+
+// ── the pull-cursor surface (ADR-352) ──────────────────────────────────────
+// The push callback above streams; this shape lets a host PULL. `irregex_engine`
+// and `irregex_cancel` are opaque handles (`api.Engine` / `api.CancelToken` by
+// pointer); `irregex_cursor` owns a materialized, arena-backed record buffer the
+// host walks with `next` / `next_batch`. All additive — the legacy triad above
+// keeps working, so `abi()` stays 2.
+
+/// One complete cursor search shape. Append-only + `struct_size`-checked so a
+/// newer field is a forward-compatible ABI extension, never a silent reinterpret.
+/// `cancel` is an optional `irregex_cancel` handle; the budgets use 0 = "unset".
+pub const SearchRequest = extern struct {
+    struct_size: u32,
+    flags: u32,
+    max_count: u64,
+    before_context: u64,
+    after_context: u64,
+    pattern: ?[*]const u8,
+    pattern_len: usize,
+    /// Monotonic wall-clock budget in ns (0 = no deadline).
+    timeout_ns: u64,
+    /// Result-count budget (0 = unbounded).
+    max_results: usize,
+    /// Optional `irregex_cancel` handle (null = no cancellation).
+    cancel: ?*anyopaque,
+};
