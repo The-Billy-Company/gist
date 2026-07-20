@@ -28,46 +28,15 @@ const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const pairs = @import("../../../kernel/kinship/cluster/pairs.zig");
 const parallel = @import("../../../kernel/primitives/parallel.zig");
+const flags = @import("../../cli/flags.zig");
 
 const oom = cli_args.oom;
 const die = cli_args.die;
 pub const Sketch = sketch.Sketch;
 pub const Silhouette = silhouette_mod.Silhouette;
 
-// ── root + path plumbing (shared by every relate verb) ──
-
-/// The value slot after a flag, or `die(msg)` when argv ends first.
-pub fn need(argv: []const []const u8, i: *usize, comptime msg: []const u8) []const u8 {
-    i.* += 1;
-    if (i.* >= argv.len) die(msg, .{});
-    return argv[i.*];
-}
-
-/// Parse the value of an integer flag (`--top 5`), dying with a uniform
-/// bad-number message keyed on `flag` — the shared int-flag parse every
-/// relate/irregex verb consumes instead of re-spelling `parseInt … catch die`.
-pub fn count(argv: []const []const u8, i: *usize, comptime flag: []const u8) usize {
-    return std.fmt.parseInt(usize, need(argv, i, flag ++ " needs a number\n"), 10) catch
-        die(flag ++ ": bad number: {s}\n", .{argv[i.*]});
-}
-
-/// Parse `--min-size`: an integer ≥ 2, since a family needs at least two
-/// members. Shared by `relate concepts` and the composed `irregex family`.
-pub fn minSize(argv: []const []const u8, i: *usize) usize {
-    const n = count(argv, i, "--min-size");
-    if (n < 2) die("--min-size: a family needs at least 2 members\n", .{});
-    return n;
-}
-
-/// Parse a finite distance/echo threshold. NaN and infinities must not enter
-/// ordering predicates: they make every comparison false and silently empty
-/// otherwise-valid result sets.
-pub fn unitFloat(raw: []const u8, flag: []const u8) f64 {
-    const value = std.fmt.parseFloat(f64, raw) catch die("{s}: bad number: {s}\n", .{ flag, raw });
-    if (!std.math.isFinite(value) or value < 0.0 or value > 1.0)
-        die("{s}: expected a finite number in [0,1], got {s}\n", .{ flag, raw });
-    return value;
-}
+// ── the relate query option surface (Opts + parseOpts) ──
+// Face-agnostic argv/root/emit plumbing lives in `../../cli/{flags,emit}.zig`.
 
 /// Which distance a kinship verb ranks by: the raw-byte LZJD sketch, the
 /// normalized-structure silhouette, or their minimum ("close in EITHER
@@ -111,16 +80,16 @@ pub fn parseOpts(
     while (i < argv.len) : (i += 1) {
         const arg = argv[i];
         if (cfg.max_dist and std.mem.eql(u8, arg, "--max-distance")) {
-            opts.max_dist = unitFloat(need(argv, &i, "--max-distance needs a number in [0,1]\n"), "--max-distance");
+            opts.max_dist = flags.unitFloat(flags.need(argv, &i, "--max-distance needs a number in [0,1]\n"), "--max-distance");
         } else if (cfg.min_size and std.mem.eql(u8, arg, "--min-size")) {
-            opts.min_size = std.fmt.parseInt(usize, need(argv, &i, "--min-size needs a number ≥ 2\n"), 10) catch die("--min-size: bad number: {s}\n", .{argv[i]});
+            opts.min_size = std.fmt.parseInt(usize, flags.need(argv, &i, "--min-size needs a number ≥ 2\n"), 10) catch die("--min-size: bad number: {s}\n", .{argv[i]});
             if (opts.min_size < 2) die("--min-size: a family needs at least 2 members\n", .{});
         } else if (cfg.lens and std.mem.eql(u8, arg, "--lens")) {
-            opts.lens = std.meta.stringToEnum(Lens, need(argv, &i, "--lens needs bytes|structure|fused\n")) orelse die("--lens: bytes, structure, or fused, not {s}\n", .{argv[i]});
+            opts.lens = std.meta.stringToEnum(Lens, flags.need(argv, &i, "--lens needs bytes|structure|fused\n")) orelse die("--lens: bytes, structure, or fused, not {s}\n", .{argv[i]});
         } else if (cfg.min_echo and std.mem.eql(u8, arg, "--min-echo")) {
-            opts.min_echo = unitFloat(need(argv, &i, "--min-echo needs a number in [0,1]\n"), "--min-echo");
+            opts.min_echo = flags.unitFloat(flags.need(argv, &i, "--min-echo needs a number in [0,1]\n"), "--min-echo");
         } else if (std.mem.eql(u8, arg, "--top")) {
-            opts.top = std.fmt.parseInt(usize, need(argv, &i, "--top needs a number\n"), 10) catch die("--top: bad number: {s}\n", .{argv[i]});
+            opts.top = std.fmt.parseInt(usize, flags.need(argv, &i, "--top needs a number\n"), 10) catch die("--top: bad number: {s}\n", .{argv[i]});
         } else if (std.mem.eql(u8, arg, "--json")) {
             opts.json = true;
         } else if (cfg.no_index and std.mem.eql(u8, arg, "--no-index")) {
@@ -133,73 +102,6 @@ pub fn parseOpts(
             try roots.append(gpa, scope.normalizeRoot(arg));
         }
     }
-}
-
-/// Positional args → corpus roots (already normalized); empty → the corpus
-/// for this working directory (`corpus.resolveRoots`). `deinit` releases only
-/// what resolution allocated — a borrow of the positionals frees nothing.
-pub const Roots = struct {
-    items: []const []const u8,
-    owned: bool = false,
-
-    pub fn deinit(self: Roots, gpa: std.mem.Allocator) void {
-        if (self.owned) corpus_mod.freeRoots(gpa, self.items);
-    }
-};
-
-pub fn rootsOf(gpa: std.mem.Allocator, positional: []const []const u8) !Roots {
-    if (positional.len > 0) return .{ .items = positional };
-    return .{ .items = try corpus_mod.resolveRoots(gpa), .owned = true };
-}
-
-/// Strip one exact leading `./` — the canonical shape for comparing a user
-/// arg against a walk-produced path (never trims `..`).
-pub fn stripDotSlash(p: []const u8) []const u8 {
-    return if (std.mem.startsWith(u8, p, "./")) p[2..] else p;
-}
-
-/// Is `path` at, or under, any of `roots`? Empty roots = the whole corpus.
-/// The shared `scope/glob.zig` boundary rule: exact file hit, or a directory
-/// prefix ending at `/` (so `services` never admits `services_old`).
-pub fn underAnyRoot(path: []const u8, roots: []const []const u8) bool {
-    if (roots.len == 0) return true;
-    for (roots) |r| if (scope.underRoot(path, std.mem.trimEnd(u8, scope.normalizeRoot(r), "/"))) return true;
-    return false;
-}
-
-/// Append `s` JSON-string-escaped (quotes included) — the NDJSON escaper the
-/// relate/irregex verb drivers share, the one `emit/jsonstr` primitive so all
-/// faces escape identically (arg order matches these `(buf, gpa, s)` callers).
-pub const jsonStr = @import("../../exec/cold/emit/jsonstr.zig").write;
-
-/// One NDJSON result row from a comptime field spec — the shared emitter
-/// behind every relate verb's `--json` arm. Each entry is `.{ "key", kind,
-/// value }` with kind `"s"` (escaped string), `"s?"` (escaped string or
-/// `null`), or a `std.fmt` spec like `"d:.4"` applied verbatim.
-pub fn jsonRow(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, fields: anytype) void {
-    inline for (fields, 0..) |f, i| {
-        buf.appendSlice(gpa, (if (i == 0) "{\"" else ",\"") ++ f[0] ++ "\":") catch oom();
-        if (comptime std.mem.eql(u8, f[1], "s")) {
-            jsonStr(buf, gpa, f[2]);
-        } else if (comptime std.mem.eql(u8, f[1], "s?")) {
-            if (f[2]) |v| jsonStr(buf, gpa, v) else buf.appendSlice(gpa, "null") catch oom();
-        } else {
-            buf.print(gpa, "{" ++ f[1] ++ "}", .{f[2]}) catch oom();
-        }
-    }
-    buf.appendSlice(gpa, "}\n") catch oom();
-}
-
-/// One result row: `--json` routes through `jsonRow`, text prints `tfmt`.
-pub fn emitRow(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, json: bool, jfields: anytype, comptime tfmt: []const u8, targs: anytype) void {
-    if (json) jsonRow(buf, gpa, jfields) else buf.print(gpa, tfmt, targs) catch oom();
-}
-
-/// The whole argv is empty or repetitions of `flag` (returns whether it was
-/// present); anything else dies with `usage_msg` — the lifecycle verbs' parse.
-pub fn onlyFlag(argv: []const []const u8, comptime flag: []const u8, comptime usage_msg: []const u8) bool {
-    for (argv) |arg| if (!std.mem.eql(u8, arg, flag)) die(usage_msg, .{});
-    return argv.len > 0;
 }
 
 // ── parallel sketch/silhouette build (the live rung) ──
@@ -329,7 +231,7 @@ fn preferScopedLive(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u
     defer persisted.deinit();
     var scoped: usize = 0;
     for (persisted.paths.items) |path| {
-        if (!underAnyRoot(path, roots)) continue;
+        if (!flags.underAnyRoot(path, roots)) continue;
         scoped += 1;
         if (scoped > 512) return false;
     }
@@ -350,7 +252,7 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
         // over (persisted in the blob) — an out-of-corpus root has no
         // sketches to elide and needs the live read below.
         for (roots) |r| {
-            if (!underAnyRoot(r, atl.roots)) {
+            if (!flags.underAnyRoot(r, atl.roots)) {
                 atl.deinit(gpa);
                 break :atlas;
             }
@@ -378,7 +280,7 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
         if (roots.len > 0) {
             // Scope the folded table to the queried roots (id-parallel copy).
             var n: usize = 0;
-            for (folded.paths.items) |p| n += @intFromBool(underAnyRoot(p, roots));
+            for (folded.paths.items) |p| n += @intFromBool(flags.underAnyRoot(p, roots));
             const sp = try gpa.alloc([]const u8, n);
             errdefer gpa.free(sp);
             const ss = try gpa.alloc(Sketch, n);
@@ -387,7 +289,7 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
             errdefer gpa.free(sl);
             var w: usize = 0;
             for (folded.paths.items, folded.sketches.items, folded.silhouettes.items) |p, s, sil| {
-                if (!underAnyRoot(p, roots)) continue;
+                if (!flags.underAnyRoot(p, roots)) continue;
                 sp[w] = p;
                 ss[w] = s;
                 sl[w] = sil;
@@ -407,7 +309,7 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
 
     // Live rung: read the scoped corpus and sketch it in parallel (both
     // channels when the verb asked for structure).
-    const rr = try rootsOf(gpa, roots);
+    const rr = try flags.rootsOf(gpa, roots);
     defer rr.deinit(gpa);
     var corpus = try corpus_mod.load(gpa, io, rr.items);
     errdefer corpus.deinit();

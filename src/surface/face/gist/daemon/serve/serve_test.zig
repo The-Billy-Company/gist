@@ -202,9 +202,13 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
 
     const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
     defer t.join();
-    defer protocol.force_fd_fail_for_test.store(false, .monotonic); // never leak the fault flag
+    defer shm.force_fail_for_test.store(false, .monotonic); // never leak the fault flag
 
-    const q = request.Request{ .pattern = "needle", .mode = .lines, .fixed = true };
+    // "payload" occurs ONLY in big.txt, so the emit-heavy answer is a single doc
+    // — one shard, deterministic doc order — which makes the fd==chunk byte
+    // comparison airtight (the parallel render's cross-doc order is a separate,
+    // sort-equal property owned by the render lane, not the transport).
+    const q = request.Request{ .pattern = "payload", .mode = .lines, .fixed = true };
 
     // (1) Connection advertising fd-transport: the emit-heavy answer rides an fd.
     const fd_out = blk: {
@@ -238,14 +242,14 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
     // byte-identical, even though the client advertised and the answer clears the
     // floor. Proves the fail-open is not a new failure mode.
     {
-        protocol.force_fd_fail_for_test.store(true, .monotonic);
+        shm.force_fail_for_test.store(true, .monotonic);
         const s = try dial(io, socket);
         defer s.close(io);
         try handshakeCaps(gpa, s.socket.handle, protocol.caps_supported);
         const ans = try collectLinesFd(gpa, s.socket.handle, a, q);
         try std.testing.expect(!ans.via_fd); // fell back to chunk frames
         try std.testing.expectEqualSlices(u8, fd_out, ans.out);
-        protocol.force_fd_fail_for_test.store(false, .monotonic);
+        shm.force_fail_for_test.store(false, .monotonic);
     }
 }
 

@@ -848,6 +848,31 @@ pub const ResidentSession = struct {
         return .{ .out = out.items, .matched = matched };
     }
 
+    /// Zero-copy sibling of `queryLines`: gather the SAME path-sorted docs under
+    /// the same lock+reconcile, then render through `render.renderLinesShm`, which
+    /// chooses the transport by answer size — at/above `floor` the daemon hands the
+    /// client a shared-memory fd (the answer never traverses the socket); below it,
+    /// or on any shm failure, the SAME bytes come back to stream as `chunk` frames.
+    /// The caller owns any returned buffer (must close it). Byte-identical to
+    /// `queryLines` for the same corpus state; `-m0` is the empty chunk answer.
+    pub fn queryLinesShm(self: *ResidentSession, arena: std.mem.Allocator, req: Request, floor: usize) QueryError!render.LinesEmit {
+        if (req.matchNothing()) return .{ .chunk = .{ .bytes = "", .matched = false } };
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        try self.reconcile();
+
+        var cq = try self.compileFor(req, .files);
+        defer cq.deinit(self.gpa);
+        var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
+        defer sc.deinit();
+
+        const docs = try self.matchingDocs(arena, &cq, &sc, .lines, req.invert);
+        return render.renderLinesShm(self.gpa, arena, req, docs, floor) catch |e| switch (e) {
+            error.OutOfMemory => return QueryError.OutOfMemory,
+            error.Unsupported => return QueryError.Stale,
+        };
+    }
+
     /// Answer an eligible `-q`/`--quiet` request: does ANY line match, anywhere
     /// in the corpus? rg's `-q` prints nothing and exits 0 the instant the first
     /// match is found (else 1) — so this is an EARLY-HALTING existence walk: the

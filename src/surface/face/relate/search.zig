@@ -24,6 +24,8 @@ const lexicon = @import("../../../kernel/kinship/recall/lexicon.zig");
 const retrieval = @import("../../exec/cold/engine/retrieval.zig");
 const zipper = @import("../../../kernel/kinship/recall/zipper.zig");
 const kinship = @import("kinship.zig");
+const flags = @import("../../cli/flags.zig");
+const emit = @import("../../cli/emit.zig");
 
 const die = cli_args.die;
 const nowNs = cli_args.nowNs;
@@ -46,7 +48,7 @@ pub fn runSearch(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
         defer buf.deinit(gpa);
         for (indexed.hits) |h| {
             const gain = if (cold > 0.0) 1.0 - h.cost.bits / cold else 0.0;
-            kinship.emitRow(&buf, gpa, o.json, .{
+            emit.emitRow(&buf, gpa, o.json, .{
                 .{ "path", "s", h.path },
                 .{ "gain", "d:.4", gain },
                 .{ "cost_bits", "d:.1", h.cost.bits },
@@ -62,7 +64,7 @@ pub fn runSearch(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
         return;
     }
 
-    const rr = try kinship.rootsOf(gpa, roots.items);
+    const rr = try flags.rootsOf(gpa, roots.items);
     defer rr.deinit(gpa);
     var corpus = try corpus_mod.load(gpa, io, rr.items);
     defer corpus.deinit();
@@ -79,7 +81,7 @@ pub fn runSearch(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
     defer buf.deinit(gpa);
     for (hits) |h| {
         const gain = if (cold > 0.0) 1.0 - h.cost.bits / cold else 0.0;
-        kinship.emitRow(&buf, gpa, o.json, .{
+        emit.emitRow(&buf, gpa, o.json, .{
             .{ "path", "s", corpus.paths[h.doc] },
             .{ "gain", "d:.4", gain },
             .{ "cost_bits", "d:.1", h.cost.bits },

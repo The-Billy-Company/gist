@@ -262,18 +262,34 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
             return protocol.sendFrame(gpa, fd, .decline, "");
         try protocol.encodeLines(&buf, gpa, "", found);
     } else if (req.mode == .lines) {
-        // The default line search: pre-rendered output bytes. A large answer to
-        // a client that advertised fd-transport goes ZERO-COPY — one `chunk_fd`
-        // frame + a shared-memory fd, so the bytes never traverse the socket. It
-        // fails open to the chunk stream (`encodeLines`) on any shm/sendmsg
-        // hiccup, a below-floor answer, or a peer that didn't advertise — a
-        // byte-identical fallback, never a new failure mode.
+        // The default line search. A client that advertised fd-transport gets the
+        // ZERO-COPY path when the answer clears `fd_transport_floor`: it is
+        // rendered STRAIGHT into shared memory and handed over as one `chunk_fd`
+        // frame + the shm fd, so the multi-MB bytes never traverse the socket.
+        // Below the floor — or on any shm failure — `renderLinesShm` returns the
+        // rendered bytes to stream as ordinary `chunk` frames, byte-identical and
+        // never a new failure mode. A peer that didn't advertise takes the plain
+        // `queryLines` + `chunk` path unchanged.
+        if ((caps & protocol.caps_supported & protocol.cap_fd_transport) != 0) {
+            switch (session.queryLinesShm(arena.allocator(), req, protocol.fd_transport_floor) catch
+                return protocol.sendFrame(gpa, fd, .decline, ""))
+            {
+                .fd => |shl| {
+                    var buffer = shl.buffer;
+                    defer buffer.close();
+                    buffer.freeze(); // drop the daemon's writable view, seal (Linux)
+                    if (!protocol.sendChunkFd(fd, shl.len, shl.matched, buffer.fd)) return error.ConnClosed;
+                    return;
+                },
+                .chunk => |c| {
+                    try protocol.encodeLines(&buf, gpa, c.bytes, c.matched);
+                    if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+                    return;
+                },
+            }
+        }
         const ans = session.queryLines(arena.allocator(), req) catch
             return protocol.sendFrame(gpa, fd, .decline, "");
-        if ((caps & protocol.caps_supported & protocol.cap_fd_transport) != 0 and
-            ans.out.len >= protocol.fd_transport_floor and
-            protocol.sendLinesFd(fd, ans.out, ans.matched))
-            return;
         try protocol.encodeLines(&buf, gpa, ans.out, ans.matched);
     } else {
         const result = session.query(arena.allocator(), req) catch

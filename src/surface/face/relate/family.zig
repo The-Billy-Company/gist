@@ -26,6 +26,7 @@ const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
 const families = @import("../../../kernel/kinship/cluster/families.zig");
 const kinship = @import("kinship.zig");
+const emit = @import("../../cli/emit.zig");
 
 const oom = cli_args.oom;
 const nowNs = cli_args.nowNs;
@@ -108,7 +109,7 @@ pub fn runClusters(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
             buf.print(gpa, "{{\"size\":{d},\"max_distance\":{d:.4},\"paths\":[", .{ f.members.len, f.max_edge }) catch oom();
             for (f.members, 0..) |m, k| {
                 if (k > 0) buf.append(gpa, ',') catch oom();
-                kinship.jsonStr(&buf, gpa, view.paths[m]);
+                emit.jsonStr(&buf, gpa, view.paths[m]);
             }
             buf.appendSlice(gpa, "]}\n") catch oom();
         } else {

@@ -42,6 +42,8 @@ const loom = @import("../../../kernel/batch/loom.zig");
 const query = @import("../../../kernel/match/query.zig");
 const parallel = @import("../../../kernel/primitives/parallel.zig");
 const kinship = @import("kinship.zig");
+const flags = @import("../../cli/flags.zig");
+const emit = @import("../../cli/emit.zig");
 const grepfile = @import("../../exec/cold/read/grepfile.zig");
 
 const die = cli_args.die;
@@ -82,11 +84,11 @@ pub fn runSimilar(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) 
     // Self-exclusion compares canonical shapes: a corpus path under an
     // explicit `.` root arrives `./`-prefixed while the arg may not (or vice
     // versa), and byte equality would leave the target ranked first at 0.0.
-    const norm_target = kinship.stripDotSlash(target);
+    const norm_target = flags.stripDotSlash(target);
     var scored: std.ArrayList(Scored) = .empty;
     defer scored.deinit(gpa);
     for (view.sketches, 0..) |*s, d| {
-        if (std.mem.eql(u8, kinship.stripDotSlash(view.paths[d]), norm_target)) continue; // self
+        if (std.mem.eql(u8, flags.stripDotSlash(view.paths[d]), norm_target)) continue; // self
         const dist = switch (o.lens) {
             .bytes => sketch.distance(&target_sketch, s),
             .structure => silhouette_mod.distance(&target_sil, &view.silhouettes[d]),
@@ -106,7 +108,7 @@ pub fn runSimilar(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) 
         if (emitted >= o.top) break;
         if (!view.gate(sc.idx)) continue; // deleted since the atlas anchor
         emitted += 1;
-        kinship.emitRow(&buf, gpa, o.json, .{ .{ "path", "s", view.paths[sc.idx] }, .{ "distance", "d:.4", sc.dist } }, "{d:.4}  {s}\n", .{ sc.dist, view.paths[sc.idx] });
+        emit.emitRow(&buf, gpa, o.json, .{ .{ "path", "s", view.paths[sc.idx] }, .{ "distance", "d:.4", sc.dist } }, "{d:.4}  {s}\n", .{ sc.dist, view.paths[sc.idx] });
     }
     corpus_mod.emitStdout(buf.items);
     std.debug.print("similar: {d} sketches ({s}{d} refreshed) · lens {s} · {d:.0} ms\n", .{ view.sketches.len, view.provenance(), view.refreshed, @tagName(o.lens), ms(nowNs(io) - t0) });
@@ -133,7 +135,7 @@ pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
         if (emitted >= o.top) break;
         if (!view.gate(p.i) or !view.gate(p.j)) continue; // deleted since the anchor
         emitted += 1;
-        kinship.emitRow(&buf, gpa, o.json, .{ .{ "a", "s", view.paths[p.i] }, .{ "b", "s", view.paths[p.j] }, .{ "distance", "d:.4", p.dist } }, "{d:.4}  {s}  {s}\n", .{ p.dist, view.paths[p.i], view.paths[p.j] });
+        emit.emitRow(&buf, gpa, o.json, .{ .{ "a", "s", view.paths[p.i] }, .{ "b", "s", view.paths[p.j] }, .{ "distance", "d:.4", p.dist } }, "{d:.4}  {s}  {s}\n", .{ p.dist, view.paths[p.i], view.paths[p.j] });
     }
     corpus_mod.emitStdout(buf.items);
     std.debug.print("dups: {d} files ({s}{d} refreshed) · {d} pair(s) ≤ {d:.2} · {d:.0} ms\n", .{ view.paths.len, view.provenance(), view.refreshed, pairs.len, o.max_dist, ms(nowNs(io) - t0) });
@@ -246,9 +248,9 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
     while (i < argv.len) : (i += 1) {
         const arg = argv[i];
         if (std.mem.eql(u8, arg, "-e") or std.mem.eql(u8, arg, "--regexp")) {
-            try pats.append(gpa, kinship.need(argv, &i, "-e needs a pattern\n"));
+            try pats.append(gpa, flags.need(argv, &i, "-e needs a pattern\n"));
         } else if (std.mem.eql(u8, arg, "-f") or std.mem.eql(u8, arg, "--file")) {
-            const buf = std.Io.Dir.cwd().readFileAlloc(io, kinship.need(argv, &i, "-f needs a file\n"), gpa, .limited(corpus_mod.per_file_cap)) catch |e|
+            const buf = std.Io.Dir.cwd().readFileAlloc(io, flags.need(argv, &i, "-f needs a file\n"), gpa, .limited(corpus_mod.per_file_cap)) catch |e|
                 die("cannot read pattern file {s}: {s}\n", .{ argv[i], @errorName(e) });
             try owned_bufs.append(gpa, buf);
             var it = std.mem.splitScalar(u8, buf, '\n');
@@ -261,11 +263,11 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         } else if (std.mem.eql(u8, arg, "-i") or std.mem.eql(u8, arg, "--ignore-case")) {
             icase = true;
         } else if (std.mem.eql(u8, arg, "--by")) {
-            by = std.meta.stringToEnum(loom.Key, kinship.need(argv, &i, "--by needs pattern|file\n")) orelse die("--by: pattern or file, not {s}\n", .{argv[i]});
+            by = std.meta.stringToEnum(loom.Key, flags.need(argv, &i, "--by needs pattern|file\n")) orelse die("--by: pattern or file, not {s}\n", .{argv[i]});
         } else if (std.mem.eql(u8, arg, "--under")) {
-            under = kinship.need(argv, &i, "--under needs a glob\n");
+            under = flags.need(argv, &i, "--under needs a glob\n");
         } else if (std.mem.eql(u8, arg, "--top")) {
-            top = std.fmt.parseInt(usize, kinship.need(argv, &i, "--top needs a number\n"), 10) catch die("--top: bad number: {s}\n", .{argv[i]});
+            top = std.fmt.parseInt(usize, flags.need(argv, &i, "--top needs a number\n"), 10) catch die("--top: bad number: {s}\n", .{argv[i]});
         } else if (std.mem.eql(u8, arg, "--json")) {
             json = true;
         } else if (std.mem.startsWith(u8, arg, "-")) {
@@ -321,7 +323,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         // it was built over (persisted beside it); a root outside them has no
         // candidates to elide and needs the live read.
         for (roots.items) |r| {
-            if (!kinship.underAnyRoot(r, p.roots.items)) break :indexed;
+            if (!flags.underAnyRoot(r, p.roots.items)) break :indexed;
         }
         cand = try fresh.candidates(gpa, io, &p.idx, &p.paths, filters.items, if (roots.items.len > 0) roots.items else p.roots.items);
         total_files = p.paths.items.len;
@@ -337,7 +339,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
             try scoped.ensureTotalCapacity(gpa, cand.?.ids.len);
             for (cand.?.ids) |d| {
                 if (d >= p.paths.items.len) continue;
-                if (kinship.underAnyRoot(p.paths.items[d], roots.items)) scoped.appendAssumeCapacity(d);
+                if (flags.underAnyRoot(p.paths.items[d], roots.items)) scoped.appendAssumeCapacity(d);
             }
         }
         read_files = scoped.items.len;
@@ -345,7 +347,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         break :indexed;
     }
     if (persisted == null) {
-        const rr = try kinship.rootsOf(gpa, roots.items);
+        const rr = try flags.rootsOf(gpa, roots.items);
         defer rr.deinit(gpa);
         corpus = try corpus_mod.load(gpa, io, rr.items);
         const c = &corpus.?;
@@ -377,7 +379,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         fn f(raw: []const []const u8, norm: []const []const u8, path: []const u8) bool {
             for (raw, norm) |rw, nm| {
                 const dotted = std.mem.eql(u8, rw, ".") or std.mem.startsWith(u8, rw, "./");
-                if (dotted and kinship.underAnyRoot(path, &.{nm})) return true;
+                if (dotted and flags.underAnyRoot(path, &.{nm})) return true;
             }
             return false;
         }
@@ -395,10 +397,10 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
                 shaped.print(gpa, "./{s}", .{r.path}) catch oom();
                 break :blk shaped.items;
             };
-            kinship.emitRow(&buf, gpa, json, .{ .{ "path", "s", path }, .{ "line", "d", r.line }, .{ "pattern_id", "d", r.pattern }, .{ "pattern", "s", pats.items[r.pattern] } }, "{s}:{d}\t{s}\n", .{ path, r.line, pats.items[r.pattern] });
+            emit.emitRow(&buf, gpa, json, .{ .{ "path", "s", path }, .{ "line", "d", r.line }, .{ "pattern_id", "d", r.pattern }, .{ "pattern", "s", pats.items[r.pattern] } }, "{s}:{d}\t{s}\n", .{ path, r.line, pats.items[r.pattern] });
         },
         .groups => |gs| for (gs) |g| {
-            kinship.emitRow(&buf, gpa, json, .{ .{ "label", "s", g.label }, .{ "count", "d", g.count } }, "{d}\t{s}\n", .{ g.count, g.label });
+            emit.emitRow(&buf, gpa, json, .{ .{ "label", "s", g.label }, .{ "count", "d", g.count } }, "{d}\t{s}\n", .{ g.count, g.label });
         },
     }
     corpus_mod.emitStdout(buf.items);

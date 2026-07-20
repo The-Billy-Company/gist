@@ -232,7 +232,7 @@ test "decodeResult(lines) rejects a truncated terminal frame" {
 
 test "chunk_fd payload encode/decode preserves length + matched, fails closed short" {
     // The daemon builds the fixed 14-byte control frame by hand (see
-    // `sendLinesFd`); parse it back through the shared frame reader + decoder.
+    // `sendChunkFd`); parse it back through the shared frame reader + decoder.
     inline for (.{ .{ @as(u64, 1 << 20), true }, .{ @as(u64, 4_294_967_301), false } }) |c| {
         var frame: [14]u8 = undefined;
         std.mem.writeInt(u32, frame[0..4], 1 + 8 + 1, .little);

@@ -26,14 +26,14 @@ const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const codex_face = @import("../gist/lifecycle/codex.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
 const cento = @import("../../../corpus/index/codex/cento.zig");
-const kinship = @import("kinship.zig");
+const emit = @import("../../cli/emit.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
 const nowNs = cli_args.nowNs;
 const ms = cli_args.ms;
 
-const jsonStr = kinship.jsonStr;
+const jsonStr = emit.jsonStr;
 
 pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
     var query_text: ?[]const u8 = null;
@@ -83,7 +83,7 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
             break :blk shelf.paths[shelf.docOf(pos)];
         };
         if (json) {
-            kinship.jsonRow(&out, gpa, .{
+            emit.jsonRow(&out, gpa, .{
                 .{ "text", "s", text },
                 .{ "occurrences", "d", ph.width },
                 .{ "bits", "d:.1", ph.bits(shelf.cx.n) },

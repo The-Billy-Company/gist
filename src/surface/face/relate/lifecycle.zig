@@ -25,6 +25,7 @@ const frag_mod = @import("../../../corpus/index/frag/frag.zig");
 const codex_face = @import("../gist/lifecycle/codex.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
 const kinship = @import("kinship.zig");
+const flags = @import("../../cli/flags.zig");
 
 const nowNs = cli_args.nowNs;
 const ms = cli_args.ms;
@@ -36,7 +37,7 @@ pub const schema_version = 1;
 /// `relate index [--shelf]` — sketch the index corpus, persist the atlas
 /// atomically; `--shelf` also rebuilds the codex shelf from the same read.
 pub fn runIndex(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
-    const with_shelf = kinship.onlyFlag(argv, "--shelf", "usage: relate index [--shelf]\n");
+    const with_shelf = flags.onlyFlag(argv, "--shelf", "usage: relate index [--shelf]\n");
 
     const t0 = nowNs(io);
     const built_ns: i64 = @intCast(std.Io.Clock.now(.real, io).nanoseconds);
@@ -119,7 +120,7 @@ const Status = struct {
 /// still answer, live). Shelf detail beyond presence stays with
 /// `gist codex status` — one artifact, one deep report.
 pub fn runStatus(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
-    const json = kinship.onlyFlag(argv, "--json", "usage: relate status [--json]\n");
+    const json = flags.onlyFlag(argv, "--json", "usage: relate status [--json]\n");
 
     var st = Status{
         .atlas = .{ .state = .unavailable },

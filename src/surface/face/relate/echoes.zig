@@ -46,6 +46,7 @@ const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const signals = @import("../../../kernel/rank/signals.zig");
 const kinship = @import("kinship.zig");
+const emit = @import("../../cli/emit.zig");
 
 const nowNs = cli_args.nowNs;
 const ms = cli_args.ms;
@@ -121,7 +122,7 @@ pub fn runEchoes(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
         if (emitted >= o.top) break;
         if (!view.gate(p.i) or !view.gate(p.j)) continue; // deleted since the anchor
         emitted += 1;
-        kinship.emitRow(&buf, gpa, o.json, .{
+        emit.emitRow(&buf, gpa, o.json, .{
             .{ "a", "s", view.paths[p.i] },
             .{ "b", "s", view.paths[p.j] },
             .{ "echo", "d:.4", p.echo },

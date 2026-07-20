@@ -34,7 +34,8 @@ const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const concepts = @import("../../../kernel/kinship/cluster/concepts.zig");
 const frag = @import("../../../corpus/index/frag/frag.zig");
-const kinship = @import("kinship.zig");
+const flags = @import("../../cli/flags.zig");
+const emit = @import("../../cli/emit.zig");
 const glob = @import("../../../corpus/scope/glob.zig");
 
 const Sketch = sketch.Sketch;
@@ -60,18 +61,18 @@ fn parse(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, roots: *s
     while (i < argv.len) : (i += 1) {
         const arg = argv[i];
         if (std.mem.eql(u8, arg, "--lens")) {
-            a.params.lens = std.meta.stringToEnum(concepts.Lens, kinship.need(argv, &i, "--lens needs structure|bytes|echo\n")) orelse
+            a.params.lens = std.meta.stringToEnum(concepts.Lens, flags.need(argv, &i, "--lens needs structure|bytes|echo\n")) orelse
                 die("--lens: structure, bytes, or echo, not {s}\n", .{argv[i]});
         } else if (std.mem.eql(u8, arg, "--max-distance")) {
-            a.params.max_dist = kinship.unitFloat(kinship.need(argv, &i, "--max-distance needs a number in [0,1]\n"), "--max-distance");
+            a.params.max_dist = flags.unitFloat(flags.need(argv, &i, "--max-distance needs a number in [0,1]\n"), "--max-distance");
         } else if (std.mem.eql(u8, arg, "--min-echo")) {
-            a.params.min_echo = kinship.unitFloat(kinship.need(argv, &i, "--min-echo needs a number in [0,1]\n"), "--min-echo");
+            a.params.min_echo = flags.unitFloat(flags.need(argv, &i, "--min-echo needs a number in [0,1]\n"), "--min-echo");
         } else if (std.mem.eql(u8, arg, "--min-lines")) {
-            a.params.min_lines = kinship.count(argv, &i, "--min-lines");
+            a.params.min_lines = flags.count(argv, &i, "--min-lines");
         } else if (std.mem.eql(u8, arg, "--min-size")) {
-            a.params.min_size = kinship.minSize(argv, &i);
+            a.params.min_size = flags.minSize(argv, &i);
         } else if (std.mem.eql(u8, arg, "--top")) {
-            a.top = kinship.count(argv, &i, "--top");
+            a.top = flags.count(argv, &i, "--top");
         } else if (std.mem.eql(u8, arg, "--brief")) {
             a.brief = true;
         } else if (std.mem.eql(u8, arg, "--json")) {
@@ -167,7 +168,7 @@ pub fn runConcepts(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
 // ── output ──
 
 fn emitHit(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, json: bool, path: []const u8, span: frag.Span, dist: f64) void {
-    kinship.emitRow(buf, gpa, json, .{
+    emit.emitRow(buf, gpa, json, .{
         .{ "path", "s", path },
         .{ "line_start", "d", span.line_start },
         .{ "line_end", "d", span.line_end },
@@ -181,7 +182,7 @@ fn emitFamily(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, a: Args, paths: [
         for (f.members, 0..) |m, k| {
             if (k != 0) buf.append(gpa, ',') catch oom();
             buf.appendSlice(gpa, "{\"path\":") catch oom();
-            kinship.jsonStr(buf, gpa, paths[m]);
+            emit.jsonStr(buf, gpa, paths[m]);
             buf.print(gpa, ",\"line_start\":{d},\"line_end\":{d}}}", .{ spans[m].line_start, spans[m].line_end }) catch oom();
         }
         buf.print(gpa, "],\"count\":{d},\"repeated_lines\":{d},\"confidence\":{d:.4},\"structure\":{d:.4}", .{
@@ -258,7 +259,7 @@ fn resolveFragments(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u
     index: {
         if (no_index) break :index;
         var f = frag.loadQuiet(gpa, io) orelse break :index;
-        for (roots) |r| if (!kinship.underAnyRoot(r, f.roots)) {
+        for (roots) |r| if (!flags.underAnyRoot(r, f.roots)) {
             f.deinit(gpa);
             break :index;
         };
@@ -284,7 +285,7 @@ fn resolveFragments(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u
         return v;
     }
 
-    const rr = try kinship.rootsOf(gpa, roots);
+    const rr = try flags.rootsOf(gpa, roots);
     defer rr.deinit(gpa);
     var corpus = try corpus_mod.load(gpa, io, rr.items);
     errdefer corpus.deinit();
@@ -313,7 +314,7 @@ fn resolveFragments(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u
 /// coworker churn beyond the fold.
 fn scopeView(v: *FragView, gpa: std.mem.Allocator, folded: *const frag.Folded, roots: []const []const u8) !void {
     var n: usize = 0;
-    for (folded.paths.items) |p| n += @intFromBool(kinship.underAnyRoot(p, roots));
+    for (folded.paths.items) |p| n += @intFromBool(flags.underAnyRoot(p, roots));
     const sp = try gpa.alloc([]const u8, n);
     errdefer gpa.free(sp);
     const ss = try gpa.alloc(frag.Span, n);
@@ -322,7 +323,7 @@ fn scopeView(v: *FragView, gpa: std.mem.Allocator, folded: *const frag.Folded, r
     errdefer gpa.free(sl);
     var w: usize = 0;
     for (folded.paths.items, folded.spans.items, folded.silhouettes.items) |p, span, sil| {
-        if (!kinship.underAnyRoot(p, roots)) continue;
+        if (!flags.underAnyRoot(p, roots)) continue;
         sp[w] = p;
         ss[w] = span;
         sl[w] = sil;

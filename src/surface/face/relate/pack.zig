@@ -34,6 +34,8 @@ const lexicon = @import("../../../kernel/kinship/recall/lexicon.zig");
 const coverage = @import("../../../kernel/kinship/recall/coverage.zig");
 const retrieval = @import("../../exec/cold/engine/retrieval.zig");
 const kinship = @import("kinship.zig");
+const flags = @import("../../cli/flags.zig");
+const emit = @import("../../cli/emit.zig");
 
 const die = cli_args.die;
 const nowNs = cli_args.nowNs;
@@ -55,7 +57,7 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
         defer buf.deinit(gpa);
         for (indexed.picks, 1..) |pick, rank| {
             const cumulative = if (indexed.total_bits > 0.0) pick.covered_bits / indexed.total_bits else 0.0;
-            kinship.emitRow(&buf, gpa, o.json, .{
+            emit.emitRow(&buf, gpa, o.json, .{
                 .{ "rank", "d", rank },
                 .{ "path", "s", pick.path },
                 .{ "marginal_bits", "d:.1", pick.marginal_bits },
@@ -82,7 +84,7 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
     if (query.len < lexicon.gram)
         die("relate pack: query shorter than the live fingerprint floor ({d} bytes) and no persisted trigram index is available\n", .{lexicon.gram});
 
-    const rr = try kinship.rootsOf(gpa, roots.items);
+    const rr = try flags.rootsOf(gpa, roots.items);
     defer rr.deinit(gpa);
     var corpus = try corpus_mod.load(gpa, io, rr.items);
     defer corpus.deinit();
@@ -109,7 +111,7 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
     defer buf.deinit(gpa);
     for (picks, 1..) |p, rank| {
         const cum = if (total_bits > 0.0) p.covered_bits / total_bits else 0.0;
-        kinship.emitRow(&buf, gpa, o.json, .{
+        emit.emitRow(&buf, gpa, o.json, .{
             .{ "rank", "d", rank },
             .{ "path", "s", corpus.paths[p.doc] },
             .{ "marginal_bits", "d:.1", p.marginal_bits },

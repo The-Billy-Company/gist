@@ -11,16 +11,9 @@
 //! Anything the server cannot serve warm comes back as `decline` (client → cold).
 
 const std = @import("std");
-const builtin = @import("builtin");
 const request = @import("request.zig");
 const wire = @import("wire.zig");
 const shm = @import("shm.zig");
-
-/// Test-only fault injection for the forced-fallback proof: when set, `sendLinesFd`
-/// reports failure so the daemon takes the `encodeLines` (chunk-frame) path even
-/// for an fd-eligible answer. The load is compiled out entirely outside `zig
-/// build test`, so it costs the production emit path nothing.
-pub var force_fd_fail_for_test: std.atomic.Value(bool) = .init(false);
 
 /// Wire version. Unknown flag bits outside `known_flags` fail closed (BadFrame
 /// → decline → cold); a version-mismatched READY handshake also falls open cold.
@@ -85,10 +78,12 @@ pub const known_flags: u8 = flag_fixed | flag_ignore_case | flag_line_num | flag
 /// Chunk payload budget for a streamed `lines` answer — under `max_frame`.
 pub const chunk_bytes: usize = 4 << 20;
 
-/// Answer-size floor for the fd path. Below it, shm create+mmap+memcpy+unmap
-/// fixed cost isn't earned back (measured on macOS: the socket write for a
-/// sub-1-MiB answer is well under a millisecond), so small emits stay on `chunk`
-/// frames; at/above it the eliminated socket copies dominate and grow linearly.
+/// Answer-size floor for the fd path. Below it the shm map + client mmap
+/// page-fault fixed cost isn't earned back (measured on macOS: a sub-1-MiB
+/// answer's chunk stream is well under a millisecond), so small emits stay on
+/// `chunk` frames — the daemon already has the bytes mapped, so it streams them
+/// with no extra render. At/above it the eliminated socket copy + client
+/// accumulation dominate and the fd path wins (measured ~1.2× at 32 MB).
 pub const fd_transport_floor: usize = 1 << 20;
 
 /// Append a `[len][opcode][payload]` frame to `buf` (gist opcode → raw byte).
@@ -191,28 +186,21 @@ pub fn encodeLines(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, out: []const
     try writeFrame(buf, gpa, .result, &body);
 }
 
-/// Try to hand a rendered `lines` answer to the client as a shared-memory fd:
-/// one terminal `chunk_fd` frame carries `{length, matched}` while `out`'s bytes
-/// ride an SCM_RIGHTS fd, so they never traverse the socket. This REPLACES the
-/// `chunk` stream + terminal `result` for the answer. Returns `false` on ANY
-/// shm/sendmsg failure — the caller falls open to `encodeLines` (`chunk` frames),
-/// which is byte-identical. The daemon closes its fd here; the client owns the
-/// received fd until it has written stdout.
-pub fn sendLinesFd(fd: std.posix.fd_t, out: []const u8, matched: bool) bool {
-    if (comptime builtin.is_test) {
-        if (force_fd_fail_for_test.load(.monotonic)) return false;
-    }
-    var buffer = shm.Buffer.create(out.len) catch return false;
-    defer buffer.close();
-    if (std.posix.getenv("GIST_FD_SKIP_MEMCPY_BENCH") == null) @memcpy(buffer.map[0..out.len], out);
-    buffer.freeze();
+/// Hand a rendered `lines` answer to the client as a shared-memory fd: one
+/// terminal `chunk_fd` frame carries `{length, matched}` while the answer bytes
+/// ride an SCM_RIGHTS fd (`shm_fd`, already filled + frozen by the caller), so
+/// they never traverse the socket. REPLACES the `chunk` stream + terminal
+/// `result` for this answer. The caller owns the shm buffer (closes it after);
+/// the client owns the received fd until it has written stdout. Returns `false`
+/// on a dead peer / sendmsg failure — the caller drops the connection.
+pub fn sendChunkFd(fd: std.posix.fd_t, len: u64, matched: bool, shm_fd: std.posix.fd_t) bool {
     // [u32 len=10][op][u64 length][u8 matched] — a fixed 14-byte control frame.
     var frame: [14]u8 = undefined;
     std.mem.writeInt(u32, frame[0..4], 1 + 8 + 1, .little);
     frame[4] = @intFromEnum(Opcode.chunk_fd);
-    std.mem.writeInt(u64, frame[5..13], @intCast(out.len), .little);
+    std.mem.writeInt(u64, frame[5..13], len, .little);
     frame[13] = @intFromBool(matched);
-    return wire.sendWithFd(fd, &frame, buffer.fd);
+    return wire.sendWithFd(fd, &frame, shm_fd);
 }
 
 pub const ChunkFd = struct { length: u64, matched: bool };
@@ -337,6 +325,6 @@ pub fn recvFrameWithFd(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!FdF
 }
 
 /// Send one framed message on `fd` carrying `pass_fd` over SCM_RIGHTS — the
-/// zero-copy `chunk_fd` transport (see `sendLinesFd`). Re-exported so serve/
+/// zero-copy `chunk_fd` transport (see `sendChunkFd`). Re-exported so serve/
 /// client call sites don't reach through `wire`.
 pub const sendWithFd = wire.sendWithFd;
