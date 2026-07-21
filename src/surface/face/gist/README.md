@@ -29,7 +29,7 @@ doc_radar:
         - 'ffi = { status = "operational-accelerator"'
     - description: "the committed fail-closed certificate exists and is fail-closed"
       file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
-      contains: "a win requires a lower median AND p<0.05"
+      contains: ["Mann-Whitney significance test", "**fail-closed**"]
 ---
 
 # `gist`: indexed regex search for a live working tree
