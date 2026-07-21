@@ -348,7 +348,12 @@ echo "racing the warm tier (resident daemon)…"
 RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/certify_warm.sh" \
   || echo "  warm tier skipped (daemon/rival unavailable) — cold cert unaffected" >&2
 
-python3 "${HERE}/check_artifacts.py" --artifacts-dir "${OUT}" --artifacts || exit 1
+# Structural completeness only. `--require-head` (git_commit==HEAD + clean tree)
+# is unsatisfiable for a fresh mint — hyperfine timings differ every run and the
+# Layer B/C/D publish above rewrites the tracked artifact/, so the tree is
+# necessarily dirty by here. Clean-START is the top gate's job; the committed
+# bundle's reproducibility is CI's invariant, which also runs --no-require-head.
+python3 "${HERE}/check_artifacts.py" --artifacts-dir "${OUT}" --artifacts --no-require-head || exit 1
 
 # Publish a committed snapshot when asked (CERT_PUBLISH_DIR is crate-relative).
 if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
@@ -365,6 +370,6 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
     [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
   done
   cp -f "${OUT}/raw/"*.json "${pub}/raw/" || exit 1
-  python3 "${HERE}/check_artifacts.py" --artifacts-dir "${pub}" --artifacts || exit 1
+  python3 "${HERE}/check_artifacts.py" --artifacts-dir "${pub}" --artifacts --no-require-head || exit 1
   echo "published reproducible certificate → ${pub}"
 fi
