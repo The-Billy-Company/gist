@@ -29,7 +29,7 @@ HEADER = "## Layer A — warm tier (resident daemon)"
 def _f(s: str) -> float | None:
     try:
         return float(s)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
