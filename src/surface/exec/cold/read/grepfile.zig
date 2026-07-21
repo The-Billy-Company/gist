@@ -508,6 +508,11 @@ pub const RawStat = struct {
     /// (macOS `st_birthtimespec`, Linux `statx` BTIME); null otherwise —
     /// callers fall back rather than mislabel ctime as creation.
     birthtime_ns: ?i96,
+    /// Modification + status-change clocks in ns — the same conservative
+    /// freshness pair the T3 overlay compares against the build anchor
+    /// (`bulkstat.needsLiveRead`). Null when the platform didn't report one.
+    mtime_ns: ?i128,
+    ctime_ns: ?i128,
 };
 
 /// `stat(2)` following symlinks — `--one-file-system` device ids and
@@ -556,7 +561,7 @@ fn statxCall(dirfd: std.posix.fd_t, path: [*:0]const u8, flags: u32) ?RawStat {
 
 /// Exactly the fields `RawStat` projects — BTIME rides along; the kernel's
 /// returned mask (not this request) decides whether it was actually filled.
-const statx_mask: std.os.linux.STATX = .{ .TYPE = true, .MODE = true, .SIZE = true, .BTIME = true };
+const statx_mask: std.os.linux.STATX = .{ .TYPE = true, .MODE = true, .SIZE = true, .BTIME = true, .MTIME = true, .CTIME = true };
 
 fn fromStatx(stx: std.os.linux.Statx) RawStat {
     return .{
@@ -566,6 +571,8 @@ fn fromStatx(stx: std.os.linux.Statx) RawStat {
         .mode = stx.mode,
         .size = stx.size,
         .birthtime_ns = if (stx.mask.BTIME) @as(i96, stx.btime.sec) * std.time.ns_per_s + stx.btime.nsec else null,
+        .mtime_ns = if (stx.mask.MTIME) @as(i128, stx.mtime.sec) * std.time.ns_per_s + stx.mtime.nsec else null,
+        .ctime_ns = if (stx.mask.CTIME) @as(i128, stx.ctime.sec) * std.time.ns_per_s + stx.ctime.nsec else null,
     };
 }
 
@@ -577,6 +584,8 @@ fn fromStat(st: std.posix.Stat) RawStat {
         // Darwin records birth time in `struct stat` itself; gist declines to
         // invent one on libc targets that don't (matching ripgrep).
         .birthtime_ns = if (comptime builtin.os.tag.isDarwin()) @as(i96, st.birthtime().sec) * std.time.ns_per_s + st.birthtime().nsec else null,
+        .mtime_ns = @as(i128, st.mtime().sec) * std.time.ns_per_s + st.mtime().nsec,
+        .ctime_ns = @as(i128, st.ctime().sec) * std.time.ns_per_s + st.ctime().nsec,
     };
 }
 

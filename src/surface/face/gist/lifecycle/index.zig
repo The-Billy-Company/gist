@@ -15,6 +15,7 @@ const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
 const persist = @import("../../../../corpus/index/trigrams/persist.zig");
 const crest_sidecar = @import("../../../../corpus/index/crest/sidecar.zig");
+const treemap = @import("../../../../corpus/index/phantom/treemap.zig");
 const Index = @import("../../../../corpus/index/trigrams/trigram.zig").Index;
 const nowNs = @import("../../../exec/cold/argv/args.zig").nowNs;
 const ms = @import("../../../exec/cold/argv/args.zig").ms;
@@ -41,6 +42,9 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void 
     // pair.gen flips — concurrent loaders never see a mixed old/new set.
     const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths, roots, crest_vectors);
     try fresh.writeAnchor(io, built_ns); // T3 freshness anchor
+    // Phantom tree.map (self-anchored, whole-CWD corpora only): best-effort —
+    // a failure costs the phantom walk tier, never the index build.
+    treemap.build(gpa, io, roots) catch {};
 
     std.debug.print("indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{
         corpus.docs.len,

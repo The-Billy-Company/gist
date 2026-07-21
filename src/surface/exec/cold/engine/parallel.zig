@@ -51,6 +51,7 @@ const persist = @import("../../../../corpus/index/trigrams/persist.zig");
 const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
 const crest = @import("../../../../kernel/primitives/crest.zig");
 const bulkstat = @import("../../../../corpus/tree/bulkstat.zig");
+const treemap = @import("../../../../corpus/index/phantom/treemap.zig");
 const paths_mod = @import("../../../../corpus/scope/paths.zig");
 const stripDot = paths_mod.stripDot;
 const replaceSep = paths_mod.replaceSep;
@@ -81,7 +82,11 @@ const Dir = std.Io.Dir;
 /// this; it is never exposed as a CLI flag.
 pub fn eligible(io: std.Io, parsed: args.Parsed, o: Opts) bool {
     if (args.envSpan("GIST_NO_PARALLEL") != null) return false;
-    if (o.follow or o.json or o.quiet or o.stats or o.files_without or o.replace != null or o.max_filesize != 0 or o.multiline) return false;
+    // `-U`/--multiline rides the pipeline: each worker's per-file render goes
+    // through the same `Emitter.buffer` whole-buffer model the serial engine
+    // uses (multiline.zig owns the span/line semantics), so the walk + literal
+    // gate + index elision that carry every linear win apply to `-U` too.
+    if (o.follow or o.json or o.quiet or o.stats or o.files_without or o.replace != null or o.max_filesize != 0) return false;
     // `--include-zero` must emit a `path:0` line for EVERY searched file, so it
     // needs the serial engine's whole-file loop with the literal gate + index
     // elision disabled — the streaming sink here culls non-matching files.
@@ -347,14 +352,17 @@ fn broadIndexedRoots(roots: []const []const u8) bool {
 }
 
 /// Cheap pre-checks before spawning the loader. Short literals cannot query the
-/// trigram index, and narrow explicit roots are cheaper to walk directly. An
-/// active crest sieve admits elision even with NO usable trigram filter — the
-/// literal-free class-repetition queries are exactly the sieve's raison d'être.
+/// trigram index; an active crest sieve admits elision even with NO usable
+/// trigram filter — the literal-free class-repetition queries are exactly the
+/// sieve's raison d'être. Narrow nested roots qualify too: the loader runs
+/// CONCURRENTLY with the walk and the end-of-walk flush never blocks on it
+/// (`flushPending` `final=true`), so a scoped walk that outruns the load pays
+/// only the per-worker deferral append — while a read-heavy subtree the loader
+/// DOES beat gets its candidate reads elided like any broad scan.
 pub fn indexElisionWanted(parsed: args.Parsed, filters: []const []const u8, sieve: crest.Vector) bool {
     const o = parsed.opts;
     if (o.files_list or o.no_index) return false;
-    if (!usableFilters(filters) and !crest.active(sieve)) return false;
-    return broadIndexedRoots(parsed.roots);
+    return usableFilters(filters) or crest.active(sieve);
 }
 
 /// Every filter can actually query the trigram index (non-empty, all ≥3 B).
@@ -441,6 +449,12 @@ const DirTask = struct {
     depth: usize,
     root_depth: usize,
     chain: ?*const IgNode,
+    /// This directory's record in the phantom `tree.map` snapshot
+    /// (`treemap.not_walked` when it has none — new dir, never-descended dir,
+    /// or no snapshot loaded). A recorded dir whose lstat proves it predates
+    /// the snapshot anchor serves its listing from the mapping with ONE
+    /// syscall instead of openat+getattrlistbulk+close.
+    snap_ix: u32 = treemap.not_walked,
 };
 
 /// The shared side of the work-stealing walk. Workers keep discovered
@@ -641,7 +655,7 @@ const Cfg = struct {
     ig: *const ignore.Ignore,
     compiled: ?*const ignore.Compiled, // rank-based base tier (null → decideAt)
     lazy: ?*LazyElide, // concurrent elide loader (null → no elision this run)
-    file_needle: ?[]const u8, // whole-file SIMD gate; null for passthru/stats-like modes
+    file_needle: ?simd.Gate, // whole-file SIMD gate; null for passthru/stats-like modes
     // Multi-literal whole-file SIMD gate for pure alternations (`panic|0x`):
     // the union of these literals covers every match, so a body containing none
     // of them is dropped without a regex run. Non-empty only when `file_needle`
@@ -658,7 +672,7 @@ const Cfg = struct {
     // rescan only the tail: a literal crossing the prefix/tail seam can start
     // at most `gate_len-1` bytes before the seam.
     gate_len: usize,
-    line_needle: ?[]const u8, // required literal before each regex engine run
+    line_needle: ?simd.Gate, // required literal before each regex engine run
     // `-l` fused fast path is sound for this invocation: no flag reshapes the
     // per-line match decision away from "does any line match?" — so one fused
     // whole-buffer `docMatch` (early-exit, no line split, no per-line dispatch)
@@ -674,6 +688,11 @@ const Cfg = struct {
     // (decompress/transcode) before matching. Immutable + shared; every
     // `ingest.apply` call is thread-confined to the calling worker's arena.
     ingest: ?*const ingest.Config,
+    // The phantom `tree.map` snapshot (rootless whole-CWD walks only; null
+    // otherwise). Membership-only: admission (ignore/hidden/glob) is always
+    // decided live, and a never-descended or clock-stale directory falls back
+    // to the ordinary live listing — see `corpus/index/phantom/treemap.zig`.
+    snap: ?*const treemap.View,
     sink: *Sink,
 };
 
@@ -707,13 +726,18 @@ fn workerSim(w: *Worker) ?*Matcher.Sim {
     return &w.sim.?;
 }
 
-/// A listed directory entry, normalized across the two listing backends.
+/// A listed directory entry, normalized across the two listing backends and
+/// the phantom snapshot. Snapshot entries (`from_snap`) carry no fd to resolve
+/// against and no timestamps — `handleEntry` resolves them from CWD and, when
+/// index elision could use freshness, learns the clocks with one lstat.
 const Entry = struct {
     name: []const u8,
     is_dir: bool,
     is_file: bool,
     mtime_ns: ?i128,
     ctime_ns: ?i128,
+    snap_ix: u32 = treemap.not_walked,
+    from_snap: bool = false,
 };
 
 fn workerMain(w: *Worker) void {
@@ -788,6 +812,19 @@ fn reportWalkError(q: *Queue, rel: []const u8, e: anyerror) void {
 fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, local: *std.ArrayList(DirTask)) void {
     const cfg = w.cfg;
     const o = cfg.o;
+
+    // Phantom walk: a recorded directory whose lstat proves BOTH clocks
+    // predate the snapshot anchor has byte-exact recorded membership (POSIX
+    // bumps a directory's mtime+ctime on any direct create/delete/rename) —
+    // serve its listing from the mapping for ONE syscall instead of
+    // openat+getattrlistbulk+close. A stale, unstat-able, or unrecorded
+    // directory falls through to the live listing below unchanged.
+    if (cfg.snap) |v| if (task.snap_ix != treemap.not_walked) {
+        if (grepfile.lstatPath(task.disk)) |st| if (!bulkstat.needsLiveRead(v.anchor_ns, st.mtime_ns, st.ctime_ns)) {
+            servePhantomDir(w, a, scratch, task, local, v);
+            return;
+        };
+    };
 
     // Raw `openat` (worker-thread safe, no std.Io indirection) — the fd feeds
     // `getattrlistbulk` directly and is wrapped in a `Dir` only for the
@@ -866,6 +903,21 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
         }
     }
 
+    // A live-listed directory that HAS a snapshot record (its own clocks were
+    // stale) still hands each child directory ITS record, so phantom serving
+    // resumes immediately below the one changed level.
+    if (cfg.snap) |v| if (task.snap_ix != treemap.not_walked) {
+        for (entries.items) |*e| {
+            if (!e.is_dir) continue;
+            for (v.children(task.snap_ix)) |ent| {
+                if (ent.isDir() and std.mem.eql(u8, v.name(ent), e.name)) {
+                    e.snap_ix = ent.dir_ix;
+                    break;
+                }
+            }
+        }
+    };
+
     // This directory's own ignore rules — unless the frozen base already holds
     // them (the CWD root, loaded by `Ignore.init`; keyed by stripped rel).
     var chain = task.chain;
@@ -877,6 +929,35 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
     // shared queue (accounting must precede this task's `done`).
     const before = local.items.len;
     for (entries.items) |e| handleEntry(w, a, scratch, dir.handle, task, chain, local, e);
+    w.q.noteDiscovered(local.items.len - before);
+}
+
+/// The phantom twin of `processDir`'s listing half: children come straight
+/// from the snapshot mapping (names + kinds — the lstat in `processDir`
+/// just proved them current), the ignore chain builds from the recorded
+/// ignore-file NAMES with rule CONTENT read live from disk, and every child
+/// then flows through the same `handleEntry` the live listing feeds. Snapshot
+/// entries resolve from CWD (`from_snap`) since no directory fd is open.
+fn servePhantomDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, local: *std.ArrayList(DirTask), v: *const treemap.View) void {
+    const cfg = w.cfg;
+    const o = cfg.o;
+    const kids = v.children(task.snap_ix);
+    var present = IgPresent{};
+    for (kids) |ent| noteIgnoreFile(&present, v.name(ent), !ent.isDir());
+    var chain = task.chain;
+    if (!o.no_ignore and (present.gitignore or present.dotignore or present.rgignore) and
+        !cfg.ig.loaded.contains(task.rel) and !cfg.ig.loaded.contains(stripDot(task.rel)))
+        chain = loadNode(cfg.ig, a, task.chain, task.disk, task.rel, present);
+    const before = local.items.len;
+    for (kids) |ent| handleEntry(w, a, scratch, std.posix.AT.FDCWD, task, chain, local, .{
+        .name = v.name(ent),
+        .is_dir = ent.isDir(),
+        .is_file = !ent.isDir(),
+        .mtime_ns = null,
+        .ctime_ns = null,
+        .snap_ix = ent.dir_ix,
+        .from_snap = true,
+    });
     w.q.noteDiscovered(local.items.len - before);
 }
 
@@ -908,7 +989,7 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     if (shouldSkip(cfg, chain, a, task, rel, e.is_dir, e.name)) return;
     if (e.is_dir) {
         if (o.max_depth != 0 and depth >= o.max_depth) return;
-        children.append(a, .{ .disk = joinPath(a, task.disk, e.name), .rel = rel, .depth = depth, .root_depth = task.root_depth, .chain = chain }) catch oom();
+        children.append(a, .{ .disk = joinPath(a, task.disk, e.name), .rel = rel, .depth = depth, .root_depth = task.root_depth, .chain = chain, .snap_ix = e.snap_ix }) catch oom();
         return;
     }
     if (o.max_depth != 0 and depth > o.max_depth) return;
@@ -917,13 +998,23 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     // has passed. Flag BEFORE index elision — an elided file still counts as
     // walked for the implicit-path nothing-searched heuristic (see `Queue`).
     if (!w.q.files_seen.load(.monotonic)) w.q.files_seen.store(true, .monotonic);
+    // A snapshot-served file carries no clocks; when elision could use them,
+    // one lstat learns the SAME conservative freshness pair the bulk listing
+    // returns — and only for files every earlier filter already admitted
+    // (a glob-rejected file never pays it; the bulk path pays for all).
+    var mtime = e.mtime_ns;
+    var ctime = e.ctime_ns;
+    if (e.from_snap and cfg.lazy != null) if (grepfile.lstatPath(joinPath(a, task.disk, e.name))) |st| {
+        mtime = st.mtime_ns;
+        ctime = st.ctime_ns;
+    };
     if (cfg.lazy) |lz| {
         if (lz.ready.load(.acquire)) {
-            if (lz.val) |*el| if (el.skip(stripDot(rel), e.mtime_ns, e.ctime_ns)) return;
+            if (lz.val) |*el| if (el.skip(stripDot(rel), mtime, ctime)) return;
         } else {
             // Oracle still loading — hold the file back so it can still be
             // elided (the walk races ahead; deferring costs three slices + metadata).
-            w.pending.append(a, .{ .disk = joinPath(a, task.disk, e.name), .rel = rel, .mtime_ns = e.mtime_ns, .ctime_ns = e.ctime_ns }) catch oom();
+            w.pending.append(a, .{ .disk = joinPath(a, task.disk, e.name), .rel = rel, .mtime_ns = mtime, .ctime_ns = ctime }) catch oom();
             return;
         }
     }
@@ -937,8 +1028,14 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     }
     // The parent directory is still open in `processDir` — resolve one
     // component (`e.name`) against its fd instead of the full path from CWD.
-    // `rel` is the CWD-openable path a `-z` external-codec subprocess re-opens.
-    searchFile(w, a, scratch, dirfd, e.name, dpath, rel);
+    // A snapshot-served entry has no open parent; it resolves from CWD like a
+    // deferred read. `rel` is the CWD-openable path a `-z` external-codec
+    // subprocess re-opens.
+    if (e.from_snap) {
+        searchFile(w, a, scratch, std.posix.AT.FDCWD, joinPath(a, task.disk, e.name), dpath, rel);
+    } else {
+        searchFile(w, a, scratch, dirfd, e.name, dpath, rel);
+    }
 }
 
 /// Read + match + render ONE file straight into the sink — the parallel
@@ -1026,7 +1123,7 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     // out across cores. One worker owning an mmap'd multi-GiB blob (which the
     // rg-parity walk legitimately admits via explicit-root re-anchoring) stops
     // serializing the whole walk behind a single-thread scan.
-    if (cfg.file_needle) |n| if (!verify.containsWide(a, body[gate_from..], n)) return;
+    if (cfg.file_needle) |n| if (!verify.gateWide(a, body[gate_from..], n)) return;
     if (cfg.file_alts.len > 0 and !verify.containsAnyWide(a, body[gate_from..], cfg.file_alts)) return;
 
     var buf: std.ArrayList(u8) = .empty;
@@ -1065,10 +1162,20 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     // `-l` fused fast path: one early-exit whole-buffer pass answers the file —
     // no line split, no per-line engine dispatch. When the pattern is a pure
     // literal (alternation), the whole-file gate above already PROVED the match
-    // (equivalence, not containment), so not even `docMatch` runs.
+    // (equivalence, not containment), so not even `docMatch` runs. A
+    // containment-only gate still drives the scan: jump gate hit to gate hit
+    // at SIMD speed and run the engine on just each hit's line, instead of
+    // paying the engine over every admitted byte (`gatedDocMatch`).
     if (cfg.fast_l) {
         const hit = cfg.lits_equiv or blk: {
             const sim = workerSim(w) orelse break :blk false;
+            // `-U`: the whole-buffer boolean — `run` admits `fast_l` here only
+            // when `bufBoolExact` proved it equals the emit model's verdict.
+            if (o.multiline) break :blk re.bufMatch(sim, body);
+            // Caseless only: the case-sensitive whole-body `docMatch` is
+            // already DFA-fast, while the caseless engine pays per byte —
+            // that is the run the hit-jump rescues.
+            if (cfg.file_needle) |n| if (n.ci) break :blk gatedDocMatch(re, sim, n, body);
             break :blk re.docMatch(sim, body);
         };
         if (hit) {
@@ -1078,11 +1185,14 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
         return;
     }
 
+    // `-U` renders through the whole-buffer emitter (no line split — a match
+    // may cross `\n`); the per-line model splits into rg lines. Mirrors the
+    // serial engine's per-file dispatch exactly.
     var lines: std.ArrayList([]const u8) = .empty;
-    grepfile.collectLines(a, body, o.term(), &lines);
+    if (!o.multiline) grepfile.collectLines(a, body, o.term(), &lines);
     if (cfg.heading) buf.print(a, "{s}{s}", .{ dpath, o.outTerm() }) catch oom();
     const before_body = buf.items.len;
-    const hits = em.file(dpath, lines.items);
+    const hits = if (o.multiline) em.buffer(dpath, body) else em.file(dpath, lines.items);
     if (hits == 0) {
         // No heading header to keep, and (except --passthru) no body either.
         if (cfg.heading or buf.items.len == before_body) return;
@@ -1090,6 +1200,26 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
         return;
     }
     cfg.sink.emit(.text_hit, buf.items);
+}
+
+/// The gate-driven `-l` boolean: every matching line must contain the gate
+/// literal (the gate is a per-match necessary condition), so instead of
+/// running the engine over every admitted byte, jump from gate hit to gate
+/// hit with the SIMD kernel and run the engine only on each hit's enclosing
+/// line. Exact: a matching line holds a gate hit inside it, so it is visited;
+/// a rejected line's remaining hits are skipped by resuming past its end.
+/// This is what keeps a caseless run at SIMD throughput — the fold-heavy
+/// engine (whose caseless DFA pays per byte) touches only gate-hit lines.
+fn gatedDocMatch(re: *const Matcher, sim: *Matcher.Sim, gate: simd.Gate, body: []const u8) bool {
+    var from: usize = 0;
+    while (gate.find(body, from)) |pos| {
+        const ls = if (std.mem.lastIndexOfScalar(u8, body[0..pos], '\n')) |k| k + 1 else 0;
+        const le = std.mem.indexOfScalarPos(u8, body, pos, '\n') orelse body.len;
+        if (re.lineMatch(sim, body[ls..le])) return true;
+        if (le >= body.len) break;
+        from = le + 1;
+    }
+    return false;
 }
 
 /// Positive-only match proof over a buffer prefix: true ⇒ the file matches
@@ -1102,8 +1232,16 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
 fn prefixProvesMatch(w: *Worker, re: *const Matcher, prefix: []const u8) bool {
     const cfg = w.cfg;
     if (cfg.lits_equiv) {
-        if (cfg.file_needle) |n| return simd.contains(prefix, n);
+        if (cfg.file_needle) |n| return n.in(prefix);
         return simd.containsAny(prefix, cfg.file_alts);
+    }
+    if (cfg.o.multiline) {
+        // `-U`: sound only for an assertion-free pattern (substring-closed —
+        // nothing zero-width can assert against the cut), and then the RAW
+        // prefix serves: any match inside it is a match of the file.
+        if (!re.bufPrefixClosed()) return false;
+        const sim = workerSim(w) orelse return false;
+        return re.bufMatch(sim, prefix);
     }
     const nl = std.mem.lastIndexOfScalar(u8, prefix, '\n') orelse return false;
     const sim = workerSim(w) orelse return false;
@@ -1115,7 +1253,7 @@ fn prefixProvesMatch(w: *Worker, re: *const Matcher, prefix: []const u8) bool {
 /// Fan out, walk, search, stream, exit. `filters` powers inline index elision;
 /// `file_needle` may reject a whole body, while `line_needle` only avoids regex
 /// execution and remains valid for passthru. Never returns.
-pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re: ?*const Matcher, use_color: bool, filters: []const []const u8, sieve: crest.Vector, file_needle: ?[]const u8, line_needle: ?[]const u8, icfg: *const ingest.Config) noreturn {
+pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re: ?*const Matcher, use_color: bool, filters: []const []const u8, sieve: crest.Vector, file_needle: ?simd.Gate, line_needle: ?simd.Gate, icfg: *const ingest.Config) noreturn {
     // Heading needs a printable path: `--no-filename` suppresses the header
     // like rg (the walk is recursive, so `.auto` filenames are always on here).
     const heading = o.heading and o.filename != .never and !o.count_only and !o.count_matches and !o.files_only and !o.vimgrep;
@@ -1150,6 +1288,17 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         }
     } else lazy.ready.store(true, .release);
 
+    // Phantom tree.map. The snapshot carries MEMBERSHIP only (names + kinds),
+    // so every admission axis stays sound by construction: ignore/hidden/glob
+    // verdicts are decided live per entry, admission-widening flags (`-uu`,
+    // `--hidden`, `-g` whitelists, `--ignore-file`) at worst re-admit a
+    // subtree the build never descended — which walks live via `not_walked` —
+    // and explicit roots resolve to their snapshot record by name (a root the
+    // snapshot can't place just walks live). `GIST_NO_PHANTOM` (internal,
+    // undocumented — the `GIST_NO_PARALLEL` idiom) forces the live walk for
+    // parity gates.
+    var snap_view: ?treemap.View = if (args.envSpan("GIST_NO_PHANTOM") == null) treemap.load(io) else null;
+
     var ig = ignore.Ignore.init(gpa, io, ignore.Options.from(o), parsed.roots);
     const compiled = ignore.Compiled.build(gpa, &ig);
     var q = Queue{ .gpa = gpa, .io = io };
@@ -1162,10 +1311,16 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     const file_alts: []const []const u8 = if (lits.len > 0 and file_needle == null and !o.invert and !o.passthru) lits else &.{};
     // Equivalence proof: the whole-file gate that will run (`file_needle`, a
     // single pure literal, or `file_alts`, a pure alternation) IS the pattern.
-    const lits_equiv = (file_needle != null and lits.len == 1 and std.mem.eql(u8, lits[0], file_needle.?)) or file_alts.len > 0;
+    // A caseless gate carries its own producer-proven equivalence (`.equiv`,
+    // mined from the raw unfolded twin in `run.zig::caselessGate`).
+    const lits_equiv = (file_needle != null and (file_needle.?.equiv or (lits.len == 1 and std.mem.eql(u8, lits[0], file_needle.?.bytes)))) or file_alts.len > 0;
+    // Under `-U` the fused boolean is `bufMatch`; admit it only when that
+    // boolean provably equals the whole-buffer emit model's `-l` verdict
+    // (`bufBoolExact` — a nullable `\z`-style pattern falls to `Emitter.buffer`).
     const fast_l = o.files_only and !o.invert and !o.word and !o.crlf and !o.null_data and o.max_per_file == 0 and !o.only_matching and
-        !o.count_only and !o.count_matches and !o.passthru and !o.vimgrep and !o.stop_on_nonmatch and o.replace == null;
-    var gate_len: usize = if (file_needle) |n| n.len else 0;
+        !o.count_only and !o.count_matches and !o.passthru and !o.vimgrep and !o.stop_on_nonmatch and o.replace == null and
+        (!o.multiline or (re != null and re.?.bufBoolExact()));
+    var gate_len: usize = if (file_needle) |n| n.bytes.len else 0;
     for (file_alts) |n| gate_len = @max(gate_len, n.len);
     const cfg = Cfg{
         .o = o,
@@ -1190,6 +1345,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         .binary_detect = !o.text and !o.null_data,
         .files_mode = o.files_list,
         .ingest = if (icfg.active()) icfg else null,
+        .snap = if (snap_view) |*v| v else null,
         .sink = &sink,
     };
     var roots_one = [_][]const u8{"."};
@@ -1199,7 +1355,10 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         defer seed.deinit(gpa);
         for (roots) |r| {
             const prefix = if (std.mem.eql(u8, r, ".") and parsed.roots.len == 0) "" else std.mem.trimEnd(u8, r, "/");
-            seed.append(gpa, .{ .disk = r, .rel = prefix, .depth = 0, .root_depth = rootDepth(prefix), .chain = null }) catch oom();
+            // Each root resolves to its snapshot record by name (dir 0 = the
+            // CWD root); an unplaceable root simply walks live.
+            const six = if (snap_view) |*v| treemap.resolve(v, prefix) orelse treemap.not_walked else treemap.not_walked;
+            seed.append(gpa, .{ .disk = r, .rel = prefix, .depth = 0, .root_depth = rootDepth(prefix), .chain = null, .snap_ix = six }) catch oom();
         }
         q.push(seed.items);
     }
