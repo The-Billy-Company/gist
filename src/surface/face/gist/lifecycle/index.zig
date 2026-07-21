@@ -16,6 +16,7 @@ const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
 const persist = @import("../../../../corpus/index/trigrams/persist.zig");
 const crest_sidecar = @import("../../../../corpus/index/crest/sidecar.zig");
 const treemap = @import("../../../../corpus/index/phantom/treemap.zig");
+const shard = @import("../../../../corpus/index/content/shard.zig");
 const Index = @import("../../../../corpus/index/trigrams/trigram.zig").Index;
 const nowNs = @import("../../../exec/cold/argv/args.zig").nowNs;
 const ms = @import("../../../exec/cold/argv/args.zig").ms;
@@ -45,6 +46,10 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void 
     // Phantom tree.map (self-anchored, whole-CWD corpora only): best-effort —
     // a failure costs the phantom walk tier, never the index build.
     treemap.build(gpa, io, roots) catch {};
+    // Content shard (self-anchored on the SAME `built_ns`, sharing this exact
+    // corpus snapshot): best-effort — a failure costs the shard read tier, so a
+    // full-scan query falls back to opening every file, never the index build.
+    shard.build(gpa, io, corpus.docs, corpus.paths, built_ns) catch {};
 
     std.debug.print("indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{
         corpus.docs.len,

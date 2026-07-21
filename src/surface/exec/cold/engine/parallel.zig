@@ -52,6 +52,7 @@ const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
 const crest = @import("../../../../kernel/primitives/crest.zig");
 const bulkstat = @import("../../../../corpus/tree/bulkstat.zig");
 const treemap = @import("../../../../corpus/index/phantom/treemap.zig");
+const shard_mod = @import("../../../../corpus/index/content/shard.zig");
 const paths_mod = @import("../../../../corpus/scope/paths.zig");
 const stripDot = paths_mod.stripDot;
 const replaceSep = paths_mod.replaceSep;
@@ -693,6 +694,12 @@ const Cfg = struct {
     // decided live, and a never-descended or clock-stale directory falls back
     // to the ordinary live listing — see `corpus/index/phantom/treemap.zig`.
     snap: ?*const treemap.View,
+    // The content shard (`content.shard`): concatenated corpus bodies mmap'd
+    // once, so a file the walk would open is instead served from the mapping
+    // when the T3 clock rule proves it unchanged. Null when disabled, absent,
+    // or not worth loading (narrow scope, `--files`, a transform run). Membership
+    // + freshness only — a miss or a changed file reads live, byte-identically.
+    shard: ?*const shard_mod.View,
     sink: *Sink,
 };
 
@@ -786,6 +793,10 @@ fn flushPending(w: *Worker, a: std.mem.Allocator, scratch: []u8, final: bool) vo
     for (w.pending.items) |d| {
         if (ready) if (lz.val) |*el| if (el.skip(stripDot(d.rel), d.mtime_ns, d.ctime_ns)) continue;
         const dpath = if (o.path_sep) |sep| replaceSep(a, d.rel, sep) else d.rel;
+        if (w.cfg.shard) |sh| if (sh.slice(stripDot(d.rel), d.mtime_ns, d.ctime_ns)) |bytes| {
+            searchShardBody(w, a, dpath, bytes);
+            continue;
+        };
         searchFile(w, a, scratch, std.posix.AT.FDCWD, d.disk, dpath, d.disk);
     }
     w.pending.clearRetainingCapacity();
@@ -848,7 +859,7 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
     if (bulkstat.supported) {
         // With index elision live, each entry's mtime+ctime ride the bulk
         // listing for free; without it, names+types via getdirentries is cheaper.
-        const listing = if (needsElisionMetadata(cfg)) bulkstat.listOneLevel(a, dir.handle) else bulkstat.listNamesOnly(a, dir.handle);
+        const listing = if (freshnessWanted(cfg)) bulkstat.listOneLevel(a, dir.handle) else bulkstat.listNamesOnly(a, dir.handle);
         if (listing) |listed| {
             for (listed) |e| {
                 noteIgnoreFile(&present, e.name, e.is_file);
@@ -891,7 +902,7 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
             var ctime: ?i128 = null;
             // Change timestamps are only consulted for elision candidates;
             // stat lazily there. A failed stat leaves both unknown, forcing read.
-            if (e.kind == .file and needsElisionMetadata(cfg)) if (dir.statFile(w.io, e.name, .{})) |st| {
+            if (e.kind == .file and freshnessWanted(cfg)) if (dir.statFile(w.io, e.name, .{})) |st| {
                 mtime = st.mtime.nanoseconds;
                 ctime = st.ctime.nanoseconds;
             } else |_| {};
@@ -970,6 +981,15 @@ fn needsElisionMetadata(cfg: *const Cfg) bool {
     return lazy.val != null;
 }
 
+/// Whether the walk should learn each file's mtime+ctime — for index elision
+/// (above) OR to let the content shard prove a file unchanged before serving
+/// its bytes from the mapping. The shard turns a full-scan query (no elision)
+/// from names-only listing back to the clock-bearing `listOneLevel`, trading a
+/// per-directory bulk-attr call for ~20k avoided file opens.
+fn freshnessWanted(cfg: *const Cfg) bool {
+    return needsElisionMetadata(cfg) or cfg.shard != null;
+}
+
 fn noteIgnoreFile(present: *IgPresent, name: []const u8, is_file: bool) void {
     if (!is_file or name.len < 7 or name[0] != '.') return;
     if (std.mem.eql(u8, name, ".gitignore"))
@@ -1004,7 +1024,7 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     // (a glob-rejected file never pays it; the bulk path pays for all).
     var mtime = e.mtime_ns;
     var ctime = e.ctime_ns;
-    if (e.from_snap and cfg.lazy != null) if (grepfile.lstatPath(joinPath(a, task.disk, e.name))) |st| {
+    if (e.from_snap and freshnessWanted(cfg)) if (grepfile.lstatPath(joinPath(a, task.disk, e.name))) |st| {
         mtime = st.mtime_ns;
         ctime = st.ctime_ns;
     };
@@ -1026,6 +1046,14 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
         cfg.sink.emit(.text_hit, dpath);
         return;
     }
+    // Content shard: an unchanged corpus file's bytes are already mmap'd, so
+    // serve them straight into the match/emit tail instead of opening the file
+    // (the whole point on a full-scan query). A miss (changed, new, binary,
+    // oversize, out-of-scope) falls through to the live open below.
+    if (cfg.shard) |sh| if (sh.slice(stripDot(rel), mtime, ctime)) |bytes| {
+        searchShardBody(w, a, dpath, bytes);
+        return;
+    };
     // The parent directory is still open in `processDir` — resolve one
     // component (`e.name`) against its fd instead of the full path from CWD.
     // A snapshot-served entry has no open parent; it resolves from CWD like a
@@ -1036,6 +1064,18 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     } else {
         searchFile(w, a, scratch, dirfd, e.name, dpath, rel);
     }
+}
+
+/// Match+render a file whose bytes came from the content-shard mapping rather
+/// than a live read. The mmap'd slice is the file's raw bytes (shard membership
+/// is `corpus.readMember` — non-binary, so no NUL triage is owed and no UTF-16
+/// transcode can fire; a bare UTF-8 BOM still strips via `decodeBom`). Nothing
+/// was pre-scanned, so `emitBody` runs the gate + match over the whole body
+/// (covered = gate_from = 0) — byte-identical to the staged read path's result.
+fn searchShardBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, bytes: []const u8) void {
+    const body = grepfile.decodeBom(a, bytes);
+    if (body.len == 0) return;
+    emitBody(w, a, dpath, body, 0, 0);
 }
 
 /// Read + match + render ONE file straight into the sink — the parallel
@@ -1299,6 +1339,17 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // parity gates.
     var snap_view: ?treemap.View = if (args.envSpan("GIST_NO_PHANTOM") == null) treemap.load(io) else null;
 
+    // Content shard. Loaded for a body-reading walk broad enough to amortize the
+    // one-time map + doc-table build (`broadIndexedRoots`, same rung the elide
+    // loader uses): every unchanged corpus file the walk would open is served
+    // from the mapping instead — the across-the-board full-scan win. Skipped for
+    // `--files` (no bytes read) and transform runs (`-z`/`-E` need live bytes,
+    // and the shard never holds compressed inputs anyway). `GIST_NO_SHARD`
+    // (internal, undocumented — the `GIST_NO_PHANTOM` idiom) forces live reads
+    // for the parity gate. Membership + freshness only, so it is fail-open.
+    const want_shard = args.envSpan("GIST_NO_SHARD") == null and !o.no_index and !o.files_list and !icfg.active() and broadIndexedRoots(parsed.roots);
+    var shard_view: ?shard_mod.View = if (want_shard) shard_mod.load(gpa, io) else null;
+
     var ig = ignore.Ignore.init(gpa, io, ignore.Options.from(o), parsed.roots);
     const compiled = ignore.Compiled.build(gpa, &ig);
     var q = Queue{ .gpa = gpa, .io = io };
@@ -1346,6 +1397,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         .files_mode = o.files_list,
         .ingest = if (icfg.active()) icfg else null,
         .snap = if (snap_view) |*v| v else null,
+        .shard = if (shard_view) |*v| v else null,
         .sink = &sink,
     };
     var roots_one = [_][]const u8{"."};

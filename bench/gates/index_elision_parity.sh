@@ -21,6 +21,13 @@
 # the freshness overlay (`corpus/fresh.zig`) closes the stale-index gap (a file
 # that GAINS the needle after the build is still found, no false negative).
 #
+# `gist index` also emits the content shard (`corpus/index/content/shard.zig`),
+# so the same oracle covers it for free: `--no-index` forces the pure live walk
+# (shard OFF), while the auto run serves unchanged files from the shard mmap —
+# the 2-byte-literal `shard-*` cases below are the full-scan classes with no
+# trigram prefilter, where every matching file rides the shard, and
+# `shard-freshness` proves a post-index edit defeats a stale shard slice.
+#
 # Usage: bench/gates/index_elision_parity.sh
 set -uo pipefail
 # Lift gist's default soft output cap so the auto-index vs --no-index diff sees
@@ -108,6 +115,17 @@ chk "no-match" zzz_nonexistent_qxv
 chk "type-scoped" -tzig needle_alpha
 chk "path-scoped" needle_alpha libs/deep
 
+# Content-shard path: a 2-byte literal extracts no trigram, so the index cannot
+# prefilter — the auto run serves every unchanged file's bytes from the mmap'd
+# `content.shard` while `--no-index` opens each live. Same body, so the multiset
+# must match. These are the full-scan classes the shard exists to win (`{}`/`()`
+# appear in nearly every noise file); `--no-index` disables the shard too, so it
+# stays the pure-live oracle.
+chk "shard-2byte" -F '{}'
+chk "shard-2byte-lines" -nF '()'
+chk "shard-2byte-count" -cF '{}'
+chk "shard-2byte-files" -lF '{}'
+
 # Freshness: append the needle to a file that had NONE at index time. The index's
 # trigram data for it is now stale (says "no needle"); the freshness overlay must
 # still force it to be read (mtime > build anchor) so the auto run finds it — else
@@ -116,6 +134,11 @@ sleep 1
 printf '\nfn late() void {} // needle_alpha arrives post-index\n' >> libs/noise_7.zig
 chk "freshness-gained" needle_alpha
 chk "freshness-lines" -n needle_alpha
+# Shard freshness: the same post-index edit added a `{}`/`()` pair to a file the
+# shard snapshotted WITHOUT it. The 2-byte full-scan run must reject that stale
+# slice (mtime > anchor) and read the file live, or its count falls short.
+chk "shard-freshness" -cF '{}'
+chk "shard-freshness-lines" -nF '()'
 
 echo
 if [[ "${fails}" -eq 0 ]]; then
