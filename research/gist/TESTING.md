@@ -117,10 +117,11 @@ python3 bench/matrix/matrix.py parity
 python3 bench/matrix/matrix.py gate
 ```
 
-The committed performance gate currently includes three explicit,
-report-only losses: literal-free PCRE2 backreferences and two multiline
-shapes. Their correctness parity still gates; only their known performance
-loss is non-blocking.
+The committed performance gate currently declares no losses — every shape is
+an enforced win (the former report-only holes, literal-free PCRE2
+backreferences and the two multiline shapes, fell to the shadow gate and the
+parallel multiline DFA). A future declared loss would stay report-only:
+correctness parity always gates; only a known performance loss is non-blocking.
 
 ---
 
