@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # portcert.sh — Layer B of the optimality certificate: PORT-OPTIMALITY, static.
 #
-# Layer A proves gist is fastest in its class empirically. Layer B proves *why
-# it can't be beaten on this instruction sequence*: it lowers gist's two hot
+# Layer A proves empirical dominance over ripgrep on the registered workloads.
+# Layer B proves *why the hot loop can't be beaten on this instruction sequence*:
+# it lowers gist's two hot
 # loops to assembly for two REAL reference microarchitectures and asks llvm-mca
 # for the static microarchitectural bound (port pressure / reciprocal
 # throughput) of each. If gist's measured cycles/byte (Layer A) sits at that
@@ -33,7 +34,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KERNEL="$(cd "${HERE}/../.." && pwd)" # portcert/ → bench/ → gist root
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
-OUT="${REPO}/.local/gist-verify" # shared with Layer A (CERTIFICATE.md)
+OUT="${CERT_OUT:-${REPO}/.local/gist-verify}" # shared with Layer A
 WORK="${OUT}/portcert"           # our emitted .s + llvm-mca logs
 CERT="${OUT}/CERTIFICATE.md"
 CSV="${OUT}/portcert.csv"
@@ -75,8 +76,8 @@ PROFILES=(
 )
 # probe | production source file | bound-kind
 PROBES=(
-  "simd_contains|src/search/match/scan/simd.zig|throughput"
-  "dfa_step|src/search/match/regex/linear/dfa.zig|latency"
+  "simd_contains|src/kernel/match/scan/simd.zig|throughput"
+  "dfa_step|src/kernel/match/regex/linear/dfa.zig|latency"
 )
 
 # Bytes consumed per marked iteration. dfa_step steps one byte; simd_contains

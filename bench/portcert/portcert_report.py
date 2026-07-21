@@ -33,7 +33,8 @@ import re
 
 
 LAYER_B_HEADER = "## Layer B — port-optimality (static µarch bound)"
-MACRO_HEADER = "## Layer A — macroscopic dominance vs the field"
+MACRO_HEADER = "## Layer A — macroscopic dominance over ripgrep"
+LEGACY_MACRO_HEADER = "## Layer A — macroscopic dominance vs the field"
 NEXT_LAYER = re.compile(r"^## Layer ", re.MULTILINE)
 
 # The permanent, cited caveat: Apple Silicon has no real llvm-mca model.
@@ -219,7 +220,10 @@ def splice(cert: Path, section: str) -> None:
         text = (text[:start].rstrip() + "\n\n" + text[end:].lstrip()).rstrip() + "\n"
 
     block = section.rstrip() + "\n"
-    macro = text.find(MACRO_HEADER)
+    macro = next(
+        (i for header in (MACRO_HEADER, LEGACY_MACRO_HEADER) if (i := text.find(header)) >= 0),
+        -1,
+    )
     if macro != -1:  # insert BEFORE the macroscopic header (survives its rewrite)
         new = text[:macro].rstrip() + "\n\n" + block + "\n" + text[macro:].lstrip()
     else:  # macroscopic half not run yet — append at EOF

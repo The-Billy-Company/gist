@@ -80,9 +80,8 @@ run_root() { # <abs-bin> [args…] — 0 on success, 1 if skipped/unavailable
 }
 
 # Layer B′ — measured port bound (always run; labels measured/not in JSON)
-# Invoke run_root outside `if`/`!` so `set -e` still sees its status (SC2310).
-run_root "${PORTBOUND}"
-root_rc=$?
+# Capture an expected no-sudo skip without letting `set -e` abort the fallback.
+if run_root "${PORTBOUND}"; then root_rc=0; else root_rc=$?; fi
 if [[ "${root_rc}" -ne 0 ]]; then
   (cd "${REPO}" && "${PORTBOUND}") || die "gist-portbound failed"
 fi
@@ -94,8 +93,7 @@ llvm_bin="$(brew --prefix llvm 2> /dev/null || true)"
 bash "${HERE}/../portcert/portcert.sh" || note "portcert skipped/degraded (see above)"
 
 # Layer C — STREAM ceiling (+ optional root for measured clock)
-run_root "${ROOFLINE}"
-root_rc=$?
+if run_root "${ROOFLINE}"; then root_rc=0; else root_rc=$?; fi
 if [[ "${root_rc}" -ne 0 ]]; then
   (cd "${REPO}" && "${ROOFLINE}") || die "gist-roofline failed"
 fi

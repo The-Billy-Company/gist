@@ -1,8 +1,20 @@
+---
+doc_radar:
+  sentinels:
+    - description: "Layer D consumes the shared first and last certificate classes"
+      file: pkg/kernels/irregex/bench/harness/probes.zig
+      contains: ['.class = "literal-rare"', '.class = "regex-litalt"']
+    - description: "the generated certificate cites the current production kernels"
+      file: pkg/kernels/irregex/bench/lowerbound/lowerbound_report.py
+      contains: ["src/kernel/match/scan/simd.zig", "src/kernel/match/regex/linear/dfa.zig"]
+---
+
 # gist/bench/lowerbound — Layer D (algorithmic lower bound)
 
 Layer D of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
-Where Layer A proves gist is _empirically fastest in its class_, Layer C that
-its cycles/byte sit on the _hardware_ ceiling, Layer D proves the last thing
+Where Layer A proves empirical dominance over ripgrep on the registered
+workloads and Layer C places its cycles/byte against the _hardware_ ceiling,
+Layer D proves the last thing
 left to prove: gist's **algorithm** matches the **information-theoretic floor**
 for the search operation — no algorithm on any machine can do asymptotically
 less work.
@@ -41,16 +53,16 @@ not asserted:
    pattern occurs in a candidate document forces you, in the worst (adversarial)
    case, to examine every one of its bytes: an unread byte could _be_ the match,
    or could _break_ one — the adversary sets it after you commit. gist's fused
-   byte-class DFA (`src/regex/dfa.zig`) reads each candidate byte **exactly
-   once** — `passes ≡ 1.0000` across all seven DFA classes on the 160 MiB
-   corpus — with none of the memchr-then-rescan _double_ byte-traffic a per-line
-   matcher pays. The SIMD literal path (`src/scan/simd.zig`) reads **≤ N**
-   (`passes` 0.18–0.71: vector first/last-byte skips + early exit on first hit).
+   byte-class DFA (`src/kernel/match/regex/linear/dfa.zig`) reads each candidate
+   byte **exactly once** — `passes ≡ 1.0000` for every DFA class — with none of
+   the memchr-then-rescan _double_ byte-traffic a per-line matcher pays. The SIMD
+   literal path (`src/kernel/match/scan/simd.zig`) reads **≤ N** through vector
+   first/last-byte skips and early exit on the first hit.
 
 2. **The trigram filter makes total work sublinear.** gist never touches most of
    the corpus, because the index prunes candidates _before_ verify runs. On this
-   corpus the selective classes admit as little as **4.35%** of the bytes
-   (`regex-dotted`) — the other 95.65% are pruned untouched.
+   corpus the selective classes admit only a measured fraction of the bytes;
+   the generated certificate records that live fraction and its complement.
 
 Together: trigram prune → single fused verify pass = the minimum reads any
 correct algorithm can make. **12/12 classes at the floor, fail-closed.**
@@ -96,7 +108,7 @@ paper over by weakening the assertion.
   Code Search Worked" (2012), <https://swtch.com/~rsc/regexp/regexp4.html>.**
   The trigram-index prefilter that makes whole-corpus search sublinear for
   selective patterns — gist's direct ancestor (see also `../README.md` and
-  `src/regex/dfa.zig`, which cite Cox's linear-time NFA/DFA work). The `cand%`
+  `src/kernel/match/regex/linear/dfa.zig`, which cites Cox's linear-time NFA/DFA work). The `cand%`
   column is the empirical measure of this pruning.
 - gist's own [`../harness/probes.zig`](../harness/probes.zig) — the shared
   probe-class registry [`certify.zig`](../harness/certify.zig) (Layer A) also

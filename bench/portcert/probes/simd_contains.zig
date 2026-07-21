@@ -1,7 +1,7 @@
 //! Layer-B port-optimality probe — the `simd.contains` vector filter loop.
 //!
-//! A **byte-faithful copy** of the hot vector loop in `src/search/match/scan/simd.zig`
-//! (`contains`, lines 33-43): splat first+last needle byte, vector-compare both
+//! A **byte-faithful copy** of `src/kernel/match/scan/simd.zig`'s `contains`
+//! hot loop: splat first+last needle byte, vector-compare both
 //! lanes across a V-wide window, AND the masks, `@ctz`-verify survivors. The
 //! copy is drift-guarded by `probes_test.zig`, which feeds identical inputs to
 //! this function AND the real `gist.simd.contains` and asserts bit-identical

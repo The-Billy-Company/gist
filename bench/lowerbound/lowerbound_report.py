@@ -15,7 +15,8 @@ The floor, in one breath:
     (1977) and Boyer-Moore (1977) are the classical linear-time exact-match
     results; Boyer-Moore is sublinear on *average* but still Ω(n/m) reads
     minimum, and the *verify-stage* floor is Ω(candidate bytes). gist's fused
-    byte-class DFA reads each candidate byte EXACTLY once (`src/regex/dfa.zig`);
+    byte-class DFA reads each candidate byte EXACTLY once
+    (`src/kernel/match/regex/linear/dfa.zig`);
     its SIMD literal path reads ≤ N (vector skips + early exit).
   • PRUNE. Total work is sublinear in corpus size because the trigram index
     admits only a fraction of documents before verify ever runs (Cox, 2012 — the
@@ -106,10 +107,12 @@ def render(rows: list[Row]) -> str:
         "(1977, *SIAM J. Comput.*) and Boyer-Moore (1977, *CACM*): linear-time in "
         "the worst case, Ω(n) reads to certify absence (Boyer-Moore is sublinear on "
         "*average* — Ω(n/m) reads — but the verify-stage guarantee is Ω(candidate "
-        "bytes)). gist's fused byte-class DFA (`src/regex/dfa.zig`) reads each "
+        "bytes)). gist's fused byte-class DFA "
+        "(`src/kernel/match/regex/linear/dfa.zig`) reads each "
         "candidate byte **exactly once** — a single forward pass, detecting `\\n` "
         "inline, with none of the memchr-then-rescan double byte-traffic a per-line "
-        "matcher pays. The SIMD literal path (`src/scan/simd.zig`) reads **≤ N** "
+        "matcher pays. The SIMD literal path "
+        "(`src/kernel/match/scan/simd.zig`) reads **≤ N** "
         "(vector first/last-byte skips, early exit on the first hit)."
     )
     lines.append("")

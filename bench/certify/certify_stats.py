@@ -13,7 +13,7 @@ Fail-closed by construction: a class is a WIN only when gist's median is lower
 AND the difference is significant (p < alpha). Overlap ⇒ PARITY; significantly
 slower ⇒ LOSS. No class is silently averaged into a win — every verdict is shown.
 
-It then rewrites the `## Layer A — macroscopic dominance vs the field` section of
+It then rewrites the `## Layer A — macroscopic dominance over ripgrep` section of
 CERTIFICATE.md in place (everything from that header to EOF), leaving the
 microscopic section written by `zig build certify` untouched.
 
@@ -32,7 +32,8 @@ ALPHA = 0.05
 BOOTSTRAP = 10_000
 SEED = 0x6E15  # same seed family as certify.zig, for reproducibility
 
-MACRO_HEADER = "## Layer A — macroscopic dominance vs the field"
+MACRO_HEADER = "## Layer A — macroscopic dominance over ripgrep"
+LEGACY_MACRO_HEADER = "## Layer A — macroscopic dominance vs the field"
 
 
 # ── statistics (mirror of bench/stats.zig) ────────────────────────────────────
@@ -246,7 +247,10 @@ def splice_certificate(cert: Path, macro: str) -> None:
     """Replace everything from MACRO_HEADER to EOF; append if absent; create if no file."""
     if cert.exists():
         text = cert.read_text()
-        idx = text.find(MACRO_HEADER)
+        idx = next(
+            (i for header in (MACRO_HEADER, LEGACY_MACRO_HEADER) if (i := text.find(header)) >= 0),
+            -1,
+        )
         head = text[:idx].rstrip() + "\n\n" if idx != -1 else text.rstrip() + "\n\n"
     else:
         head = "# gist — Certificate of Optimality\n\n"

@@ -15,8 +15,8 @@ doc_radar:
 # bench/portcert — Layer B (port-optimality: static bound + measured on this machine)
 
 Layer B of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
-Where Layer A proves gist is _empirically fastest in its class_, Layer B
-proves _why the hot loop can't be beaten on this instruction sequence_ — in
+Where Layer A proves empirical dominance over ripgrep on the registered
+workloads, Layer B proves _why the hot loop can't be beaten on this instruction sequence_ — in
 two legs: a **static** `llvm-mca` microarchitectural bound (port pressure /
 reciprocal throughput) over reference cores, and **Layer B′**, the same two
 hot-loop probes run natively on _this_ machine under the PMU, so the
@@ -30,8 +30,8 @@ cross-machine cross-check.
 | `portcert.sh`              | cross-compiles the two probes to two reference microarchitectures, runs `llvm-mca`, writes `portcert.csv`/`portcert.json`, splices the certificate                                                       |
 | `portcert_report.py`       | renders the `## Layer B` markdown section (static + the Layer B′ measured subsection) from `portcert.json` + `portbound.json` and splices it into `.local/gist-verify/CERTIFICATE.md`                    |
 | `portbound.zig`            | **Layer B′** — `gist-portbound`: times the same drift-guarded probes natively under the PMU (`bench/harness/pmu.zig`), writing `portbound.json` (measured cyc/byte + cyc/step; fail-closed without root) |
-| `probes/simd_contains.zig` | byte-faithful copy of the hot loop in [`../../src/search/match/scan/simd.zig`](../../src/search/match/scan/simd.zig)'s `contains` — throughput-bound                                                     |
-| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/search/match/regex/linear/dfa.zig`](../../src/search/match/regex/linear/dfa.zig)'s `docMatch` — latency-bound                                          |
+| `probes/simd_contains.zig` | byte-faithful copy of the hot loop in [`../../src/kernel/match/scan/simd.zig`](../../src/kernel/match/scan/simd.zig)'s `contains` — throughput-bound                                                     |
+| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/kernel/match/regex/linear/dfa.zig`](../../src/kernel/match/regex/linear/dfa.zig)'s `docMatch` — latency-bound                                          |
 | `probes_test.zig`          | the drift guard — asserts each probe is bit-identical to the real production function it copies, over adversarial random inputs (`zig build test`)                                                       |
 
 **Why cross-compiled reference cores, not this machine.** This dev box is
@@ -104,6 +104,9 @@ cd ../../..                                        # the binary resolves .local/
 sudo pkg/kernels/irregex/zig-out/bin/gist-portbound  # measured cycles (kpc is root-gated)
 pkg/kernels/irregex/bench/portcert/portcert.sh       # re-splice: the measured subsection lands in the cert
 ```
+
+`CERT_OUT=/path/to/bundle` targets an isolated certificate directory; otherwise
+the script uses the repo's `.local/gist-verify/`.
 
 Install `llvm-mca` opt-in with `brew install llvm` (lands at
 `$(brew --prefix llvm)/bin/llvm-mca`). Missing `llvm-mca` or `zig` degrades to

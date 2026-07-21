@@ -39,7 +39,8 @@ import re
 LAYER_C_HEADER = "## Layer C — roofline (hardware ceiling)"
 # certify_stats.py rewrites this section to EOF, so a fresh Layer C is inserted
 # *before* it (not appended) to survive a later macroscopic re-splice.
-MACRO_HEADER = "## Layer A — macroscopic dominance vs the field"
+MACRO_HEADER = "## Layer A — macroscopic dominance over ripgrep"
+LEGACY_MACRO_HEADER = "## Layer A — macroscopic dominance vs the field"
 # Anchor the shared cert dir at the repo root (computed from this file's location:
 # bench/roofline/roofline_report.py → repo root is parents[5]) so the report works
 # from any CWD — the zig steps and portcert.sh already resolve the repo root, and
@@ -294,7 +295,12 @@ def splice(cert: Path, section: str) -> None:
         nxt = re.search(r"^## Layer [A-Z]\b", text[m.end() :], re.MULTILINE)
         end = m.end() + nxt.start() if nxt else len(text)
         new = text[: m.start()].rstrip() + "\n\n" + body + "\n" + text[end:].lstrip("\n")
-    elif (macro := text.find(MACRO_HEADER)) != -1:
+    elif (
+        macro := next(
+            (i for header in (MACRO_HEADER, LEGACY_MACRO_HEADER) if (i := text.find(header)) >= 0),
+            -1,
+        )
+    ) != -1:
         new = text[:macro].rstrip() + "\n\n" + body + "\n" + text[macro:]
     else:
         new = text.rstrip() + "\n\n" + body

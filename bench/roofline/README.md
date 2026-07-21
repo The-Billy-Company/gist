@@ -1,9 +1,17 @@
+---
+doc_radar:
+  sentinels:
+    - description: "the roofline reporter owns the generated Layer C section"
+      file: pkg/kernels/irregex/bench/roofline/roofline_report.py
+      contains: 'LAYER_C_HEADER = "## Layer C — roofline (hardware ceiling)"'
+---
+
 # bench/roofline — Layer C (hardware ceiling)
 
 Layer C of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
-Where Layer A proves gist is _empirically fastest in its class_ and Layer B
-that its hot loop matches the static instruction-level bound, Layer C proves
-the last hardware claim: gist's cycles/byte sit on _this machine's_ memory
+Where Layer A proves empirical dominance over ripgrep on the registered
+workloads and Layer B bounds its hot loop against static instruction-level
+pressure, Layer C tests the hardware claim: gist's cycles/byte sit against this machine's memory
 bandwidth ceiling, so **no implementation on this chip can go materially
 faster** — the bottleneck is memory, not gist's instruction stream.
 
