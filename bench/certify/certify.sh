@@ -340,6 +340,14 @@ python3 "${HERE}/../gates/index_size_accounting.py" \
 echo "splicing Layers B/B′/C/D…"
 CERT_OUT="${OUT}" bash "${HERE}/certify_layers.sh" || exit 1
 
+# Warm tier — the resident-daemon regime an agent actually drives (ADR-352 rung
+# 2.5). Additive: splices a marked section into CERTIFICATE.md + emits
+# certify_warm.csv. Never blocks the mint (a missing daemon/rival is honestly
+# reported), so the cold Layers A–D stay the reproducibility-gated headline.
+echo "racing the warm tier (resident daemon)…"
+RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/certify_warm.sh" \
+  || echo "  warm tier skipped (daemon/rival unavailable) — cold cert unaffected" >&2
+
 python3 "${HERE}/check_artifacts.py" --artifacts-dir "${OUT}" --artifacts || exit 1
 
 # Publish a committed snapshot when asked (CERT_PUBLISH_DIR is crate-relative).
@@ -350,6 +358,8 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   cp -f "${CERT}" "${OUT}/certify.csv" "${MACRO_CSV}" "${OUT}/machine.json" \
     "${OUT}/tool-versions.txt" "${OUT}/corpus-manifest.tsv" \
     "${OUT}/command-log.txt" "${OUT}/index-sizes.json" "${pub}/"
+  # Warm-tier CSV — additive side-car (present when the warm race ran).
+  [[ -f "${OUT}/certify_warm.csv" ]] && cp -f "${OUT}/certify_warm.csv" "${pub}/"
   # Layer B/C/D side-cars — the certificate is incomplete without them.
   for side in portcert.json portcert.csv portbound.json roofline.json lowerbound.csv; do
     [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
