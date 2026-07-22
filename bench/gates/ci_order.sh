@@ -61,6 +61,15 @@ fi
 # can never reach the perf phase. See `bench/rgsuite/modes.py`.
 run "multiline parity -U (modes.py)" python3 bench/rgsuite/modes.py run --mode multiline
 run "pcre parity -P (modes.py)" python3 bench/rgsuite/modes.py run --mode pcre
+# The indexed-PCRE2 win — gist runs PCRE2 behind a trigram/shadow prefilter, the
+# one capability no competitor has — proven RIGHT, not just self-consistent. The
+# oracle is Python's stdlib `re` (an independent engine lineage) scanning the raw
+# corpus bytes; the corpus plants literal-carrying decoys, shadow-splices, and a
+# noise floor a naïve prefilter would mis-elide. Each pattern is a THREE-WAY diff:
+# idx == oracle (independent parity) AND idx == --no-index (index safety). Blocking
+# so a required-literal over-claim (a silent false negative) can't reach the perf
+# phase — this gate caught exactly that. See `bench/gates/indexed_pcre_oracle.py`.
+run "indexed-PCRE2 oracle (indexed_pcre_oracle.py)" python3 bench/gates/indexed_pcre_oracle.py run
 # The walk/order/ignore flags the mined suite can't pin (results depend on file
 # timestamps, device ids, thread counts, and global git config): --sort/--sortr/
 # --sort-files, -j/--threads, --one-file-system, --no-ignore-global, and the
