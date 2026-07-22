@@ -19,6 +19,10 @@
 //! == sort_lines(rg)`). `-c` (per-file `path:count`) and every richer shape
 //! stay cold: the daemon speaks `count` on the wire as a corpus-wide total for
 //! embedders, but the CLI never claims rg's per-file `-c` layout from it.
+//! `--rank[=N]` — gist's definition-first ranked view, the one shape rg can't
+//! express — is served warm too: the daemon ranks over resident bytes and
+//! streams the rendered top-K on the same transport as a `lines` answer,
+//! exiting 0 as cold `--rank` always does.
 //!
 //! Two environment guards keep the warm answer inside its parity envelope:
 //!
@@ -97,13 +101,30 @@ fn recvFdFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i
     return protocol.recvFrameWithFd(gpa, fd);
 }
 
+/// True only if every scope root resolves on disk from the CWD (the tree cold
+/// walks). A missing root is not "no matches": cold reports it as an error and
+/// exits 2, so the warm path must decline and let cold own that outcome.
+fn rootsExist(io: std.Io, roots: []const []const u8) bool {
+    for (roots) |r| std.Io.Dir.cwd().access(io, r, .{}) catch return false;
+    return true;
+}
+
 /// Try to answer `argv` warm. Never errors: any failure is `.cold`.
 pub fn attempt(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, socket_path: []const u8) Outcome {
     return attemptWithDeadline(gpa, io, argv, socket_path, client_io_timeout_ms);
 }
 
 fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, socket_path: []const u8, timeout_ms: i32) Outcome {
-    const req = request.classify(argv) catch return .cold;
+    // `sa` backs `req.filter.roots` (aliases into argv) and must outlive the
+    // whole attempt — it lives on this frame across `exchange` below.
+    var sa: request.ScopeArgs = .{};
+    const req = request.classify(argv, &sa) catch return .cold;
+    // A scope root the cold engine would fail to open (a typo'd PATH) must reach
+    // cold so it emits rg's exit-2 "No such file or directory" — the warm mirror
+    // would otherwise silently prune the unknown root to an exit-1 "no match",
+    // which reads to a caller like a crash on a typo. Stat each root against the
+    // same CWD cold walks; any miss → cold. Only the (rare) scoped path pays it.
+    if (!req.filter.isEmpty() and !rootsExist(io, req.filter.roots)) return .cold;
     // The wire count is a corpus-wide total; rg's `-c` is per-file — cold owns
     // it. But `-q` overrides the mode entirely (it answers existence, prints
     // nothing), so a quiet `-c`/`-l`/bare query is all served warm below.
@@ -158,7 +179,15 @@ fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request, ti
 
     var qbuf: std.ArrayList(u8) = .empty;
     defer qbuf.deinit(gpa);
-    try protocol.encodeQuery(&qbuf, gpa, req);
+    // A rootless, non-rank, windowless request rides the classic `query` (an old
+    // daemon still serves it warm); a scoped OR `--rank` OR `-A`/`-B`/`-C` one
+    // rides `query_ext`, whose trailer carries the `PathFilter`, the rank top-k,
+    // and the context window (an old daemon declines it → the classified-but-
+    // unserved query simply runs cold).
+    if (req.filter.isEmpty() and req.rank_k == null and req.before == 0 and req.after == 0)
+        try protocol.encodeQuery(&qbuf, gpa, req)
+    else
+        try protocol.encodeQueryExt(&qbuf, gpa, req);
     if (!protocol.writeAll(fd, qbuf.items)) return .cold;
 
     var lines_out: std.ArrayList(u8) = .empty;

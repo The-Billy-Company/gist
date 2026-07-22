@@ -71,6 +71,11 @@ const parallel = @import("../../../kernel/primitives/parallel.zig");
 // depending on `faces/search` is a one-way edge (serial.zig never imports
 // session), so no import cycle.
 const run = @import("../cold/engine/serial.zig");
+// The gist-native `--rank` kernel (`ranked.zig`): its `renderLive` extracts
+// features over in-memory `LiveFile`s, fuses via RRF, and renders the top-K —
+// the SAME emission cold's `runLive` produces, returned to buffer instead of
+// stdout. A one-way edge (ranked never imports session), so no cycle.
+const ranked = @import("../cold/engine/ranked.zig");
 const grepfile = @import("../cold/read/grepfile.zig");
 const dirtylog = @import("dirty.zig");
 const Seqlock = @import("seqlock.zig").Seqlock;
@@ -78,6 +83,9 @@ const delta_mod = @import("delta.zig");
 const persist = @import("../../../corpus/index/trigrams/persist.zig");
 const Index = @import("../../../corpus/index/trigrams/trigram.zig").Index;
 const query_mod = @import("../../../kernel/match/query.zig");
+// Path-scope predicate (`underRoot`/`normalizeRoot`) — the served-scope subset
+// check reuses the exact primitive the request `PathFilter` prunes with.
+const scope = @import("../../../corpus/scope/glob.zig");
 const CompiledQuery = query_mod.CompiledQuery;
 const Scratch = query_mod.Scratch;
 const MatchScratch = query_mod.MatchScratch;
@@ -87,6 +95,9 @@ const Dir = std.Io.Dir;
 
 pub const Mode = request.Mode;
 pub const Request = request.Request;
+/// The resolved path-scope a request confines its answer to (roots today) — the
+/// candidate walk prunes/gates with it; empty is the rootless whole-corpus search.
+const PathFilter = request.PathFilter;
 
 pub const QueryError = error{
     /// The session cannot prove freshness (no valid build anchor, or the index
@@ -246,6 +257,32 @@ pub const ResidentSession = struct {
         errdefer gpa.free(gen);
 
         return .{ .gpa = gpa, .io = io, .roots_arena = roots_arena, .roots = owned_roots, .mir = mir, .idx = idx, .by_path = by_path, .index_gen = gen, .fresh_ns = load_ns, .overlay = std.StringHashMap(Overlay).init(gpa), .dirty_log = dirtylog.DirtyLog.init(gpa) };
+    }
+
+    /// Does this daemon serve no explicit scope — the bare `gist serve` whole-CWD
+    /// tree? Then its mirror is the full corpus and admits any relative subtree.
+    fn rootless(self: *const ResidentSession) bool {
+        return self.roots.len == 0 or
+            (self.roots.len == 1 and (self.roots[0].len == 0 or std.mem.eql(u8, self.roots[0], ".")));
+    }
+
+    /// May this daemon answer a request scoped to `req_roots`? A rootless query
+    /// (no roots) is served over whatever this daemon mirrors — the unchanged
+    /// bare-`gist` behavior, independent of how the daemon was launched. A SCOPED
+    /// query is sound only when its mirror is a superset of the requested roots:
+    /// a rootless daemon mirrors the whole CWD tree and admits any relative root,
+    /// while an explicitly-scoped daemon admits a scoped query only when every
+    /// requested root lies at/under one of its served roots (else its mirror is
+    /// missing files cold would search — decline → certified cold).
+    pub fn servesScope(self: *const ResidentSession, req_roots: []const []const u8) bool {
+        if (req_roots.len == 0 or self.rootless()) return true;
+        for (req_roots) |rr| {
+            const nr = scope.normalizeRoot(rr);
+            for (self.roots) |sr| {
+                if (scope.underRoot(nr, scope.normalizeRoot(sr))) break;
+            } else return false;
+        }
+        return true;
     }
 
     pub fn deinit(self: *ResidentSession) void {
@@ -653,14 +690,14 @@ pub const ResidentSession = struct {
         // and accumulator per thread), else it folds serially — byte-identical.
         var cand_buf: ?[]u32 = null;
         defer if (cand_buf) |c| self.gpa.free(c);
-        const cand = try self.candidateIds(&cq, &cand_buf);
+        const cand = try self.candidateIds(&cq, req.filter, &cand_buf);
 
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
         var acc = Accumulator{ .mode = req.mode, .arena = arena, .io = self.io, .verify_existence = verify, .cq = &cq, .sc = &sc };
         if (!try self.foldBaseParallel(arena, req, &cq, cand, verify, &acc))
             try self.eachBase(cand, &acc);
-        try self.eachOverlay(&acc); // the (bounded) overlay always folds serially
+        try self.eachOverlay(req.filter, &acc); // the (bounded) overlay always folds serially
 
         if (req.mode == .files) std.mem.sort([]const u8, acc.files.items, {}, lessPath);
         return .{ .mode = req.mode, .files = acc.files.items, .count = acc.count };
@@ -766,16 +803,17 @@ pub const ResidentSession = struct {
 
         var cand_buf: ?[]u32 = null;
         defer if (cand_buf) |c| self.gpa.free(c);
-        const cand = try self.candidateIds(&cq, &cand_buf);
+        const cand = try self.candidateIds(&cq, req.filter, &cand_buf);
         const is_cand = try self.gpa.alloc(bool, self.mir.docs.len);
         defer self.gpa.free(is_cand);
         @memset(is_cand, false);
-        for (cand) |id| is_cand[id] = true;
+        for (cand) |id| is_cand[id] = true; // pruned to in-scope ids by the filter
 
         var inv = InvertFold{ .mode = req.mode, .arena = arena, .io = self.io, .cap = req.max_count, .verify_existence = !self.seqlock.provenClean() };
         for (self.mir.paths, self.mir.docs, self.mir.nuls, self.mir.lines, 0..) |path, bytes, nul, nlines, i| {
             if (nlines == 0) continue; // empty / NUL-in-first-buffer: cold suppresses it
             if (self.overlay.contains(path)) continue; // the overlay pass owns it
+            if (!req.filter.admits(path)) continue; // out-of-scope: cold never walks it under `-v`
             const matches = if (is_cand[i]) gatedMatches(&cq, &sc, bytes, nul) else 0;
             try inv.fold(path, nlines, matches);
         }
@@ -783,6 +821,7 @@ pub const ResidentSession = struct {
         while (it.next()) |e| switch (e.value_ptr.*) {
             .tombstone => {},
             .doc => |d| {
+                if (!req.filter.admits(e.key_ptr.*)) continue;
                 const nlines = corpus.gatedLineCount(d.bytes, d.nul);
                 if (nlines == 0) continue;
                 // Overlay docs (changed/new since the build) are stale in the
@@ -824,7 +863,7 @@ pub const ResidentSession = struct {
         // doc is admitted whole (a doc with zero matching lines is entirely
         // selected), so the emit gather walks every doc — the invert emit's own
         // cost, which Lever B parallelizes.
-        const docs = try self.matchingDocs(arena, &cq, &sc, .lines, req.invert);
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert);
         var out: std.ArrayList(u8) = .empty;
         // Both faces shard the emit over cores through the SAME primitive
         // (`render.renderLinesParallel` → `parallel.shardBounds`): `-v` selects
@@ -858,11 +897,69 @@ pub const ResidentSession = struct {
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
 
-        const docs = try self.matchingDocs(arena, &cq, &sc, .lines, req.invert);
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert);
         return render.renderLinesShm(self.gpa, arena, req, docs, floor) catch |e| switch (e) {
             error.OutOfMemory => return QueryError.OutOfMemory,
             error.Unsupported => return QueryError.Stale,
         };
+    }
+
+    /// Answer a `--rank[=N]` request over resident bytes: gist's definition-first
+    /// ranked view (`ranked.zig`), the one shape rg can't express. The candidate
+    /// set is the SAME trigram-pruned, scope-gated ids the line faces gather (so a
+    /// caseless rank prunes soundly instead of scanning the whole tree), gathered
+    /// as in-memory `LiveFile`s in ASCENDING mirror-id order — the exact id order
+    /// cold's index rank path appends in, so the RRF tiebreak (`rank.zig`: fused
+    /// score desc, then array position) is byte-identical on a quiescent tree.
+    /// `arena` owns the returned rendered bytes; the overlay's fresher-than-index
+    /// docs fold in after the base half (empty on a quiescent tree, so
+    /// parity-neutral — under churn warm is simply fresher, the daemon's standing
+    /// contract). A pattern outside the linear engine (declined `-F`, or a
+    /// compile decline) or an OOM surfaces as `error.Stale`/`OutOfMemory` → cold.
+    /// `k` is the surfaced-row cap (`0` ⇒ cold's default 20).
+    pub fn queryRank(self: *ResidentSession, arena: std.mem.Allocator, req: Request, k: usize) QueryError![]const u8 {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        try self.reconcile();
+
+        // The whole-doc gate doubles as the candidate compiler; its regex body IS
+        // the linear engine cold ranks with (`serial.zig`'s `re.linear`), compiled
+        // from the same pattern/case/unicode — reuse it (no second compile).
+        // `--rank` declines `-F` in `classify`, so the body is always a regex here.
+        var cq = try self.compileFor(req, .files);
+        defer cq.deinit(self.gpa);
+        const rex = switch (cq.body) {
+            .regex => |*r| r,
+            .literal => return QueryError.Stale,
+        };
+
+        var cand_buf: ?[]u32 = null;
+        defer if (cand_buf) |c| self.gpa.free(c);
+        const cand = try self.candidateIds(&cq, req.filter, &cand_buf);
+
+        // Base candidates in ascending id order (cold's index-rank append order),
+        // then the bounded overlay — `renderLive`'s `fileDoc` re-verifies each and
+        // drops trigram false positives, so the surviving ranked set is identical
+        // to cold's, and the array position (the RRF tiebreak) matches too.
+        var files: std.ArrayList(ranked.LiveFile) = .empty;
+        for (cand) |id| {
+            const path = self.mir.paths[id];
+            if (self.overlay.contains(path)) continue; // the overlay pass owns it
+            files.append(arena, .{ .path = path, .bytes = self.mir.docs[id] }) catch return QueryError.OutOfMemory;
+        }
+        var it = self.overlay.iterator();
+        while (it.next()) |e| switch (e.value_ptr.*) {
+            .tombstone => {},
+            .doc => |d| {
+                if (!req.filter.admits(e.key_ptr.*)) continue;
+                files.append(arena, .{ .path = e.key_ptr.*, .bytes = d.bytes }) catch return QueryError.OutOfMemory;
+            },
+        };
+
+        var out: std.ArrayList(u8) = .empty;
+        _ = ranked.renderLive(arena, self.io, rex, files.items, k, &out) catch |err|
+            return if (err == error.OutOfMemory) QueryError.OutOfMemory else QueryError.Stale;
+        return out.items;
     }
 
     /// Answer an eligible `-q`/`--quiet` request: does ANY line match, anywhere
@@ -898,7 +995,7 @@ pub const ResidentSession = struct {
             .verify_existence = !self.seqlock.provenClean(),
         };
         defer ex.spans.deinit(self.gpa);
-        if (req.invert) try self.eachDoc(&ex) else try self.eachCandidate(&cq, &ex);
+        if (req.invert) try self.eachDoc(req.filter, &ex) else try self.eachCandidate(&cq, req.filter, &ex);
         return ex.found;
     }
 
@@ -940,7 +1037,7 @@ pub const ResidentSession = struct {
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
 
-        const docs = try self.matchingDocs(arena, &cq, &sc, .json_stream, req.invert);
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .json_stream, req.invert);
 
         // A common token's matching-doc set is large enough that the per-line span
         // scan — not the sink emit — is the 1-core-vs-16-core loss to cold. Above
@@ -1066,9 +1163,9 @@ pub const ResidentSession = struct {
     /// walk→report window is never reported. `admit` selects the binary policy
     /// (see `Admit`). The sort is `run.pathLess` — the warm canonical file
     /// order (see `docLess`) — so downstream output is deterministic.
-    fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, sc: *Scratch, admit: Admit, invert: bool) QueryError![]const DocRef {
+    fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, filter: PathFilter, sc: *Scratch, admit: Admit, invert: bool) QueryError![]const DocRef {
         var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .require_match = !invert, .check_exists = !self.seqlock.provenClean() };
-        if (invert) try self.eachDoc(&g) else try self.eachCandidate(cq, &g);
+        if (invert) try self.eachDoc(filter, &g) else try self.eachCandidate(cq, filter, &g);
         std.mem.sort(DocRef, g.docs.items, {}, docLess);
         return g.docs.items;
     }
@@ -1076,9 +1173,10 @@ pub const ResidentSession = struct {
     /// Walk every live document without trigram pruning. Invert-match needs this:
     /// a document excluded by the positive candidate set may be entirely made of
     /// selected nonmatching lines.
-    fn eachDoc(self: *ResidentSession, v: anytype) QueryError!void {
+    fn eachDoc(self: *ResidentSession, filter: PathFilter, v: anytype) QueryError!void {
         for (self.mir.paths, self.mir.docs, self.mir.nuls) |path, bytes, nul| {
             if (self.overlay.contains(path)) continue;
+            if (!filter.admits(path)) continue; // out-of-scope for a scoped `-v` walk
             try v.visit(path, bytes, nul);
             if (wantsStop(v)) return;
         }
@@ -1086,6 +1184,7 @@ pub const ResidentSession = struct {
         while (it.next()) |e| switch (e.value_ptr.*) {
             .tombstone => {},
             .doc => |d| {
+                if (!filter.admits(e.key_ptr.*)) continue;
                 try v.visit(e.key_ptr.*, d.bytes, d.nul);
                 if (wantsStop(v)) return;
             },
@@ -1099,12 +1198,12 @@ pub const ResidentSession = struct {
     /// always visited directly — the index is stale for exactly those. Shared
     /// by the files/count fold (`Accumulator`) and the doc gather (`Gather`),
     /// so every answer face prunes candidates identically.
-    fn eachCandidate(self: *ResidentSession, cq: *const CompiledQuery, v: anytype) QueryError!void {
+    fn eachCandidate(self: *ResidentSession, cq: *const CompiledQuery, filter: PathFilter, v: anytype) QueryError!void {
         var cand_buf: ?[]u32 = null;
         defer if (cand_buf) |c| self.gpa.free(c);
-        try self.eachBase(try self.candidateIds(cq, &cand_buf), v);
+        try self.eachBase(try self.candidateIds(cq, filter, &cand_buf), v);
         if (wantsStop(v)) return;
-        try self.eachOverlay(v);
+        try self.eachOverlay(filter, v);
     }
 
     /// The base half of `eachCandidate`: visit each trigram base candidate id in
@@ -1129,11 +1228,12 @@ pub const ResidentSession = struct {
     /// existence-checks its match (the same fail-closed stat-per-hit the base
     /// docs get); the clean path already tombstoned any delete, keeping the
     /// no-stat path. Bounded by the mutation count since build, so always serial.
-    fn eachOverlay(self: *ResidentSession, v: anytype) QueryError!void {
+    fn eachOverlay(self: *ResidentSession, filter: PathFilter, v: anytype) QueryError!void {
         var it = self.overlay.iterator();
         while (it.next()) |e| switch (e.value_ptr.*) {
             .tombstone => {},
             .doc => |d| {
+                if (!filter.admits(e.key_ptr.*)) continue; // out-of-scope overlay doc
                 try v.visit(e.key_ptr.*, d.bytes, d.nul);
                 if (wantsStop(v)) return;
             },
@@ -1146,7 +1246,7 @@ pub const ResidentSession = struct {
     /// fails. `buf` owns any index-allocated slice (freed by the caller). Shared
     /// by the files/count `answer`, the `lines` renderer, and the FFI match
     /// stream (`matchingDocs`) so all faces prune candidates identically.
-    fn candidateIds(self: *ResidentSession, cq: *const CompiledQuery, buf: *?[]u32) QueryError![]const u32 {
+    fn candidateIds(self: *ResidentSession, cq: *const CompiledQuery, filter: PathFilter, buf: *?[]u32) QueryError![]const u32 {
         var one: [1][]const u8 = undefined;
         const pf = cq.prefilter(&one);
         const hit: ?[]u32 = switch (pf.len) {
@@ -1159,8 +1259,13 @@ pub const ResidentSession = struct {
             for (all, 0..) |*x, i| x.* = @intCast(i);
             break :blk all;
         };
-        buf.* = c;
-        return c;
+        buf.* = c; // caller frees the full allocation; the pruned view is a prefix of it
+        // Scope BEFORE matching: a `PathFilter` (positional roots today) drops
+        // out-of-scope candidate ids in place, so the fold/gather never reads a
+        // file outside the query's subtree — the "faster than rg" prune the
+        // glob module documents, and the reason warm scoped work ≤ cold scoped
+        // work. An empty filter returns `c` untouched (rootless pays nothing).
+        return filter.prune(self.mir.paths, c);
     }
 };
 

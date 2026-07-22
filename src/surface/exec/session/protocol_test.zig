@@ -303,3 +303,70 @@ test "FileIter fails closed on a truncated path length" {
     var view = try protocol.decodeResult(&payload);
     try std.testing.expectError(protocol.WireError.BadFrame, view.files.next());
 }
+
+test "query_ext round-trips the PathFilter and the --rank trailer" {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // A scoped rank query: regex pattern, `-i`, a PATH root, and `--rank=5`.
+    const sent: request.Request = .{
+        .pattern = "WalletService",
+        .mode = .lines,
+        .ignore_case = true,
+        .rank_k = 5,
+        .filter = .{ .roots = &.{"services/ai"}, .includes = &.{"*.py"}, .excludes = &.{"*_pb2.py"}, .exts = &.{} },
+    };
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.encodeQueryExt(&buf, gpa, sent);
+
+    const p = try roundTrip(&buf);
+    try std.testing.expectEqual(protocol.Opcode.query_ext, p.op);
+    const got = try protocol.decodeQueryExt(arena.allocator(), p.payload);
+    try std.testing.expectEqualStrings("WalletService", got.pattern);
+    try std.testing.expect(got.ignore_case);
+    try std.testing.expectEqual(@as(?usize, 5), got.rank_k);
+    try std.testing.expectEqualStrings("services/ai", got.filter.roots[0]);
+    try std.testing.expectEqualStrings("*.py", got.filter.includes[0]);
+    try std.testing.expectEqualStrings("*_pb2.py", got.filter.excludes[0]);
+
+    // A bare `--rank` (default top-20 sentinel 0) survives; and a non-rank scoped
+    // query decodes back to `rank_k == null` (the presence byte is 0).
+    {
+        var b2: std.ArrayList(u8) = .empty;
+        defer b2.deinit(gpa);
+        var s2 = sent;
+        s2.rank_k = 0;
+        try protocol.encodeQueryExt(&b2, gpa, s2);
+        const p2 = try roundTrip(&b2);
+        const g2 = try protocol.decodeQueryExt(arena.allocator(), p2.payload);
+        try std.testing.expectEqual(@as(?usize, 0), g2.rank_k);
+    }
+    {
+        var b3: std.ArrayList(u8) = .empty;
+        defer b3.deinit(gpa);
+        var s3 = sent;
+        s3.rank_k = null;
+        try protocol.encodeQueryExt(&b3, gpa, s3);
+        const p3 = try roundTrip(&b3);
+        const g3 = try protocol.decodeQueryExt(arena.allocator(), p3.payload);
+        try std.testing.expectEqual(@as(?usize, null), g3.rank_k);
+        // No window ⇒ the context trailer is one `0` presence byte, decoding to
+        // a zero window (never a spurious `-A`/`-B`).
+        try std.testing.expectEqual(@as(u64, 0), g3.before);
+        try std.testing.expectEqual(@as(u64, 0), g3.after);
+    }
+    // A `-A`/`-B`/`-C` window round-trips through the context trailer.
+    {
+        var b4: std.ArrayList(u8) = .empty;
+        defer b4.deinit(gpa);
+        var s4 = sent;
+        s4.rank_k = null;
+        s4.before = 3;
+        s4.after = 2;
+        try protocol.encodeQueryExt(&b4, gpa, s4);
+        const p4 = try roundTrip(&b4);
+        const g4 = try protocol.decodeQueryExt(arena.allocator(), p4.payload);
+        try std.testing.expectEqual(@as(u64, 3), g4.before);
+        try std.testing.expectEqual(@as(u64, 2), g4.after);
+    }
+}
