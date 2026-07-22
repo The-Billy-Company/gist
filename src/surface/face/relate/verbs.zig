@@ -325,7 +325,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         for (roots.items) |r| {
             if (!flags.underAnyRoot(r, p.roots.items)) break :indexed;
         }
-        cand = try fresh.candidates(gpa, io, &p.idx, &p.paths, filters.items, if (roots.items.len > 0) roots.items else p.roots.items);
+        cand = try fresh.candidates(gpa, io, p, &p.paths, filters.items, if (roots.items.len > 0) roots.items else p.roots.items);
         total_files = p.paths.items.len;
 
         // Root-scope gate before the read (rank.zig's lesson): without it a

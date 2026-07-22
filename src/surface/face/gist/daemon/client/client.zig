@@ -234,6 +234,56 @@ fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request, ti
     }
 }
 
+/// Deadline for the `gist index` annals consult — tighter than a query's
+/// 2 s: the consult's whole point is out-running the ~10 ms journal replay
+/// and the ~100 ms stat walk, so a daemon too busy to answer inside this
+/// window is answered by the fallback instead of waited on.
+pub const changed_timeout_ms: i32 = 500;
+
+/// A vouched annals answer: the daemon's armed absolute watch prefix (the
+/// caller verifies it names ITS repo root) + the repo-relative changed paths.
+/// Everything is allocated from the caller's arena.
+pub const ChangedAnswer = struct { prefix: []const u8, paths: []const []const u8 };
+
+/// Ask the resident daemon which corpus files changed at/after `since_ns`
+/// (the amend's `base.ns` anchor). Null on ANY uncertainty — no daemon,
+/// version skew, decline, truncation, deadline — so the caller runs its
+/// proven fallback (journal replay → stat walk). Never errors, never spawns;
+/// output lives in `a` (the caller's arena).
+pub fn consultChanged(gpa: std.mem.Allocator, io: std.Io, a: std.mem.Allocator, socket_path: []const u8, since_ns: i64) ?ChangedAnswer {
+    const ua = net.UnixAddress.init(socket_path) catch return null;
+    const stream = ua.connect(io) catch return null; // no daemon → fallback
+    defer stream.close(io);
+    return exchangeChanged(gpa, a, stream.socket.handle, since_ns) catch null;
+}
+
+fn exchangeChanged(gpa: std.mem.Allocator, a: std.mem.Allocator, fd: std.posix.fd_t, since_ns: i64) !?ChangedAnswer {
+    // Same HELLO → READY handshake as a query (no transport caps — the answer
+    // is small). A version-skewed daemon would BadOpcode-drop the `changed`
+    // frame, so the mismatch bails here first.
+    try protocol.sendFrame(gpa, fd, .hello, &.{ protocol.protocol_version, 0 });
+    {
+        var ready = try recvFrameDeadline(gpa, fd, changed_timeout_ms);
+        defer ready.deinit();
+        if (ready.op != .ready) return null;
+        const r = protocol.decodeReady(ready.payload()) catch return null;
+        if (r.proto != protocol.protocol_version) return null;
+    }
+    var qbuf: std.ArrayList(u8) = .empty;
+    defer qbuf.deinit(gpa);
+    try protocol.encodeChanged(&qbuf, gpa, since_ns);
+    if (!protocol.writeAll(fd, qbuf.items)) return null;
+
+    var resp = try recvFrameDeadline(gpa, fd, changed_timeout_ms);
+    defer resp.deinit();
+    if (resp.op != .annals) return null;
+    const view = (protocol.decodeAnnals(resp.payload()) catch return null) orelse return null;
+    var out: std.ArrayList([]const u8) = .empty;
+    var it = view.paths;
+    while (it.next() catch return null) |p| try out.append(a, try a.dupe(u8, p));
+    return .{ .prefix = try a.dupe(u8, view.prefix), .paths = try out.toOwnedSlice(a) };
+}
+
 /// Emit the matched paths one per line and return rg's exit code (0 matched /
 /// 1 none). The set AND order are identical to cold `-l` (the daemon sorts with
 /// the same separator-aware `pathLess` cold's file sort applies). One batched

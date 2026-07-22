@@ -112,6 +112,7 @@ const Syms = struct {
     FSEventStreamStop: *const fn (Ref) callconv(.c) void,
     FSEventStreamInvalidate: *const fn (Ref) callconv(.c) void,
     FSEventStreamRelease: *const fn (Ref) callconv(.c) void,
+    FSEventStreamFlushSync: *const fn (Ref) callconv(.c) void,
     run_loop_default_mode: Ref,
     array_callbacks: ?*const anyopaque,
 
@@ -148,6 +149,7 @@ const Syms = struct {
         s.FSEventStreamStop = cs.lookup(@TypeOf(s.FSEventStreamStop), "FSEventStreamStop") orelse return s.fail();
         s.FSEventStreamInvalidate = cs.lookup(@TypeOf(s.FSEventStreamInvalidate), "FSEventStreamInvalidate") orelse return s.fail();
         s.FSEventStreamRelease = cs.lookup(@TypeOf(s.FSEventStreamRelease), "FSEventStreamRelease") orelse return s.fail();
+        s.FSEventStreamFlushSync = cs.lookup(@TypeOf(s.FSEventStreamFlushSync), "FSEventStreamFlushSync") orelse return s.fail();
         return s;
     }
 
@@ -163,6 +165,16 @@ const Syms = struct {
         s.cs.close();
     }
 };
+
+/// Wall-clock nanoseconds off the raw libc clock — the FSEvents callback thread
+/// has no `std.Io` handle, and the annals compare against `base.ns` instants
+/// minted from the SAME realtime clock. Null on failure (callers degrade to
+/// doubt/uncovered, never to a guessed instant).
+fn wallNowNs() ?i128 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.REALTIME, &ts) != 0) return null;
+    return @as(i128, ts.sec) * std.time.ns_per_s + ts.nsec;
+}
 
 /// The freshness watcher, generic over any resident `Session` that exposes the
 /// change-tracking surface it drives: `roots: []const []const u8`,
@@ -191,14 +203,38 @@ pub fn Watcher(comptime Session: type) type {
         /// macOS: the watch thread's CFRunLoop, published so `stop` can wake it. Null
         /// until the loop thread stores it (before it signals `ready`).
         run_loop: std.atomic.Value(?*anyopaque) = .init(null),
+        /// macOS: the live FSEvents stream ref, published by the loop thread once
+        /// `FSEventStreamStart` succeeds so the serve thread can `flushSync` it —
+        /// the annals query's causal barrier. Cleared by the loop thread before
+        /// the stream is torn down; readers only ever run while the daemon's
+        /// single serve thread is live (i.e. before `stop`).
+        fs_stream: std.atomic.Value(?*anyopaque) = .init(null),
         /// macOS start handshake: 0 pending, 1 stream armed, 2 failed. The loop
         /// thread publishes it once; `startFsevents` polls it to decide whether to
         /// arm the session (kept on the main thread so the plain `watcher_active`
         /// bool the query path reads is never written concurrently).
         start_result: std.atomic.Value(u8) = .init(0),
 
+        /// Does this session carry the annals ledger (the never-drained changed-path
+        /// map a one-shot `gist index` queries)? Comptime-gated so the watcher stays
+        /// generic over sessions that don't (relate's retrieval session).
+        const has_annals = @hasField(Session, "annals");
+
         pub fn init(gpa: std.mem.Allocator, io: std.Io, session: *Session) @This() {
             return .{ .session = session, .io = io, .gpa = gpa };
+        }
+
+        /// Force synchronous delivery of every FSEvents event already queued for
+        /// the live stream — the causal barrier an annals query runs behind: after
+        /// this returns, every change that OCCURRED before the call has been
+        /// `note`d. Returns false when there is no live macOS stream to flush
+        /// (caller must treat the annals as unable to vouch).
+        pub fn flushSync(self: *@This()) bool {
+            if (comptime !is_macos) return false;
+            const s = if (self.syms) |*p| p else return false;
+            const stream = self.fs_stream.load(.acquire) orelse return false;
+            s.FSEventStreamFlushSync(stream);
+            return true;
         }
 
         /// Best-effort start. Arms the session (enabling the clean fast path) only
@@ -422,6 +458,12 @@ pub fn Watcher(comptime Session: type) type {
             defer s.CFRelease(paths);
 
             var ctx = CFContext{ .info = @ptrCast(self.session) };
+            // Annals coverage instant: captured BEFORE the stream exists. `SinceNow`
+            // resolves at creation and fseventsd's journal replays anything between
+            // create and start, so every event at/after this instant is delivered —
+            // the floor is conservative by construction. A clock failure leaves the
+            // annals uncovered (never answerable), not wrong.
+            const coverage_ns: ?i128 = if (comptime has_annals) wallNowNs() else null;
             const stream = s.FSEventStreamCreate(
                 null,
                 fseventsCallback,
@@ -432,6 +474,7 @@ pub fn Watcher(comptime Session: type) type {
                 kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagFileEvents,
             ) orelse return self.start_result.store(2, .release);
             defer {
+                self.fs_stream.store(null, .release);
                 s.FSEventStreamStop(stream);
                 s.FSEventStreamInvalidate(stream);
                 s.FSEventStreamRelease(stream);
@@ -442,6 +485,8 @@ pub fn Watcher(comptime Session: type) type {
             s.FSEventStreamScheduleWithRunLoop(stream, rl, s.run_loop_default_mode);
             if (s.FSEventStreamStart(stream) == 0) return self.start_result.store(2, .release);
 
+            self.fs_stream.store(stream, .release);
+            if (comptime has_annals) if (coverage_ns) |ns| self.session.annals.openCoverage(ns);
             self.running.store(true, .release);
             self.start_result.store(1, .release);
 
@@ -475,6 +520,11 @@ pub fn Watcher(comptime Session: type) type {
                 const cfstr = s.CFStringCreateWithBytes(null, abs.ptr, @intCast(abs.len), kCFStringEncodingUTF8, 0) orelse return null;
                 refs[made] = cfstr;
                 made += 1;
+                // Annals deliveries are keyed absolute; arm the strip prefix now —
+                // BEFORE the stream exists — so no delivery can outrun it. Only a
+                // single-root watch is annals-addressable (one unambiguous prefix);
+                // a multi-root session simply leaves the ledger unarmed (declines).
+                if (comptime has_annals) if (roots.len == 1) self.session.annals.arm(abs);
             }
             return s.CFArrayCreate(null, refs.ptr, @intCast(made), s.array_callbacks);
         }
@@ -488,15 +538,28 @@ pub fn Watcher(comptime Session: type) type {
         /// mounts) becomes `noteDoubt`, so that batch's reconcile walks fully.
         fn fseventsCallback(_: Ref, info: ?*anyopaque, num_events: usize, event_paths: ?[*]const [*:0]const u8, event_flags: [*]const u32, _: [*]const u64) callconv(.c) void {
             const session: *Session = @ptrCast(@alignCast(info orelse return));
+            // One delivery instant for the whole batch — coalesced events share a
+            // callback anyway, and delivery-at-or-after-occurrence is what the
+            // annals' `since` filter relies on. A dead clock poisons the ledger
+            // (never guesses); the dirty log is untouched either way.
+            const now_ns: ?i128 = if (comptime has_annals) wallNowNs() else null;
             if (event_paths) |paths| {
                 for (0..num_events) |i| {
                     if (event_flags[i] & inexact_flags != 0) {
                         session.dirty_log.noteDoubt();
+                        if (comptime has_annals) session.annals.noteDoubt();
                     } else {
-                        session.dirty_log.note(std.mem.span(paths[i]));
+                        const p = std.mem.span(paths[i]);
+                        session.dirty_log.note(p);
+                        if (comptime has_annals) {
+                            if (now_ns) |ns| session.annals.note(p, ns) else session.annals.noteDoubt();
+                        }
                     }
                 }
-            } else session.dirty_log.noteDoubt();
+            } else {
+                session.dirty_log.noteDoubt();
+                if (comptime has_annals) session.annals.noteDoubt();
+            }
             session.markDirty();
         }
     };

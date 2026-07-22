@@ -78,6 +78,7 @@ const run = @import("../cold/engine/serial.zig");
 const ranked = @import("../cold/engine/ranked.zig");
 const grepfile = @import("../cold/read/grepfile.zig");
 const dirtylog = @import("dirty.zig");
+const annalslog = @import("annals.zig");
 const Seqlock = @import("seqlock.zig").Seqlock;
 const delta_mod = @import("delta.zig");
 const persist = @import("../../../corpus/index/trigrams/persist.zig");
@@ -204,6 +205,13 @@ pub const ResidentSession = struct {
     /// (macOS FSEvents today). When its drain is exact and doubt-free, the
     /// reconcile verifies ONLY the drained paths — O(changed), not O(tree).
     dirty_log: dirtylog.DirtyLog,
+    /// The never-drained sibling ledger: every exact watcher delivery accretes
+    /// as `path → last delivery instant`, so a one-shot `gist index` amend can
+    /// dial in and ask "what changed since anchor S?" without a stat walk.
+    /// Armed by the watcher (single-root FSEvents only); fail-closed everywhere
+    /// else (`annals.zig`). Like `dirty_log`, it belongs to the SESSION's
+    /// lifetime, not an index generation — reloads leave it untouched.
+    annals: annalslog.Annals,
     /// A scoped reconcile is sound only downstream of one full walk that
     /// overlapped the live event stream (the watcher arms before the first
     /// query, so the first reconcile is always the covering full pass).
@@ -256,7 +264,7 @@ pub const ResidentSession = struct {
         const gen = try readGen(gpa, io);
         errdefer gpa.free(gen);
 
-        return .{ .gpa = gpa, .io = io, .roots_arena = roots_arena, .roots = owned_roots, .mir = mir, .idx = idx, .by_path = by_path, .index_gen = gen, .fresh_ns = load_ns, .overlay = std.StringHashMap(Overlay).init(gpa), .dirty_log = dirtylog.DirtyLog.init(gpa) };
+        return .{ .gpa = gpa, .io = io, .roots_arena = roots_arena, .roots = owned_roots, .mir = mir, .idx = idx, .by_path = by_path, .index_gen = gen, .fresh_ns = load_ns, .overlay = std.StringHashMap(Overlay).init(gpa), .dirty_log = dirtylog.DirtyLog.init(gpa), .annals = annalslog.Annals.init(gpa) };
     }
 
     /// Does this daemon serve no explicit scope — the bare `gist serve` whole-CWD
@@ -286,6 +294,7 @@ pub const ResidentSession = struct {
     }
 
     pub fn deinit(self: *ResidentSession) void {
+        self.annals.deinit();
         self.dirty_log.deinit();
         self.clearOverlay();
         self.overlay.deinit();
@@ -361,11 +370,12 @@ pub const ResidentSession = struct {
         // fallback). init dupes `self.roots` into its own arena before we free
         // the old roots_arena below.
         var fresh = ResidentSession.init(self.gpa, self.io, self.roots) catch return QueryError.Stale;
-        // The watcher notes into THIS session's log; the replacement's own
-        // (empty) log is surplus. `full_pass_done` survives: the event stream
-        // ran across the rebuild, so init's fresh corpus read IS a covering
-        // full pass and pending events stay queued for the next drain.
+        // The watcher notes into THIS session's log + annals; the replacement's
+        // own (empty) pair is surplus. `full_pass_done` survives: the event
+        // stream ran across the rebuild, so init's fresh corpus read IS a
+        // covering full pass and pending events stay queued for the next drain.
         fresh.dirty_log.deinit();
+        fresh.annals.deinit();
 
         // Free only the stale DATA.
         self.clearOverlay();

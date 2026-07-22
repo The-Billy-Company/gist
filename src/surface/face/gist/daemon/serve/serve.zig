@@ -41,9 +41,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const resident = @import("../../../../exec/session/resident.zig");
+const annals_mod = @import("../../../../exec/session/annals.zig");
 const protocol = @import("../../../../exec/session/protocol.zig");
 const watch = @import("../../../../exec/session/watch.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
+const fresh = @import("../../../../../corpus/index/trigrams/fresh.zig");
+const journal = @import("../../../../../corpus/tree/journal.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
@@ -105,6 +108,12 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
         if (session.seqlock.active) "armed" else "unavailable (reconcile-always)",
         if (session.dirty_log.exact) "on" else "off",
     });
+    // Boot-seed the annals from the persisted journal token: a `gist index`
+    // amend asks "changed since base.ns" — an instant that usually PREDATES
+    // this daemon — so replay the OS journal once and extend coverage back to
+    // the token's mint. Best-effort: any doubt leaves coverage at stream-live
+    // (the consult declines; the client falls back to its own replay/walk).
+    seedAnnals(gpa, io, &session);
 
     if (std.fs.path.dirnamePosix(socket_path)) |dir| Dir.cwd().createDirPath(io, dir) catch {};
     Dir.cwd().deleteFile(io, socket_path) catch {}; // clear a stale socket from a crashed daemon
@@ -150,7 +159,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
         var dropped = false;
         for (clients.items, pfds.items[1..]) |*c, pfd| {
             if (pfd.revents & (std.posix.POLL.IN | std.posix.POLL.HUP | std.posix.POLL.ERR) == 0) continue;
-            const after = serveFrame(&session, gpa, c);
+            const after = serveFrame(&session, &watcher, gpa, c);
             if (session.scoped_reconciles != last_scoped or session.full_reconciles != last_full) {
                 last_scoped = session.scoped_reconciles;
                 last_full = session.full_reconciles;
@@ -187,6 +196,37 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     }
 }
 
+/// One-time boot seed of the session's annals: replay the persisted FSEvents
+/// journal token (the same one the one-shot amend would replay itself) and
+/// deposit each surviving file with its LIVE max(mtime, ctime) — the exact
+/// quantity the stat walk compares — then extend coverage back to the token's
+/// mint instant. Gated on the per-file-exact watcher being live (`dirty_log
+/// .exact`): seeding must never make the ledger answerable for a window no
+/// live stream is covering forward from. Every failure returns with coverage
+/// unextended — sound, just younger.
+fn seedAnnals(gpa: std.mem.Allocator, io: std.Io, session: *ResidentSession) void {
+    if (comptime !journal.supported) return;
+    if (!session.dirty_log.exact) return; // no live exact stream → never extend
+    const tok = fresh.readJournalToken(gpa, io) orelse return;
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var entries: std.ArrayList(journal.Entry) = .empty;
+    // Rootless daemon semantics: the annals cover the whole CWD tree, so the
+    // replay runs over `.` regardless of served roots (a scoped daemon's
+    // annals prefix won't match the amend's CWD check anyway).
+    if (!journal.replay(gpa, io, &.{"."}, tok, arena.allocator(), &entries)) return;
+    for (entries.items) |e| {
+        if (e.is_dir) continue;
+        const ts: i128 = if (Dir.cwd().statFile(io, e.path, .{ .follow_symlinks = false })) |st|
+            @max(st.mtime.nanoseconds, st.ctime.nanoseconds)
+        else |_|
+            std.Io.Clock.now(.real, io).nanoseconds; // vanished: conservatively "now"
+        if (!session.annals.seed(e.path, ts)) return; // OOM/cap: abort WITHOUT extending
+    }
+    session.annals.extendCoverage(tok.captured_ns);
+    note("gist serve: annals seeded ({d} replayed entries, coverage from token)\n", .{entries.items.len});
+}
+
 /// Take the advisory single-instance lock on `<socket_path>.lock`. Returns the
 /// held fd (keep it open for the daemon's lifetime — closing releases the lock),
 /// or `null` if another daemon owns it or the lock file can't be opened (in
@@ -208,7 +248,7 @@ fn acquireSingleton(io: std.Io, socket_path: []const u8) ?std.posix.fd_t {
 /// small request frame arrives in one segment on a local Unix socket; a
 /// half-written frame from a dying peer ends as `ConnClosed` → `.drop`).
 /// Returns `.stop` only on an explicit `shutdown` opcode.
-fn serveFrame(session: *ResidentSession, gpa: std.mem.Allocator, client: *Client) After {
+fn serveFrame(session: *ResidentSession, watcher: *watch.Watcher(ResidentSession), gpa: std.mem.Allocator, client: *Client) After {
     const fd = client.stream.socket.handle;
     var frame = protocol.recvFrame(gpa, fd) catch return .drop; // closed/oversized/bad → drop peer
     defer frame.deinit();
@@ -228,12 +268,38 @@ fn serveFrame(session: *ResidentSession, gpa: std.mem.Allocator, client: *Client
         // trailer. An old daemon never reaches here (the opcode is unknown to
         // it → `.decline` below → client cold).
         .query_ext => handleQuery(session, gpa, fd, frame.payload(), client.caps, true) catch return .drop,
+        // The annals consult: `gist index` asking "what changed since S?".
+        .changed => handleChanged(session, watcher, gpa, fd, frame.payload()) catch return .drop,
         .shutdown => return .stop,
         // Anything server→client, or an unknown verb, is not a request: refuse
         // it as decline so a confused client falls back cold rather than hangs.
         else => protocol.sendFrame(gpa, fd, .decline, "") catch return .drop,
     }
     return .keep;
+}
+
+/// Answer an annals consult: force synchronous delivery of every FSEvents
+/// event already queued (the causal barrier — after `flushSync` returns, any
+/// change that OCCURRED before the client captured its own witness instant has
+/// been `note`d), then snapshot the ledger at/after `since_ns`. Every
+/// uncertainty — no live stream to flush, an unarmed/poisoned ledger, a
+/// pre-floor query, OOM — answers `ok=0`, sending the client to its proven
+/// fallback (journal replay → stat walk). Never a partial list.
+fn handleChanged(session: *ResidentSession, watcher: *watch.Watcher(ResidentSession), gpa: std.mem.Allocator, fd: std.posix.fd_t, payload: []const u8) !void {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const since_ns = protocol.decodeChanged(payload) catch {
+        try protocol.encodeAnnals(&buf, gpa, null);
+        if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+        return;
+    };
+    var snap: ?annals_mod.Snapshot = if (watcher.flushSync())
+        session.annals.since(gpa, since_ns)
+    else
+        null;
+    defer if (snap) |*s| s.deinit(gpa);
+    try protocol.encodeAnnals(&buf, gpa, if (snap) |s| .{ .prefix = s.prefix, .paths = s.paths } else null);
+    if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
 }
 
 /// Answer a `hello`/`status` frame with the READY triple (daemon gen, session

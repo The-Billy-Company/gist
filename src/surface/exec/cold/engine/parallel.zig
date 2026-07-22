@@ -381,7 +381,7 @@ fn assembleElide(gpa: std.mem.Allocator, io: std.Io, filters: []const []const u8
     var candidates = try std.DynamicBitSet.initEmpty(gpa, p.paths.items.len);
     errdefer candidates.deinit();
     if (usableFilters(filters)) {
-        const cand = try p.idx.queryAny(gpa, filters);
+        const cand = try p.queryAny(gpa, filters);
         defer gpa.free(cand);
         for (cand) |d| candidates.set(d);
     } else {

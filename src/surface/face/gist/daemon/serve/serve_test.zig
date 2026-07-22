@@ -511,3 +511,103 @@ test "serve: an idle persistent client does not starve a second connection" {
 
     // Deferred teardown sends SHUTDOWN and joins even if an assertion above fails.
 }
+
+/// One CHANGED → ANNALS round-trip. Null ⇒ the daemon declined to vouch.
+fn consultChanged(gpa: std.mem.Allocator, arena: std.mem.Allocator, fd: std.posix.fd_t, since_ns: i64) !?struct { prefix: []const u8, paths: []const []const u8 } {
+    var qbuf: std.ArrayList(u8) = .empty;
+    defer qbuf.deinit(gpa);
+    try protocol.encodeChanged(&qbuf, gpa, since_ns);
+    try std.testing.expect(protocol.writeAll(fd, qbuf.items));
+    try expectReadable(fd);
+    var resp = try protocol.recvFrame(gpa, fd);
+    defer resp.deinit();
+    try std.testing.expectEqual(protocol.Opcode.annals, resp.op);
+    const view = (try protocol.decodeAnnals(resp.payload())) orelse return null;
+    var out: std.ArrayList([]const u8) = .empty;
+    var it = view.paths;
+    while (try it.next()) |p| try out.append(arena, try arena.dupe(u8, p));
+    return .{ .prefix = try arena.dupe(u8, view.prefix), .paths = try out.toOwnedSlice(arena) };
+}
+
+test "serve: annals consult declines pre-coverage instants and vouches for a live change behind the flush barrier" {
+    const gpa = std.testing.allocator;
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const root = try std.fmt.allocPrint(a, "/tmp/gist_annals_{x}", .{@intFromPtr(&threaded)});
+    Dir.cwd().deleteTree(io, root) catch {};
+    try Dir.cwd().createDirPath(io, root);
+    defer Dir.cwd().deleteTree(io, root) catch {};
+    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/seed.txt", .{root}), .data = "needle\n" });
+
+    const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
+    const roots = try a.dupe([]const u8, &.{root});
+    const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
+    defer shutdownAndJoin(gpa, io, socket, t);
+
+    const stream = try dial(io, socket);
+    defer stream.close(io);
+    const fd = stream.socket.handle;
+    try handshake(gpa, fd);
+
+    // (1) An instant far before any possible coverage floor ALWAYS declines —
+    // armed or not, the ledger never vouches for a window it did not watch.
+    try std.testing.expectEqual(@as(@TypeOf(try consultChanged(gpa, a, fd, 1)), null), try consultChanged(gpa, a, fd, 1));
+
+    // (2) The vouch path needs a live per-file-exact watcher (macOS FSEvents).
+    // Elsewhere — or when fseventsd won't arm in this environment — every
+    // consult declines, and (1) already proved that shape; skip the rest.
+    if (@import("builtin").os.tag != .macos) return error.SkipZigTest;
+
+    // Wait for coverage to open (the watcher thread arms asynchronously to
+    // serve startup), then write a NEW file strictly after `t_before`. The
+    // daemon's FlushSync barrier must surface it on a consult with
+    // `since = t_before` — that delivery-forcing is exactly what the one-shot
+    // amend relies on for soundness.
+    const t_before = std.Io.Clock.now(.real, io).nanoseconds;
+    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/late.txt", .{root}), .data = "fresh\n" });
+
+    var vouched: bool = false;
+    var saw_late: bool = false;
+    const deadline = std.Io.Clock.now(.real, io).nanoseconds + 5 * std.time.ns_per_s;
+    while (std.Io.Clock.now(.real, io).nanoseconds < deadline) {
+        if (try consultChanged(gpa, a, fd, @intCast(t_before))) |ans| {
+            vouched = true;
+            // The armed prefix is the realpath of OUR root (firmlink resolved).
+            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            const rootz = try a.dupeZ(u8, root);
+            const want_prefix = std.mem.span(std.c.realpath(rootz, &buf) orelse return error.RealpathFailed);
+            try std.testing.expectEqualStrings(want_prefix, ans.prefix);
+            for (ans.paths) |p| {
+                if (std.mem.eql(u8, p, "late.txt")) saw_late = true;
+            }
+            if (saw_late) break;
+        }
+        try io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .real);
+    }
+    // No vouch within the budget ⇒ fseventsd never armed here (sandboxed CI);
+    // the decline shape was already proven, so skip rather than fake a pass.
+    if (!vouched) return error.SkipZigTest;
+    try std.testing.expect(saw_late);
+
+    // (3) Post-coverage no-change window: a consult since NOW vouches with an
+    // empty set — the exact answer the sub-5 ms no-change amend rides.
+    const t_now = std.Io.Clock.now(.real, io).nanoseconds;
+    var empty_ok = false;
+    while (std.Io.Clock.now(.real, io).nanoseconds < deadline + 2 * std.time.ns_per_s) {
+        if (try consultChanged(gpa, a, fd, @intCast(t_now))) |ans| {
+            if (ans.paths.len == 0) {
+                empty_ok = true;
+                break;
+            }
+            // Straggler deliveries from (2) may still land; retry.
+        }
+        try io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .real);
+    }
+    try std.testing.expect(empty_ok);
+}

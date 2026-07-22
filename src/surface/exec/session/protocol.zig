@@ -26,7 +26,12 @@ const shm = @import("shm.zig");
 /// warm). The bump makes the handshake fail-open: a v5 client meeting a stale
 /// v4 daemon (or vice versa) sees the version mismatch in READY and runs cold,
 /// so no peer ever reads the new trailer without agreeing to it.
-pub const protocol_version: u8 = 5;
+///
+/// v6 grew the `changed`/`annals` opcode pair (the `gist index` amend consult).
+/// An old daemon receiving `changed` would BadOpcode-drop the whole connection
+/// mid-session; the bump lets a v6 client see the stale daemon in READY and
+/// skip the consult entirely (fallback: journal replay → stat walk).
+pub const protocol_version: u8 = 6;
 
 /// Session/transport capabilities the peers agree on in the HELLO frame. NOT
 /// query flags — the flags byte is fully assigned; this is a separate handshake
@@ -74,6 +79,18 @@ pub const Opcode = enum(u8) {
     // `query` opcode still carries every unscoped request, so an old daemon
     // keeps serving those warm.
     query_ext = 13, // C→S: [u8 mode][u8 flags][opt u64 max_count][u32 plen][pattern] then 4×([u8 n]{[u32 len][bytes]}) = roots,includes,excludes,exts, then [u8 rank_present][opt u64 rank_k], then [u8 ctx_present][opt u64 before][opt u64 after], then [u8 pcre] (`-P`/`--pcre2`; self-describing, absent tail ⇒ 0)
+    // The annals consult (`gist index` amend fast path): "which corpus files
+    // changed at/after instant S?" — answered from the daemon's never-drained
+    // watcher ledger (`annals.zig`) behind an FSEventStreamFlushSync barrier.
+    // ADDITIVE like `query_ext`: an old daemon's `BadOpcode` drop / `decline`
+    // sends the client to its proven fallback (journal replay → stat walk).
+    changed = 14, // C→S: [i64 since_ns]
+    // The answer: ok=0 ⇒ the ledger cannot vouch (unarmed, poisoned, floor,
+    // flush failure) — never a partial list. ok=1 ⇒ the daemon's armed absolute
+    // watch prefix (the client verifies it matches its own repo root) + every
+    // REPO-RELATIVE path noted at/after S (a sound superset; the client's stat
+    // confirm prunes the extras).
+    annals = 15, // S→C: [u8 ok][if ok: [u32 plen][prefix][u32 n]{[u32 len][path]}]
 };
 
 // Query flags byte. Reserved bits join `known_flags` only with their engine semantics.
@@ -421,6 +438,55 @@ pub const FileIter = struct {
         return s;
     }
 };
+
+/// Encode the annals consult: one signed instant. `since_ns` is the amend's
+/// last freshness anchor (`built.ns`), which is already bounded to i64.
+pub fn encodeChanged(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, since_ns: i64) !void {
+    var body: [8]u8 = undefined;
+    std.mem.writeInt(i64, &body, since_ns, .little);
+    try writeFrame(buf, gpa, .changed, &body);
+}
+
+pub fn decodeChanged(payload: []const u8) WireError!i64 {
+    if (payload.len < 8) return WireError.BadFrame;
+    return std.mem.readInt(i64, payload[0..8], .little);
+}
+
+/// Encode an annals answer. `vouched == null` ⇒ the single `ok=0` byte (the
+/// ledger cannot vouch); otherwise the armed prefix + the changed-path list.
+pub fn encodeAnnals(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, vouched: ?struct { prefix: []const u8, paths: []const []const u8 }) !void {
+    var body: std.ArrayList(u8) = .empty;
+    defer body.deinit(gpa);
+    const v = vouched orelse {
+        try body.append(gpa, 0);
+        return writeFrame(buf, gpa, .annals, body.items);
+    };
+    try body.append(gpa, 1);
+    try wire.appendInt(u32, &body, gpa, @intCast(v.prefix.len));
+    try body.appendSlice(gpa, v.prefix);
+    try wire.appendInt(u32, &body, gpa, @intCast(v.paths.len));
+    for (v.paths) |p| {
+        try wire.appendInt(u32, &body, gpa, @intCast(p.len));
+        try body.appendSlice(gpa, p);
+    }
+    try writeFrame(buf, gpa, .annals, body.items);
+}
+
+/// A vouched annals answer: the daemon's armed watch prefix + a path iterator
+/// (both alias the frame buffer — caller keeps it alive while iterating).
+pub const AnnalsView = struct { prefix: []const u8, paths: FileIter };
+
+/// Decode an `annals` payload. Null ⇒ the daemon declined to vouch (the
+/// caller runs its fallback); truncation fails closed as `BadFrame`.
+pub fn decodeAnnals(payload: []const u8) WireError!?AnnalsView {
+    if (payload.len < 1) return WireError.BadFrame;
+    if (payload[0] == 0) return null;
+    var rest = payload[1..];
+    const prefix = try takeLenPrefixed(&rest);
+    if (rest.len < 4) return WireError.BadFrame;
+    const n = std.mem.readInt(u32, rest[0..4], .little);
+    return .{ .prefix = prefix, .paths = .{ .rest = rest[4..], .remaining = n } };
+}
 
 pub fn encodeReady(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, daemon_gen: u64, session_gen: u64, index_gen: []const u8) !void {
     var body: std.ArrayList(u8) = .empty;

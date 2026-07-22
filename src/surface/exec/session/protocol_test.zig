@@ -403,3 +403,61 @@ test "query_ext round-trips the -P engine trailer" {
         try std.testing.expect(!(try protocol.decodeQuery(p3.payload)).pcre);
     }
 }
+
+test "changed encode/decode round-trips the since instant (negative included)" {
+    inline for (.{ @as(i64, 0), @as(i64, 1_753_000_000_000_000_000), @as(i64, -7) }) |since| {
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(gpa);
+        try protocol.encodeChanged(&buf, gpa, since);
+        const p = try roundTrip(&buf);
+        try std.testing.expectEqual(protocol.Opcode.changed, p.op);
+        try std.testing.expectEqual(since, try protocol.decodeChanged(p.payload));
+    }
+    // Truncated instant fails closed.
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeChanged("short"));
+}
+
+test "annals encode/decode: vouched answer round-trips prefix + paths losslessly" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    const paths = [_][]const u8{ "src/a.zig", "docs/b.md", "" };
+    try protocol.encodeAnnals(&buf, gpa, .{ .prefix = "/repo", .paths = &paths });
+    const p = try roundTrip(&buf);
+    try std.testing.expectEqual(protocol.Opcode.annals, p.op);
+    const view = (try protocol.decodeAnnals(p.payload)) orelse return error.TestExpectedVouch;
+    try std.testing.expectEqualStrings("/repo", view.prefix);
+    var it = view.paths;
+    for (paths) |want| try std.testing.expectEqualStrings(want, (try it.next()) orelse return error.TestExpectedPath);
+    try std.testing.expectEqual(@as(?[]const u8, null), try it.next());
+}
+
+test "annals encode/decode: decline round-trips as null; malformed payloads fail closed" {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.encodeAnnals(&buf, gpa, null);
+    const p = try roundTrip(&buf);
+    try std.testing.expectEqual(@as(?protocol.AnnalsView, null), try protocol.decodeAnnals(p.payload));
+
+    // Empty payload / truncated prefix / truncated count all fail closed.
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeAnnals(""));
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeAnnals(&[_]u8{ 1, 9, 0, 0, 0, 'x' })); // prefix len 9, 1 byte follows
+    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeAnnals(&[_]u8{ 1, 1, 0, 0, 0, 'x', 2 })); // count truncated
+    // A path list shorter than its declared count fails closed at iteration.
+    {
+        var b2: std.ArrayList(u8) = .empty;
+        defer b2.deinit(gpa);
+        const one = [_][]const u8{"a"};
+        try protocol.encodeAnnals(&b2, gpa, .{ .prefix = "/r", .paths = &one });
+        const p2 = try roundTrip(&b2);
+        const raw = p2.payload;
+        // Bump the declared count past the encoded list: prefix is "/r" (len 2),
+        // so the count u32 sits at offset 1 + 4 + 2.
+        var mangled = try gpa.dupe(u8, raw);
+        defer gpa.free(mangled);
+        std.mem.writeInt(u32, mangled[7..11], 2, .little);
+        const v = (try protocol.decodeAnnals(mangled)) orelse return error.TestExpectedVouch;
+        var it2 = v.paths;
+        _ = try it2.next(); // the real path
+        try std.testing.expectError(protocol.WireError.BadFrame, it2.next()); // the phantom one
+    }
+}
