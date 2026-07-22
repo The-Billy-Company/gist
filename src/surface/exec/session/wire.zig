@@ -142,13 +142,13 @@ const cmsg_len = cmsg_data_off + fd_size; // CMSG_LEN(fd)
 const cmsg_space = cmsg_data_off + std.mem.alignForward(usize, fd_size, cmsg_align); // CMSG_SPACE(fd)
 
 /// Overlay a `cmsghdr` on a CMSG_SPACE-sized control buffer. The buffer is
-/// sized and aligned for the target's `cmsghdr`; intFromPtr/ptrFromInt keeps
-/// the libc CMSG_FIRSTHDR seam free of `@ptrCast` (same discipline as watch.zig).
+/// sized and aligned for the target's `cmsghdr`; bytesAsValue preserves that
+/// provenance without manufacturing a pointer from its address.
 fn cmsgHdr(ctrl: *align(cmsg_align) [cmsg_space]u8) *cmsghdr {
-    return @ptrFromInt(@intFromPtr(ctrl));
+    return std.mem.bytesAsValue(cmsghdr, ctrl[0..@sizeOf(cmsghdr)]);
 }
 fn cmsgHdrConst(ctrl: *align(cmsg_align) const [cmsg_space]u8) *const cmsghdr {
-    return @ptrFromInt(@intFromPtr(ctrl));
+    return std.mem.bytesAsValue(cmsghdr, ctrl[0..@sizeOf(cmsghdr)]);
 }
 
 /// Send `bytes` as one message carrying `pass_fd` in an SCM_RIGHTS control

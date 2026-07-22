@@ -56,51 +56,53 @@ const in_mask: u32 = linux.IN.MODIFY | linux.IN.CREATE | linux.IN.DELETE |
 /// build the paths array with the retaining `kCFTypeArrayCallBacks`, so we drop
 /// our own string references immediately and the stream copies the list on
 /// create. Frameworks are linked in `build.zig` (`CoreServices`+`CoreFoundation`).
-const darwin = if (is_macos) struct {
-    const Ref = ?*anyopaque;
-    const CFIndex = isize;
-    const kCFStringEncodingUTF8: u32 = 0x0800_0100;
-    const kFSEventStreamEventIdSinceNow: u64 = 0xFFFF_FFFF_FFFF_FFFF;
-    // NoDefer: deliver the first event immediately, then coalesce at `latency`.
-    const kFSEventStreamCreateFlagNoDefer: u32 = 0x0000_0002;
-    // FileEvents: report the changed ITEM's own path (file or dir) instead of
-    // its parent directory — the exact dirty set the scoped reconcile needs.
-    const kFSEventStreamCreateFlagFileEvents: u32 = 0x0000_0010;
-    // Event flags that mean "these paths are NOT an exact account of what
-    // changed": subtree-rescan hints, kernel/user queue drops, id wrap,
-    // history replay boundary, root moves, mount churn. Any of them makes the
-    // batch a doubt (→ full walk), never a silent gap.
-    const inexact_flags: u32 = 0x0000_00FF;
-    // Coalescing window (s): small keeps the read-your-writes stale window tight
-    // while still folding a build's event storm into a handful of markDirty calls.
-    const latency: f64 = 0.05;
+fn Darwin(comptime Session: type) type {
+    return if (is_macos) struct {
+        const Ref = ?*anyopaque;
+        const CFIndex = isize;
+        const kCFStringEncodingUTF8: u32 = 0x0800_0100;
+        const kFSEventStreamEventIdSinceNow: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+        // NoDefer: deliver the first event immediately, then coalesce at `latency`.
+        const kFSEventStreamCreateFlagNoDefer: u32 = 0x0000_0002;
+        // FileEvents: report the changed ITEM's own path (file or dir) instead of
+        // its parent directory — the exact dirty set the scoped reconcile needs.
+        const kFSEventStreamCreateFlagFileEvents: u32 = 0x0000_0010;
+        // Event flags that mean "these paths are NOT an exact account of what
+        // changed": subtree-rescan hints, kernel/user queue drops, id wrap,
+        // history replay boundary, root moves, mount churn. Any of them makes the
+        // batch a doubt (→ full walk), never a silent gap.
+        const inexact_flags: u32 = 0x0000_00FF;
+        // Coalescing window (s): small keeps the read-your-writes stale window tight
+        // while still folding a build's event storm into a handful of markDirty calls.
+        const latency: f64 = 0.05;
 
-    const Context = extern struct {
-        version: CFIndex = 0,
-        info: ?*anyopaque = null,
-        retain: ?*const anyopaque = null,
-        release: ?*const anyopaque = null,
-        copy_description: ?*const anyopaque = null,
-    };
-    const Callback = *const fn (Ref, ?*anyopaque, usize, ?*anyopaque, [*c]const u32, [*c]const u64) callconv(.c) void;
+        const Context = extern struct {
+            version: CFIndex = 0,
+            info: ?*Session = null,
+            retain: ?*const anyopaque = null,
+            release: ?*const anyopaque = null,
+            copy_description: ?*const anyopaque = null,
+        };
+        const Callback = *const fn (Ref, ?*Session, usize, ?[*]const [*:0]const u8, [*]const u32, [*]const u64) callconv(.c) void;
 
-    extern var kCFRunLoopDefaultMode: Ref;
-    extern var kCFTypeArrayCallBacks: anyopaque;
+        extern var kCFRunLoopDefaultMode: Ref;
+        extern var kCFTypeArrayCallBacks: anyopaque;
 
-    extern fn CFStringCreateWithBytes(Ref, [*]const u8, CFIndex, u32, u8) Ref;
-    extern fn CFArrayCreate(Ref, [*]const ?*const anyopaque, CFIndex, ?*const anyopaque) Ref;
-    extern fn CFRelease(Ref) void;
-    extern fn CFRunLoopGetCurrent() Ref;
-    extern fn CFRunLoopRunInMode(Ref, f64, u8) i32;
-    extern fn CFRunLoopStop(Ref) void;
+        extern fn CFStringCreateWithBytes(Ref, [*]const u8, CFIndex, u32, u8) Ref;
+        extern fn CFArrayCreate(Ref, [*]const Ref, CFIndex, ?*const anyopaque) Ref;
+        extern fn CFRelease(Ref) void;
+        extern fn CFRunLoopGetCurrent() Ref;
+        extern fn CFRunLoopRunInMode(Ref, f64, u8) i32;
+        extern fn CFRunLoopStop(Ref) void;
 
-    extern fn FSEventStreamCreate(Ref, Callback, ?*const Context, Ref, u64, f64, u32) Ref;
-    extern fn FSEventStreamScheduleWithRunLoop(Ref, Ref, Ref) void;
-    extern fn FSEventStreamStart(Ref) u8;
-    extern fn FSEventStreamStop(Ref) void;
-    extern fn FSEventStreamInvalidate(Ref) void;
-    extern fn FSEventStreamRelease(Ref) void;
-} else struct {};
+        extern fn FSEventStreamCreate(Ref, Callback, ?*const Context, Ref, u64, f64, u32) Ref;
+        extern fn FSEventStreamScheduleWithRunLoop(Ref, Ref, Ref) void;
+        extern fn FSEventStreamStart(Ref) u8;
+        extern fn FSEventStreamStop(Ref) void;
+        extern fn FSEventStreamInvalidate(Ref) void;
+        extern fn FSEventStreamRelease(Ref) void;
+    } else struct {};
+}
 
 /// The freshness watcher, generic over any resident `Session` that exposes the
 /// change-tracking surface it drives: `roots: []const []const u8`,
@@ -109,6 +111,7 @@ const darwin = if (is_macos) struct {
 /// relate's retrieval session both satisfy it, so one watcher backs both —
 /// the accelerator is written once, the corpus/index model stays per-session.
 pub fn Watcher(comptime Session: type) type {
+    const darwin = Darwin(Session);
     return struct {
         session: *Session,
         io: std.Io,
@@ -337,9 +340,7 @@ pub fn Watcher(comptime Session: type) type {
             const paths = self.buildPathsArray() orelse return self.start_result.store(2, .release);
             defer darwin.CFRelease(paths);
 
-            // intFromPtr/ptrFromInt keeps the FFI opaque seam free of @ptrCast
-            // (zig-safety ratchet — new files are born clean).
-            var ctx = darwin.Context{ .info = @ptrFromInt(@intFromPtr(self.session)) };
+            var ctx = darwin.Context{ .info = self.session };
             const stream = darwin.FSEventStreamCreate(
                 null,
                 fseventsCallback,
@@ -393,8 +394,7 @@ pub fn Watcher(comptime Session: type) type {
                 refs[made] = s;
                 made += 1;
             }
-            const items: [*]const ?*const anyopaque = @ptrFromInt(@intFromPtr(refs.ptr));
-            return darwin.CFArrayCreate(null, items, @intCast(made), &darwin.kCFTypeArrayCallBacks);
+            return darwin.CFArrayCreate(null, refs.ptr, @intCast(made), &darwin.kCFTypeArrayCallBacks);
         }
 
         /// FSEvents delivers here on any change under the roots. With per-file
@@ -404,13 +404,11 @@ pub fn Watcher(comptime Session: type) type {
         /// the log's drain contract relies on); any flag that means the paths are
         /// not an exact account of what changed (rescan hints, drops, id wrap,
         /// mounts) becomes `noteDoubt`, so that batch's reconcile walks fully.
-        fn fseventsCallback(_: darwin.Ref, info: ?*anyopaque, num_events: usize, event_paths: ?*anyopaque, event_flags: [*c]const u32, _: [*c]const u64) callconv(.c) void {
-            const p = info orelse return;
-            const session: *Session = @ptrFromInt(@intFromPtr(p));
-            if (event_paths) |ep| {
-                const paths: [*]const [*:0]const u8 = @ptrFromInt(@intFromPtr(ep));
+        fn fseventsCallback(_: darwin.Ref, info: ?*Session, num_events: usize, event_paths: ?[*]const [*:0]const u8, event_flags: [*]const u32, _: [*]const u64) callconv(.c) void {
+            const session = info orelse return;
+            if (event_paths) |paths| {
                 for (0..num_events) |i| {
-                    if (event_flags != null and event_flags[i] & darwin.inexact_flags != 0) {
+                    if (event_flags[i] & darwin.inexact_flags != 0) {
                         session.dirty_log.noteDoubt();
                     } else {
                         session.dirty_log.note(std.mem.span(paths[i]));

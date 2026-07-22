@@ -3,6 +3,8 @@
 //! This module owns layout and status—not execution. `session.zig` translates
 //! these types into resident requests; `root.zig` alone exports C symbols.
 
+const api = @import("../../api.zig");
+
 /// Every entry returns one status; negative values always mean "decline safely."
 pub const Status = enum(i32) {
     ok = 0,
@@ -80,5 +82,5 @@ pub const SearchRequest = extern struct {
     /// Result-count budget (0 = unbounded).
     max_results: usize,
     /// Optional `irregex_cancel` handle (null = no cancellation).
-    cancel: ?*anyopaque,
+    cancel: ?*api.CancelToken,
 };
