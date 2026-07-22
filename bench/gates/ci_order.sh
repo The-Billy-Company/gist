@@ -7,7 +7,8 @@
 # pass. It is the one command CI shells to enforce that ordering.
 #
 #   correctness : zig build test · rgsuite parity · line-output parity ·
-#                 index-elision parity · fail-closed contract · freshness
+#                 index-elision parity · enumeration determinism ·
+#                 fail-closed contract · freshness
 #   performance : certify.sh · certificate-artifacts · ratio regression ·
 #                 index-size accounting
 #
@@ -92,6 +93,7 @@ run "CLI-shape matrix parity (matrix.py)" python3 bench/matrix/matrix.py parity
 run "line-output parity (line_parity.sh)" bash bench/gates/line_parity.sh
 run "Unicode parity (unicode_parity.sh)" bash bench/gates/unicode_parity.sh
 run "index-elision parity (index_elision_parity.sh)" bash bench/gates/index_elision_parity.sh
+run "enumeration determinism (enum_determinism.sh)" bash bench/gates/enum_determinism.sh
 run "fail-closed contract (fail_closed.sh)" bash bench/gates/fail_closed.sh
 run "freshness (freshness_fs.sh)" bash bench/gates/freshness_fs.sh
 
@@ -138,6 +140,13 @@ run "warm session floors (gate_session.py --committed)" \
 # (serial -U, literal-less backref) are report-only so no aggregate buries them.
 run "CLI-shape matrix floors (matrix.py gate)" \
   python3 bench/matrix/matrix.py gate
+# The three flags agents reach for most (-i/-n/-v): each self-checks byte-identity
+# as it profiles, then its one hot function clears a conservative regression floor
+# — the caseless tax and writeDecimal speedup are same-run ratios (jitter cancels),
+# the invert-emit floor an absolute far below observed. Blocking under --gate. No
+# external tool needed, so it runs before the hyperfine/rg field check.
+run "flag hot-path floors (flagbench --gate)" \
+  zig build flagbench -- pkg/kernels/irregex/src --gate
 missing=""
 for t in hyperfine csearch zoekt rg; do command -v "${t}" > /dev/null || missing="${missing} ${t}"; done
 if [[ -n "${missing}" ]]; then

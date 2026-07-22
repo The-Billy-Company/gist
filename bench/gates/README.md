@@ -3,13 +3,16 @@
 Permanent, fail-closed correctness and contract gates — each exits non-zero on
 any violation, so a regression can't ship silently. `scan_regress.sh` and
 `streams.sh` source the shared field registry at
-[`../races/_compete.sh`](../races/_compete.sh); `equality.sh` and
-`index_elision_parity.sh` are pure two-way oracles and need no field registry.
+[`../races/_compete.sh`](../races/_compete.sh); `equality.sh`,
+`index_elision_parity.sh`, and `enum_determinism.sh` are pure gist-side oracles
+and need no field registry (`enum_determinism.sh` diffs gist against itself and
+needs no `rg`).
 
 | File                      | Gate                                                                                                                                                                                                                            |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `equality.sh`             | **correctness (index vs `rg`)**: gist ≡ `rg` over a byte-exact corpus snapshot — the soundness oracle                                                                                                                           |
 | `index_elision_parity.sh` | **correctness (index vs itself)**: the index-accelerated run ≡ the same query with `--no-index` — proves the index only elides reads, never changes results                                                                     |
+| `enum_determinism.sh`     | **correctness (enumeration completeness)**: with the soft cap live, `-l`/`-c`/`--count-matches`/`--files-without-match`/`--files` return the complete, run-to-run-stable set — never a truncated, work-stealing-order-dependent subset             |
 | `unicode_parity.sh`       | **correctness (Unicode drop-in)**: `gist <pat>` ≡ `rg <pat>` at rg's default (Unicode) semantics over a multi-script fixture — fold, classes, `\b`/`-w`, and the `(?-u)`/`--no-unicode` opt-out, byte-identical on both engines |
 | `scan_regress.sh`         | **correctness (no-prefilter fallback) + race**: the live-tree full-read fallback ≡ `rg` (exits 1 on FN/FP) + min-of-N speed floor                                                                                               |
 | `streams.sh`              | **output contract**: results→stdout, diagnostics (`--rank`'s timing line / guidance)→stderr — the `rg`-conventional split that makes gist composable                                                                            |
@@ -31,6 +34,33 @@ skipping reads, which breaks gist's core safety claim.
 ```bash
 cd pkg/kernels/irregex
 bench/gates/index_elision_parity.sh
+```
+
+## `enum_determinism.sh` — enumeration is complete under the cap
+
+`equality.sh` proves gist ≡ `rg` on the **full (uncapped)** matching-file set.
+This gate proves the sibling invariant it can't see: with the **default**
+~25k-token soft context cap ON, the compact per-file modes —
+`-l`/`--files-with-matches`, `-c`/`--count`, `--count-matches`,
+`--files-without-match`, and `--files` — return the **complete, run-to-run-stable**
+set, never a soft-cap-truncated subset. Truncating the parallel engine's
+worker-discovery-order stream at the cap used to return a nondeterministic subset
+of files run-to-run (the same `gist -l foo` yielding a different set each call);
+`corpus.exemptSoftCap` (keyed on `Opts.enumeration`) lifts only the soft guard
+for these modes, and this gate freezes that.
+
+Over a hermetic corpus whose enumeration output exceeds 100 KiB, each mode is
+checked two ways under the default cap: **complete** (default-cap set ==
+`GIST_UNCAP=1` set) and **stable** (three back-to-back runs identical as a sorted
+set). A positive control first proves the cap is genuinely live on the corpus — a
+non-exempt content mode truncates — so the completeness proof is never vacuous.
+Runs the cold work-stealing engine (`GIST_NO_AUTOSERVE=1` + `--no-index`), where
+the order-dependent truncation lived; the warm client applies the identical
+exemption in `tryWarm`, so the engines can't disagree on which files `-l` returns.
+
+```bash
+cd pkg/kernels/irregex
+bench/gates/enum_determinism.sh
 ```
 
 ## `equality.sh` — the INDEX-path soundness oracle
