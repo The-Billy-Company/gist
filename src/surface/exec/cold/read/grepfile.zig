@@ -22,6 +22,7 @@ const multiline = @import("../emit/multiline.zig");
 const Emitter = output.Emitter;
 const Regex = @import("../../../../kernel/match/regex/linear/core.zig").Regex;
 const Matcher = @import("../../../../kernel/match/regex/linear/matcher.zig").Matcher;
+const simd = @import("../../../../kernel/match/scan/simd.zig");
 
 /// ripgrep's default read-buffer capacity. Binary detection scans each fill's
 /// newly-read bytes for a NUL; the searched region is what `committedPrefix`
@@ -285,7 +286,14 @@ pub const FileStat = struct { matches: usize, lines: usize, bytes: usize };
 /// stops reading after the Nth matching line, so `bytes` reports only the bytes
 /// actually searched (ADR-parity with rg's `r2944` regression) rather than the
 /// whole file.
-pub fn fileMatchStats(re: *const Matcher, a: std.mem.Allocator, o: Opts, body: []const u8, lines: []const []const u8) FileStat {
+pub fn fileMatchStats(re: *const Matcher, a: std.mem.Allocator, o: Opts, body: []const u8, lines: []const []const u8, needle: ?simd.Gate) FileStat {
+    // The required-literal gate is sound for the tally exactly as it is for
+    // emission: a body/line without the literal every match must contain holds
+    // zero matches, so it contributes (0 matches, 0 lines) and only its bytes to
+    // `bytes_searched`. This replaces a full NFA sweep of every line with one
+    // SIMD `contains` — the same scan `--stats` used to skip. `bytes` still
+    // reports the whole body (rg counts non-matching bytes as searched).
+    if (needle) |g| if (!g.in(body)) return .{ .matches = 0, .lines = 0, .bytes = body.len };
     // `-U`: the tally is over whole-buffer spans, not split lines. `matches`
     // counts non-empty spans; `lines` the union of lines they cover (rg's
     // `matched lines`). `-m` already capped the span list, and rg reports the
@@ -302,6 +310,7 @@ pub fn fileMatchStats(re: *const Matcher, a: std.mem.Allocator, o: Opts, body: [
     var l: usize = 0;
     for (lines) |line| {
         const mv = if (o.crlf) std.mem.trimEnd(u8, line, "\r") else line;
+        if (needle) |g| if (!g.in(mv)) continue;
         var from: usize = 0;
         var line_hit = false;
         while (from <= mv.len) {
@@ -595,6 +604,20 @@ fn fromStat(st: std.posix.Stat) RawStat {
 /// not a regular file, the file shrank below what was already read (a racing
 /// truncation the read loop handles conservatively), or `mmap` itself fails —
 /// the caller then takes the copying path, never a silent drop.
+/// Map a regular file at `disk` read-only when it is at least `min` bytes — the
+/// large-file path that skips the read-loop + arena dupe entirely: the bytes
+/// fault in lazily during the scan, and a SHARDED scan faults its ranges in
+/// PARALLEL (the copy this replaces was serial, the Amdahl tail under single-file
+/// sharding). Null — caller takes the copying read path — for a sub-`min` file, a
+/// non-regular fd, or any open/stat/mmap failure, so no input shape is lost. The
+/// map is never unmapped (the cold engine is a one-shot process; the OS reclaims
+/// it at exit), matching the `readTail` large-file mapping's lifetime.
+pub fn mapFile(disk: []const u8, min: usize) ?[]const u8 {
+    const fd = std.posix.openat(std.posix.AT.FDCWD, disk, .{ .ACCMODE = .RDONLY }, 0) catch return null;
+    defer _ = std.posix.system.close(fd);
+    return mapWhole(fd, min);
+}
+
 fn mapWhole(fd: std.posix.fd_t, min_len: usize) ?[]const u8 {
     const st = statFd(fd) orelse return null;
     if (st.mode & std.posix.S.IFMT != std.posix.S.IFREG) return null;
@@ -640,7 +663,7 @@ test "multiline --stats tallies spans and covered lines over the whole buffer" {
     var m = Matcher{ .linear = try Regex.compileOpts(a, "a\\nb", .{ .multiline = true }) };
     defer m.deinit();
     const body = "a\nb\nx\na\nb\n";
-    const fs = fileMatchStats(&m, a, .{ .multiline = true }, body, &.{});
+    const fs = fileMatchStats(&m, a, .{ .multiline = true }, body, &.{}, null);
     try t.expectEqual(@as(usize, 2), fs.matches); // two cross-line matches
     try t.expectEqual(@as(usize, 4), fs.lines); // they cover four physical lines
     try t.expectEqual(body.len, fs.bytes);

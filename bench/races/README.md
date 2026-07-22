@@ -11,7 +11,7 @@ and the per-tool invocation helpers (`compete_lit_cmd`, `compete_rgx_cmd`,
 | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `_compete.sh`             | shared competitor registry — locations, tool roster, fairness scoping, invocation helpers (sourced only)                                                                                                                                                                                                 |
 | `headtohead.sh`           | **warm**: gist's resident-index p50 vs the unindexed scanners at their warm fastest (the long-lived agent-session model)                                                                                                                                                                                 |
-| `coldquery.sh`            | **cold literal**: fresh-process gist vs csearch/zoekt (indexed) + rg/ugrep/ag/ggrep/git-grep (unindexed)                                                                                                                                                                                                 |
+| `coldquery.sh`            | **cold literal**: fresh-process gist vs csearch/zoekt (indexed) + rg/ugrep/ag/ggrep/git-grep (unindexed) — in **two emit lanes**, `-l` files-with-matches then `-c` per-file count                                                                                                                       |
 | `regex_headtohead.sh`     | **cold regex**: same field, gist's byte-class DFA vs RE2 (csearch/zoekt) and PCRE (`-P`) / `(?-u)`                                                                                                                                                                                                       |
 | `pcre_headtohead.sh`      | **cold PCRE**: gist's `-P` (vendored PCRE2 JIT, trigram-prefiltered) vs `rg -P` / `ugrep -P` on lookaround/backref queries                                                                                                                                                                               |
 | `searchzip_headtohead.sh` | **cold `-z`**: gist vs rg vs ugrep over a compressed corpus — in-process `std.compress` decode vs a fork-a-decompressor-per-file (gist beats both on gzip/zstd/xz; bzip2 + the external-codec tail have no in-process Zig decoder)                                                                       |
@@ -21,7 +21,15 @@ and the per-tool invocation helpers (`compete_lit_cmd`, `compete_rgx_cmd`,
 
 - **Cold literal slate** (`coldquery.sh`): a guaranteed miss (pure index win),
   very-selective symbols, medium, common tokens touching thousands of files, and
-  a 2-byte punctuation needle (the `<3 B`, no-trigram-filter fallback).
+  a 2-byte punctuation needle (the `<3 B`, no-trigram-filter fallback). Raced in
+  two emit lanes over the same needles: **`-l`** files-with-matches (first-hit
+  short-circuit — the whole field, indexed + unindexed) and **`-c`** per-file
+  count (whole-candidate scan + tally, no short-circuit — the unindexed grep-`-c`
+  field). The count lane proves the index win holds when per-candidate work rises;
+  gist's `-c` stays byte-parity with rg (matrix + flagbench), so its cell is
+  oracle-gated against rg exactly like `-l`. Both indexed rivals are absent from
+  the count lane by construction — zoekt has no per-file `-c`, and csearch's `-c`
+  is a total-match tally, not grep's per-line-per-file count.
 - **Cold regex slate** (`regex_headtohead.sh`): 22 patterns grouped by tier —
   literal-prefix, anchored `^`/`$`, counted `{n,m}`, dense classes (`\w{3,8}` —
   the byte-class DFA's home), alternation cover sets, and a prefilter-less
@@ -41,7 +49,7 @@ and the per-tool invocation helpers (`compete_lit_cmd`, `compete_rgx_cmd`,
 
 Each race prints per-query times with gist's speedup, then a summary: **geomean
 speedup and win-rate per tool**, split indexed vs unindexed. Raw rows land in
-`.local/gist-compete/{cold,regex,warm}.csv`.
+`.local/gist-compete/{cold,cold_count,regex,warm}.csv`.
 
 ```bash
 cd pkg/kernels/irregex

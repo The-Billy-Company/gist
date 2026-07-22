@@ -88,3 +88,61 @@ for t in "${tools[@]}"; do
   printf "  %-8s %-9s %sx geomean · won %d/%d\n" "${kind}" "${t}" "${g}" "${WINS[${t}]}" "${CNT[${t}]}"
 done
 echo "csv → ${csv}"
+
+# ── count lane (-c): the count emit path over the same needle spread ──────────
+# `-l` (above) short-circuits at the first hit per candidate; `-c` scans every
+# candidate whole and tallies — same index pruning, strictly more per-file work,
+# so it's the harder proof the index win holds. gist's `-c` is byte-parity with
+# rg's (matrix + flagbench), so the gist cell stays oracle-gated against rg. Only
+# the grep-`-c`-capable unindexed field runs here (see _compete.sh).
+ctools_raw="$(compete_count_tools)"
+mapfile -t ctools <<< "${ctools_raw}"
+echo
+echo "cold count query (-c) — fresh process, warm cache (hyperfine mean, runs=8):"
+echo "fields: <tool> <ms> (<gist speedup>); unindexed scanners only (grep -c field)"
+echo
+
+declare -A CSUM CCNT CWINS
+for t in "${ctools[@]}"; do
+  CSUM[${t}]=0
+  CCNT[${t}]=0
+  CWINS[${t}]=0
+done
+ccsv="${COMPETE_DIR}/cold_count.csv"
+echo "needle,tool,ms,gist_ms,ratio" > "${ccsv}"
+
+for n in "${needles[@]}"; do
+  gcmd="$(compete_count_cmd gist "${n}")"
+  rcmd="$(compete_count_cmd rg "${n}")"
+  if ! gist_ms="$(hf_mean 3 8 "${gcmd}" "${rcmd}")"; then
+    echo "aborting: gist failed count parity/status precheck for '${n}'" >&2
+    exit 1
+  fi
+  printf "%-16s gist %sms\n" "${n}" "${gist_ms}"
+  line="    unidx:"
+  for t in "${ctools[@]}"; do
+    cmd="$(compete_count_cmd "${t}" "${n}")"
+    if ! ms="$(hf_mean 2 8 "${cmd}")"; then
+      echo "aborting: ${t} hard-failed while count-benchmarking '${n}'" >&2
+      exit 1
+    fi
+    spd="$(ratio "${ms}" "${gist_ms}")"
+    echo "${n},${t},${ms},${gist_ms},${spd}" >> "${ccsv}"
+    if [[ "${ms}" != "?" && "${gist_ms}" != "?" ]]; then
+      CSUM[${t}]="$(python3 -c "import math;print(${CSUM[${t}]}+math.log(${ms}/${gist_ms}))")"
+      CCNT[${t}]=$((CCNT[${t}] + 1))
+      python3 -c "import sys;sys.exit(0 if ${ms}>=${gist_ms} else 1)" && CWINS[${t}]=$((CWINS[${t}] + 1))
+    fi
+    line+="$(printf " %s %s(%s)" "${t}" "${ms}" "${spd}")"
+  done
+  echo "${line}"
+done
+
+echo
+echo "── count summary: geomean gist speedup · queries gist ≥ tool ──"
+for t in "${ctools[@]}"; do
+  [[ "${CCNT[${t}]}" -eq 0 ]] && continue
+  g="$(python3 -c "import math;print('%.1f'%math.exp(${CSUM[${t}]}/${CCNT[${t}]}))")"
+  printf "  unidx    %-9s %sx geomean · won %d/%d\n" "${t}" "${g}" "${CWINS[${t}]}" "${CCNT[${t}]}"
+done
+echo "csv → ${ccsv}"

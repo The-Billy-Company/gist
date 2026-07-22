@@ -223,7 +223,11 @@ fn serveFrame(session: *ResidentSession, gpa: std.mem.Allocator, client: *Client
         },
         .status => sendReady(session, gpa, fd, client.gen) catch return .drop,
         .ping => protocol.sendFrame(gpa, fd, .pong, "") catch return .drop,
-        .query => handleQuery(session, gpa, fd, frame.payload(), client.caps) catch return .drop,
+        .query => handleQuery(session, gpa, fd, frame.payload(), client.caps, false) catch return .drop,
+        // The scoped query (`query_ext`) — same dispatch, decoded with a roots
+        // trailer. An old daemon never reaches here (the opcode is unknown to
+        // it → `.decline` below → client cold).
+        .query_ext => handleQuery(session, gpa, fd, frame.payload(), client.caps, true) catch return .drop,
         .shutdown => return .stop,
         // Anything server→client, or an unknown verb, is not a request: refuse
         // it as decline so a confused client falls back cold rather than hangs.
@@ -245,15 +249,34 @@ fn sendReady(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
 /// (`error.Stale` from a lost freshness anchor / rebuilt index, OOM) comes back
 /// as `decline` — the client re-runs it on the certified cold path. `caps` is
 /// the connection's advertised transport capabilities (see `Client.caps`).
-fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd_t, payload: []const u8, caps: u8) !void {
-    const req = protocol.decodeQuery(payload) catch
-        return protocol.sendFrame(gpa, fd, .decline, "");
-
+fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd_t, payload: []const u8, caps: u8, ext: bool) !void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
+    // `query_ext` carries a roots trailer whose slice headers live in the arena;
+    // `query` is rootless. A malformed frame → decline (client → cold).
+    const req = (if (ext) protocol.decodeQueryExt(arena.allocator(), payload) else protocol.decodeQuery(payload)) catch
+        return protocol.sendFrame(gpa, fd, .decline, "");
+    // Served-scope soundness: a scoped request is only answerable warm when its
+    // roots are a subset of what THIS daemon mirrors — otherwise the resident
+    // set is missing files cold would search, so warm could report empty where
+    // cold matches. The common auto-spawned daemon is rootless (serves the whole
+    // CWD tree) and admits every relative root; an explicitly-scoped daemon
+    // declines a query that reaches outside its subtree.
+    if (!session.servesScope(req.filter.roots))
+        return protocol.sendFrame(gpa, fd, .decline, "");
+
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
-    if (req.quiet) {
+    if (req.rank_k) |k| {
+        // `--rank`: gist's definition-first ranked view, dispatched before the
+        // mode (it overrides it). The rendered top-K rides the SAME `chunk`+
+        // terminal-`result` transport as a `lines` answer, with `matched=true` so
+        // the client exits 0 — cold `--rank` always exits 0 (only a path error is
+        // 2, and the client's `rootsExist` gate already sent those cold).
+        const bytes = session.queryRank(arena.allocator(), req, k) catch
+            return protocol.sendFrame(gpa, fd, .decline, "");
+        try protocol.encodeLines(&buf, gpa, bytes, true);
+    } else if (req.quiet) {
         // `-q`: an existence-only answer regardless of the mode byte. The walk
         // halts at the first hit (`queryExists`); framed as a zero-chunk `lines`
         // result carrying just the matched flag, so the client prints nothing

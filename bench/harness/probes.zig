@@ -42,4 +42,13 @@ pub const probes = [_]Probe{
     // republish (the published artifact is minted only on a clean tree —
     // `bench/certify/artifact/README.md`), keeping the 12-class snapshot
     // internally consistent until then.
+    //
+    // STAGED for the same republish — the `-i` (caseless) cost axis. The bit-5
+    // fold gate (`simd.indexOfCaselessPos`) is a scan-kernel path, so it fits the
+    // Layer-A cycles/byte model 1:1; until it lands here its worst-case tax is
+    // held by the same-run ratio floor in `bench/harness/flagbench.zig`
+    // (`-i caseless tax <= 3.0×`, run blocking in `bench/gates/ci_order.sh`).
+    // Add at republish (keeps the class↔claim 1:1 mapping this file promises):
+    //   .{ .class = "literal-caseless", .kind = .literal, .pattern = "func" },   // -i over a common literal
+    //   .{ .class = "regex-caseless",   .kind = .regex,   .pattern = "(?i)func\\s+\\w+\\(" }, // folded decl
 };

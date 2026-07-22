@@ -39,7 +39,11 @@ pub fn maybeSpawn(
     for ([_][]const u8{ "GIST_NO_AUTOSERVE", "GIST_NO_PARALLEL", "GIST_SESSION_SOCK" }) |k|
         if (env.get(k) != null) return;
     // Only the shapes the daemon can actually accelerate are worth warming for.
-    const req = request.classify(argv) catch return;
+    // A scoped query is eligible too — the rootless daemon spawned here serves
+    // any subtree of the CWD tree — so warming for it is worthwhile; `sa` is a
+    // throwaway (roots are unread here, only `req.mode`/tty/stdin gate below).
+    var sa: request.ScopeArgs = .{};
+    const req = request.classify(argv, &sa) catch return;
     // The client declines these shapes up front (`client.attempt`), so a daemon
     // would never serve them: `-c` stays cold (per-file layout), a TTY stdout
     // gets cold's interactive presentation, and a readable stdin is a stream

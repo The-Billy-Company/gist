@@ -41,16 +41,18 @@ REQUIRED_FILES = (
     "command-log.txt",
     "index-sizes.json",
 )
-# Side-cars that prove Layers B/C/D were minted, not merely named in the header.
+# Side-cars that prove Layers B/C/D/E were minted, not merely named in the header.
 REQUIRED_LAYER_FILES = (
     "portcert.json",
     "roofline.json",
     "lowerbound.csv",
+    "crest.csv",
 )
 REQUIRED_LAYER_HEADERS = (
     "## Layer B — port-optimality",
     "## Layer C — roofline (measured headroom)",
     "## Layer D — algorithmic lower bound",
+    "## Layer E — crest sieve (the trigram blind spot, measured)",
 )
 FORBIDDEN_LAYER_C_CLAIMS = (
     "cycles/byte sits on the hardware ceiling",
@@ -305,9 +307,9 @@ def _check_cells(d: Path, meta: dict[str, object], tools: set[str], problems: li
 
 
 def _check_layers(d: Path, problems: list[str]) -> None:
-    """Fail closed when the certificate promises four layers but only ships A."""
+    """Fail closed when the certificate promises five layers but only ships A."""
     problems.extend(
-        f"missing Layer B/C/D artifact: {name} "
+        f"missing Layer B/C/D/E artifact: {name} "
         "(run bench/certify/certify_layers.sh or full certify.sh)"
         for name in REQUIRED_LAYER_FILES
         if not (d / name).is_file()
@@ -318,7 +320,7 @@ def _check_layers(d: Path, problems: list[str]) -> None:
     text = cert.read_text(errors="replace")
     problems.extend(
         f"CERTIFICATE.md missing section {header!r} — "
-        "header promises four layers; splice with certify_layers.sh"
+        "header promises five layers; splice with certify_layers.sh"
         for header in REQUIRED_LAYER_HEADERS
         if header not in text
     )

@@ -256,6 +256,42 @@ compete_rgx_cmd() {
   esac
 }
 
+# compete_count_cmd <tool> <needle> → a per-file COUNT command (grep `-c`) for a
+# fixed-string needle. Distinct emit path from `-l`: `-l` short-circuits at the
+# first hit per file, `-c` scans every candidate whole and tallies — the harder
+# test of whether gist's index win survives when per-candidate work goes up.
+# gist's `-c` is byte-parity with rg's (proven in the CLI matrix + flagbench), so
+# the gist cell is oracle-gated against rg exactly like the `-l` lanes. Zoekt has
+# no per-file grep `-c`, and csearch's `-c` is a total-match tally (not grep's
+# per-line-per-file semantics), so both indexed rivals are absent BY CONSTRUCTION
+# — the count field is the unindexed scanners (all grep-`-c` compatible) + gist.
+compete_count_cmd() {
+  local tool="${1}" n="${2}" roots="${ROOTS[*]}" xd
+  xd="$(_xdir_flags)"
+  case "${tool}" in
+    rg) echo "rg -F -c --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- '${n}' ${roots}" ;;
+    ugrep) echo "ugrep -rc -F${xd} -- '${n}' ${roots}" ;;
+    ag) echo "ag -c -Q -s --path-to-ignore ${CORPUS}/.gitignore -- '${n}' ${roots}" ;;
+    ggrep) echo "ggrep -rIcF${xd} -- '${n}' ${roots}" ;;
+    gitgrep) echo "git -C ${CORPUS} grep -c -F -- '${n}' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} '${n}' -F -c --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
+    *) echo "false" ;;
+  esac
+}
+
+# compete_count_tools → the grep-`-c`-capable field (unindexed scanners), indexed
+# rivals excluded by construction (see compete_count_cmd). `gist` is printed by
+# the race script itself, so it's omitted here.
+compete_count_tools() {
+  local t=()
+  [[ "${HAVE_RG}" = 1 ]] && t+=(rg)
+  [[ "${HAVE_UGREP}" = 1 ]] && t+=(ugrep)
+  [[ "${HAVE_AG}" = 1 ]] && t+=(ag)
+  [[ "${HAVE_GGREP}" = 1 ]] && t+=(ggrep)
+  [[ "${HAVE_GITGREP}" = 1 ]] && t+=(gitgrep)
+  printf '%s\n' "${t[@]}"
+}
+
 # compete_pcre_cmd <tool> <pattern> → list-files command for a PCRE pattern
 # (lookaround / backreferences — the class RE2 engines cannot express AT ALL).
 # The indexed RE2 rivals csearch + zoekt are absent from this field by

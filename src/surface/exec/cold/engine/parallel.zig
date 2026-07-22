@@ -42,6 +42,7 @@ const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const args = @import("../argv/args.zig");
 const output = @import("../emit/output.zig");
+const json = @import("../emit/json.zig");
 const ignore = @import("../../../../corpus/tree/ignore.zig");
 const grepfile = @import("../read/grepfile.zig");
 const ingest = @import("../read/ingest.zig");
@@ -87,7 +88,15 @@ pub fn eligible(io: std.Io, parsed: args.Parsed, o: Opts) bool {
     // through the same `Emitter.buffer` whole-buffer model the serial engine
     // uses (multiline.zig owns the span/line semantics), so the walk + literal
     // gate + index elision that carry every linear win apply to `-U` too.
-    if (o.follow or o.json or o.quiet or o.stats or o.files_without or o.replace != null or o.max_filesize != 0) return false;
+    if (o.follow or o.quiet or o.stats or o.files_without or o.replace != null or o.max_filesize != 0) return false;
+    // `--json` RIDES the walk (the streaming win every other mode gets): each
+    // worker emits ripgrep's per-file `begin`/`match`/`end` records via the shared
+    // `json.emitOne` and tallies a per-worker `json.Stats`; `run` sums them into
+    // the single trailing `summary`. It declines only when it would need
+    // per-thread capture scratch (`-r`, gated above) or a content transform
+    // (`-z`/`-E`) whose decoded bytes the walk's JSON path doesn't rewrite — those
+    // keep the serial collect-then-shard path (`serial.run`'s `o.json` block).
+    if (o.json and (o.search_zip or o.encoding != .auto)) return false;
     // `--include-zero` must emit a `path:0` line for EVERY searched file, so it
     // needs the serial engine's whole-file loop with the literal gate + index
     // elision disabled — the streaming sink here culls non-matching files.
@@ -360,10 +369,32 @@ fn broadIndexedRoots(roots: []const []const u8) bool {
 /// (`flushPending` `final=true`), so a scoped walk that outruns the load pays
 /// only the per-worker deferral append — while a read-heavy subtree the loader
 /// DOES beat gets its candidate reads elided like any broad scan.
-pub fn indexElisionWanted(parsed: args.Parsed, filters: []const []const u8, sieve: crest.Vector) bool {
+pub fn indexElisionWanted(io: std.Io, parsed: args.Parsed, filters: []const []const u8, sieve: crest.Vector) bool {
     const o = parsed.opts;
     if (o.files_list or o.no_index) return false;
+    // Explicit-file roots elide NOTHING: the index answers "which of the walked
+    // files can't match" — but a named file is read no matter what the trigrams
+    // say, so loading + decompressing the persisted index and reading the
+    // freshness anchor is pure launch-time tax (measured ~1.5 ms on a warm
+    // corpus) that only the tree walk ever amortizes. Skip it when every root is
+    // a regular file; the mixed / directory / implicit-CWD cases keep it.
+    if (rootsAllRegularFiles(io, parsed)) return false;
     return usableFilters(filters) or crest.active(sieve);
+}
+
+/// True iff ≥1 root was given and every one stats as a regular file (a lone
+/// `gist PAT file.txt`, or several explicit files) — the case where index
+/// elision is provably useless. Empty roots (implicit CWD walk) or any
+/// directory / symlink-to-dir / unstattable root returns false, so a broad or
+/// mixed scan still gets the oracle. The stat is one syscall per root, dwarfed
+/// by the index load it avoids.
+fn rootsAllRegularFiles(io: std.Io, parsed: args.Parsed) bool {
+    if (parsed.roots.len == 0) return false;
+    for (parsed.roots) |r| {
+        const st = Dir.cwd().statFile(io, r, .{}) catch return false;
+        if (st.kind != .file) return false;
+    }
+    return true;
 }
 
 /// Every filter can actually query the trigram index (non-empty, all ≥3 B).
@@ -588,7 +619,7 @@ const Queue = struct {
 
 /// What kind of fragment a worker just rendered — decides what inter-file
 /// glue (if any) `Sink.emit` prepends before writing it.
-const FragKind = enum { text_hit, text_plain, bin_hit };
+const FragKind = enum { text_hit, text_plain, bin_hit, json };
 
 /// The one shared stdout writer every worker streams through, the instant
 /// each file's fragment is ready — replacing the old collect-everything →
@@ -627,6 +658,16 @@ const Sink = struct {
         defer self.mu.unlock(self.io);
         if (self.q.aborted.load(.monotonic)) return; // pipe already gone — nothing left to do
         var ok = true;
+        // `--json` fragments are a whole file's `begin`/records/`end`, already a
+        // self-framed record block — write it verbatim (order-insensitive per the
+        // parity harness's `sort -u` set compare). A non-empty buffer ⟺ the file
+        // matched (`json.emitOne` emits nothing otherwise), so it also drives the
+        // matched-files exit code; the `summary` record is written once by `run`.
+        if (kind == .json) {
+            self.matched_files += 1;
+            if (corpus_mod.writeStdout(buf) == false) self.q.abort();
+            return;
+        }
         if (self.files_mode) {
             self.matched_files += 1;
             ok = corpus_mod.writeStdout(buf) and corpus_mod.writeStdout(if (self.null_sep) "\x00" else "\n");
@@ -640,6 +681,7 @@ const Sink = struct {
                 },
                 .bin_hit => self.matched_files += 1,
                 .text_plain => {},
+                .json => unreachable, // handled above (self-framed record block)
             }
             if (ok) ok = corpus_mod.writeStdout(buf);
         }
@@ -724,6 +766,11 @@ const Worker = struct {
     // searches — the Pike generation counter self-invalidates between calls,
     // so no reset is needed and no per-file alloc/free is paid.
     sim: ?Matcher.Sim = null,
+    // `--json` per-worker span scratch + running tally (both null/zero until the
+    // first JSON file this worker renders). `run` sums every worker's `jstats`
+    // for the single trailing `summary` record.
+    jss: ?Matcher.SpanSim = null,
+    jstats: json.Stats = .{},
 };
 
 /// The worker's lazily-built reusable match scratch (null only on OOM, where
@@ -731,6 +778,13 @@ const Worker = struct {
 fn workerSim(w: *Worker) ?*Matcher.Sim {
     if (w.sim == null) w.sim = Matcher.Sim.init(w.arena.allocator(), w.cfg.re.?) catch return null;
     return &w.sim.?;
+}
+
+/// The worker's lazily-built reusable span scratch for the `--json` encoder
+/// (`Matcher.SpanSim` is per-thread, mirroring `workerSim`).
+fn workerSpanSim(w: *Worker) ?*Matcher.SpanSim {
+    if (w.jss == null) w.jss = Matcher.SpanSim.init(w.arena.allocator(), w.cfg.re.?) catch return null;
+    return &w.jss.?;
 }
 
 /// A listed directory entry, normalized across the two listing backends and
@@ -1074,8 +1128,31 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
 /// (covered = gate_from = 0) — byte-identical to the staged read path's result.
 fn searchShardBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, bytes: []const u8) void {
     const body = grepfile.decodeBom(a, bytes);
+    if (w.cfg.o.json) return emitJson(w, a, dpath, body);
     if (body.len == 0) return;
     emitBody(w, a, dpath, body, 0, 0);
+}
+
+/// The `--json` per-file render on the parallel walk: emit ripgrep's
+/// `begin`/`match`/`end` records for ONE file through the shared `json.emitOne`
+/// (the identical encoder the serial/shard `--json` path uses), tallying this
+/// worker's running `jstats`, then stream the self-framed record block through
+/// the sink. `run` sums every worker's `jstats` into the single trailing
+/// `summary`. Byte-identical to the serial collect-then-shard path by
+/// construction: the SAME `file_needle` whole-file gate decides which admitted
+/// files are searched (mirroring `readOneCandidate` — a body missing the required
+/// literal provably can't match, so it is neither searched nor counted, keeping
+/// the `searches` tally in lockstep), and `line_needle` accelerates the per-line
+/// span scan inside `emitOne`. `file_alts` is deliberately NOT applied — the
+/// serial collect path gates `--json` on the single `file_needle` only.
+fn emitJson(w: *Worker, a: std.mem.Allocator, dpath: []const u8, decoded: []const u8) void {
+    const cfg = w.cfg;
+    const body = grepfile.stripBom(decoded);
+    if (cfg.file_needle) |gate| if (!verify.gateWide(a, body, gate)) return;
+    const ss = workerSpanSim(w) orelse return;
+    var buf: std.ArrayList(u8) = .empty;
+    json.emitOne(a, &buf, cfg.re.?, ss, null, cfg.o, .{ .path = dpath, .body = body }, &w.jstats, cfg.line_needle);
+    if (buf.items.len > 0) cfg.sink.emit(.json, buf.items);
 }
 
 /// Read + match + render ONE file straight into the sink — the parallel
@@ -1088,6 +1165,18 @@ fn searchFile(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.
     const cfg = w.cfg;
     const o = cfg.o;
     const re = cfg.re.?;
+
+    // `--json` reads the WHOLE body (rg emits every match line's record) and
+    // renders it through `emitJson`, bypassing the text prefix-triage/`-l`
+    // fast paths below — `--json` declines `-z`/`-E` (see `eligible`), so no
+    // transform is owed here. Every admitted file reaches `emitJson` exactly
+    // once, so its `searches` tally stays byte-identical to the serial path.
+    if (o.json) {
+        const sf = grepfile.StagedFile.open(scratch, dirfd, disk) orelse return;
+        defer sf.close();
+        const raw = if (sf.more) (sf.readRest(a, scratch) orelse return) else sf.prefix;
+        return emitJson(w, a, dpath, grepfile.decodeBom(a, raw));
+    }
 
     // Transform run (`-z`/`-E`): the on-disk bytes are compressed/encoded, so the
     // staged prefix triage below (a NUL sniff, an `-l` prefix proof) would read
@@ -1297,7 +1386,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // Heading needs a printable path: `--no-filename` suppresses the header
     // like rg (the walk is recursive, so `.auto` filenames are always on here).
     const heading = o.heading and o.filename != .never and !o.count_only and !o.count_matches and !o.files_only and !o.vimgrep;
-    const want_elision = indexElisionWanted(parsed, filters, sieve);
+    const want_elision = indexElisionWanted(io, parsed, filters, sieve);
     // Internal gate-only contract: load synchronously and fail closed unless
     // the real elision oracle is admitted. This makes freshness_fs.sh prove the
     // accelerated path instead of accidentally passing via an async/full-read
@@ -1474,6 +1563,21 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // everything — stderr note + exit 2, never a silent exit-1 "no matches".
     const nothing_searched = re != null and parsed.roots.len == 0 and !q.files_seen.load(.acquire);
     if (nothing_searched) grepfile.printNothingSearched();
+    // `--json`: every worker streamed its per-file `begin`/records/`end` blocks;
+    // sum their per-worker tallies and write the single trailing `summary` record
+    // (rg's stream always ends with it, even on no match) as the last stdout line.
+    // The stream's file order is worker-discovery order — order-insensitive, the
+    // same contract as the plain walk's fragments and the parity harness's
+    // `sort -u` set compare. No `noMatches` stderr hint (rg's serial `--json`
+    // path emits none either — it would only pollute a machine-consumed stream).
+    if (o.json) {
+        var st = json.Stats{};
+        for (workers) |*wk| st.add(wk.jstats);
+        var sbuf: std.ArrayList(u8) = .empty;
+        json.summary(gpa, &sbuf, st);
+        _ = corpus_mod.writeStdout(sbuf.items);
+        std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (st.with_match > 0) 0 else 1);
+    }
     if (re != null and !o.quiet and !o.files_list and sink.matched_files == 0 and !nothing_searched and !q.walk_error.load(.acquire))
         hints.noMatches(hints.shape(parsed.patterns, o, parsed.roots, parsed.roots.len > 0), null);
     std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);

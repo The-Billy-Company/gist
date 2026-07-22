@@ -140,11 +140,13 @@ run "warm session floors (gate_session.py --committed)" \
 # (serial -U, literal-less backref) are report-only so no aggregate buries them.
 run "CLI-shape matrix floors (matrix.py gate)" \
   python3 bench/matrix/matrix.py gate
-# The three flags agents reach for most (-i/-n/-v): each self-checks byte-identity
-# as it profiles, then its one hot function clears a conservative regression floor
-# — the caseless tax and writeDecimal speedup are same-run ratios (jitter cancels),
-# the invert-emit floor an absolute far below observed. Blocking under --gate. No
-# external tool needed, so it runs before the hyperfine/rg field check.
+# The flags agents reach for most (-i/-n/-v/-l/-c/-o/-w/-r): each self-checks
+# byte-identity as it profiles (the -v/-l/-c paths against independent oracles;
+# -o/-w/-r byte-identity is the parity gates above), then its one hot function
+# clears a conservative regression floor — the caseless tax and writeDecimal
+# speedup are same-run ratios (jitter cancels), the emit-mode floors absolutes far
+# below observed. Blocking under --gate. No external tool needed, so it runs
+# before the hyperfine/rg field check.
 run "flag hot-path floors (flagbench --gate)" \
   zig build flagbench -- pkg/kernels/irregex/src --gate
 missing=""

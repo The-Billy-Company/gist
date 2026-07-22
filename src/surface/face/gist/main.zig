@@ -64,13 +64,23 @@ fn normalizeRootArg(raw: []const u8) []const u8 {
 fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.Map, argv: []const []const u8) void {
     const sock = serve.socketPath(gpa, env) catch return;
     defer gpa.free(sock);
+    // Enumeration modes (`-l`/`-c`) list one compact line per file: lift the soft
+    // context cap BEFORE the warm stream so a warm-served answer is the COMPLETE
+    // set, matching the cold engine's exemption (the two engines must never
+    // disagree on which files `-l` returns). Classify is stack-only + pure; an
+    // ineligible argv routes cold below, where `serial.run` applies the same rule.
+    var mode_sa: gist.session.request.ScopeArgs = .{};
+    if (gist.session.request.classify(argv, &mode_sa)) |req| {
+        if (req.mode == .files or req.mode == .count) gist.corpus.exemptSoftCap();
+    } else |_| {}
     const debug = env.get("GIST_DEBUG_WARM") != null; // observe the routing decision
     if (debug) {
         // Surface the CLASSIFY verdict independently of daemon availability, so a
         // cold outcome from "ineligible argv" is distinguishable from "eligible
         // but no daemon up". This is the oracle the cross-binding parity test
         // reads to prove Python `warm_eligible` tracks this classifier exactly.
-        if (gist.session.request.classify(argv)) |_|
+        var dbg_sa: gist.session.request.ScopeArgs = .{};
+        if (gist.session.request.classify(argv, &dbg_sa)) |_|
             std.debug.print("gist: [eligible]\n", .{})
         else |_|
             std.debug.print("gist: [ineligible]\n", .{});
@@ -85,7 +95,8 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
             // RESOLVED case state (smart-case folds through the session's one
             // resolution site) without a second full flag parse; eligible
             // requests are always rootless.
-            if (code == 1) if (gist.session.request.classify(argv)) |req| {
+            var hint_sa: gist.session.request.ScopeArgs = .{};
+            if (code == 1) if (gist.session.request.classify(argv, &hint_sa)) |req| {
                 // `-q` and `-m0` are SILENT on a miss (cold exits 1 with no
                 // stderr guidance — `serial.zig`), so suppress the hint for them.
                 if (!req.quiet and !req.matchNothing())

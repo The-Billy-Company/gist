@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# certify.sh — full Certificate of Optimality (Layers A–D).
+# certify.sh — full Certificate of Optimality (Layers A–E).
 #
 # Layer A has two halves: microscopic (`zig build certify` — cycles/byte for the
 # in-process verify kernel; auto-re-runs under sudo when available for PMU) and
 # macroscopic (this script's hyperfine race — cold fresh-process gist vs the
-# field, fail-closed bootstrap-CI + Mann-Whitney vs ripgrep). Layers B/B′/C/D
+# field, fail-closed bootstrap-CI + Mann-Whitney vs ripgrep). Layers B/B′/C/D/E
 # are then spliced automatically via `certify_layers.sh` so the committed
-# artifact never ships a header that promises four layers and delivers one.
+# artifact never ships a header that promises five layers and delivers one.
 #
 # The 12 classes are byte-identical to certify.zig's probes, so the macroscopic
 # table and the microscopic table in CERTIFICATE.md map 1:1 by class name.
@@ -18,7 +18,7 @@
 # Usage:  bench/certify/certify.sh            (RUNS=20 WARMUP=3 by default)
 #         RUNS=40 bench/certify/certify.sh    (tighten the CIs)
 #         CERT_SUDO=1 CERT_PUBLISH_DIR=bench/certify/artifact …
-#         make bench-gist-certify             (B–D refresh; CERT_FULL=1 = this)
+#         make bench-gist-certify             (B–E refresh; CERT_FULL=1 = this)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../races/_compete.sh
@@ -34,7 +34,7 @@ fi
 dirty="$(git -C "${REPO}" status --porcelain 2> /dev/null || true)"
 if [[ -n "${dirty}" && "${CERT_ALLOW_DIRTY:-0}" != "1" ]]; then
   echo "certificate aborted: worktree is dirty — commit or isolate changes before certifying" >&2
-  echo "(local refresh: CERT_ALLOW_DIRTY=1 …, or bash bench/certify/certify_layers.sh for B–D only)" >&2
+  echo "(local refresh: CERT_ALLOW_DIRTY=1 …, or bash bench/certify/certify_layers.sh for B–E only)" >&2
   git -C "${REPO}" status --porcelain >&2
   exit 1
 fi
@@ -343,7 +343,7 @@ CERT_OUT="${OUT}" bash "${HERE}/certify_layers.sh" || exit 1
 # Warm tier — the resident-daemon regime an agent actually drives (ADR-352 rung
 # 2.5). Additive: splices a marked section into CERTIFICATE.md + emits
 # certify_warm.csv. Never blocks the mint (a missing daemon/rival is honestly
-# reported), so the cold Layers A–D stay the reproducibility-gated headline.
+# reported), so the cold Layers A–E stay the reproducibility-gated headline.
 echo "racing the warm tier (resident daemon)…"
 RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/certify_warm.sh" \
   || echo "  warm tier skipped (daemon/rival unavailable) — cold cert unaffected" >&2
@@ -365,8 +365,8 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
     "${OUT}/command-log.txt" "${OUT}/index-sizes.json" "${pub}/"
   # Warm-tier CSV — additive side-car (present when the warm race ran).
   [[ -f "${OUT}/certify_warm.csv" ]] && cp -f "${OUT}/certify_warm.csv" "${pub}/"
-  # Layer B/C/D side-cars — the certificate is incomplete without them.
-  for side in portcert.json portcert.csv portbound.json roofline.json lowerbound.csv; do
+  # Layer B/C/D/E side-cars — the certificate is incomplete without them.
+  for side in portcert.json portcert.csv portbound.json roofline.json lowerbound.csv crest.csv; do
     [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
   done
   cp -f "${OUT}/raw/"*.json "${pub}/raw/" || exit 1

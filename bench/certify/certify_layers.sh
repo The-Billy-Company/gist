@@ -41,7 +41,8 @@ note "building lab binaries (ReleaseFast)…"
 PORTBOUND="${KERNEL}/zig-out/bin/gist-portbound"
 ROOFLINE="${KERNEL}/zig-out/bin/gist-roofline"
 LOWERBOUND="${KERNEL}/zig-out/bin/gist-lowerbound"
-for bin in "${PORTBOUND}" "${ROOFLINE}" "${LOWERBOUND}"; do
+CREST="${KERNEL}/zig-out/bin/crest"
+for bin in "${PORTBOUND}" "${ROOFLINE}" "${LOWERBOUND}" "${CREST}"; do
   [[ -x "${bin}" ]] || die "missing executable ${bin}"
 done
 
@@ -111,12 +112,28 @@ python3 "${HERE}/../lowerbound/lowerbound_report.py" \
   --csv "${OUT}/lowerbound.csv" \
   || die "lowerbound_report.py failed"
 
+# Layer E — crest sieve (index completeness; the trigram blind spot). No PMU:
+# wall-clock full-scan vs sieve-survivors, same matcher. FAIL-CLOSED — a soundness
+# violation exits non-zero and aborts the mint; never weaken the sieve to go green.
+note "Layer E — crest sieve production proof (fail-closed)…"
+(cd "${REPO}" && "${CREST}") \
+  || die "crest proof failed (soundness violation) — fix the calculus in src/kernel/primitives/crest.zig, never weaken the sieve"
+[[ -s "${OUT}/crest.csv" ]] || die "crest proof did not emit ${OUT}/crest.csv"
+if crest_machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else crest_machine="$(uname -m)"; fi
+python3 "${HERE}/certify_crest_report.py" \
+  --certificate "${CERT}" \
+  --csv "${OUT}/crest.csv" \
+  --machine "${crest_machine}" \
+  --zig "$(cd "${KERNEL}" && zig version)" \
+  || die "certify_crest_report.py failed"
+
 # Completeness gate (layers only — full artifact check stays with certify.sh)
 missing=0
 for hdr in \
   "## Layer B — port-optimality" \
   "## Layer C — roofline" \
-  "## Layer D — algorithmic lower bound"; do
+  "## Layer D — algorithmic lower bound" \
+  "## Layer E — crest sieve"; do
   if ! grep -qF "${hdr}" "${CERT}"; then
     echo "certify_layers: CERTIFICATE.md missing section: ${hdr}" >&2
     missing=1
@@ -130,7 +147,7 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   mkdir -p "${pub}/raw"
   for f in CERTIFICATE.md certify.csv certify_macro.csv machine.json \
     tool-versions.txt corpus-manifest.tsv command-log.txt index-sizes.json \
-    portcert.json portcert.csv portbound.json roofline.json lowerbound.csv; do
+    portcert.json portcert.csv portbound.json roofline.json lowerbound.csv crest.csv; do
     [[ -f "${OUT}/${f}" ]] && cp -f "${OUT}/${f}" "${pub}/"
   done
   if compgen -G "${OUT}/raw/*.json" > /dev/null; then
