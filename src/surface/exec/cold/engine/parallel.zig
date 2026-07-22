@@ -834,17 +834,25 @@ fn workerMain(w: *Worker) void {
 
 /// Elide-or-search every deferred file. In-walk (`final=false`): only runs
 /// once the loader has finished, retried after every directory. End-of-walk
-/// (`final=true`): NEVER blocks on the loader — on a warm tree, re-reading
-/// the backlog beats idling for the oracle (~20ms load; waiting measured
-/// 1.5x slower on `libs`-sized scopes). Walks that outlive the load still
-/// get full elision via the in-walk flushes.
+/// (`final=true`): NEVER idles — but re-polls the loader per file as it drains
+/// (see the loop), so a loader that lands mid-drain still elides the backlog's
+/// tail. This keeps the "don't block on the oracle" contract (idling measured
+/// 1.5x slower on warm `libs`-sized scopes) while recovering the cold-page-
+/// cache race, where the 39 MiB index faults in after the fast metadata walk
+/// has already deferred everything and the drain is long enough (disk-bound
+/// reads) for the oracle to catch it.
 fn flushPending(w: *Worker, a: std.mem.Allocator, scratch: []u8, final: bool) void {
     if (w.pending.items.len == 0) return;
     const lz = w.cfg.lazy.?; // pending is only ever fed when a loader exists
-    const ready = lz.ready.load(.acquire);
+    var ready = lz.ready.load(.acquire);
     if (!ready and !final) return;
     const o = w.cfg.o;
     for (w.pending.items) |d| {
+        // The oracle may still land while we drain: re-poll per file so its late
+        // arrival elides the remaining tail instead of forfeiting every leftover
+        // read. A cheap acquire load guarding an open+read, and it never idles —
+        // a page-cache-warm reread just reads until the flip, so warm is untouched.
+        if (final and !ready) ready = lz.ready.load(.acquire);
         if (ready) if (lz.val) |*el| if (el.skip(stripDot(d.rel), d.mtime_ns, d.ctime_ns)) continue;
         const dpath = if (o.path_sep) |sep| replaceSep(a, d.rel, sep) else d.rel;
         if (w.cfg.shard) |sh| if (sh.slice(stripDot(d.rel), d.mtime_ns, d.ctime_ns)) |bytes| {
