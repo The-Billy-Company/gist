@@ -157,24 +157,17 @@ test "transform routing: -z/-E ride the pipeline; --pre/--binary decline" {
 
 // ─────────────────────────── ignore chain ───────────────────────────
 
-/// One directory's own ignore rules (.gitignore + .ignore/.rgignore, in the
-/// serial engine's load order), chained to the parent directory's node.
-/// Immutable after construction; `rules` and the chain links live in the
-/// building worker's arena, which outlives the whole run.
-const IgNode = struct {
-    parent: ?*const IgNode,
-    rules: []const ignore.Rule,
-};
-
-/// Fold the chain's rules into `verdict`, parent-first (shallow→deep, so the
-/// deepest matching rule wins — git precedence, same as `Ignore.decideAt`).
-fn applyChain(node: ?*const IgNode, a: std.mem.Allocator, ci: bool, root_depth: usize, reanchor_root: bool, rel: []const u8, is_dir: bool, verdict: *?bool) void {
-    const n = node orelse return;
-    applyChain(n.parent, a, ci, root_depth, reanchor_root, rel, is_dir, verdict);
-    for (n.rules) |r| if (ignore.ruleMatch(a, ci, root_depth, reanchor_root, r, rel, is_dir)) {
-        verdict.* = !r.negated;
-    };
-}
+// The per-directory ignore CHAIN (immutable, worker-arena-lived) and its
+// build/fold helpers live in `ignore.zig` — one rule core so the serial walker,
+// this search engine, and the fused corpus loader (`corpus/tree/loadpar.zig`)
+// cannot drift. Aliased here so every existing call site reads unchanged.
+const IgNode = ignore.IgNode;
+const applyChain = ignore.applyChain;
+const readIgnoreFile = ignore.readIgnoreFile;
+const appendRules = ignore.appendRules;
+const IgPresent = ignore.IgPresent;
+const loadNode = ignore.loadNode;
+const noteIgnoreFile = ignore.noteIgnoreFile;
 
 /// The full skip decision for one walked entry: frozen-base verdict —
 /// `Compiled.matchRank` (hash-probing fast tier) when available, else
@@ -194,53 +187,6 @@ fn shouldSkip(cfg: *const Cfg, chain: ?*const IgNode, a: std.mem.Allocator, task
     const wl_ig = cfg.o.filter.whitelists(a, rel);
     const wl_hid = cfg.o.filter.whitelistsHidden(a, rel);
     return ig.skipFromVerdict(v, is_dir, basename, wl_ig, wl_hid);
-}
-
-/// Read one ignore file (raw POSIX, worker-thread safe) into `a`. Null when
-/// absent/unreadable — same silent degrade as `Ignore.readFile`.
-fn readIgnoreFile(a: std.mem.Allocator, path: []const u8) ?[]const u8 {
-    const fd = std.posix.openat(std.posix.AT.FDCWD, path, .{ .ACCMODE = .RDONLY }, 0) catch return null;
-    defer _ = std.posix.system.close(fd);
-    var buf: std.ArrayList(u8) = .empty;
-    var tmp: [16 * 1024]u8 = undefined;
-    while (buf.items.len < (1 << 20)) {
-        const r = std.posix.read(fd, &tmp) catch break;
-        if (r == 0) break;
-        buf.appendSlice(a, tmp[0..r]) catch return null;
-    }
-    return buf.toOwnedSlice(a) catch null;
-}
-
-fn appendRules(a: std.mem.Allocator, list: *std.ArrayList(ignore.Rule), path: []const u8, base: []const u8) void {
-    const buf = readIgnoreFile(a, path) orelse return;
-    var it = std.mem.splitScalar(u8, buf, '\n');
-    while (it.next()) |raw| {
-        const line = std.mem.trimEnd(u8, raw, "\r");
-        if (ignore.parseRuleLine(line, base, "")) |r| list.append(a, r) catch oom();
-    }
-}
-
-/// Which ignore files a directory's LISTING says are present — the walk
-/// already read every sibling name, so `loadNode` only `openat`s files that
-/// exist instead of blind-probing all three in every directory (the biggest
-/// syscall sink in the whole walk: ~3 failed opens × every dir).
-const IgPresent = struct { gitignore: bool = false, dotignore: bool = false, rgignore: bool = false };
-
-/// Build the `IgNode` for a directory the walk just entered (its `.gitignore`
-/// then `.ignore`/`.rgignore`, mirroring `Ignore.loadDir`'s order so
-/// last-match-wins precedence is identical). Null when the directory
-/// contributes no rules — the chain link is skipped, not empty.
-fn loadNode(ig: *const ignore.Ignore, a: std.mem.Allocator, parent: ?*const IgNode, disk: []const u8, rel: []const u8, present: IgPresent) ?*const IgNode {
-    var rules: std.ArrayList(ignore.Rule) = .empty;
-    if (ig.use_git and present.gitignore) appendRules(a, &rules, joinPath(a, disk, ".gitignore"), rel);
-    if (ig.use_dot) {
-        if (present.dotignore) appendRules(a, &rules, joinPath(a, disk, ".ignore"), rel);
-        if (present.rgignore) appendRules(a, &rules, joinPath(a, disk, ".rgignore"), rel);
-    }
-    if (rules.items.len == 0) return parent;
-    const node = a.create(IgNode) catch oom();
-    node.* = .{ .parent = parent, .rules = rules.toOwnedSlice(a) catch oom() };
-    return node;
 }
 
 // ─────────────────────────── index elision ───────────────────────────
@@ -1050,16 +996,6 @@ fn needsElisionMetadata(cfg: *const Cfg) bool {
 /// per-directory bulk-attr call for ~20k avoided file opens.
 fn freshnessWanted(cfg: *const Cfg) bool {
     return needsElisionMetadata(cfg) or cfg.shard != null;
-}
-
-fn noteIgnoreFile(present: *IgPresent, name: []const u8, is_file: bool) void {
-    if (!is_file or name.len < 7 or name[0] != '.') return;
-    if (std.mem.eql(u8, name, ".gitignore"))
-        present.gitignore = true
-    else if (std.mem.eql(u8, name, ".ignore"))
-        present.dotignore = true
-    else if (std.mem.eql(u8, name, ".rgignore"))
-        present.rgignore = true;
 }
 
 fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.fd_t, task: DirTask, chain: ?*const IgNode, children: *std.ArrayList(DirTask), e: Entry) void {
