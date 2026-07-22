@@ -179,12 +179,12 @@ fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request, ti
 
     var qbuf: std.ArrayList(u8) = .empty;
     defer qbuf.deinit(gpa);
-    // A rootless, non-rank, windowless request rides the classic `query` (an old
-    // daemon still serves it warm); a scoped OR `--rank` OR `-A`/`-B`/`-C` one
-    // rides `query_ext`, whose trailer carries the `PathFilter`, the rank top-k,
-    // and the context window (an old daemon declines it → the classified-but-
-    // unserved query simply runs cold).
-    if (req.filter.isEmpty() and req.rank_k == null and req.before == 0 and req.after == 0)
+    // A rootless, non-rank, windowless, non-`-P` request rides the classic
+    // `query`; a scoped OR `--rank` OR `-A`/`-B`/`-C` OR `-P` one rides
+    // `query_ext`, whose trailer carries the `PathFilter`, the rank top-k, the
+    // context window, and the PCRE2 engine bit (the classic `query` has no
+    // trailer room — the flags byte is full — so `-P` must ride `query_ext`).
+    if (req.filter.isEmpty() and req.rank_k == null and req.before == 0 and req.after == 0 and !req.pcre)
         try protocol.encodeQuery(&qbuf, gpa, req)
     else
         try protocol.encodeQueryExt(&qbuf, gpa, req);

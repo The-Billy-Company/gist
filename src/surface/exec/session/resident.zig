@@ -650,6 +650,11 @@ pub const ResidentSession = struct {
             // (match nothing) never reaches here — every entry point below
             // short-circuits `req.matchNothing()` before compiling.
             .max_count = req.max_count orelse 0,
+            // `-P`: compile the regex body through the PCRE2 backend behind the
+            // shared `Matcher` seam (lookaround/backreferences the linear engine
+            // declines). A pattern PCRE2 rejects surfaces as `error.Stale` →
+            // certified cold fallback, exactly like a linear-syntax decline.
+            .pcre = req.pcre,
         }) catch return QueryError.Stale;
     }
 
@@ -928,8 +933,14 @@ pub const ResidentSession = struct {
         // `--rank` declines `-F` in `classify`, so the body is always a regex here.
         var cq = try self.compileFor(req, .files);
         defer cq.deinit(self.gpa);
+        // `--rank` is linear-only: `classify` declines `-F` AND `-P` alongside
+        // it, so the body is always the linear arm here (the AST `ranked` ranks
+        // with). A PCRE2 or literal body is defensively `error.Stale` → cold.
         const rex = switch (cq.body) {
-            .regex => |*r| r,
+            .engine => |*m| switch (m.*) {
+                .linear => |*r| r,
+                .pcre => return QueryError.Stale,
+            },
             .literal => return QueryError.Stale,
         };
 

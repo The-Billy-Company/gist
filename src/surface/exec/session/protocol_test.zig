@@ -370,3 +370,36 @@ test "query_ext round-trips the PathFilter and the --rank trailer" {
         try std.testing.expectEqual(@as(u64, 2), g4.after);
     }
 }
+
+test "query_ext round-trips the -P engine trailer" {
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // A `-P` query (rootless is fine — the client routes every `-P` through
+    // query_ext because the classic `query` flags byte is full).
+    const sent: request.Request = .{ .pattern = "foo(?=bar)", .mode = .lines, .pcre = true };
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    try protocol.encodeQueryExt(&buf, gpa, sent);
+    const p = try roundTrip(&buf);
+    const got = try protocol.decodeQueryExt(arena.allocator(), p.payload);
+    try std.testing.expect(got.pcre);
+    try std.testing.expectEqualStrings("foo(?=bar)", got.pattern);
+
+    // A non-`-P` scoped query decodes back to `pcre == false`.
+    {
+        var b2: std.ArrayList(u8) = .empty;
+        defer b2.deinit(gpa);
+        try protocol.encodeQueryExt(&b2, gpa, .{ .pattern = "x", .mode = .files, .filter = .{ .roots = &.{"libs"} } });
+        const p2 = try roundTrip(&b2);
+        const g2 = try protocol.decodeQueryExt(arena.allocator(), p2.payload);
+        try std.testing.expect(!g2.pcre);
+    }
+    // The classic `query` opcode never carries the engine bit (always linear).
+    {
+        var b3: std.ArrayList(u8) = .empty;
+        defer b3.deinit(gpa);
+        try protocol.encodeQuery(&b3, gpa, .{ .pattern = "x", .mode = .lines });
+        const p3 = try roundTrip(&b3);
+        try std.testing.expect(!(try protocol.decodeQuery(p3.payload)).pcre);
+    }
+}

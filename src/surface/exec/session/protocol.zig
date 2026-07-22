@@ -21,7 +21,12 @@ const shm = @import("shm.zig");
 /// fd-transport is negotiated as an ADDITIVE capability (see `cap_fd_transport`),
 /// not a version bump: an old client sends a 1-byte HELLO and an old daemon
 /// ignores the extra byte, so no peer is forced cold by the change.
-pub const protocol_version: u8 = 4;
+///
+/// v5 grew the `query_ext` `[u8 pcre]` engine trailer (`-P`/`--pcre2` served
+/// warm). The bump makes the handshake fail-open: a v5 client meeting a stale
+/// v4 daemon (or vice versa) sees the version mismatch in READY and runs cold,
+/// so no peer ever reads the new trailer without agreeing to it.
+pub const protocol_version: u8 = 5;
 
 /// Session/transport capabilities the peers agree on in the HELLO frame. NOT
 /// query flags — the flags byte is fully assigned; this is a separate handshake
@@ -68,7 +73,7 @@ pub const Opcode = enum(u8) {
     // client fails open to cold, exactly like an unknown flag bit. The classic
     // `query` opcode still carries every unscoped request, so an old daemon
     // keeps serving those warm.
-    query_ext = 13, // C→S: [u8 mode][u8 flags][opt u64 max_count][u32 plen][pattern] then 4×([u8 n]{[u32 len][bytes]}) = roots,includes,excludes,exts, then [u8 rank_present][opt u64 rank_k], then [u8 ctx_present][opt u64 before][opt u64 after]
+    query_ext = 13, // C→S: [u8 mode][u8 flags][opt u64 max_count][u32 plen][pattern] then 4×([u8 n]{[u32 len][bytes]}) = roots,includes,excludes,exts, then [u8 rank_present][opt u64 rank_k], then [u8 ctx_present][opt u64 before][opt u64 after], then [u8 pcre] (`-P`/`--pcre2`; self-describing, absent tail ⇒ 0)
 };
 
 // Query flags byte. Reserved bits join `known_flags` only with their engine semantics.
@@ -168,6 +173,11 @@ pub fn encodeQueryExt(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, req: requ
         try wire.appendInt(u64, &body, gpa, req.before);
         try wire.appendInt(u64, &body, gpa, req.after);
     }
+    // The `-P`/`--pcre2` engine trailer: one self-describing byte (there is no
+    // free bit in the flags byte — it is fully assigned). A `-P` query rides
+    // `query_ext` even when rootless (the client routes it here), so an old
+    // daemon — which never negotiates this protocol version — is not reached.
+    try body.append(gpa, @intFromBool(req.pcre));
     try writeFrame(buf, gpa, .query_ext, body.items);
 }
 
@@ -183,7 +193,7 @@ fn appendStrList(body: *std.ArrayList(u8), gpa: std.mem.Allocator, list: []const
 /// Build a `Request` from the decoded scalar fields + `pattern`/`filter` (both
 /// alias the frame buffer / caller arena). Shared by `decodeQuery` and
 /// `decodeQueryExt` so the two opcodes lower a set flag bit to the same field.
-fn requestFrom(mode: request.Mode, flags: u8, max_count: ?u64, pattern: []const u8, filter: request.PathFilter, rank_k: ?usize, before: u64, after: u64) request.Request {
+fn requestFrom(mode: request.Mode, flags: u8, max_count: ?u64, pattern: []const u8, filter: request.PathFilter, rank_k: ?usize, before: u64, after: u64, pcre: bool) request.Request {
     return .{
         .pattern = pattern,
         .mode = mode,
@@ -191,6 +201,7 @@ fn requestFrom(mode: request.Mode, flags: u8, max_count: ?u64, pattern: []const 
         .ignore_case = flags & flag_ignore_case != 0,
         .line_num = flags & flag_line_num != 0,
         .word = flags & flag_word != 0,
+        .pcre = pcre,
         .invert = flags & flag_invert != 0,
         .smart_case = flags & flag_smart_case != 0,
         .quiet = flags & flag_quiet != 0,
@@ -219,7 +230,10 @@ pub fn decodeQuery(payload: []const u8) WireError!request.Request {
         rest = rest[8..];
     }
     if (rest.len == 0) return WireError.BadFrame;
-    return requestFrom(mode, flags, max_count, rest, .{}, null, 0, 0);
+    // The classic `query` opcode carries no engine trailer — it is only ever
+    // emitted for a rootless, non-`-P` request (the client routes `-P` through
+    // `query_ext`), so `pcre` is always false here.
+    return requestFrom(mode, flags, max_count, rest, .{}, null, 0, 0, false);
 }
 
 /// Decode a `query_ext` payload — the scoped query. Same head as `decodeQuery`
@@ -250,7 +264,19 @@ pub fn decodeQueryExt(a: std.mem.Allocator, payload: []const u8) WireError!reque
     };
     const rank_k = try takeRank(&rest);
     const ctx = try takeContext(&rest);
-    return requestFrom(mode, flags, max_count, pattern, filter, rank_k, ctx.before, ctx.after);
+    const pcre = takePcre(&rest);
+    return requestFrom(mode, flags, max_count, pattern, filter, rank_k, ctx.before, ctx.after, pcre);
+}
+
+/// Consume the `[u8 pcre]` engine trailer. A same-version peer always writes it,
+/// but a truncated tail tolerates as `false` (linear) — the same forward-lenient
+/// rule as `takeRank`, so a stray short frame degrades to a correct linear
+/// answer rather than a `BadFrame`.
+fn takePcre(rest: *[]const u8) bool {
+    if (rest.len == 0) return false;
+    const b = rest.*[0];
+    rest.* = rest.*[1..];
+    return b != 0;
 }
 
 /// Consume the `[u8 present][opt u64 k]` rank trailer. Absent (a v3 peer always
