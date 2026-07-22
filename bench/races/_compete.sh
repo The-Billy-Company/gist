@@ -52,6 +52,11 @@ export GIST_UNCAP=1
 COMPETE_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KERNEL="$(cd "${COMPETE_HERE}/../.." && pwd)" # races/ → bench/ → gist root
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
+# Corpus base: the tree every tool actually SEARCHES. Defaults to the repo, but the
+# evaluator points it at an immutable copy-on-write snapshot (GIST_CORPUS_ROOT) so a
+# live coworking tree can't churn under a parity/timing capture. Only the search base
+# moves — the built binary, persisted index, and competitor indices stay under REPO.
+CORPUS="${GIST_CORPUS_ROOT:-${REPO}}"
 OUT="${GIST_DIR:-${REPO}/.local/gist-verify}" # gist's persisted index + paths.list live here (GIST_DIR-relocatable)
 COMPETE_DIR="${REPO}/.local/gist-compete"     # competitor indices live here
 GIST_BIN="${REPO}/.local/gist-bin"
@@ -66,7 +71,7 @@ if [[ -n "${GIST_ROOTS:-}" ]]; then
   read -ra ROOTS <<< "${GIST_ROOTS//[:,]/ }"
 else
   ROOTS=(services libs clients contracts scripts quality)
-  for r in "${ROOTS[@]}"; do [[ -d "${REPO}/${r}" ]] || {
+  for r in "${ROOTS[@]}"; do [[ -d "${CORPUS}/${r}" ]] || {
     ROOTS=(.)
     break
   }; done
@@ -91,7 +96,9 @@ have ag && HAVE_AG=1
 HAVE_GGREP=0
 have ggrep && HAVE_GGREP=1
 HAVE_GITGREP=0
-have git && HAVE_GITGREP=1
+# git grep needs a real repo at the search base; an immutable corpus snapshot has no
+# `.git`, so gitgrep drops out cleanly there rather than misfiring against a parent repo.
+have git && [[ -d "${CORPUS}/.git" ]] && HAVE_GITGREP=1
 HAVE_CSEARCH=0
 have csearch && have cindex && HAVE_CSEARCH=1
 HAVE_ZOEKT=0
@@ -153,7 +160,7 @@ compete_install_gist_bin() {
 compete_build_gist_index() {
   (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast) || return 1
   compete_install_gist_bin || return 1
-  (cd "${REPO}" && "${GIST_BIN}" index) || return 1
+  (cd "${CORPUS}" && "${GIST_BIN}" index) || return 1
 }
 
 # ── index construction (once per run) ────────────────────────────────────────
@@ -171,10 +178,10 @@ compete_build_csearch() {
   rm -f "${CSEARCH_IDX}"
   local t0 t1 secs bytes human
   t0="$(python3 -c 'import time;print(time.time())')"
-  (cd "${REPO}" && xargs -0 -n 400 env CSEARCHINDEX="${CSEARCH_IDX}" cindex < "${PATHS_LIST}" > /dev/null 2>&1)
+  (cd "${CORPUS}" && xargs -0 -n 400 env CSEARCHINDEX="${CSEARCH_IDX}" cindex < "${PATHS_LIST}" > /dev/null 2>&1)
   t1="$(python3 -c 'import time;print(time.time())')"
   secs="$(python3 -c "print('%.1f'%(${t1}-${t0}))")"
-  bytes="$(stat -f%z "${CSEARCH_IDX}" 2> /dev/null || echo 0)"
+  bytes="$(stat -f%z "${CSEARCH_IDX}" 2> /dev/null || stat -c%s "${CSEARCH_IDX}" 2> /dev/null || echo 0)"
   human="$(_compete_humansize "${bytes}")"
   printf "  csearch index: %ss · %s\n" "${secs}" "${human}"
 }
@@ -191,7 +198,7 @@ compete_build_zoekt() {
     echo "${XDIRS[*]}"
   )"
   t0="$(python3 -c 'import time;print(time.time())')"
-  (cd "${REPO}" && zoekt-index -index "${ZOEKT_DIR}" -ignore_dirs "${ign}" "${ROOTS[@]}" > /dev/null 2>&1)
+  (cd "${CORPUS}" && zoekt-index -index "${ZOEKT_DIR}" -ignore_dirs "${ign}" "${ROOTS[@]}" > /dev/null 2>&1)
   t1="$(python3 -c 'import time;print(time.time())')"
   secs="$(python3 -c "print('%.1f'%(${t1}-${t0}))")"
   du_out="$(du -sk "${ZOEKT_DIR}")"
@@ -221,14 +228,14 @@ compete_lit_cmd() {
   local tool="${1}" n="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg -F -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- '${n}' ${roots}" ;;
+    rg) echo "rg -F -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- '${n}' ${roots}" ;;
     ugrep) echo "ugrep -rl -F${xd} -- '${n}' ${roots}" ;;
-    ag) echo "ag -l -Q -s --path-to-ignore ${REPO}/.gitignore -- '${n}' ${roots}" ;;
+    ag) echo "ag -l -Q -s --path-to-ignore ${CORPUS}/.gitignore -- '${n}' ${roots}" ;;
     ggrep) echo "ggrep -rIlF${xd} -- '${n}' ${roots}" ;;
-    gitgrep) echo "git -C ${REPO} grep -F -l -- '${n}' -- ${roots}" ;;
+    gitgrep) echo "git -C ${CORPUS} grep -F -l -- '${n}' -- ${roots}" ;;
     csearch) echo "env CSEARCHINDEX='${CSEARCH_IDX}' csearch -l '\\Q${n}\\E'" ;;
     zoekt) echo "zoekt -index_dir '${ZOEKT_DIR}' -l '\"${n}\"'" ;;
-    gist) echo "${GIST_BIN} '${n}' -F -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} '${n}' -F -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
@@ -237,14 +244,14 @@ compete_rgx_cmd() {
   local tool="${1}" p="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg '${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
+    rg) echo "rg '${p}' -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
     ugrep) echo "ugrep -rl -P${xd} -- '${p}' ${roots}" ;;
-    ag) echo "ag -l -s --path-to-ignore ${REPO}/.gitignore -- '${p}' ${roots}" ;;
+    ag) echo "ag -l -s --path-to-ignore ${CORPUS}/.gitignore -- '${p}' ${roots}" ;;
     ggrep) echo "ggrep -rIlP${xd} -- '${p}' ${roots}" ;;
-    gitgrep) echo "git -C ${REPO} grep -lP -- '${p}' -- ${roots}" ;;
+    gitgrep) echo "git -C ${CORPUS} grep -lP -- '${p}' -- ${roots}" ;;
     csearch) echo "env CSEARCHINDEX='${CSEARCH_IDX}' csearch -l '${p}'" ;;
     zoekt) echo "zoekt -index_dir '${ZOEKT_DIR}' -l 'regex:${p}'" ;;
-    gist) echo "${GIST_BIN} '${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} '${p}' -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
@@ -262,12 +269,12 @@ compete_pcre_cmd() {
   local tool="${1}" p="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg -P '${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
+    rg) echo "rg -P '${p}' -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
     ugrep) echo "ugrep -rl -P${xd} -- '${p}' ${roots}" ;;
-    ag) echo "ag -l -s --path-to-ignore ${REPO}/.gitignore -- '${p}' ${roots}" ;;
+    ag) echo "ag -l -s --path-to-ignore ${CORPUS}/.gitignore -- '${p}' ${roots}" ;;
     ggrep) echo "ggrep -rIlP${xd} -- '${p}' ${roots}" ;;
-    gitgrep) echo "git -C ${REPO} grep -lP -- '${p}' -- ${roots}" ;;
-    gist) echo "${GIST_BIN} -P '${p}' -l --sort none --no-ignore-vcs --ignore-file '${REPO}/.gitignore' -- ${roots}" ;;
+    gitgrep) echo "git -C ${CORPUS} grep -lP -- '${p}' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} -P '${p}' -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
