@@ -1,13 +1,12 @@
-//! gist bench — `roofline`: Layer C of the optimality certificate. A STREAM-style
+//! gist bench — `roofline`: Layer C of the performance certificate. A STREAM-style
 //! (McCalpin 1995) single-thread **read-bandwidth** microbenchmark that measures
 //! the achievable memory bandwidth of THIS machine at three working-set tiers —
 //! L1-, L2-, and DRAM-resident — exposing the cache hierarchy. gist's verify path
-//! is a byte classifier / streaming scan with tiny arithmetic intensity (a few
-//! ops per byte), so the roofline model (Williams, Waterman & Patterson, CACM
-//! 2009) pins it to the **memory-bandwidth ceiling**, not the compute ceiling.
-//! `roofline_report.py` then shows gist's measured cycles/byte (from Layer A's
-//! certify.csv) sitting on this ceiling — the "memory-bound, can't go faster"
-//! half of the certificate.
+//! is then measured through a matched ladder: the same dual-window load/compare
+//! shape on one contiguous DRAM buffer, production `simd.contains` on that buffer,
+//! and production over the fragmented corpus. The roofline model (Williams,
+//! Waterman & Patterson, CACM 2009) supplies an upper bound; the ladder explains
+//! the distance to it instead of pretending that a sub-ceiling point saturates it.
 //!
 //! Zero-dep, mirroring gist's discipline: a plain vectorized sum-reduction over
 //! an aligned buffer, kept live through a global `sink` to defeat DCE (as
@@ -37,6 +36,9 @@ const V = 8;
 const NACC = 8;
 const STEP = NACC * V; // u64 words consumed per inner iteration (512 B)
 const Vu = @Vector(V, u64);
+const scan_vlen: usize = std.simd.suggestVectorLength(u8) orelse 16;
+const ScanVec = @Vector(scan_vlen, u8);
+const ScanMask = std.meta.Int(.unsigned, scan_vlen);
 
 // Best-of-N: interference from ~10 coworking agents on this shared box only ever
 // *slows* a trial, so the max GB/s across trials is the cleanest estimate of the
@@ -82,6 +84,12 @@ const Tier = struct {
     gbps_median: f64,
 };
 
+const Stage = struct {
+    name: []const u8,
+    gbps_max: f64,
+    gbps_median: f64,
+};
+
 /// Read-bandwidth of one working-set size: sweep `buf` enough times to move
 /// ~`traffic_budget` bytes per trial, take the fastest of `trials` (best = least
 /// contended). GB/s = bytes moved ÷ ns (1 GB/s ≡ 1 byte/ns).
@@ -108,6 +116,47 @@ fn measureTier(io: std.Io, name: []const u8, buf: []u64) Tier {
         .gbps_max = samples[trials - 1],
         .gbps_median = samples[trials / 2],
     };
+}
+
+/// Production-shaped control: two offset vector loads, two compares, mask AND,
+/// and the same rare-survivor branch as `simd.indexOfPos`, but no candidate
+/// verification or per-document dispatch. Its gap from STREAM is instruction /
+/// load-port cost; later ladder gaps isolate production control and corpus shape.
+fn dualWindowCandidates(buf: []const u8, needle: []const u8) usize {
+    const first: ScanVec = @splat(needle[0]);
+    const last: ScanVec = @splat(needle[needle.len - 1]);
+    const last_off = needle.len - 1;
+    var candidates: usize = 0;
+    var i: usize = 0;
+    while (i + last_off + scan_vlen <= buf.len) : (i += scan_vlen) {
+        const bf: ScanVec = buf[i..][0..scan_vlen].*;
+        const bl: ScanVec = buf[i + last_off ..][0..scan_vlen].*;
+        const bits: ScanMask = @bitCast((bf == first) & (bl == last));
+        if (bits != 0) candidates +%= @popCount(bits);
+    }
+    return candidates;
+}
+
+fn measureContiguous(io: std.Io, name: []const u8, buf: []const u8, needle: []const u8, comptime matched: bool) Stage {
+    const sweeps: usize = @max(traffic_budget / buf.len, 1);
+    const moved: f64 = @floatFromInt(buf.len * sweeps);
+    var samples: [trials]f64 = undefined;
+    for (0..trials) |t| {
+        var result: usize = 0;
+        const t0 = nowNs(io);
+        for (0..sweeps) |_| {
+            if (matched) {
+                result +%= dualWindowCandidates(buf, needle);
+            } else {
+                result +%= @intFromBool(simd.contains(buf, needle));
+            }
+        }
+        const ns: f64 = @floatFromInt(@max(nowNs(io) - t0, 1));
+        sink +%= result;
+        samples[t] = moved / ns;
+    }
+    std.mem.sort(f64, &samples, {}, std.sort.asc(f64));
+    return .{ .name = name, .gbps_max = samples[trials - 1], .gbps_median = samples[trials / 2] };
 }
 
 /// Effective core clock (GHz) via the kperf PMU: stream the DRAM buffer once with
@@ -177,7 +226,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
     var meter = pmu.Meter.init();
     defer meter.deinit();
 
-    std.debug.print("gist roofline · Layer C (hardware ceiling) · abi v{d}\n", .{gist.abi()});
+    std.debug.print("gist roofline · Layer C (measured headroom) · abi v{d}\n", .{gist.abi()});
     std.debug.print("machine: {s} · zig {s}\n", .{ @tagName(builtin.target.cpu.arch), builtin.zig_version_string });
     std.debug.print("meter:   {s}\n", .{meter.note});
     std.debug.print("method:  single-thread STREAM read reduction · best-of-{d} · ~{d} MiB/trial\n\n", .{ trials, traffic_budget >> 20 });
@@ -212,8 +261,20 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
         dram.gbps_max, dram_cpb, l2.gbps_max, l2_cpb,
     });
 
-    // gist's own SIMD scan bandwidth over the real corpus — the honest operating
-    // point on this roofline (same process, same clock, same methodology).
+    const absent = scan_needles[0].needle;
+    const dram_bytes = std.mem.sliceAsBytes(dram_buf);
+    const stages = [_]Stage{
+        measureContiguous(io, "matched dual-window control", dram_bytes, absent, true),
+        measureContiguous(io, "production contiguous", dram_bytes, absent, false),
+    };
+    std.debug.print("\nmatched scan ladder over the DRAM buffer (logical input GB/s):\n", .{});
+    for (stages) |stage| {
+        std.debug.print("  {d:>6.1} GB/s · median {d:>6.1} · {s}\n", .{ stage.gbps_max, stage.gbps_median, stage.name });
+    }
+
+    // Production over the real corpus completes the ladder. The same process and
+    // timing method make ratios useful; none of these sub-ceiling points is called
+    // a saturated hardware bound.
     const roots = try corpus_mod.resolveRoots(gpa);
     defer corpus_mod.freeRoots(gpa, roots);
     var corpus = try corpus_mod.load(gpa, io, roots);
@@ -226,9 +287,9 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io) !void {
         std.debug.print("  {d:>6.1} GB/s = {d:>4.0}% of DRAM ceiling · {s}\n", .{ s.gbps, s.gbps / dram.gbps_max * 100.0, s.kind });
     }
 
-    try writeJson(gpa, io, tiers[0..], clk.ghz, clk.source, dram_cpb, l2_cpb, scans[0..], corpus_mib);
+    try writeJson(gpa, io, tiers[0..], clk.ghz, clk.source, dram_cpb, l2_cpb, stages[0..], scans[0..], corpus_mib);
     std.debug.print("\nwrote {s}/roofline.json — run bench/roofline/roofline_report.py to splice Layer C\n", .{out_dir});
-    if (!meter.has_pmu) std.debug.print("note: clock assumed (GB/s ceiling is exact; cyc/byte derived). Re-run `sudo` for a measured clock.\n", .{});
+    if (!meter.has_pmu) std.debug.print("note: clock assumed (GB/s is frequency-free; cyc/byte derived). Re-run `sudo` for a measured clock.\n", .{});
 }
 
 fn writeJson(
@@ -239,6 +300,7 @@ fn writeJson(
     ghz_source: []const u8,
     dram_cpb: f64,
     l2_cpb: f64,
+    stages: []const Stage,
     scans: []const ScanResult,
     corpus_mib: f64,
 ) !void {
@@ -259,6 +321,13 @@ fn writeJson(
     for (tiers, 0..) |t, i| {
         try j.appendSlice(gpa, try std.fmt.bufPrint(&line, "    {{ \"name\": \"{s}\", \"bytes\": {d}, \"gbps\": {d:.3}, \"gbps_median\": {d:.3} }}{s}\n", .{
             t.name, t.bytes, t.gbps_max, t.gbps_median, if (i + 1 < tiers.len) "," else "",
+        }));
+    }
+    try j.appendSlice(gpa, "  ],\n");
+    try j.appendSlice(gpa, "  \"matched_ladder\": [\n");
+    for (stages, 0..) |stage, i| {
+        try j.appendSlice(gpa, try std.fmt.bufPrint(&line, "    {{ \"name\": \"{s}\", \"gbps\": {d:.3}, \"gbps_median\": {d:.3} }}{s}\n", .{
+            stage.name, stage.gbps_max, stage.gbps_median, if (i + 1 < stages.len) "," else "",
         }));
     }
     try j.appendSlice(gpa, "  ],\n");

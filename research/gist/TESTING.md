@@ -36,8 +36,8 @@ The properties under test are:
    the authoritative cold answer; declining to cold is valid.
 5. **Correctness before performance** — the default `ci_order.sh` path skips
    performance when a correctness gate fails. Its explicit `--allow-known`
-   development option is an exception for traversing past the 14 tracked
-   rgsuite failures, not a clean correctness verdict.
+   development option remains for historical workflows; the tracked rgsuite
+   currently has no failures to bypass.
 
 ---
 
@@ -195,9 +195,9 @@ Important limits:
   12 classes; they are not a universal performance theorem.
 - Layer B bounds the measured instruction sequences and modeled CPUs, not
   every possible implementation.
-- Layer C reports distance from a measured ceiling. The committed absent-needle
-  scan is 29.6 GB/s against a 75.0 GB/s DRAM read ceiling (39%); that supports
-  a roofline comparison but not a claim that the scan saturates DRAM.
+- Layer C reports and decomposes distance from a measured ceiling. The
+  committed absent-needle scan is 29.1 GB/s against an 83.9 GB/s DRAM read
+  ceiling (35%); that proves material headroom, not DRAM saturation.
 - Layer D proves one-pass verification over the candidate set admitted by the
   current filter. It does not prove that this candidate set is globally
   minimal among all possible indexes or that no different search algorithm

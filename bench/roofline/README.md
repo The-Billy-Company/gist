@@ -3,29 +3,36 @@ doc_radar:
   sentinels:
     - description: "the roofline reporter owns the generated Layer C section"
       file: pkg/kernels/irregex/bench/roofline/roofline_report.py
-      contains: 'LAYER_C_HEADER = "## Layer C — roofline (hardware ceiling)"'
+      contains:
+        - 'LAYER_C_HEADER = "## Layer C — roofline (measured headroom)"'
+        - "if frac >= 80.0:"
+    - description: "adverse tests forbid sub-roof saturation claims"
+      file: pkg/kernels/irregex/bench/roofline/test_roofline_report.py
+      contains: ["test_sub_threshold_result_cannot_claim_saturation"]
 ---
 
-# bench/roofline — Layer C (hardware ceiling)
+# bench/roofline — Layer C (measured headroom)
 
 Layer C of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
 Where Layer A proves empirical dominance over ripgrep on the registered
 workloads and Layer B bounds its hot loop against static instruction-level
 pressure, Layer C tests the hardware claim: gist's cycles/byte sit against this machine's memory
-bandwidth ceiling, so **no implementation on this chip can go materially
-faster** — the bottleneck is memory, not gist's instruction stream.
+bandwidth ceiling. It reports a near-roof result only at or above 80%;
+anything below that is reported as optimization headroom, without inventing
+a binding bottleneck.
 
 ## What it is
 
 | File                 | Role                                                                                                                                                                                                           |
 | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bandwidth.zig`      | a STREAM-style single-thread read-bandwidth microbenchmark at three working-set tiers (L1/L2/DRAM), plus gist's real SIMD scan over the corpus on the same roofline                                            |
+| `bandwidth.zig`      | a STREAM-style single-thread read-bandwidth microbenchmark at three working-set tiers (L1/L2/DRAM), a matched dual-window/contiguous-production ladder, and gist's real SIMD scan over the corpus |
 | `roofline_report.py` | reads `roofline.json` + Layer A's `certify.csv` (optionally Layer B's `portcert.json` for the compute ceiling), renders the `## Layer C` markdown section, splices it into `.local/gist-verify/CERTIFICATE.md` |
+| `test_roofline_report.py` | adverse tests that reject sub-roof saturation claims and keep legacy certificate refreshes honest |
 
-gist's verify path is a byte classifier / streaming scan with tiny arithmetic
-intensity (a handful of ops per byte), so the roofline model pins it to the
-**memory-bandwidth ceiling**, not the compute ceiling — `roofline_report.py`
-shows the measured operating point sitting on it.
+Low arithmetic intensity places a theoretical roof; it does not prove an
+implementation has reached it. `roofline_report.py` therefore reports the
+measured operating point, its distance from the roof, and the matched stages
+that localize the gap.
 
 ## Method
 
@@ -38,14 +45,25 @@ best-of-9 trials, since on this shared coworking box interference only ever
 _slows_ a trial, never inflates it, so the max is the cleanest ceiling
 estimate. It then times gist's real `scan/simd.zig` `contains` over the full
 corpus with an absent needle (a full scan, no early exit, no verification) —
-the clean, directly-comparable streaming operating point — plus two present
-needles for context (early-exit + verify, not a clean bandwidth number).
+the clean corpus operating point — plus two present needles for context
+(early-exit + verify, not a clean bandwidth number).
+
+Between STREAM and the corpus point, the harness runs two controls over the
+same 512 MiB DRAM buffer:
+
+1. a dual-window load/compare/mask loop matching the production hot-loop shape
+   without verification or document dispatch;
+2. production `simd.contains` over one contiguous buffer.
+
+The first gap prices the search instruction/load shape; the second prices
+production control flow; the corpus gap prices document fragmentation and
+dispatch. This ladder makes Layer C diagnostic even when the scan is nowhere
+near the hardware roof.
 
 Frequency (only needed for the _derived_ cycles/byte ceiling) is measured via
 the same `kperf` PMU [`../harness/pmu.zig`](../harness/pmu.zig) uses when run
 under `sudo`; without it the run falls back to a clearly-labeled assumed
-clock — the primary **GB/s ceiling itself is frequency-free** and always
-exact.
+clock — the primary **GB/s measurement itself is frequency-free**.
 
 ## How to run
 

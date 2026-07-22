@@ -49,8 +49,13 @@ REQUIRED_LAYER_FILES = (
 )
 REQUIRED_LAYER_HEADERS = (
     "## Layer B — port-optimality",
-    "## Layer C — roofline",
+    "## Layer C — roofline (measured headroom)",
     "## Layer D — algorithmic lower bound",
+)
+FORBIDDEN_LAYER_C_CLAIMS = (
+    "cycles/byte sits on the hardware ceiling",
+    "no implementation on this chip can go faster",
+    "**Verdict — memory-bandwidth-bound.**",
 )
 REQUIRED_MACHINE_KEYS = (
     "cpu_model",
@@ -301,22 +306,63 @@ def _check_cells(d: Path, meta: dict[str, object], tools: set[str], problems: li
 
 def _check_layers(d: Path, problems: list[str]) -> None:
     """Fail closed when the certificate promises four layers but only ships A."""
-    for name in REQUIRED_LAYER_FILES:
-        if not (d / name).is_file():
-            problems.append(
-                f"missing Layer B/C/D artifact: {name} "
-                "(run bench/certify/certify_layers.sh or full certify.sh)"
-            )
+    problems.extend(
+        f"missing Layer B/C/D artifact: {name} "
+        "(run bench/certify/certify_layers.sh or full certify.sh)"
+        for name in REQUIRED_LAYER_FILES
+        if not (d / name).is_file()
+    )
     cert = d / "CERTIFICATE.md"
     if not cert.is_file():
         return
     text = cert.read_text(errors="replace")
-    for header in REQUIRED_LAYER_HEADERS:
-        if header not in text:
-            problems.append(
-                f"CERTIFICATE.md missing section {header!r} — "
-                "header promises four layers; splice with certify_layers.sh"
-            )
+    problems.extend(
+        f"CERTIFICATE.md missing section {header!r} — "
+        "header promises four layers; splice with certify_layers.sh"
+        for header in REQUIRED_LAYER_HEADERS
+        if header not in text
+    )
+    problems.extend(
+        f"CERTIFICATE.md overstates Layer C with retired claim: {claim!r}"
+        for claim in FORBIDDEN_LAYER_C_CLAIMS
+        if claim in text
+    )
+
+    roof = _json(d / "roofline.json", problems)
+    if not isinstance(roof, dict):
+        return
+    tiers = {
+        tier.get("name"): tier.get("gbps")
+        for tier in roof.get("tiers", [])
+        if isinstance(tier, dict)
+    }
+    dram = tiers.get("DRAM")
+    scans = roof.get("gist_scan", [])
+    pure = next(
+        (
+            scan.get("gbps")
+            for scan in scans
+            if isinstance(scan, dict) and "0 matches" in str(scan.get("kind", ""))
+        ),
+        None,
+    )
+    if (
+        not isinstance(dram, int | float)
+        or dram <= 0
+        or not isinstance(pure, int | float)
+        or pure <= 0
+    ):
+        problems.append("roofline.json needs positive DRAM and full-scan GB/s measurements")
+        return
+    ratio = pure / dram
+    near_roof = ratio >= 0.8
+    verdict = "near the measured roof" if near_roof else "material headroom remains"
+    if verdict not in text:
+        problems.append(
+            f"CERTIFICATE.md Layer C verdict disagrees with measured {ratio:.0%} of roof"
+        )
+    if not near_roof and "does **not** certify DRAM saturation" not in text:
+        problems.append("sub-80% Layer C result must explicitly reject a DRAM-saturation claim")
 
 
 def _check_index_sizes(path: Path, problems: list[str]) -> None:

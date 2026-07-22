@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""gist roofline — Layer C synthesis + CERTIFICATE.md splicer (the hardware ceiling).
+"""gist roofline — Layer C synthesis + CERTIFICATE.md splicer (measured headroom).
 
 The roofline model (Williams, Waterman & Patterson, "Roofline: An Insightful
 Visual Performance Model for Multicore Architectures", CACM 2009) bounds a
 kernel's throughput by min(peak compute, peak memory-bandwidth x arithmetic
-intensity). gist's verify path is a byte classifier / streaming scan with tiny
-arithmetic intensity (a handful of ops per byte), so it lives on the **memory
-ridge**: no implementation on this chip can go materially faster because the
-bottleneck is memory bandwidth, not gist's instruction stream.
+intensity). That roof is an upper bound, not evidence that an operating point
+well below it is bandwidth-saturated. This report preserves that distinction.
 
 This reads two measured artifacts and writes a verdict that is beyond reproach:
   * `roofline.json`  — this machine's achievable single-core read bandwidth per
                        cache tier (from `bench/roofline/bandwidth.zig`), the
-                       **memory ceiling**.
+                       hardware upper bound.
+  * `matched_ladder` — dual-window control, production on contiguous DRAM, and
+                       production over corpus documents; these localize the gap.
   * `certify.csv`    — Layer A's per-class measured operating point (bytes crunched
                        + median ns), from which gist's achieved GB/s is derived.
 Optionally `portcert.json` (Layer B) supplies the **compute ceiling** for the
@@ -36,11 +36,20 @@ from pathlib import Path
 import re
 
 
-LAYER_C_HEADER = "## Layer C — roofline (hardware ceiling)"
+LAYER_C_HEADER = "## Layer C — roofline (measured headroom)"
 # certify_stats.py rewrites this section to EOF, so a fresh Layer C is inserted
 # *before* it (not appended) to survive a later macroscopic re-splice.
 MACRO_HEADER = "## Layer A — macroscopic dominance over ripgrep"
 LEGACY_MACRO_HEADER = "## Layer A — macroscopic dominance vs the field"
+LEGACY_SUMMARY = (
+    "- **Layer C — roofline.** cycles/byte sits on the hardware ceiling (memory\n"
+    "  bandwidth or compute), so no implementation on this chip can go faster."
+)
+SUMMARY = (
+    "- **Layer C — roofline headroom.** measures distance from the pure-read roof and "
+    "decomposes it with matched controls when present. It reports near-roof placement "
+    "only at or above 80%; otherwise it reports optimization headroom."
+)
 # Anchor the shared cert dir at the repo root (computed from this file's location:
 # bench/roofline/roofline_report.py → repo root is parents[5]) so the report works
 # from any CWD — the zig steps and portcert.sh already resolve the repo root, and
@@ -142,10 +151,11 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
     ghz = float(roof.get("ghz", 0.0))
     ghz_src = roof.get("ghz_source", "?")
     dram = tiers.get("DRAM", 0.0)
+    ladder = roof.get("matched_ladder", [])
     scans = roof.get("gist_scan", [])
     # The clean streaming point: the absent-needle scan reads every byte (no
-    # early exit, no verification) in the SAME process as the ceiling, so its
-    # "% of DRAM ceiling" is a same-run ratio — robust to this shared box's load.
+    # early exit, no verification). It shares the process and methodology with
+    # the roof; absolute values and ratios remain measured, not universal.
     pure = next(
         (s for s in scans if float(s.get("gbps", 0)) > 0 and "0 matches" in s.get("kind", "")),
         None,
@@ -153,12 +163,12 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
 
     lines: list[str] = [LAYER_C_HEADER, ""]
     lines.append(
-        "_The roofline model (Williams, Waterman & Patterson, CACM 2009) caps a kernel at "
-        "min(peak compute, peak bandwidth x arithmetic intensity). gist's scan is a byte "
-        "classifier — a dual-window SIMD compare per stride — with tiny arithmetic intensity, "
-        "so it lives in the **memory-bound region**: its ceiling is memory bandwidth, not "
-        "compute. Ceiling = this machine's measured single-core STREAM read bandwidth "
-        "(McCalpin 1995); operating point = gist's real `contains` scan over the corpus._"
+        "_The roofline model (Williams, Waterman & Patterson, CACM 2009) supplies an upper "
+        "bound: min(peak compute, peak bandwidth × arithmetic intensity). Layer C measures "
+        "gist's distance from that bound. It does **not** infer saturation from low arithmetic "
+        "intensity. A matched ladder separates raw STREAM bandwidth, the dual-window "
+        "load/compare shape, production on contiguous DRAM, and production over corpus "
+        "documents._"
     )
     lines.append("")
     lines.append(
@@ -174,8 +184,8 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
     if isinstance(dram_cpb, int | float):
         lines.append(
             f"- DRAM ceiling in cycles/byte (derived, GHz ÷ GB/s): **{dram_cpb:.4f} cyc/byte** "
-            "— the floor no single-thread kernel can beat (it would have to read faster "
-            "than memory)"
+            "— the ideal pure-read floor; search instructions and load shape can impose "
+            "lower ceilings"
         )
     if compute:
         bounds = " · ".join(
@@ -186,17 +196,31 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
             f"llvm-mca port bound — {bounds}. These are *reference cores* (LLVM has no "
             "Apple-Silicon model), so they are a low-intensity **cross-check**, not a same-axis "
             "ceiling on this M4 roofline; they confirm the scan is a tight, few-cycle/byte "
-            "port-bound kernel — i.e. firmly in the memory-bound region."
+            "port-bound kernel, but do not identify this machine's binding bottleneck."
         )
     else:
         lines.append(
             "- compute ceiling: _Layer B (`portcert.json`) not present — memory-ceiling-only. "
-            "gist's arithmetic intensity (a few ops/byte) puts the compute ridge far above the "
-            "memory ridge regardless, so the memory ceiling is the binding one._"
+            "no binding-bottleneck claim is made without a same-machine compute measurement._"
         )
     lines.append("")
 
-    # ── gist's clean operating point (same process, same clock) ──
+    if ladder:
+        control = float(ladder[0].get("gbps", 0.0))
+        lines.append("**Matched ceiling ladder** (same process; logical input GB/s):")
+        lines.append("")
+        lines.append("| stage | GB/s | % of DRAM roof | % of matched control |")
+        lines.append("|---|--:|--:|--:|")
+        for stage in ladder:
+            g = float(stage.get("gbps", 0.0))
+            lines.append(
+                f"| {stage.get('name', '?')} | {g:.1f} "
+                f"| {g / dram * 100.0 if dram else 0.0:.0f}% "
+                f"| {g / control * 100.0 if control else 0.0:.0f}% |"
+            )
+        lines.append("")
+
+    # ── gist's corpus operating point (same process, same clock) ──
     if scans:
         lines.append(
             "**gist's SIMD scan on the roofline** "
@@ -212,27 +236,37 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
             lines.append(f"| {label} | {g:.1f} | {pct:.0f}% |")
         lines.append("")
 
-    # ── verdict from the clean pure-streaming point ──
+    # ── verdict from the clean full-scan point ──
     if pure:
         pg = float(pure["gbps"])
         frac = pg / dram * 100.0 if dram > 0 else 0.0
-        lines.append(
-            f"**Verdict — memory-bandwidth-bound.** gist's SIMD scan reads every byte at "
-            f"**{pg:.1f} GB/s = {frac:.0f}% of the {dram:.1f} GB/s single-core pure-read ceiling** "
-            "(same-run ratio, so this holds even as absolute GB/s drifts with box load). The scan "
-            "issues **two overlapping vector loads per stride** (first-byte + last-byte windows, "
-            "memchr-style), so it moves ~2x the needle bytes through the load ports — "
-            "hitting a large fraction of a *pure-read* STREAM ceiling that a compare-and-verify "
-            "scan can "
-            "never fully reach. The kernel is limited by memory/load-port throughput, not by "
-            "search logic: it sits on the memory ridge, and the trigram prefilter (Layer A) is "
-            "what actually wins — by never bringing most bytes to this scan at all."
-        )
+        if frac >= 80.0:
+            verdict = (
+                f"**Verdict — near the measured roof.** The full scan reaches **{pg:.1f} GB/s = "
+                f"{frac:.0f}% of the {dram:.1f} GB/s single-core pure-read roof**. At the "
+                "pre-registered 80% threshold, little roofline headroom remains. Bottleneck "
+                "attribution still requires same-machine counters; this is not a universal "
+                "optimality proof."
+            )
+        else:
+            next_step = (
+                "The matched ladder shows where throughput falls before corpus fragmentation; "
+                "optimize and remeasure those stages before making a stronger claim."
+                if ladder
+                else "This older artifact predates the matched ladder; remint Layer C to localize "
+                "the gap before making a stronger claim."
+            )
+            verdict = (
+                f"**Verdict — material headroom remains.** The full scan reaches **{pg:.1f} GB/s = "
+                f"{frac:.0f}% of the {dram:.1f} GB/s single-core pure-read roof**. That is below "
+                "the pre-registered 80% near-roof threshold, so Layer C does **not** certify "
+                f"DRAM saturation, a binding memory bottleneck, or hardware optimality. {next_step}"
+            )
+        lines.append(verdict)
     else:
         lines.append(
-            "**Verdict — memory-bound region.** gist's scan is a low-intensity byte classifier; "
-            f"its ceiling is the {dram:.1f} GB/s single-core memory bandwidth, far below the "
-            "compute ridge. (Clean pure-streaming point unavailable this run.)"
+            "**Verdict unavailable.** The clean full-scan operating point was not measured; "
+            "Layer C cannot classify the bottleneck."
         )
     lines.append("")
 
@@ -271,12 +305,12 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
         lines.append(
             "_Layer A measured gist's actual cycles/byte under `sudo` (see the microscopic table "
             "above); compare them to the derived DRAM ceiling of "
-            f"{dram_cpb:.4f} cyc/byte to place each class on the ridge._"
+            f"{dram_cpb:.4f} cyc/byte to quantify headroom; do not read the bound as saturation._"
         )
     else:
         lines.append(
-            "> Ceiling clock was assumed (no PMU). The **GB/s ceiling and % attained are exact** "
-            "(bandwidth is frequency-free); only the derived cyc/byte figures assume the clock. "
+            "> Ceiling clock was assumed (no PMU). The **GB/s measurements and ratios are "
+            "frequency-free**; only the derived cyc/byte figures assume the clock. "
             "Re-run `sudo zig build certify` + `sudo zig build roofline` for measured cycles."
         )
     lines.append("")
@@ -289,7 +323,7 @@ def splice(cert: Path, section: str) -> None:
     if not cert.exists():
         cert.write_text("# gist — Certificate of Optimality\n\n" + body)
         return
-    text = cert.read_text()
+    text = cert.read_text().replace(LEGACY_SUMMARY, SUMMARY)
     m = re.search(r"^## Layer C\b.*$", text, re.MULTILINE)
     if m:
         nxt = re.search(r"^## Layer [A-Z]\b", text[m.end() :], re.MULTILINE)
