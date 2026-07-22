@@ -12,8 +12,12 @@
 //! searches child FILES on the spot (read → BOM decode → literal gate →
 //! binary sniff → line match → render), writing each hit to stdout the
 //! instant it's rendered via the shared `Sink` (`Sink.emit`, lock-guarded so
-//! concurrent workers' output never interleaves) — never buffered and
-//! reordered after the fact. This is also what lets gist cancel early: a
+//! concurrent workers' output never interleaves) — never globally reordered
+//! after the fact. The one exception is the pure path-list modes (`-l`/
+//! `--files`), whose records a worker coalesces into ~64 KiB chunks
+//! (`bufferPath`/`Sink.emitFilesChunk`) so a high-hit scan pays one lock+write
+//! per chunk, not per file — still contiguous, still order-free by contract.
+//! This is also what lets gist cancel early: a
 //! downstream reader hanging up (`| head`, a closed FD, an interrupted pager)
 //! surfaces as a failed write, which flips `Queue.aborted` and unwinds every
 //! worker within microseconds instead of finishing the whole tree — the same
@@ -39,6 +43,7 @@
 //! explicit FILE args, stdin) stays on the proven serial engine.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const args = @import("../argv/args.zig");
 const output = @import("../emit/output.zig");
@@ -205,10 +210,10 @@ pub const IndexedPaths = struct {
 
     pub fn init(gpa: std.mem.Allocator, paths: []const []const u8) std.mem.Allocator.Error!IndexedPaths {
         if (paths.len > std.math.maxInt(usize) / 2) return error.OutOfMemory;
-        const capacity = std.math.ceilPowerOfTwo(usize, @max(@as(usize, 8), paths.len * 2)) catch return error.OutOfMemory;
+        const capacity = std.math.ceilPowerOfTwo(usize, @max(8, paths.len * 2)) catch return error.OutOfMemory;
         const slots = try gpa.alloc(u32, capacity);
         @memset(slots, empty);
-        const table = IndexedPaths{ .slots = slots, .mask = capacity - 1, .gpa = gpa };
+        const table: IndexedPaths = .{ .slots = slots, .mask = capacity - 1, .gpa = gpa };
         for (paths, 0..) |path, doc| {
             var pos = table.slot(path);
             while (slots[pos] != empty) pos = (pos + 1) & table.mask;
@@ -594,8 +599,6 @@ const Sink = struct {
     mu: std.Io.Mutex = .init,
     heading: bool,
     join_groups: bool,
-    files_mode: bool,
-    null_sep: bool,
     first: bool = true, // guarded by `mu`
     matched_files: usize = 0, // guarded by `mu`
 
@@ -611,27 +614,36 @@ const Sink = struct {
         // matched-files exit code; the `summary` record is written once by `run`.
         if (kind == .json) {
             self.matched_files += 1;
-            if (corpus_mod.writeStdout(buf) == false) self.q.abort();
+            if (!corpus_mod.writeStdout(buf)) self.q.abort();
             return;
         }
-        if (self.files_mode) {
-            self.matched_files += 1;
-            ok = corpus_mod.writeStdout(buf) and corpus_mod.writeStdout(if (self.null_sep) "\x00" else "\n");
-        } else {
-            switch (kind) {
-                .text_hit => {
-                    if (self.heading and !self.first) ok = corpus_mod.writeStdout("\n");
-                    if (ok and self.join_groups and !self.first and buf.len > 0) ok = corpus_mod.writeStdout("--\n");
-                    self.first = false;
-                    self.matched_files += 1;
-                },
-                .bin_hit => self.matched_files += 1,
-                .text_plain => {},
-                .json => unreachable, // handled above (self-framed record block)
-            }
-            if (ok) ok = corpus_mod.writeStdout(buf);
+        switch (kind) {
+            .text_hit => {
+                if (self.heading and !self.first) ok = corpus_mod.writeStdout("\n");
+                if (ok and self.join_groups and !self.first and buf.len > 0) ok = corpus_mod.writeStdout("--\n");
+                self.first = false;
+                self.matched_files += 1;
+            },
+            .bin_hit => self.matched_files += 1,
+            .text_plain => {},
+            .json => unreachable, // handled above (self-framed record block)
         }
+        if (ok) ok = corpus_mod.writeStdout(buf);
         if (!ok) self.q.abort();
+    }
+
+    /// Write ONE coalesced path-list chunk (`-l`/`--files`): many `path+term`
+    /// records a worker batched, plus their file count, in a single locked
+    /// `write(2)`. This is the path-list twin of `emit` — the mutex + syscall
+    /// is a per-chunk cost, not per file, so a high-hit scan stops serializing
+    /// every worker behind the sink lock. Order-free (each chunk is a
+    /// contiguous slice of one worker's matches).
+    fn emitFilesChunk(self: *Sink, buf: []const u8, files: usize) void {
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+        if (self.q.aborted.load(.monotonic)) return;
+        self.matched_files += files;
+        if (!corpus_mod.writeStdout(buf)) self.q.abort();
     }
 };
 
@@ -707,6 +719,14 @@ const Worker = struct {
     cfg: *const Cfg,
     arena: std.heap.ArenaAllocator,
     pending: std.ArrayList(Deferred) = .empty,
+    // Coalesced path-list output (`-l`/`--files`): a per-file lock+`write(2)`
+    // under the shared sink mutex serialized every worker on a high-hit scan
+    // (`\w{3,8} -l` matches ~every file — 20k locked syscalls), which capped
+    // parallel scaling at ~1.4x. Batching each worker's paths into ~64 KiB
+    // chunks (order-free by the files-list contract) makes the lock+syscall a
+    // per-chunk cost. `out` is gpa-owned so it outlives per-file arena churn.
+    out: std.ArrayList(u8) = .empty,
+    out_files: usize = 0, // paths buffered in `out` since the last flush
     // Reusable boolean-match scratch (`Matcher.Sim` is per-thread by design):
     // lazily built once on first use, then reused for every file this worker
     // searches — the Pike generation counter self-invalidates between calls,
@@ -718,6 +738,30 @@ const Worker = struct {
     jss: ?Matcher.SpanSim = null,
     jstats: json.Stats = .{},
 };
+
+/// Flush a worker's coalesced path-list buffer once it reaches this size — big
+/// enough that the lock+`write(2)` amortizes over hundreds of paths, small
+/// enough to stream (and to keep the soft output budget's cut at a whole-line
+/// chunk boundary).
+const files_flush_cap: usize = 64 * 1024;
+
+/// Append one path-list record (`path` + its terminator) to the worker's
+/// private buffer, flushing in a single locked write once it fills. Replaces a
+/// per-file `Sink.emit` (lock + raw syscall) on the `-l`/`--files` hot paths.
+fn bufferPath(w: *Worker, path: []const u8, term: []const u8) void {
+    w.out.appendSlice(w.gpa, path) catch oom();
+    w.out.appendSlice(w.gpa, term) catch oom();
+    w.out_files += 1;
+    if (w.out.items.len >= files_flush_cap) flushFiles(w);
+}
+
+/// Drain the worker's buffered path list into the sink as one chunk.
+fn flushFiles(w: *Worker) void {
+    if (w.out_files == 0) return;
+    w.cfg.sink.emitFilesChunk(w.out.items, w.out_files);
+    w.out.clearRetainingCapacity();
+    w.out_files = 0;
+}
 
 /// The worker's lazily-built reusable match scratch (null only on OOM, where
 /// the caller degrades to "no match proven" — never an invented match).
@@ -775,7 +819,10 @@ fn workerMain(w: *Worker) void {
     // The walk is over (or cancelled); resolve whatever is still deferred
     // (see the policy note on `flushPending`) — unless the pipe is already
     // gone, in which case there's nothing left to search FOR.
-    if (!w.q.aborted.load(.monotonic)) flushPending(w, a, scratch, true);
+    if (!w.q.aborted.load(.monotonic)) {
+        flushPending(w, a, scratch, true);
+        flushFiles(w); // drain the tail of this worker's coalesced path list
+    }
 }
 
 /// Elide-or-search every deferred file. In-walk (`final=false`): only runs
@@ -814,8 +861,17 @@ fn flushPending(w: *Worker, a: std.mem.Allocator, scratch: []u8, final: bool) vo
 /// emitted path (serial `relPath` / rg parity); only the implicit whole-CWD
 /// walk ("" prefix) emits bare paths.
 fn joinRel(a: std.mem.Allocator, prefix: []const u8, name: []const u8) []const u8 {
-    if (prefix.len == 0) return name;
-    return std.fmt.allocPrint(a, "{s}/{s}", .{ prefix, name }) catch oom();
+    return if (prefix.len == 0) name else std.fmt.allocPrint(a, "{s}/{s}", .{ prefix, name }) catch oom();
+}
+
+/// This directory's own ignore rules chained onto the parent's — unless the
+/// frozen base already holds them (the CWD root, loaded by `Ignore.init`;
+/// keyed by stripped rel). Shared by the live and phantom listings.
+fn dirChain(cfg: *const Cfg, a: std.mem.Allocator, task: DirTask, present: IgPresent) ?*const IgNode {
+    if (!cfg.o.no_ignore and (present.gitignore or present.dotignore or present.rgignore) and
+        !cfg.ig.loaded.contains(task.rel) and !cfg.ig.loaded.contains(stripDot(task.rel)))
+        return loadNode(cfg.ig, a, task.chain, task.disk, task.rel, present);
+    return task.chain;
 }
 
 /// The same walk-error contract `run.zig`'s serial `reportWalkError` enforces
@@ -830,7 +886,6 @@ fn reportWalkError(q: *Queue, rel: []const u8, e: anyerror) void {
 
 fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, local: *std.ArrayList(DirTask)) void {
     const cfg = w.cfg;
-    const o = cfg.o;
 
     // Phantom walk: a recorded directory whose lstat proves BOTH clocks
     // predate the snapshot anchor has byte-exact recorded membership (POSIX
@@ -853,7 +908,7 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
         reportWalkError(w.q, task.rel, e);
         return;
     };
-    var dir = Dir{ .handle = fd };
+    var dir: Dir = .{ .handle = fd };
     var closed = false;
     defer if (!closed) {
         _ = std.posix.system.close(dir.handle);
@@ -862,20 +917,18 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
     // List the whole directory FIRST — the names tell us which ignore files
     // exist here, so the chain build below never blind-probes the disk.
     var entries: std.ArrayList(Entry) = .empty;
-    var present = IgPresent{};
-    var bulk_ok = false;
-    if (bulkstat.supported) {
+    var present: IgPresent = .{};
+    const bulk_ok = bulkstat.supported and blk: {
         // With index elision live, each entry's mtime+ctime ride the bulk
         // listing for free; without it, names+types via getdirentries is cheaper.
         const listing = if (freshnessWanted(cfg)) bulkstat.listOneLevel(a, dir.handle) else bulkstat.listNamesOnly(a, dir.handle);
-        if (listing) |listed| {
-            for (listed) |e| {
-                noteIgnoreFile(&present, e.name, e.is_file);
-                entries.append(a, .{ .name = e.name, .is_dir = e.is_dir, .is_file = e.is_file, .mtime_ns = e.mtime_ns, .ctime_ns = e.ctime_ns }) catch oom();
-            }
-            bulk_ok = true;
-        } else |_| {}
-    }
+        const listed = listing catch break :blk false;
+        for (listed) |e| {
+            noteIgnoreFile(&present, e.name, e.is_file);
+            entries.append(a, .{ .name = e.name, .is_dir = e.is_dir, .is_file = e.is_file, .mtime_ns = e.mtime_ns, .ctime_ns = e.ctime_ns }) catch oom();
+        }
+        break :blk true;
+    };
     if (!bulk_ok) {
         if (bulkstat.supported) {
             // Bulk listing is all-or-nothing but shares the fd offset with
@@ -886,7 +939,7 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
                 reportWalkError(w.q, task.rel, e);
                 return;
             };
-            dir = Dir{ .handle = fd2 };
+            dir = .{ .handle = fd2 };
             closed = false;
         }
         var it = dir.iterate();
@@ -937,12 +990,7 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
         }
     };
 
-    // This directory's own ignore rules — unless the frozen base already holds
-    // them (the CWD root, loaded by `Ignore.init`; keyed by stripped rel).
-    var chain = task.chain;
-    if (!o.no_ignore and (present.gitignore or present.dotignore or present.rgignore) and
-        !cfg.ig.loaded.contains(task.rel) and !cfg.ig.loaded.contains(stripDot(task.rel)))
-        chain = loadNode(cfg.ig, a, task.chain, task.disk, task.rel, present);
+    const chain = dirChain(cfg, a, task, present);
 
     // Children go on the worker's own stack; only the COUNT touches the
     // shared queue (accounting must precede this task's `done`).
@@ -959,14 +1007,10 @@ fn processDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, lo
 /// entries resolve from CWD (`from_snap`) since no directory fd is open.
 fn servePhantomDir(w: *Worker, a: std.mem.Allocator, scratch: []u8, task: DirTask, local: *std.ArrayList(DirTask), v: *const treemap.View) void {
     const cfg = w.cfg;
-    const o = cfg.o;
     const kids = v.children(task.snap_ix);
-    var present = IgPresent{};
+    var present: IgPresent = .{};
     for (kids) |ent| noteIgnoreFile(&present, v.name(ent), !ent.isDir());
-    var chain = task.chain;
-    if (!o.no_ignore and (present.gitignore or present.dotignore or present.rgignore) and
-        !cfg.ig.loaded.contains(task.rel) and !cfg.ig.loaded.contains(stripDot(task.rel)))
-        chain = loadNode(cfg.ig, a, task.chain, task.disk, task.rel, present);
+    const chain = dirChain(cfg, a, task, present);
     const before = local.items.len;
     for (kids) |ent| handleEntry(w, a, scratch, std.posix.AT.FDCWD, task, chain, local, .{
         .name = v.name(ent),
@@ -1039,9 +1083,9 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
 
     const dpath = if (o.path_sep) |sep| replaceSep(a, rel, sep) else rel;
     if (cfg.files_mode) {
-        // Streamed straight through — `Sink.emit` appends the one-byte
-        // separator, so listing a file allocates nothing beyond `dpath` itself.
-        cfg.sink.emit(.text_hit, dpath);
+        // Coalesced into the worker's path-list buffer — one locked write per
+        // ~64 KiB chunk instead of a lock+syscall per listed file.
+        bufferPath(w, dpath, if (o.null_sep) "\x00" else "\n");
         return;
     }
     // Content shard: an unchanged corpus file's bytes are already mmap'd, so
@@ -1057,11 +1101,10 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     // A snapshot-served entry has no open parent; it resolves from CWD like a
     // deferred read. `rel` is the CWD-openable path a `-z` external-codec
     // subprocess re-opens.
-    if (e.from_snap) {
-        searchFile(w, a, scratch, std.posix.AT.FDCWD, joinPath(a, task.disk, e.name), dpath, rel);
-    } else {
+    if (e.from_snap)
+        searchFile(w, a, scratch, std.posix.AT.FDCWD, joinPath(a, task.disk, e.name), dpath, rel)
+    else
         searchFile(w, a, scratch, dirfd, e.name, dpath, rel);
-    }
 }
 
 /// Match+render a file whose bytes came from the content-shard mapping rather
@@ -1136,8 +1179,7 @@ fn searchFile(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.
         const raw = sf.readRest(a, scratch) orelse return;
         const body = ingest.apply(a, icfg, openable, dpath, raw) orelse return;
         if (body.len == 0) return;
-        emitBody(w, a, dpath, body, 0, 0);
-        return;
+        return emitBody(w, a, dpath, body, 0, 0);
     }
 
     const sf = grepfile.StagedFile.open(scratch, dirfd, disk) orelse return;
@@ -1147,7 +1189,7 @@ fn searchFile(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.
     // settle, before paying for the tail (86% of this corpus's bytes live in
     // the tails of >64 KiB files). A UTF-16 BOM opts out: the transcode needs
     // the whole file and dissolves its NULs, so no prefix triage is sound.
-    const utf16 = sf.prefix.len >= 2 and ((sf.prefix[0] == 0xFF and sf.prefix[1] == 0xFE) or (sf.prefix[0] == 0xFE and sf.prefix[1] == 0xFF));
+    const utf16 = std.mem.startsWith(u8, sf.prefix, "\xFF\xFE") or std.mem.startsWith(u8, sf.prefix, "\xFE\xFF");
     if (!utf16) {
         // NUL in buffer 0: rg's emission cutoff is the start of the buffer that
         // holds the first NUL — the very first — so an implicit walked file
@@ -1160,9 +1202,7 @@ fn searchFile(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.
         // line, and the literal gates never over-claim) — emit and skip the
         // tail. Absence proves nothing; fall through to the full read.
         if (cfg.fast_l and sf.more and prefixProvesMatch(w, re, grepfile.stripBom(sf.prefix))) {
-            var buf: std.ArrayList(u8) = .empty;
-            buf.print(a, "{s}{s}", .{ dpath, if (o.null_sep) "\x00" else o.outTerm() }) catch oom();
-            cfg.sink.emit(.text_hit, buf.items);
+            bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
             return;
         }
     }
@@ -1200,7 +1240,7 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     if (cfg.file_alts.len > 0 and !verify.containsAnyWide(a, body[gate_from..], cfg.file_alts)) return;
 
     var buf: std.ArrayList(u8) = .empty;
-    var em = Emitter{
+    var em: Emitter = .{
         .a = a,
         .re = re,
         .o = o,
@@ -1251,10 +1291,7 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
             if (cfg.file_needle) |n| if (n.ci) break :blk gatedDocMatch(re, sim, n, body);
             break :blk re.docMatch(sim, body);
         };
-        if (hit) {
-            buf.print(a, "{s}{s}", .{ dpath, if (o.null_sep) "\x00" else o.outTerm() }) catch oom();
-            cfg.sink.emit(.text_hit, buf.items);
-        }
+        if (hit) bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
         return;
     }
 
@@ -1267,18 +1304,17 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     // dispatch on a ubiquitous literal the index can't prune. Mirrors the serial
     // engine's per-file dispatch exactly.
     const fast = !o.multiline and em.litFastEligible();
+    // The fused `-c`/`-l` class-run paths answer from the whole buffer —
+    // skip the line split they'd never read (mirrors the serial driver).
+    const fused = !o.multiline and !fast and em.fusedFileEligible();
     var lines: std.ArrayList([]const u8) = .empty;
-    if (!o.multiline and !fast) grepfile.collectLines(a, body, o.term(), &lines);
+    if (!o.multiline and !fast and !fused) grepfile.collectLines(a, body, o.term(), &lines);
     if (cfg.heading) buf.print(a, "{s}{s}", .{ dpath, o.outTerm() }) catch oom();
     const before_body = buf.items.len;
     const hits = if (o.multiline) em.buffer(dpath, body) else if (fast) em.fileLit(dpath, body, 0, body.len, 0, true) else em.file(dpath, lines.items);
-    if (hits == 0) {
-        // No heading header to keep, and (except --passthru) no body either.
-        if (cfg.heading or buf.items.len == before_body) return;
-        cfg.sink.emit(.text_plain, buf.items);
-        return;
-    }
-    cfg.sink.emit(.text_hit, buf.items);
+    if (hits > 0) return cfg.sink.emit(.text_hit, buf.items);
+    // No heading header to keep, and (except --passthru) no body either.
+    if (!cfg.heading and buf.items.len > before_body) cfg.sink.emit(.text_plain, buf.items);
 }
 
 /// The gate-driven `-l` boolean: every matching line must contain the gate
@@ -1346,7 +1382,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // The elide oracle loads on its own thread while the walk runs, keeping
     // mmap validation, sparse posting decode, and path-table setup off the
     // serial query prefix.
-    var lazy = LazyElide{};
+    var lazy: LazyElide = .{};
     if (want_elision) {
         if (require_elision) {
             lazy.val = buildElide(gpa, io, o, filters, sieve);
@@ -1358,9 +1394,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
             // elision, nobody waits on this thread — `run` exits the process and
             // the OS reclaims it. (`lazy`/`o`/`filters` outlive it either way:
             // this frame never returns.)
-            if (std.Thread.spawn(.{}, LazyElide.loaderMain, .{ &lazy, gpa, io, o, filters, sieve })) |t| {
-                t.detach();
-            } else |_| {
+            if (std.Thread.spawn(.{}, LazyElide.loaderMain, .{ &lazy, gpa, io, o, filters, sieve })) |t| t.detach() else |_| {
                 lazy.val = buildElide(gpa, io, o, filters, sieve);
                 lazy.ready.store(true, .release);
             }
@@ -1391,9 +1425,9 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
 
     var ig = ignore.Ignore.init(gpa, io, ignore.Options.from(o), parsed.roots);
     const compiled = ignore.Compiled.build(gpa, &ig);
-    var q = Queue{ .gpa = gpa, .io = io };
+    var q: Queue = .{ .gpa = gpa, .io = io };
     defer q.items.deinit(gpa);
-    var sink = Sink{ .q = &q, .io = io, .heading = heading, .join_groups = o.wantsContext() and !o.files_only and !o.count_only and !o.count_matches and !heading, .files_mode = o.files_list, .null_sep = o.null_sep };
+    var sink: Sink = .{ .q = &q, .io = io, .heading = heading, .join_groups = o.wantsContext() and !o.files_only and !o.count_only and !o.count_matches and !heading };
     // Pure-literal alternation gate/equivalence (see `Cfg.file_alts`): only when
     // no single required literal already gates, and never for modes that must
     // read every body (`-v` needs zero-hit files; passthru emits them).
@@ -1412,7 +1446,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         (!o.multiline or (re != null and re.?.bufBoolExact()));
     var gate_len: usize = if (file_needle) |n| n.bytes.len else 0;
     for (file_alts) |n| gate_len = @max(gate_len, n.len);
-    const cfg = Cfg{
+    const cfg: Cfg = .{
         .o = o,
         .re = re,
         .ig = &ig,
@@ -1425,11 +1459,8 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         .line_needle = line_needle,
         .fast_l = fast_l,
         .use_color = use_color,
-        .show_name = switch (o.filename) {
-            .always => true,
-            .never => false,
-            .auto => true, // the walk is recursive by construction
-        },
+        // `.auto` shows names too: the walk is recursive by construction.
+        .show_name = o.filename != .never,
         .heading = heading,
         .join_groups = sink.join_groups,
         .binary_detect = !o.text and !o.null_data,
@@ -1439,8 +1470,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         .shard = if (shard_view) |*v| v else null,
         .sink = &sink,
     };
-    var roots_one = [_][]const u8{"."};
-    const roots: []const []const u8 = if (parsed.roots.len > 0) parsed.roots else roots_one[0..];
+    const roots: []const []const u8 = if (parsed.roots.len > 0) parsed.roots else &.{"."};
     {
         var seed: std.ArrayList(DirTask) = .empty;
         defer seed.deinit(gpa);
@@ -1454,11 +1484,10 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         q.push(seed.items);
     }
 
-    // Full-corpus scans retain the measured six-worker ceiling. Traversal-only,
-    // narrow-root, and index-selective runs do less useful work per file, so on
-    // wider machines they use roughly half the logical CPUs (four on an 8-core
-    // M2) instead of paying extra spawn/namei/fd contention. `GIST_WORKERS`
-    // remains absolute.
+    // Worker topology is OS-aware (see `defaultWorkerCount`): macOS keeps the
+    // measured six-worker ceiling (kernel-serialized walk) and halves it for
+    // traversal-only / narrow / selective runs; every other OS scales to all
+    // logical CPUs like ripgrep. `GIST_WORKERS` remains absolute.
     const ncpu = std.Thread.getCpuCount() catch 6;
     const narrow_scope = parsed.roots.len > 0 and !broadIndexedRoots(parsed.roots);
     // A transforming run (-z/--pre/-E) does CPU-bound per-file work — inflate
@@ -1468,7 +1497,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // syscall/namei-bound plaintext walk, where more threads only add fd + namei
     // contention; it throttles decode-heavy codecs (xz/zstd) below the serial
     // path, so a transforming pipeline lifts the cap to all logical CPUs.
-    var nworkers = if (icfg.active()) @max(@as(usize, 1), ncpu) else defaultWorkerCount(ncpu, o.files_list or want_elision or narrow_scope);
+    var nworkers = if (icfg.active()) @max(1, ncpu) else defaultWorkerCount(ncpu, o.files_list or want_elision or narrow_scope);
     // -j/--threads caps the pool explicitly (rg's `--threads`); 0 keeps gist's
     // adaptive topology. `GIST_WORKERS` still overrides everything (parity gates).
     if (o.threads != 0) nworkers = @max(1, o.threads);
@@ -1478,7 +1507,10 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     const workers = gpa.alloc(Worker, nworkers) catch oom();
     defer gpa.free(workers);
     for (workers) |*w| w.* = .{ .q = &q, .io = io, .gpa = gpa, .cfg = &cfg, .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
-    defer for (workers) |*w| w.arena.deinit();
+    defer for (workers) |*w| {
+        w.arena.deinit();
+        w.out.deinit(gpa);
+    };
 
     const threads = gpa.alloc(std.Thread, nworkers) catch oom();
     defer gpa.free(threads);
@@ -1521,7 +1553,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // `sort -u` set compare. No `noMatches` stderr hint (rg's serial `--json`
     // path emits none either — it would only pollute a machine-consumed stream).
     if (o.json) {
-        var st = json.Stats{};
+        var st: json.Stats = .{};
         for (workers) |*wk| st.add(wk.jstats);
         var sbuf: std.ArrayList(u8) = .empty;
         json.summary(gpa, &sbuf, st);
@@ -1533,11 +1565,21 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);
 }
 
+/// Worker pool size for a plaintext walk. macOS serializes the walk in the
+/// kernel — the `vm_map` fault lock on the mmap'd content shard and syspolicyd/
+/// vnode locks on open+namei — so past a small pool more threads only add
+/// contention (measured flat 6→16 on the shard path, and slower on the open
+/// path); the tuned six-worker ceiling stays, halved further for traversal-only
+/// / narrow / index-selective runs that do less work per file. Every other OS
+/// has a scalable fault + open path — ripgrep saturates all logical CPUs there —
+/// so the ceiling would just idle cores: scale to `ncpu`. `GIST_WORKERS` and
+/// `-j` still override.
 fn defaultWorkerCount(ncpu_raw: usize, selective: bool) usize {
-    const ncpu = @max(@as(usize, 1), ncpu_raw);
+    const ncpu = @max(1, ncpu_raw);
+    if (builtin.os.tag != .macos) return ncpu;
     const full = @min(ncpu, 6);
     if (!selective or ncpu <= 4) return full;
-    return @min(full, @max(@as(usize, 4), (ncpu + 1) / 2));
+    return @min(full, @max(4, (ncpu + 1) / 2));
 }
 
 test "IndexedPaths resolves exactly and reads unknown paths" {
@@ -1546,16 +1588,16 @@ test "IndexedPaths resolves exactly and reads unknown paths" {
     var indexed = try IndexedPaths.init(t.allocator, &paths);
     defer indexed.deinit();
 
-    try t.expectEqual(@as(?u32, 0), indexed.get(&paths, "libs/a.zig"));
-    try t.expectEqual(@as(?u32, 2), indexed.get(&paths, "clients/c.ts"));
-    try t.expectEqual(@as(?u32, null), indexed.get(&paths, "libs/new.zig"));
+    try t.expectEqual(0, indexed.get(&paths, "libs/a.zig"));
+    try t.expectEqual(2, indexed.get(&paths, "clients/c.ts"));
+    try t.expectEqual(null, indexed.get(&paths, "libs/new.zig"));
 
     var buf: [32]u8 = undefined;
     var collision_checked = false;
     for (0..1024) |i| {
         const unknown = try std.fmt.bufPrint(&buf, "new/path-{d}", .{i});
         if (indexed.slot(unknown) != indexed.slot(paths[0])) continue;
-        try t.expectEqual(@as(?u32, null), indexed.get(&paths, unknown));
+        try t.expectEqual(null, indexed.get(&paths, unknown));
         collision_checked = true;
         break;
     }
@@ -1580,8 +1622,16 @@ test "index loading stays off narrow explicit roots" {
 
 test "worker topology keeps scans wide and selective walks lean" {
     const t = std.testing;
-    try t.expectEqual(@as(usize, 4), defaultWorkerCount(8, true));
-    try t.expectEqual(@as(usize, 6), defaultWorkerCount(8, false));
-    try t.expectEqual(@as(usize, 4), defaultWorkerCount(4, true));
-    try t.expectEqual(@as(usize, 6), defaultWorkerCount(12, true));
+    if (builtin.os.tag == .macos) {
+        // macOS keeps the kernel-serialized ceiling, halved for selective walks.
+        try t.expectEqual(4, defaultWorkerCount(8, true));
+        try t.expectEqual(6, defaultWorkerCount(8, false));
+        try t.expectEqual(4, defaultWorkerCount(4, true));
+        try t.expectEqual(6, defaultWorkerCount(12, true));
+    } else {
+        // Every other OS scales to all logical CPUs (ripgrep's model).
+        try t.expectEqual(8, defaultWorkerCount(8, true));
+        try t.expectEqual(8, defaultWorkerCount(8, false));
+        try t.expectEqual(12, defaultWorkerCount(12, true));
+    }
 }
