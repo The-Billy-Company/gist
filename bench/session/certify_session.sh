@@ -33,8 +33,10 @@ need_hyperfine
 RUNS="${RUNS:-10}"
 WARMUP="${WARMUP:-2}"
 BENCH_EXE="${KERNEL}/zig-out/bin/gist-bench"
-SESSION_CSV="${OUT}/session.csv"  # (needle, warm_p50_ns, daemon_files) — emitted by gist-bench
-MACRO="${HERE}/session_macro.csv" # (needle, daemon_files, rg_files, warm_p50_ms, rg_ms, speedup)
+SESSION_CSV="${OUT}/session.csv"              # (needle, warm_p50_ns, daemon_files) — emitted by gist-bench
+SESSION_COUNT_CSV="${OUT}/session_count.csv"  # (needle, warm_p50_ns, daemon_count) — count-mode lane
+MACRO="${HERE}/session_macro.csv"             # (needle, daemon_files, rg_files, warm_p50_ms, rg_ms, speedup)
+MACRO_COUNT="${HERE}/session_count_macro.csv" # (needle, daemon_count, rg_count, warm_p50_ms, rg_ms, speedup)
 CERT="${OUT}/CERTIFICATE_SESSION.md"
 
 sys="$(uname -s)"
@@ -72,6 +74,10 @@ echo "measuring the persistent client → daemon path (warm p50 per needle)…"
   echo "gist-bench session emitted no ${SESSION_CSV}" >&2
   exit 1
 }
+[[ -s "${SESSION_COUNT_CSV}" ]] || {
+  echo "gist-bench session emitted no ${SESSION_COUNT_CSV}" >&2
+  exit 1
+}
 
 echo
 echo "warm persistent-client latency vs ripgrep cold (fresh process), runs=${RUNS}:"
@@ -103,6 +109,45 @@ done < "${SESSION_CSV}"
 geo="$(python3 -c "import math;print('%.1f'%math.exp(${logsum}/${n}) if ${n} else 0)")"
 echo
 printf '── geomean warm speedup vs rg cold: %sx  ·  watcher: %s  ·  armed fast path: %s ──\n' "${geo}" "${watcher}" "${armed}"
+
+# ── count lane: warm resident `-c` p50 vs ripgrep-cold `-c` ──────────────────
+# The files table above short-circuits at the first hit per candidate; count
+# mode scans every candidate whole and tallies, so it is the harder proof the
+# resident-index win survives more per-file work. `d_count` is the daemon's
+# matching-LINE tally (grep `-c` semantics, same as rg `-c`); `rg_count` sums
+# ripgrep's per-file `-c`. As with `d_files`/`rg_files` above, the two are NOT
+# like-for-like — the daemon counts over its own live, watcher-reconciled corpus
+# while rg re-walks the tree, so on a tree ~10 agents edit they legitimately
+# differ; exact warm==cold==oracle parity is gated hermetically by the Zig suite,
+# not by a live-tree count race. The SPEEDUP (timing) is the claim, and this lane
+# is reported only — files-mode geomean stays the number gate_session.py enforces.
+echo
+echo "warm persistent-client count (-c) vs ripgrep cold (fresh process), runs=${RUNS}:"
+printf '%-16s %8s %8s %12s %12s %9s\n' needle d_count rg_count warm_p50 rg_mean speedup
+printf '%-16s %8s %8s %12s %12s %9s\n' ---------------- ------- ------- ------------ ------------ ---------
+: > "${MACRO_COUNT}"
+clogsum=0
+cn=0
+while IFS=$'\t' read -r needle p50_ns dcount; do
+  [[ -n "${needle}" ]] || continue
+  warm_ms="$(python3 -c "print('%.4f'%(${p50_ns}/1e6))")"
+  rcmd="$(compete_count_cmd rg "${needle}")"
+  rg_count="$(bash -c "${rcmd}" 2> /dev/null | awk -F: '{s += $NF} END {print s + 0}')"
+  if ! rg_ms="$(hf_mean "${WARMUP}" "${RUNS}" "${rcmd}")"; then
+    echo "  rg hard-failed on count '${needle}'" >&2
+    exit 1
+  fi
+  spd="$(ratio "${rg_ms}" "${warm_ms}")"
+  printf '%-16s %8s %8s %10s ms %10s ms %9s\n' "${needle}" "${dcount}" "${rg_count}" "${warm_ms}" "${rg_ms}" "${spd}"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "${needle}" "${dcount}" "${rg_count}" "${warm_ms}" "${rg_ms}" "${spd%x}" >> "${MACRO_COUNT}"
+  if [[ "${rg_ms}" != "?" ]]; then
+    clogsum="$(python3 -c "import math;print(${clogsum}+math.log(${rg_ms}/${warm_ms}))")"
+    cn=$((cn + 1))
+  fi
+done < "${SESSION_COUNT_CSV}"
+geo_count="$(python3 -c "import math;print('%.1f'%math.exp(${clogsum}/${cn}) if ${cn} else 0)")"
+echo
+printf '── geomean warm count(-c) speedup vs rg cold: %sx ──\n' "${geo_count}"
 
 # Machine-readable provenance for gate_session.py (armed decides floor enforcement).
 python3 - "${HERE}/session_meta.json" "${armed}" "${watcher}" "${geo}" "${uname_sm}" "${n}" << 'PY'
@@ -136,8 +181,27 @@ PY
     # shellcheck disable=SC2016  # backticks here are literal Markdown, not command substitution
     printf '| `%s` | %s | %s | %s | %s | %s× |\n' "${needle}" "${dfiles}" "${rgf}" "${warm}" "${rg}" "${spd}"
   done < "${MACRO}"
+  echo
+  echo "## count lane (\`-c\`)"
+  echo
+  echo "Warm resident \`-c\` vs ripgrep-cold \`-c\` over the same slate — the count emit"
+  echo "path (whole-candidate scan + tally, no first-hit short-circuit). \`d_count\` is the"
+  echo "daemon's matching-line tally (grep \`-c\` semantics); \`rg_count\` sums ripgrep's"
+  echo "per-file \`-c\`. Like \`d_files\`/\`rg_files\`, they are not like-for-like — the daemon"
+  echo "counts over its own live watcher-reconciled corpus, rg re-walks — so the **speedup**"
+  echo "is the claim, not count equality. Reported only; files-mode geomean is the gated headline."
+  echo
+  echo "- **geomean warm count(\`-c\`) speedup vs ripgrep cold:** **${geo_count}×**"
+  echo
+  echo '| needle | d_count | rg_count | warm p50 (ms) | rg mean (ms) | speedup |'
+  echo '| --- | ---: | ---: | ---: | ---: | ---: |'
+  while IFS=$'\t' read -r needle dcount rgc warm rg spd; do
+    # shellcheck disable=SC2016  # backticks here are literal Markdown, not command substitution
+    printf '| `%s` | %s | %s | %s | %s | %s× |\n' "${needle}" "${dcount}" "${rgc}" "${warm}" "${rg}" "${spd}"
+  done < "${MACRO_COUNT}"
 } > "${CERT}"
 cp "${SESSION_CSV}" "${HERE}/session.csv" 2> /dev/null || true
 
 echo "certificate → ${CERT}"
 echo "macro csv   → ${MACRO}"
+echo "count macro → ${MACRO_COUNT}"

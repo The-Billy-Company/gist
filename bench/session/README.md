@@ -29,6 +29,13 @@ path — the only honest basis for a warm-speedup claim — and gates it fail-cl
 - **Latency.** `session.csv` (emitted by `zig build bench -- session`) holds the
   warm p50 per needle over the persistent connection; `certify_session.sh` pairs
   each with a ripgrep-cold timing and reports the geomean speedup.
+- **Two emit lanes.** The harness replays the same slate in both `-l`
+  files-with-matches (the gated headline) and `-c` count mode (`session_count.csv`).
+  `-l` short-circuits at the first hit per candidate; `-c` scans every candidate
+  whole and tallies — the harder proof the resident-index win holds when per-file
+  work rises. The count lane is **reported, not gated** (absolute count latency is
+  box-specific); its `d_count`/`rg_count` carry the same not-like-for-like caveat
+  as `d_files`/`rg_files`, so its **speedup** is the claim, not count equality.
 - **Two honest caveats, printed not hidden:**
   1. gist's matched-file set is a systematic **subset** of `rg`'s (a corpus-walker
      difference owned by the _cold_ certificate); the daemon tracks the _cold gist_
@@ -59,6 +66,7 @@ on a quiescent tree and the number approaches the in-process ceiling; re-run
 | `gate_session.py`       | fail-closed latency gate: committed floor (armed only) + opt-in `--live` remeasure                                |
 | `session_baseline.json` | `armed_geomean_floor` — the armed-path speedup floor (theorem-backed; see the file's comment)                     |
 | `session_macro.csv`     | committed per-needle medians (`needle · d_files · rg_files · warm_ms · rg_ms · speedup`)                          |
+| `session_count_macro.csv` | committed count-lane medians (`needle · d_count · rg_count · warm_ms · rg_ms · speedup`) — reported, not gated   |
 | `session_meta.json`     | provenance the gate reads (`armed`, `watcher`, `platform`, `geomean_speedup`)                                     |
 
 ```bash

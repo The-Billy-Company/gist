@@ -412,9 +412,11 @@ fn dialRetry(io: std.Io, socket: []const u8) !net.Stream {
     return error.DaemonNeverCameUp;
 }
 
-/// One request/response over the persistent connection; returns the matched-file
-/// count. `qbytes` is the pre-encoded query frame (constant per needle), so the
-/// timed loop pays only the write + daemon answer + read, not re-encoding.
+/// One request/response over the persistent connection; returns the scalar the
+/// answer carries — the matched-FILE count in files mode, the daemon's total
+/// matching-LINE tally (grep `-c`, via `countLines`) in count mode. `qbytes` is
+/// the pre-encoded query frame (constant per needle), so the timed loop pays
+/// only the write + daemon answer + read, not re-encoding.
 fn sessionQuery(gpa: std.mem.Allocator, fd: std.posix.fd_t, qbytes: []const u8) !usize {
     if (!proto.writeAll(fd, qbytes)) return error.ConnClosed;
     var resp = try proto.recvFrame(gpa, fd);
@@ -427,8 +429,8 @@ fn sessionQuery(gpa: std.mem.Allocator, fd: std.posix.fd_t, qbytes: []const u8) 
             var it = it0;
             while (try it.next()) |_| n += 1;
         },
-        .count => {},
-        .lines => {}, // bench probes files mode only
+        .count => |c| n = @intCast(c), // count mode: the daemon's scalar total
+        .lines => {}, // bench probes files + count modes only
     }
     return n;
 }
@@ -490,6 +492,46 @@ fn runSession(gpa: std.mem.Allocator, io: std.Io) !void {
     }
     try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/session.csv", .data = csv.items });
     std.debug.print("\nwrote {s}/session.csv\n", .{out_dir});
+
+    // ── count mode over the SAME warm connection (the -c emit path) ──────────
+    // The daemon already speaks `.count` (protocol.encodeCount → the matching-
+    // line tally from `countLines`, grep `-c` semantics); replaying the identical
+    // slate in count mode lets certify_session.sh pair a warm `-c` p50 with
+    // ripgrep-cold `-c` — the count analog of the files lane above. `-c` scans
+    // every candidate whole (no first-hit short-circuit), so it is the harder
+    // proof the resident-index win holds when per-file work rises. Files-mode
+    // stays the GATED headline (session_macro.csv); this is reported, since
+    // absolute count latency is box-specific.
+    std.debug.print("\nper-query latency over the warm connection (count mode), {d} runs each (+{d} warmup):\n", .{ runs, warmup });
+    std.debug.print("{s:<18} {s:>10} {s:>12} {s:>12} {s:>12}\n", .{ "needle", "count", "p50", "p95", "p99" });
+    std.debug.print("{s:-<18} {s:->10} {s:->12} {s:->12} {s:->12}\n", .{ "", "", "", "", "" });
+
+    var ccsv: std.ArrayList(u8) = .empty;
+    defer ccsv.deinit(gpa);
+    for (fixed_slate) |needle| {
+        var qbuf: std.ArrayList(u8) = .empty;
+        defer qbuf.deinit(gpa);
+        try proto.encodeQuery(&qbuf, gpa, .{ .pattern = needle, .mode = .count, .fixed = true });
+
+        var total: usize = 0;
+        for (0..warmup) |_| total = try sessionQuery(gpa, fd, qbuf.items);
+        for (0..runs) |i| {
+            const q0 = nowNs(io);
+            total = try sessionQuery(gpa, fd, qbuf.items);
+            samples[i] = @intCast(nowNs(io) - q0);
+        }
+        std.mem.sort(u64, &samples, {}, comptime std.sort.asc(u64));
+        const p50 = percentile(&samples, 0.50);
+        std.debug.print("{s:<18} {d:>10} {d:>9.1} us {d:>9.1} us {d:>9.1} us\n", .{
+            needle,                                                    total,
+            @as(f64, @floatFromInt(p50)) / 1e3,                        @as(f64, @floatFromInt(percentile(&samples, 0.95))) / 1e3,
+            @as(f64, @floatFromInt(percentile(&samples, 0.99))) / 1e3,
+        });
+        var line: [128]u8 = undefined;
+        try ccsv.appendSlice(gpa, try std.fmt.bufPrint(&line, "{s}\t{d}\t{d}\n", .{ needle, p50, total }));
+    }
+    try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/session_count.csv", .data = ccsv.items });
+    std.debug.print("wrote {s}/session_count.csv\n", .{out_dir});
 
     // Clean shutdown: stop the accept loop and join the daemon thread.
     proto.sendFrame(gpa, fd, .shutdown, "") catch {};
@@ -556,6 +598,24 @@ pub fn main(init: std.process.Init) !void {
     }
     if (std.mem.eql(u8, mode, "certify")) {
         try certify.run(gpa, io);
+        return;
+    }
+    if (std.mem.eql(u8, mode, "flagbench")) {
+        // `--gate` makes the regression floors blocking (nonzero exit on breach);
+        // every other token is a corpus root, defaulting to the resolved tree.
+        var gate = false;
+        var froots: std.ArrayList([]const u8) = .empty;
+        defer froots.deinit(gpa);
+        while (it.next()) |arg| {
+            if (std.mem.eql(u8, arg, "--gate")) gate = true else try froots.append(gpa, arg);
+        }
+        var fresolved: ?[]const []const u8 = null;
+        defer if (fresolved) |r| corpus_mod.freeRoots(gpa, r);
+        const roots: []const []const u8 = if (froots.items.len > 0) froots.items else blk: {
+            fresolved = try corpus_mod.resolveRoots(gpa);
+            break :blk fresolved.?;
+        };
+        try @import("flagbench.zig").run(gpa, io, roots, gate);
         return;
     }
 
