@@ -1315,13 +1315,19 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     }
 
     // `-U` renders through the whole-buffer emitter (no line split — a match
-    // may cross `\n`); the per-line model splits into rg lines. Mirrors the
-    // serial engine's per-file dispatch exactly.
+    // may cross `\n`); the per-line model splits into rg lines. The line-free
+    // literal fast path (`Emitter.fileLit`) — rg's candidate-jump searcher —
+    // reads `body` directly, so skip `collectLines` when it is eligible. This is
+    // exactly the count/`-o`/`-n`/plain literal regime `fast_l` above does not
+    // cover; without it every worker paid a full line split + per-line engine
+    // dispatch on a ubiquitous literal the index can't prune. Mirrors the serial
+    // engine's per-file dispatch exactly.
+    const fast = !o.multiline and em.litFastEligible();
     var lines: std.ArrayList([]const u8) = .empty;
-    if (!o.multiline) grepfile.collectLines(a, body, o.term(), &lines);
+    if (!o.multiline and !fast) grepfile.collectLines(a, body, o.term(), &lines);
     if (cfg.heading) buf.print(a, "{s}{s}", .{ dpath, o.outTerm() }) catch oom();
     const before_body = buf.items.len;
-    const hits = if (o.multiline) em.buffer(dpath, body) else em.file(dpath, lines.items);
+    const hits = if (o.multiline) em.buffer(dpath, body) else if (fast) em.fileLit(dpath, body, 0, body.len, 0, true) else em.file(dpath, lines.items);
     if (hits == 0) {
         // No heading header to keep, and (except --passthru) no body either.
         if (cfg.heading or buf.items.len == before_body) return;
