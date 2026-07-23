@@ -5,7 +5,7 @@
 //! process + index-mmap + candidate-read startup on every call — the whole
 //! reason the warm certificate can post a geomean the cold path never could. It
 //! is the transport shell only; the correctness (freshness, parity) lives in the
-//! session (`src/session/`).
+//! session (`src/surface/exec/session/`).
 //!
 //! Lifecycle: grab the single-instance lock, build the session, arm the
 //! freshness watcher, bind the socket (unlinking a stale one), then a
@@ -22,6 +22,16 @@
 //! minutes-long block for everyone else. Every failure is fail-open toward
 //! cold: a declined/again-errored query costs the client a fallback
 //! subprocess, never a wrong answer.
+//!
+//! Because one query still runs to completion on this thread before the next
+//! frame is served, a single runaway scan — or one a client already timed out
+//! and abandoned — would hold the thread the whole population shares. A
+//! per-query wall-clock **budget** (`ResidentSession.query_budget_ns`, armed
+//! under the session lock and sampled at strided checkpoints in the O(corpus)
+//! walks) bounds that: an overrun declines the query so the client answers cold
+//! and the thread is reclaimed. It is a liveness backstop, not a latency SLA —
+//! generous by default (`GIST_QUERY_BUDGET_MS`), so no legitimate local warm
+//! query approaches it.
 //!
 //! Two self-management properties make the daemon safe to auto-spawn (the cold
 //! CLI forks one on the first eligible miss, so ~10 coworker CLIs may each race
@@ -84,6 +94,31 @@ fn note(comptime fmt: []const u8, args: anytype) void {
 /// fresh query re-spawns one in the background anyway (see `client/spawn.zig`).
 const idle_ttl_ms: i32 = 10 * 60 * 1000;
 
+/// Default per-query wall-clock ceiling (see the header): a liveness backstop
+/// deliberately far above any legitimate local warm query, so it only bounds a
+/// runaway or abandoned scan that would otherwise pin the shared daemon thread.
+/// `GIST_QUERY_BUDGET_MS` overrides it; `0` disables the ceiling entirely.
+const query_budget_ms_default: i64 = 30_000;
+
+/// Test hook (mirrors `shm.force_fail_for_test`): a non-negative value forces
+/// the per-query budget in NANOSECONDS, so a unit test can drive the abort path
+/// deterministically without a giant corpus. `-1` (the default) defers to
+/// `GIST_QUERY_BUDGET_MS` / `query_budget_ms_default`.
+pub var query_budget_ns_override: std.atomic.Value(i64) = .init(-1);
+
+/// Resolve this daemon's per-query budget in nanoseconds: the test override if
+/// armed, else `GIST_QUERY_BUDGET_MS`, else the default. A malformed env value
+/// falls back to the default rather than failing the daemon.
+fn configuredBudgetNs() i128 {
+    const override = query_budget_ns_override.load(.monotonic);
+    if (override >= 0) return override;
+    const ms: i64 = if (std.c.getenv("GIST_QUERY_BUDGET_MS")) |s|
+        std.fmt.parseInt(i64, std.mem.span(s), 10) catch query_budget_ms_default
+    else
+        query_budget_ms_default;
+    return @as(i128, @max(ms, 0)) * std.time.ns_per_ms;
+}
+
 /// Serve `roots` warm on `socket_path` until it goes idle, a client sends
 /// `shutdown`, or the listener dies. Owns the session + socket for its whole
 /// lifetime. Returns immediately (no-op) if another daemon already holds the
@@ -100,6 +135,10 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     var session = try ResidentSession.init(gpa, io, roots);
     defer session.deinit();
     session.daemon_gen = @bitCast(@as(i64, @truncate(std.Io.Clock.now(.real, io).nanoseconds)));
+    // Only the daemon arms a budget; embedders/FFI/tests keep the unbudgeted
+    // default so their behavior — and the fast path's zero clock reads — is
+    // unchanged. Survives an index-reload (config, not per-index data).
+    session.query_budget_ns = configuredBudgetNs();
 
     var watcher = watch.Watcher(ResidentSession).init(gpa, io, &session);
     watcher.start();
@@ -138,6 +177,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     var session_gen: u64 = 0;
     var last_scoped: u64 = 0;
     var last_full: u64 = 0;
+    var last_aborts: u64 = 0;
     serve_loop: while (true) {
         pfds.clearRetainingCapacity();
         try pfds.append(gpa, .{ .fd = server.socket.handle, .events = std.posix.POLL.IN, .revents = 0 });
@@ -164,6 +204,11 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
                 last_scoped = session.scoped_reconciles;
                 last_full = session.full_reconciles;
                 note("gist serve: reconciled (scoped={d} full={d})\n", .{ last_scoped, last_full });
+            }
+            const aborts = session.budget_aborts.load(.monotonic);
+            if (aborts != last_aborts) {
+                last_aborts = aborts;
+                note("gist serve: query exceeded budget → declined cold (total {d})\n", .{aborts});
             }
             switch (after) {
                 .keep => {},

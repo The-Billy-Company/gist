@@ -5,7 +5,7 @@
 //! held warm across many queries so an eligible request (`request.zig`) answers
 //! without re-paying the process + index-mmap + candidate-read startup the cold
 //! subprocess pays every call. It lowers each request through the shared search
-//! core (`engine/query.zig`) — the SAME compile → trigram-prefilter → match
+//! core (`kernel/match/query.zig`) — the SAME compile → trigram-prefilter → match
 //! kernels the cold CLI is built on — driven directly over the warm corpus, so
 //! the warm and cold answers cannot drift. Because that core **returns errors**
 //! (`error.Unsupported`) instead of calling `die()`, a bad request surfaces here
@@ -32,7 +32,7 @@
 //!
 //! The invariant is `resident matches == gist --no-index matches == rg matches`.
 //! It holds because both the base corpus and every reconcile re-derive their file
-//! set from the cold path's OWN certified walk (`runtime/cold/engine/serial.zig::
+//! set from the cold path's OWN certified walk (`surface/exec/cold/engine/serial.zig::
 //! defaultFileSet` — hidden-file exclusion, `.gitignore`/`.ignore` precedence,
 //! `.git` skip, root scope), never `haystack`'s coarse superset. The warm set is
 //! therefore byte-identical to what a rootless `gist <pattern>` would walk:
@@ -40,7 +40,7 @@
 //!   - A query is answered from resident bytes directly ONLY when the freshness
 //!     barrier proves the roots quiescent since the last reconcile — a
 //!     watcher-clean window (`markClean`/`markDirty`, driven by inotify on Linux
-//!     / FSEvents on macOS; `src/session/watch.zig`). This is the microsecond path.
+//!     / FSEvents on macOS; `src/surface/exec/session/watch.zig`). This is the microsecond path.
 //!   - Otherwise (no watcher, any pending event, first query) the session
 //!     RECONCILES: it re-walks the authoritative set and diffs it against
 //!     base + overlay — a path that left the set (deleted, or newly
@@ -68,7 +68,7 @@ const parallel = @import("../../../kernel/primitives/parallel.zig");
 // The resident file set is the certified rg-default walk the cold path uses, NOT
 // `haystack`'s coarse superset — this is what makes `resident == --no-index ==
 // rg` true for hidden files, `.gitignore` precedence, and root scope. `session`
-// depending on `faces/search` is a one-way edge (serial.zig never imports
+// depending on `surface/exec/cold` is a one-way edge (serial.zig never imports
 // session), so no import cycle.
 const run = @import("../cold/engine/serial.zig");
 // The gist-native `--rank` kernel (`ranked.zig`): its `renderLive` extracts
@@ -100,11 +100,55 @@ pub const Request = request.Request;
 /// candidate walk prunes/gates with it; empty is the rootless whole-corpus search.
 const PathFilter = request.PathFilter;
 
+/// Budget checkpoints are strided: `overBudget` reads the clock only when the
+/// caller's loop index masks to zero against this power-of-two-minus-one, so a
+/// budgeted scan of a huge candidate set pays ~one clock read per 1024 visits.
+const budget_stride: usize = 1023;
+
 pub const QueryError = error{
     /// The session cannot prove freshness (no valid build anchor, or the index
     /// was rebuilt out from under it and could not be reloaded) — answer cold.
     Stale,
     OutOfMemory,
+};
+
+/// A cooperative, thread-safe cancellation flag, shared by reference into a
+/// search's `RunBudget`. Any thread may `cancel()` while the engine scans; the
+/// scan observes it at a strided gather checkpoint AND at every record boundary
+/// (the hosted collector) and stops cleanly, keeping whatever it gathered. Bare
+/// atomic-builtin bool so it needs no allocation and no std version pin. The
+/// hosted `api.CancelToken` is this type — it lives with the engine core it
+/// bounds, not the veneer that names it.
+pub const CancelToken = struct {
+    flag: bool = false,
+
+    pub fn cancel(self: *CancelToken) void {
+        @atomicStore(bool, &self.flag, true, .seq_cst);
+    }
+
+    pub fn requested(self: *const CancelToken) bool {
+        return @atomicLoad(bool, &self.flag, .seq_cst);
+    }
+
+    pub fn reset(self: *CancelToken) void {
+        @atomicStore(bool, &self.flag, false, .seq_cst);
+    }
+};
+
+/// A per-search cooperative halt the DOC GATHER honors so a scan that emits few
+/// or no records (a rare pattern, an invert walk, a `-l` superset that mostly
+/// fails the whole-doc gate) still respects a hosted `cancel` / `timeout_ns`
+/// instead of running the whole corpus first. Distinct from the daemon's
+/// `query_budget_ns` ceiling (which DECLINES to the certified cold path via
+/// `Stale`): a gather halt is a CLEAN partial stop — the docs gathered so far
+/// stand, no `Stale` is raised — mirroring the record-boundary budget the
+/// hosted collector already applies at emit. Empty (both null) for the daemon
+/// and FFI-callback faces, whose completeness is guarded by the session ceiling
+/// instead, so the check compiles away for them.
+pub const RunBudget = struct {
+    cancel: ?*const CancelToken = null,
+    /// Absolute monotonic (`.awake`) deadline in ns; null = no wall-clock cap.
+    deadline_ns: ?i128 = null,
 };
 
 /// One eligible query's answer. `files` aliases session-owned path strings
@@ -124,7 +168,7 @@ pub const Lines = struct { out: []const u8, matched: bool };
 /// the `emit` call — the sink must copy anything it keeps. `line_number` is
 /// 1-based over rg's line model, and every span is a non-empty `[start,end)`
 /// byte range within `text`, byte-identical to the cold `gist --json` submatch
-/// stream (`runtime/cold/emit/json.zig`).
+/// stream (`surface/exec/cold/emit/json.zig`).
 pub const MatchKind = enum(u32) { match, context };
 pub const MatchRecord = struct { path: []const u8, line_number: u64, text: []const u8, spans: []const Span, kind: MatchKind = .match };
 
@@ -146,7 +190,7 @@ pub const MatchRecord = struct { path: []const u8, line_number: u64, text: []con
 const DocRef = render.Doc;
 
 /// Separator-aware path order — the SAME `pathLess` cold's `--sort path`
-/// comparator uses (`runtime/cold/engine/serial.zig::cmpFiles`). Cold's default
+/// comparator uses (`surface/exec/cold/engine/serial.zig::cmpFiles`). Cold's default
 /// parallel pipeline emits in worker-discovery order (nondeterministic);
 /// warm canonicalizes to this deterministic total order instead — per-file
 /// bytes stay identical, and the rgsuite oracle's own equivalence
@@ -223,6 +267,22 @@ pub const ResidentSession = struct {
     /// Monotonic per-daemon-boot id, echoed to clients so they can detect a
     /// restarted daemon and re-handshake. Assigned by the server.
     daemon_gen: u64 = 0,
+
+    /// Per-query wall-clock ceiling in nanoseconds (0 ⇒ disabled — the default
+    /// for every embedder/FFI/test session, so their behavior is unchanged).
+    /// The resident daemon sets it (see `serve.zig`) so one runaway — or a query
+    /// a client already timed out and abandoned — can't pin the single daemon
+    /// thread the ~10 coworker agents share. It is a liveness backstop, not a
+    /// latency SLA: no legitimate local warm query approaches it, and overrunning
+    /// it declines the query (→ certified cold path), never a wrong answer.
+    query_budget_ns: i128 = 0,
+    /// The armed absolute deadline for the in-flight query (`.awake` clock), set
+    /// from `query_budget_ns` under the lock at the top of each `reconcile` so it
+    /// spans reconcile + fold/gather. 0 ⇒ no ceiling for this query.
+    query_deadline_ns: i128 = 0,
+    /// Observability: how many queries the budget declined. Atomic because the
+    /// abort can fire inside a parallel fold/stream shard.
+    budget_aborts: std.atomic.Value(u64) = .init(0),
 
     pub fn init(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !ResidentSession {
         var roots_arena = std.heap.ArenaAllocator.init(gpa);
@@ -406,6 +466,38 @@ pub const ResidentSession = struct {
         self.markDirty(); // a rebuilt index demands a reconcile pass
     }
 
+    /// Arm this query's wall-clock ceiling from the configured budget — a no-op
+    /// when unbudgeted (the embedder/FFI/test default), which skips the clock
+    /// read entirely. Called under the session lock at the top of `reconcile`, so
+    /// the deadline spans reconcile + fold/gather for every query face.
+    fn armBudget(self: *ResidentSession) void {
+        self.query_deadline_ns = if (self.query_budget_ns != 0)
+            std.Io.Clock.now(.awake, self.io).nanoseconds + self.query_budget_ns
+        else
+            0;
+    }
+
+    /// Has this query overrun its armed ceiling? Sampled at strided checkpoints
+    /// in the O(corpus) walks — the caller passes its loop index, so the clock is
+    /// read at most once per `budget_stride` visits (amortized to noise; the fast
+    /// path returns before the first sample for a small candidate set). An
+    /// unbudgeted query short-circuits before any clock read, so the common case
+    /// pays nothing. Each parallel shard walks its own contiguous range with its
+    /// own index, so the read-only `query_deadline_ns` is sampled per shard.
+    inline fn overBudget(self: *const ResidentSession, i: usize) bool {
+        if (self.query_deadline_ns == 0) return false;
+        if (i & budget_stride != 0) return false;
+        return std.Io.Clock.now(.awake, self.io).nanoseconds >= self.query_deadline_ns;
+    }
+
+    /// Record a budget decline and surface it as `Stale` — the client answers on
+    /// the certified cold path exactly as for a lost freshness anchor. Atomic
+    /// because a parallel fold/stream shard may be the one that trips the ceiling.
+    fn budgetAbort(self: *ResidentSession) QueryError {
+        _ = self.budget_aborts.fetchAdd(1, .monotonic);
+        return QueryError.Stale;
+    }
+
     /// Bring the overlay current against the certified rg-default walk. No-op on
     /// the watcher-clean fast path. Re-derives the authoritative file set the
     /// cold path would walk RIGHT NOW and diffs it against the resident base +
@@ -417,6 +509,7 @@ pub const ResidentSession = struct {
     /// walk error (unreadable directory — cold reports it and exits 2) surfaces
     /// as `error.Stale` (→ cold fallback); see the module header on walk OOM.
     fn reconcile(self: *ResidentSession) QueryError!void {
+        self.armBudget();
         try self.maybeReload();
         if (self.seqlock.skip()) return;
 
@@ -466,7 +559,10 @@ pub const ResidentSession = struct {
         try cur_set.ensureTotalCapacity(@intCast(cur.len));
         for (cur) |p| cur_set.putAssumeCapacity(p, {});
 
-        for (cur) |p| try self.reconcileOne(p);
+        for (cur, 0..) |p, i| {
+            if (self.overBudget(i)) return self.budgetAbort();
+            try self.reconcileOne(p);
+        }
         try self.tombstoneVanished(&cur_set);
     }
 
@@ -684,7 +780,7 @@ pub const ResidentSession = struct {
         try self.reconcile();
         if (req.invert) return self.queryInvert(arena, req);
 
-        // Lower the request through the shared search core (`engine/query.zig`):
+        // Lower the request through the shared search core (`kernel/match/query.zig`):
         // the SAME compile → prefilter → match kernels the cold CLI is built on,
         // but returning errors instead of `die()`ing. A pattern outside the
         // linear-time syntax surfaces as `error.Stale` → certified cold fallback.
@@ -792,7 +888,7 @@ pub const ResidentSession = struct {
         return true;
     }
 
-    /// Answer `-v -l` / `-v -c` by SET-COMPLEMENT (Lever A): the non-matching
+    /// Answer `-v -l` / `-v -c` by SET-COMPLEMENT: the non-matching
     /// lines of a file are `lines(f) − matching(f)`. The trigram prefilter is
     /// sound for the POSITIVE match set (a ruled-out file has zero matches by
     /// construction, so its whole cached `lines(f)` is non-matching and needs
@@ -826,6 +922,7 @@ pub const ResidentSession = struct {
 
         var inv = InvertFold{ .mode = req.mode, .arena = arena, .io = self.io, .cap = req.max_count, .verify_existence = !self.seqlock.provenClean() };
         for (self.mir.paths, self.mir.docs, self.mir.nuls, self.mir.lines, 0..) |path, bytes, nul, nlines, i| {
+            if (self.overBudget(i)) return self.budgetAbort();
             if (nlines == 0) continue; // empty / NUL-in-first-buffer: cold suppresses it
             if (self.overlay.contains(path)) continue; // the overlay pass owns it
             if (!req.filter.admits(path)) continue; // out-of-scope: cold never walks it under `-v`
@@ -878,7 +975,7 @@ pub const ResidentSession = struct {
         // doc is admitted whole (a doc with zero matching lines is entirely
         // selected), so the emit gather walks every doc — the invert emit's own
         // cost, which Lever B parallelizes.
-        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert);
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert, .{});
         var out: std.ArrayList(u8) = .empty;
         // Both faces shard the emit over cores through the SAME primitive
         // (`render.renderLinesParallel` → `parallel.shardBounds`): `-v` selects
@@ -912,7 +1009,7 @@ pub const ResidentSession = struct {
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
 
-        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert);
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert, .{});
         return render.renderLinesShm(self.gpa, arena, req, docs, floor) catch |e| switch (e) {
             error.OutOfMemory => return QueryError.OutOfMemory,
             error.Unsupported => return QueryError.Stale,
@@ -963,7 +1060,8 @@ pub const ResidentSession = struct {
         // drops trigram false positives, so the surviving ranked set is identical
         // to cold's, and the array position (the RRF tiebreak) matches too.
         var files: std.ArrayList(ranked.LiveFile) = .empty;
-        for (cand) |id| {
+        for (cand, 0..) |id, i| {
+            if (self.overBudget(i)) return self.budgetAbort();
             const path = self.mir.paths[id];
             if (self.overlay.contains(path)) continue; // the overlay pass owns it
             files.append(arena, .{ .path = path, .bytes = self.mir.docs[id] }) catch return QueryError.OutOfMemory;
@@ -1058,7 +1156,7 @@ pub const ResidentSession = struct {
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
 
-        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .json_stream, req.invert);
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .json_stream, req.invert, sinkBudget(sink));
 
         // A common token's matching-doc set is large enough that the per-line span
         // scan — not the sink emit — is the 1-core-vs-16-core loss to cold. Above
@@ -1183,9 +1281,14 @@ pub const ResidentSession = struct {
     /// fail-closed stat-per-hit `query` uses) so a file removed in the
     /// walk→report window is never reported. `admit` selects the binary policy
     /// (see `Admit`). The sort is `run.pathLess` — the warm canonical file
-    /// order (see `docLess`) — so downstream output is deterministic.
-    fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, filter: PathFilter, sc: *Scratch, admit: Admit, invert: bool) QueryError![]const DocRef {
-        var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .require_match = !invert, .check_exists = !self.seqlock.provenClean() };
+    /// order (see `docLess`) — so downstream output is deterministic. `budget`
+    /// is the hosted record stream's cooperative halt (`cancel`/`timeout_ns`):
+    /// on trip the gather stops CLEANLY with a partial doc set (no `Stale`), so
+    /// a scan that emits few or no records still respects the caller's budget;
+    /// it is empty for the daemon `lines` faces, whose completeness the session
+    /// ceiling guards instead.
+    fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, filter: PathFilter, sc: *Scratch, admit: Admit, invert: bool, budget: RunBudget) QueryError![]const DocRef {
+        var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .require_match = !invert, .check_exists = !self.seqlock.provenClean(), .cancel = budget.cancel, .deadline_ns = budget.deadline_ns };
         if (invert) try self.eachDoc(filter, &g) else try self.eachCandidate(cq, filter, &g);
         std.mem.sort(DocRef, g.docs.items, {}, docLess);
         return g.docs.items;
@@ -1195,7 +1298,8 @@ pub const ResidentSession = struct {
     /// a document excluded by the positive candidate set may be entirely made of
     /// selected nonmatching lines.
     fn eachDoc(self: *ResidentSession, filter: PathFilter, v: anytype) QueryError!void {
-        for (self.mir.paths, self.mir.docs, self.mir.nuls) |path, bytes, nul| {
+        for (self.mir.paths, self.mir.docs, self.mir.nuls, 0..) |path, bytes, nul, i| {
+            if (self.overBudget(i)) return self.budgetAbort();
             if (self.overlay.contains(path)) continue;
             if (!filter.admits(path)) continue; // out-of-scope for a scoped `-v` walk
             try v.visit(path, bytes, nul);
@@ -1234,7 +1338,8 @@ pub const ResidentSession = struct {
     /// overlay stays serial. `cand` is contiguous and ordered, so a sharded walk
     /// yields the same visits in the same per-shard order.
     fn eachBase(self: *ResidentSession, cand: []const u32, v: anytype) QueryError!void {
-        for (cand) |id| {
+        for (cand, 0..) |id, i| {
+            if (self.overBudget(i)) return self.budgetAbort();
             if (self.overlay.contains(self.mir.paths[id])) continue; // overlay owns it
             try v.visit(self.mir.paths[id], self.mir.docs[id], self.mir.nuls[id]);
             if (wantsStop(v)) return; // `-q` early-halt (comptime no-op for other visitors)
@@ -1307,6 +1412,18 @@ inline fn wantsStop(v: anytype) bool {
     return false;
 }
 
+/// The optional cooperative budget a search sink carries into the doc gather.
+/// The hosted collector exposes `runBudget()` (its cancel token + deadline) so a
+/// scan that never reaches `emit` — a rare pattern, an invert walk, a superset
+/// that mostly fails the whole-doc gate — still honors `cancel`/`timeout_ns`.
+/// Every other sink (the FFI relay, the parallel-shard buffer) declares none, so
+/// the gather runs unbounded and this resolves to an empty budget at comptime.
+inline fn sinkBudget(sink: anytype) RunBudget {
+    const S = std.meta.Child(@TypeOf(sink));
+    if (comptime @hasDecl(S, "runBudget")) return sink.runBudget();
+    return .{};
+}
+
 /// The `-q` existence visitor: cold `anyMatch`'s exact admission — an
 /// implicit-binary file (a NUL inside the first 8 KiB) is skipped WHOLE (unlike
 /// `-l`'s pre-NUL slice), an empty body never matches — then the shared
@@ -1356,15 +1473,39 @@ const Gather = struct {
     admit: Admit,
     require_match: bool,
     check_exists: bool,
+    /// Hosted cooperative budget (both null off the hosted record stream). When
+    /// tripped `visit` raises `stop`, so `eachCandidate`/`eachDoc` return early
+    /// cleanly with the partial doc set — the collector then bounds the emit.
+    cancel: ?*const CancelToken = null,
+    deadline_ns: ?i128 = null,
+    i: usize = 0,
+    stop: bool = false,
     docs: std.ArrayList(DocRef) = .empty,
 
     fn visit(self: *Gather, path: []const u8, bytes: []const u8, nul: ?usize) QueryError!void {
+        if (self.budgetTripped()) {
+            self.stop = true;
+            return;
+        }
         // Cold `--json` skips a doc its 8 KiB `isBinary` window flags; a doc whose
         // first NUL sits past the window is streamed in full. Match that exactly.
         if (self.admit == .json_stream and nul != null and corpus_mod.isBinary(bytes)) return;
         if (self.require_match and !self.cq.docMatches(bytes, self.sc)) return;
         if (self.check_exists and !fileExists(self.io, path)) return;
         try self.docs.append(self.arena, .{ .path = path, .bytes = bytes, .nul = nul });
+    }
+
+    /// A hosted `cancel` (checked every visit — an armed-only atomic load, cheap
+    /// beside the whole-doc gate that follows) or a `timeout_ns` deadline
+    /// (sampled once per `budget_stride` visits, so the clock read amortizes to
+    /// noise). Both branches compile to a constant `false` when unarmed.
+    inline fn budgetTripped(self: *Gather) bool {
+        if (self.cancel) |c| if (c.requested()) return true;
+        if (self.deadline_ns) |d| {
+            self.i +%= 1;
+            if (self.i & budget_stride == 0 and std.Io.Clock.now(.awake, self.io).nanoseconds >= d) return true;
+        }
+        return false;
     }
 };
 
@@ -1467,7 +1608,7 @@ fn emitDocContext(gpa: std.mem.Allocator, cq: *const CompiledQuery, msc: *MatchS
 
 /// Folds matched docs into either the file-path set (`-l`) or the matching-line
 /// total (`-c`), so both fold modes share one candidate walk. The match
-/// decision itself is the shared `CompiledQuery` kernel (`engine/query.zig`);
+/// decision itself is the shared `CompiledQuery` kernel (`kernel/match/query.zig`);
 /// the binary rule per mode is cold's own (see the module header).
 const Accumulator = struct {
     mode: Mode,

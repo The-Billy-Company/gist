@@ -5,7 +5,7 @@
 //! query → result → shutdown round-trip: the daemon answers an eligible `-l`
 //! query with the correct sorted file set, honors `ping`, and stops cleanly on
 //! `shutdown` (the thread joins — no leaked listener, socket unlinked). This is
-//! the transport counterpart to `session/resident_test.zig` (which proves the
+//! the transport counterpart to `surface/exec/session/resident_test.zig` (which proves the
 //! engine's correctness directly); here we prove the socket carries it faithfully.
 
 const std = @import("std");
@@ -510,6 +510,67 @@ test "serve: an idle persistent client does not starve a second connection" {
     try std.testing.expectEqual(protocol.Opcode.pong, pong.op);
 
     // Deferred teardown sends SHUTDOWN and joins even if an assertion above fails.
+}
+
+/// Send an eligible query and expect the daemon to DECLINE it — the shape a
+/// budget-aborted walk produces (the client then answers on the certified cold
+/// path). Bounded readability so a regression that hangs the walk fails loud.
+fn expectDecline(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request) !void {
+    var qbuf: std.ArrayList(u8) = .empty;
+    defer qbuf.deinit(gpa);
+    try protocol.encodeQuery(&qbuf, gpa, req);
+    try std.testing.expect(protocol.writeAll(fd, qbuf.items));
+    try expectReadable(fd);
+    var resp = try protocol.recvFrame(gpa, fd);
+    defer resp.deinit();
+    try std.testing.expectEqual(protocol.Opcode.decline, resp.op);
+}
+
+test "serve: a query that overruns its budget is declined and the daemon stays responsive" {
+    const gpa = std.testing.allocator;
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const root = try std.fmt.allocPrint(a, "/tmp/gist_budget_{x}", .{@intFromPtr(&threaded)});
+    Dir.cwd().deleteTree(io, root) catch {};
+    try Dir.cwd().createDirPath(io, root);
+    defer Dir.cwd().deleteTree(io, root) catch {};
+    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/a.txt", .{root}), .data = "needle here\n" });
+
+    const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
+    const roots = try a.dupe([]const u8, &.{root});
+
+    // A 1 ns budget: the first checkpoint in the reconcile/fold walk is already
+    // past the deadline, so every eligible query declines — a deterministic
+    // stand-in for a runaway/abandoned scan without a giant corpus. Reset the
+    // hook before the next test regardless of outcome.
+    serve.query_budget_ns_override.store(1, .monotonic);
+    defer serve.query_budget_ns_override.store(-1, .monotonic);
+
+    const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
+    defer shutdownAndJoin(gpa, io, socket, t);
+
+    const stream = try dial(io, socket);
+    defer stream.close(io);
+    const fd = stream.socket.handle;
+    try handshake(gpa, fd);
+
+    // The eligible query overruns the ceiling and comes back a decline — the
+    // daemon abandoned the scan instead of running it to completion.
+    try expectDecline(gpa, fd, .{ .pattern = "needle", .mode = .files, .fixed = true });
+
+    // ...and the thread is immediately free for the next frame: PING → PONG,
+    // proving the abandoned work stopped rather than blocking the daemon.
+    try protocol.sendFrame(gpa, fd, .ping, "");
+    try expectReadable(fd);
+    var pong = try protocol.recvFrame(gpa, fd);
+    defer pong.deinit();
+    try std.testing.expectEqual(protocol.Opcode.pong, pong.op);
 }
 
 /// One CHANGED → ANNALS round-trip. Null ⇒ the daemon declined to vouch.
