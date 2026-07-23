@@ -190,6 +190,18 @@ pub fn handleBinary(a: std.mem.Allocator, re: *const Matcher, o: Opts, out: *std
 /// run downgraded to line-model binary semantics still RENDERS whole-buffer;
 /// its pattern can't cross lines, so the two shapes coincide). Returns hits.
 fn emitRegion(a: std.mem.Allocator, em: *Emitter, o: Opts, path: []const u8, region: []const u8) usize {
+    // The fused whole-buffer fast paths inside `file`/`buffer` read the
+    // emitter's `[base, body_end)` window DIRECTLY — the `-l` doc-match
+    // (`output.zig`), the `-c`/`-o` miss-skip — bypassing the `lines` slice. The
+    // caller (`handleBinary`, via both walk engines) has that window pointed at
+    // the WHOLE body, but the binary quit strategy searches only this `region`
+    // (the committed prefix). Re-point the window at exactly `region` — a
+    // contiguous slice of that body — so a fused pass can't escape past rg's NUL
+    // cutoff and match bytes in the discarded tail. An empty prefix collapses
+    // `body_end == base`, which disables every fused path (they gate on
+    // `body_end > base`), so nothing is searched — rg parity.
+    em.base = @intFromPtr(region.ptr);
+    em.body_end = em.base + region.len;
     if (em.re.multiline()) return em.buffer(path, region);
     var lines: std.ArrayList([]const u8) = .empty;
     defer lines.deinit(a);
@@ -677,8 +689,20 @@ test "walked -l stops at the NUL buffer without scanning its tail" {
     defer out.deinit(t.allocator);
     const o = Opts{ .files_only = true };
     var em = Emitter{ .a = t.allocator, .re = &m, .o = o, .show_name = true, .out = &out };
+    // Both walk engines point the emitter's whole-body window at the file
+    // BEFORE binary handling (serial `renderFile`, parallel `emitBody`), and the
+    // fused `-l` doc-match reads that window. The test MUST mirror that state or
+    // it silently exercises an unset (empty) window and cannot catch a fused
+    // pass escaping the NUL cutoff — `setWindow` re-points it per body.
+    const setWindow = struct {
+        fn f(e: *Emitter, body: []const u8) void {
+            e.base = @intFromPtr(body.ptr);
+            e.body_end = e.base + body.len;
+        }
+    }.f;
 
     const same_buffer = "panic\x00panic after cutoff";
+    setWindow(&em, same_buffer);
     try t.expect(!handleBinary(t.allocator, &m, o, &out, &em, "same.bin", false, same_buffer, 5, true));
     try t.expectEqual(@as(usize, 0), out.items.len);
 
@@ -690,6 +714,7 @@ test "walked -l stops at the NUL buffer without scanning its tail" {
     @memset(uncommitted, 'x');
     @memcpy(uncommitted[0..5], "panic");
     uncommitted[BUFCAP] = 0;
+    setWindow(&em, uncommitted);
     try t.expect(!handleBinary(t.allocator, &m, o, &out, &em, "uncommitted.bin", false, uncommitted, BUFCAP, true));
     try t.expectEqual(@as(usize, 0), out.items.len);
 
@@ -700,6 +725,7 @@ test "walked -l stops at the NUL buffer without scanning its tail" {
     @memset(committed, 'x');
     @memcpy(committed[0..6], "panic\n");
     committed[BUFCAP] = 0;
+    setWindow(&em, committed);
     try t.expect(handleBinary(t.allocator, &m, o, &out, &em, "committed.bin", false, committed, BUFCAP, true));
     try t.expectEqualStrings("committed.bin\n", out.items);
 }
