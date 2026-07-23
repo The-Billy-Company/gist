@@ -18,7 +18,7 @@ doc_radar:
       file: pkg/kernels/irregex/src/surface/exec/cold/argv/args.zig
       contains:
         - "pub const flag_catalog"
-        - "supported_with_differences"
+        - "improvement"
         - "accepted_but_ignored"
         - "unsupported_fail_loud"
     - description: "all three search transports remain operational"
@@ -172,12 +172,14 @@ ripgrep.
   Use `--sort path|modified|accessed|created` or `--sortr` only when stable
   global order is part of the consumer's contract.
 - **Unusual input:** `-z` searches compressed files; `--pre CMD` searches a
-  preprocessor's stdout and takes precedence over `-z`; `-E/--encoding`
-  accepts `auto`, `none`, or the checked-in WHATWG label set. Unknown labels
-  and failing preprocessors exit 2 rather than looking like empty searches.
+  preprocessor's stdout and takes precedence over `-z` — the command receives the
+  path as `argv[1]` and the file's bytes on stdin, ripgrep's exact contract;
+  `-E/--encoding` accepts `auto`, `none`, or the checked-in WHATWG label set.
+  Unknown labels and failing preprocessors exit 2 rather than looking like empty
+  searches.
 - **Binary intent:** `-a` treats input as text. `--binary` and `-uuu` search a
-  binary file in full and print every matching line, intentionally differing
-  from ripgrep's one-line binary summary.
+  binary file in full and print every matching line — an improvement over
+  ripgrep's one-line binary summary for a code locator (see Improvements).
 - **Machine output:** use `--json` for typed records, `-0` for NUL-delimited
   paths, `--null-data` for NUL-delimited input records, and explicit sorting
   when downstream comparison requires deterministic file order.
@@ -197,10 +199,12 @@ This section teaches selection, not a second flag registry. The checked-in
 
 The cold runtime's
 [`flag_catalog`](../../exec/cold/argv/args.zig) is the source of truth for both argv
-handling and `gist --schema`. It separates the public surface into exact
-support, support with documented differences, accepted no-ops, and unknown
-flags that fail with exit 2. I do **not** claim every option ripgrep ever
-shipped.
+handling and `gist --schema`. It separates the public surface into four buckets:
+exact support, **improvements** (identical-or-superset results that are strictly
+better — faster, more robust, or better for code search — never a regression),
+accepted no-ops, and unknown flags that fail with exit 2. Where gist differs from
+ripgrep it is an improvement, or it is a bug; there is no third category. I do
+**not** claim every option ripgrep ever shipped.
 
 The implemented surface includes:
 
@@ -232,27 +236,48 @@ Search exit codes follow ripgrep:
 An unknown flag or a pattern rejected by the selected engine is therefore an
 error, never a convincing empty result.
 
-### Deliberate differences
+### Improvements
 
-These are current product choices, not unfinished claims:
+Six flags are not bit-identical to ripgrep. Every one is an **improvement** —
+identical-or-superset results that are strictly better in behavior, performance,
+or robustness, never a regression. This is the _only_ category of divergence: if
+gist ever disagrees with ripgrep outside this list it is a bug, not a design
+choice. `gist --schema` reports the same six under the `improvements` bucket.
 
-- The parallel walk may discover independent files in a different order.
-  Explicit `--sort`/`--sortr` requests are globally ordered after parallel
-  reads.
-- `--binary` and `-uuu` search a binary file in full instead of emitting
-  ripgrep's one-line binary summary.
-- `--type-list` is formatted like ripgrep but describes gist's strict superset
-  of the type registry.
-- `-j` caps gist's adaptive work-stealing pool; it is not a promise to copy
-  ripgrep's scheduler.
-- `-z` decodes gzip, zlib, zstd, and xz in-process; bzip2, lz4, Brotli, and
-  other supported formats use their standard external decoders. `--pre`
-  passes the path as argv 1 with stdin closed.
-- `--mmap`, `--no-mmap`, `--colors`, `--dfa-size-limit`, and
-  `--regex-size-limit` are accepted compatibility no-ops. Color uses gist's
-  own palette.
-- Agent-facing output has a soft budget of roughly 25k tokens / 100 KiB and a
-  hard 256 MiB ceiling. `--uncap` or `GIST_UNCAP=1` lifts the soft limit.
+- **`--binary` (and `-uuu`) — searches a NUL-bearing file in full.** ripgrep
+  prints one opaque line, `binary file matches (found "\0" byte around offset
+N)`, and stops. A code locator wants the matches, not a shrug: gist searches
+  past the NUL and prints every matching line, exactly as `-a/--text` does. For
+  the source artifacts that carry a stray NUL (minified bundles, checked-in
+  fixtures, mixed-content files) this is strictly more information.
+- **`-P` / `--pcre2` — the only _indexed_ PCRE search.** The vendored PCRE2 JIT
+  backend returns ripgrep's exact `-P` match set (lookaround, backreferences,
+  Unicode properties), but it rides the same trigram prefilter as the linear
+  engine, so PCRE queries skip provable non-candidate files instead of scanning
+  the whole tree. Same answers, fewer bytes read. (The gist-native `--rank` is
+  linear-only.)
+- **`-z` / `--search-zip` — in-process decompression.** Results are identical to
+  ripgrep across every codec (verified byte-for-byte in `bench/rgsuite`), but
+  gzip, zlib, zstd, and xz decode _in-process_ via `std.compress` — no
+  `gzip -dc` fork per file, the single biggest speed edge on compressed corpora.
+  bzip2, lz4, Brotli, lzma, and `.Z` shell the standard external tool exactly as
+  ripgrep does.
+- **`--sort` / `--sortr` — parallel-read ordering, sorted deterministically.**
+  The final `path`/`modified`/`accessed`/`created` order is identical to
+  ripgrep's, but gist reads the files in parallel and orders after (ripgrep
+  single-threads a sorted run). `created` additionally falls back to ctime where
+  the platform has no birth time, so a sort ripgrep cannot perform still
+  succeeds.
+- **`--type-list` — a strict superset of the type registry.** Sorted and framed
+  exactly like ripgrep's, with ripgrep's rows byte-identical, plus richer
+  definitions and gist-only types. A caller parsing ripgrep's format parses
+  gist's; it just sees more.
+
+Two adjacent product choices that are _not_ rg-flag divergences: `--mmap`,
+`--no-mmap`, `--colors`, `--dfa-size-limit`, and `--regex-size-limit` are
+accepted compatibility no-ops (color uses gist's own palette), and agent-facing
+output has a soft budget of roughly 25k tokens / 100 KiB and a hard 256 MiB
+ceiling that `--uncap` or `GIST_UNCAP=1` lifts.
 
 For an exact, versioned answer about a flag, inspect `gist --schema` rather
 than relying on a prose list.

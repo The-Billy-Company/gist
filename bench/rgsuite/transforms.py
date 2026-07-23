@@ -16,7 +16,10 @@ ground truth (no hardcoded expected strings):
     xz IN-PROCESS; rg forks a decompressor; the *output* must be identical.
   * `-E` transcoding is byte-exact on UTF-16 (LE/BE/BOM), Latin-1, and the CJK /
     legacy code pages (Shift_JIS, EUC-JP, GBK, Big5, EUC-KR) vs rg's encoding_rs.
-  * `--pre` (a `gzip -dc "$1"` wrapper) and `--pre-glob` scoping match rg exactly.
+  * `--pre` matches rg exactly for BOTH invocation styles: a `gzip -dc "$1"`
+    wrapper (reads the path argv) and an `exec cat` preprocessor (reads only the
+    file's bytes on stdin — proving gist feeds stdin like rg, not just the path),
+    plus `--pre-glob` scoping.
   * `--binary`/`-uuu` are gist's deliberate **superset** of rg's one-line summary:
     they search a NUL-bearing file in full, so `rg -a` (ripgrep --text, "search it
     all as text") is the correct oracle for gist's `--binary` stdout — pinned
@@ -212,7 +215,10 @@ def gen_fixtures(root: Path) -> list[str]:
     bind.mkdir()
     (bind / "blob.dat").write_bytes(b"text needle before\x00binary needle after\nmore needle\n")
 
-    # ── --pre: the canonical `exec gzip -dc "$1"` wrapper rg's docs lead with ──
+    # ── --pre: the canonical `exec gzip -dc "$1"` wrapper rg's docs lead with, plus
+    # a stdin-ONLY preprocessor (`exec cat`, no argv use) that proves gist feeds the
+    # file's bytes on the child's stdin exactly as rg does — the adverse case that
+    # fails the moment stdin is closed (the pre-fix behavior) ──
     pre = root / "pre"
     pre.mkdir()
     (pre / "doc.txt.gz").write_bytes(gzip.compress(raw, mtime=0))
@@ -220,6 +226,9 @@ def gen_fixtures(root: Path) -> list[str]:
     script = pre / "decompress.sh"
     script.write_text('#!/bin/sh\nexec gzip -dc "$1"\n')
     script.chmod(0o755)
+    stdin_only = pre / "stdin_only.sh"
+    stdin_only.write_text("#!/bin/sh\nexec cat\n")  # ignores argv, reads stdin
+    stdin_only.chmod(0o755)
 
     return exts
 
@@ -311,6 +320,15 @@ def _cases(exts: list[str]) -> list[Case]:
             ["--pre", pre_sh, "--pre-glob", "*.gz", "-l", "needle", "pre"],
             FIX,
             sort_lines=True,
+        ),
+        # stdin-only preprocessor: `exec cat` never touches argv, so it emits the
+        # file's bytes ONLY if gist (like rg) wires them to the child's stdin. Fails
+        # loud if stdin is ever closed again.
+        Case(
+            "pre:stdin-only",
+            ["--pre", "pre/stdin_only.sh", *n, "pre/plain.txt"],
+            ["--pre", "pre/stdin_only.sh", *n, "pre/plain.txt"],
+            FIX,
         ),
     ]
 

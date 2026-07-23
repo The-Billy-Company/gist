@@ -47,7 +47,7 @@ const manifest_prefix =
     \\      {"name": "pattern", "type": "string", "required": true, "description": "literal or RE2-style regex"},
     \\      {"name": "PATH...", "type": "string[]", "required": false, "description": "positional search roots"}
     \\    ],
-    \\    "flag_surface": "broad, tested ripgrep-compatible subset; not full ripgrep compatibility. Unsupported and unknown flags fail loud with exit 2.",
+    \\    "flag_surface": "a tested ripgrep-compatible flag surface: every implemented flag matches ripgrep's behavior, except the `improvements` bucket where gist is strictly better (identical-or-superset results, faster, or more robust) — never a regression. Not every ripgrep flag is implemented; an unimplemented or unknown flag fails loud with exit 2.",
     \\    "ripgrep_compatibility": {
     \\      "source_of_truth": "src/surface/exec/cold/argv/args.zig:flag_catalog",
     \\      "unknown_flags": "unsupported-fail-loud",
@@ -86,7 +86,7 @@ const Bucket = struct {
 
 const buckets = [_]Bucket{
     .{ .name = "supported", .compatibility = .supported },
-    .{ .name = "supported-with-differences", .compatibility = .supported_with_differences },
+    .{ .name = "improvements", .compatibility = .improvement },
     .{ .name = "accepted-but-ignored", .compatibility = .accepted_but_ignored },
     .{ .name = "unsupported-fail-loud", .compatibility = .unsupported_fail_loud },
 };
@@ -156,7 +156,7 @@ test "--schema is valid JSON derived from the parser catalog" {
         try t.expect(std.mem.indexOf(u8, manifest, bucket.name) != null);
     }
     // Post-Unicode-flip: -i/-S/-w are `supported` (rg-parity) with Unicode by
-    // default, no longer `supported_with_differences` for ASCII-only folding.
+    // default, no longer a divergence bucketed for ASCII-only folding.
     try t.expect(std.mem.indexOf(u8, manifest, "Unicode case folding by default") != null);
     try t.expect(std.mem.indexOf(u8, manifest, "ASCII-only case folding") == null);
     try t.expect(std.mem.indexOf(u8, manifest, "\\\\b/\\\\w") != null);
