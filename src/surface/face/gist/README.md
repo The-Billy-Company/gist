@@ -32,7 +32,7 @@ doc_radar:
       contains: ["Mann-Whitney significance test", "**fail-closed**"]
     - description: "prose cites the live certificate corpus + cold speedup band (re-mint updates both)"
       file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
-      contains: ["20393 files · 194.3 MiB", "14.27x", "2.13x"]
+      contains: ["20591 files · 196.8 MiB", "28.73x", "16.33x"]
 ---
 
 # `gist`: indexed regex search for a live working tree
@@ -421,8 +421,8 @@ performance gates, so a faster wrong answer cannot earn a benchmark win.
 Performance claims come from the committed fail-closed certificate: fresh
 processes, 20 measured runs after three warmups, bootstrap 95% confidence
 intervals on medians, and a Mann–Whitney test. A win requires both a lower
-median and p < 0.05. On its recorded 20,393-file / 194.3 MiB corpus, gist beat
-ripgrep in all 12 query classes by 2.13×–14.27×. Those are measurements from
+median and p < 0.05. On its recorded 20,591-file / 196.8 MiB corpus, gist beat
+ripgrep in all 12 query classes by 16.33×–28.73×. Those are measurements from
 the **macroscopic end-to-end layer**, not universal constants. The certificate's
 microscopic cycles/byte and lower-bound layers run over that same RAM-resident
 corpus; those single-thread kernel numbers must not be attached to the
