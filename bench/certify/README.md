@@ -39,7 +39,8 @@ fail-closed section**, so no claim ships without a receipt: the **warm
 resident-daemon tier** (`certify_warm.sh` + `../session/`) is the single home for
 the "warm is Nx faster" claim; the **`--rank` lane** (`certify_rank.sh`) certifies
 the definition-first shape rg cannot express (no-fabrication + coverage +
-def-boost + codegen-demote + bounded overhead + beats-rg); **Layer F**
+def-boost + codegen-demote + bounded overhead + beats-rg where the prefilter
+prunes); **Layer F**
 (`certify_codex.sh` via `../codex/`) proves the codex self-index is compressed,
 searchable, and byte-exact decodable; and **Layer G** (`certify_relate.sh`)
 certifies the relate face's retrieval-quality contract + boundary — explicitly
@@ -52,7 +53,7 @@ this certificate even when their correctness is proved elsewhere.
 | `certify_layers.sh`   | Layers B/B′/C/D/E/F — build lab bins, measure, splice; the half that used to be a manual checklist. `make bench-gist-certify` default                        |
 | `certify_stats.py`    | a stdlib mirror of `../harness/stats.zig` — per-class bootstrap-CI median + Mann-Whitney verdict, splices the table into `.local/gist-verify/CERTIFICATE.md` |
 | `certify_warm_report.py` | Layer A warm-tier splicer — per-class Mann-Whitney dominance of the resident daemon over cold gist + rivals                                               |
-| `certify_rank_report.py` | Layer A `--rank` lane splicer — fail-closed no-fabrication/coverage/def-boost/demotion/overhead/beats-rg from `certify_rank.sh`                           |
+| `certify_rank_report.py` | Layer A `--rank` lane splicer — fail-closed no-fabrication/coverage/def-boost/demotion/overhead/selective-beats-rg from `certify_rank.sh`                 |
 | `certify_crest_report.py` | Layer E splicer — renders the fail-closed crest-sieve pruning/speedup table from `crest.csv` (`zig build crest`) into the certificate                    |
 | `certify_codex_report.py` | Layer F splicer — fail-closed decodability/sub-entropy space/n-free count/cheap reload/self-recognition from the `codex-scale` JSONL (`../codex/`)       |
 | `certify_relate_report.py` | Layer G splicer — fail-closed relate boundary + recall@1 + pack + short-recall from `certify_relate.sh`                                                 |

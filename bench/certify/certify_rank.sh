@@ -23,8 +23,12 @@
 #      generated weight in rank.zig is set to outrank the codegen double-boost).
 #   4. BOUNDED OVERHEAD — --rank's median never exceeds a small multiple of plain
 #      `gist -l` (it reads+scores every candidate, yet surfaces only top-K).
-#   5. BEATS RIPGREP — --rank is significantly faster than `rg` (Mann-Whitney win):
-#      the trigram prefilter reads the candidate set where rg re-walks the tree.
+#   5. BEATS RIPGREP (SELECTIVE regime) — where the trigram prefilter prunes the corpus
+#      to a small candidate minority, --rank is significantly faster than `rg` (Mann-Whitney
+#      win): it reads that minority where rg re-walks the whole tree. A saturating needle (a
+#      common token matching a large fraction of files) gets no prefilter edge and ranking is
+#      strictly more work than a raw scan, so rg legitimately wins there — its certified claim
+#      is #4 (bounded vs `gist -l`), and beats-rg is reported but not gated.
 #
 # Usage:  bench/certify/certify_rank.sh   (RUNS=20 WARMUP=3 by default)
 # Assumes certify.sh already built the gist index this run (it calls this after warm).
@@ -112,8 +116,30 @@ for row in "${PROBES[@]}"; do
   printf "  %-16s ranked+timed\n" "${name}"
 done
 
+# Corpus size splits selective (prefilter prunes → beats-rg gated) from saturating
+# needles in the report. Prefer the machine.json the mint already wrote; fall back to
+# the persisted paths.list; 0 = unknown (report then uses an absolute-count threshold).
+corpus_files="$(python3 - "${OUT}/machine.json" "${PATHS_LIST}" << 'PY'
+import json, sys
+
+machine_json, paths_list = sys.argv[1], sys.argv[2]
+n = 0
+try:
+    n = int(json.load(open(machine_json)).get("corpus_file_count") or 0)
+except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    n = 0
+if n <= 0:
+    try:
+        with open(paths_list, "rb") as fh:
+            n = sum(1 for p in fh.read().split(b"\0") if p)
+    except OSError:
+        n = 0
+print(n)
+PY
+)"
+
 cat > "${WORK}/meta.json" << EOF
-{ "runs": ${RUNS}, "warmup": ${WARMUP}, "roots": "${roots}" }
+{ "runs": ${RUNS}, "warmup": ${WARMUP}, "roots": "${roots}", "corpus_files": ${corpus_files} }
 EOF
 
 echo
