@@ -448,7 +448,16 @@ def mine_block(name, body, consts, srcfile):
         or "setup_pcre2" in body
         or "dir.pcre2" in body
     )
-    cmp = "sort" if "sort_lines" in body else "plain"
+    # A block's comparison bar mirrors the macro it asserts stdout with. Any
+    # `sort_lines` use (`eqnice!(sort_lines(…), sort_lines(…))`) is order-agnostic.
+    # A block that never byte-asserts (`eqnice!`) yet checks stdout via
+    # `assert!(got.contains(…))` — rg 15.2's #3320/#3376 multi-root ORDER tests,
+    # the f411 `--stats` probes, r2944's byte-count — is order-agnostic too: its
+    # own bar is substring presence, not byte order, so holding it to byte-exact
+    # is stricter than ripgrep's own test (and, for the multi-root walks whose
+    # emit order is genuinely nondeterministic, spuriously flaps PASS↔ORDER). Only
+    # a real `eqnice!` byte assertion stays "plain".
+    cmp = "sort" if ("sort_lines" in body or ("eqnice!" not in body and ".contains(" in body)) else "plain"
     # Scan code only (string bodies blanked) so keywords inside expected-output
     # blocks — e.g. the word "match" in a binary-warning string — don't masquerade
     # as control flow.

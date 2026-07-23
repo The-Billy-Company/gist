@@ -37,10 +37,14 @@
 //!
 //! Dispatch policy (`eligible`): the recursive-walk cases every agent session
 //! actually hits — default search, `-l`, `-c`, `-o`, `-n`, context, `-w`/`-i`/
-//! `-F`/`-x`, `-t`/`-g` scoping, `--files` — run here. The long tail that
-//! carries cross-file or stateful semantics (`-L` symlink cycles, `--json`,
-//! `--stats`, `-q`, `--files-without-match`, `-r` captures, `--max-filesize`,
-//! explicit FILE args, stdin) stays on the proven serial engine.
+//! `-F`/`-x`, `-t`/`-g` scoping, `--files`, `--files-without-match`, `--stats`
+//! — run here. The long tail that carries cross-file or stateful semantics
+//! (`-L` symlink cycles, `--json` with transforms, `-q`, `-r` captures,
+//! `--max-filesize`, explicit FILE args, stdin) stays on the proven serial
+//! engine. `--files-without-match` is the invert of `-l` (emit on a miss;
+//! index elision IS a miss → emit without reading). `--stats` streams the
+//! match body like any content mode and sums a per-worker `grepfile.Stats`
+//! into one trailing block (same shape as the `--json` summary fold).
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -93,7 +97,11 @@ pub fn eligible(io: std.Io, parsed: args.Parsed, o: Opts) bool {
     // through the same `Emitter.buffer` whole-buffer model the serial engine
     // uses (multiline.zig owns the span/line semantics), so the walk + literal
     // gate + index elision that carry every linear win apply to `-U` too.
-    if (o.follow or o.quiet or o.stats or o.files_without or o.replace != null or o.max_filesize != 0) return false;
+    // `--stats` and `--files-without-match` ride the fused walk (per-worker
+    // tallies / inverted `-l` emit); `-q` still needs the serial short-circuit
+    // (first hit wins, cancel the walk), and `-r`/`--max-filesize`/`-L` keep
+    // their serial collect semantics.
+    if (o.follow or o.quiet or o.replace != null or o.max_filesize != 0) return false;
     // `--json` RIDES the walk (the streaming win every other mode gets): each
     // worker emits ripgrep's per-file `begin`/`match`/`end` records via the shared
     // `json.emitOne` and tallies a per-worker `json.Stats`; `run` sums them into
@@ -106,11 +114,26 @@ pub fn eligible(io: std.Io, parsed: args.Parsed, o: Opts) bool {
     // needs the serial engine's whole-file loop with the literal gate + index
     // elision disabled — the streaming sink here culls non-matching files.
     if (o.include_zero) return false;
-    // A globally ordered result (`--sort`/`--sortr`) and a device-bounded walk
-    // (`--one-file-system`) both need cross-file state the streaming sink can't
-    // give, so they run on the serial engine — which still reads in parallel,
-    // then orders once, beating ripgrep's fully single-threaded sort walk.
-    if (o.sort_key != .none or o.one_file_system) return false;
+    // A device-bounded walk (`--one-file-system`) needs cross-file device state
+    // the streaming walk can't carry, so it stays serial.
+    if (o.one_file_system) return false;
+    // `--sort`/`--sortr` rides the fused parallel walk for the PATH key: each
+    // worker holds its rendered per-file output (already in its arena) keyed by
+    // path instead of racing it to stdout, and `run` orders the whole result
+    // once after the walk — a parallel walk+read+match feeding a single sort,
+    // which beats ripgrep's single-threaded sorted traversal (`emitSorted`).
+    // The exclusions keep byte-parity with the serial sort oracle: time keys
+    // (modified/accessed/created) need a per-file stat the fused walk skips;
+    // `--files` (no pattern) already wins on the serial stat-only listing; a
+    // machine-consumed `--json` stream keeps its serial collect path; and rg
+    // orders ASCENDING multi-root path per-argv-root (`lessAscPathWalk`), which
+    // the rootless streaming walk doesn't track — descending is global, so it
+    // rides regardless of root count.
+    switch (o.sort_key) {
+        .none => {},
+        .path => if (o.json or o.files_list or (parsed.roots.len > 1 and !o.sort_reverse)) return false,
+        .modified, .accessed, .created => return false,
+    }
     // `-z`/`-E` ride the parallel engine; `--pre`/`--binary` do not (see
     // `transformsRidePipeline`). Kept as a pure, unit-tested seam so a future
     // edit can't silently drop `-z` back to the serial engine unnoticed.
@@ -186,9 +209,9 @@ fn shouldSkip(cfg: *const Cfg, chain: ?*const IgNode, a: std.mem.Allocator, task
     const ig = cfg.ig;
     var v: ?bool = null;
     if (cfg.compiled) |c| {
-        if (c.matchRank(stripDot(rel), is_dir, task.root_depth, ig.reanchor_root_rules)) |r| v = !c.rules[r].negated;
+        if (c.matchRank(stripDot(rel), is_dir)) |r| v = !c.rules[r].negated;
     } else v = ig.decideAt(rel, is_dir, task.root_depth);
-    applyChain(chain, a, ig.o.ignore_case_insensitive, task.root_depth, ig.reanchor_root_rules, rel, is_dir, &v);
+    applyChain(chain, a, ig.o.ignore_case_insensitive, task.root_depth, rel, is_dir, &v);
     const wl_ig = cfg.o.filter.whitelists(a, rel);
     const wl_hid = cfg.o.filter.whitelistsHidden(a, rel);
     return ig.skipFromVerdict(v, is_dir, basename, wl_ig, wl_hid);
@@ -601,6 +624,13 @@ const Sink = struct {
     join_groups: bool,
     first: bool = true, // guarded by `mu`
     matched_files: usize = 0, // guarded by `mu`
+    // Bytes actually written to stdout (match stream + separators). `--stats`
+    // reads this after the walk for `bytes printed` (quiet ⇒ forced to 0).
+    bytes_printed: usize = 0, // guarded by `mu`
+
+    fn noteWrite(self: *Sink, n: usize) void {
+        self.bytes_printed += n;
+    }
 
     fn emit(self: *Sink, kind: FragKind, buf: []const u8) void {
         self.mu.lockUncancelable(self.io);
@@ -614,13 +644,19 @@ const Sink = struct {
         // matched-files exit code; the `summary` record is written once by `run`.
         if (kind == .json) {
             self.matched_files += 1;
-            if (!corpus_mod.writeStdout(buf)) self.q.abort();
+            if (!corpus_mod.writeStdout(buf)) self.q.abort() else self.noteWrite(buf.len);
             return;
         }
         switch (kind) {
             .text_hit => {
-                if (self.heading and !self.first) ok = corpus_mod.writeStdout("\n");
-                if (ok and self.join_groups and !self.first and buf.len > 0) ok = corpus_mod.writeStdout("--\n");
+                if (self.heading and !self.first) {
+                    ok = corpus_mod.writeStdout("\n");
+                    if (ok) self.noteWrite(1);
+                }
+                if (ok and self.join_groups and !self.first and buf.len > 0) {
+                    ok = corpus_mod.writeStdout("--\n");
+                    if (ok) self.noteWrite(3);
+                }
                 self.first = false;
                 self.matched_files += 1;
             },
@@ -628,22 +664,25 @@ const Sink = struct {
             .text_plain => {},
             .json => unreachable, // handled above (self-framed record block)
         }
-        if (ok) ok = corpus_mod.writeStdout(buf);
+        if (ok) {
+            ok = corpus_mod.writeStdout(buf);
+            if (ok) self.noteWrite(buf.len);
+        }
         if (!ok) self.q.abort();
     }
 
-    /// Write ONE coalesced path-list chunk (`-l`/`--files`): many `path+term`
-    /// records a worker batched, plus their file count, in a single locked
-    /// `write(2)`. This is the path-list twin of `emit` — the mutex + syscall
-    /// is a per-chunk cost, not per file, so a high-hit scan stops serializing
-    /// every worker behind the sink lock. Order-free (each chunk is a
-    /// contiguous slice of one worker's matches).
+    /// Write ONE coalesced path-list chunk (`-l`/`--files`/`--files-without-match`):
+    /// many `path+term` records a worker batched, plus their file count, in a
+    /// single locked `write(2)`. This is the path-list twin of `emit` — the
+    /// mutex + syscall is a per-chunk cost, not per file, so a high-hit scan
+    /// stops serializing every worker behind the sink lock. Order-free (each
+    /// chunk is a contiguous slice of one worker's matches).
     fn emitFilesChunk(self: *Sink, buf: []const u8, files: usize) void {
         self.mu.lockUncancelable(self.io);
         defer self.mu.unlock(self.io);
         if (self.q.aborted.load(.monotonic)) return;
         self.matched_files += files;
-        if (!corpus_mod.writeStdout(buf)) self.q.abort();
+        if (!corpus_mod.writeStdout(buf)) self.q.abort() else self.noteWrite(buf.len);
     }
 };
 
@@ -656,7 +695,7 @@ const Cfg = struct {
     ig: *const ignore.Ignore,
     compiled: ?*const ignore.Compiled, // rank-based base tier (null → decideAt)
     lazy: ?*LazyElide, // concurrent elide loader (null → no elision this run)
-    file_needle: ?simd.Gate, // whole-file SIMD gate; null for passthru/stats-like modes
+    file_needle: ?simd.Gate, // whole-file SIMD gate; null for passthru / invert modes
     // Multi-literal whole-file SIMD gate for pure alternations (`panic|0x`):
     // the union of these literals covers every match, so a body containing none
     // of them is dropped without a regex run. Non-empty only when `file_needle`
@@ -701,7 +740,19 @@ const Cfg = struct {
     // + freshness only — a miss or a changed file reads live, byte-identically.
     shard: ?*const shard_mod.View,
     sink: *Sink,
+    // `--sort`/`--sortr path`: hold each rendered fragment in the worker's arena
+    // keyed by path (`Worker.recs`) rather than streaming it, so `run` can order
+    // the whole result once (`emitSorted`). False ⇒ the streaming sink path.
+    collect_sorted: bool = false,
 };
+
+/// One rendered file fragment held for the ordered `--sort`/`--sortr` emit. The
+/// fused walk renders every file in parallel exactly as the streaming path does;
+/// the only difference is the bytes stay in this worker's arena (which outlives
+/// the walk) keyed by `path`, so `run` orders the whole result once. `buf` is the
+/// rendered block for a content mode; in `-l`/`--files` mode `buf` is unused (the
+/// path IS the output) and `kind` is immaterial — `emitSorted` writes path+term.
+const SortedRec = struct { path: []const u8, kind: FragKind, buf: []const u8 };
 
 /// A file discovered before the elide oracle finished loading — held back so
 /// it can still be elided (or searched) once `LazyElide.ready` flips.
@@ -727,6 +778,12 @@ const Worker = struct {
     // per-chunk cost. `out` is gpa-owned so it outlives per-file arena churn.
     out: std.ArrayList(u8) = .empty,
     out_files: usize = 0, // paths buffered in `out` since the last flush
+    // `--sort`/`--sortr path` only (`Cfg.collect_sorted`): the worker's rendered
+    // fragments held for the ordered final emit, keyed by path. Each `buf`/`path`
+    // already lives in this worker's arena (no copy) — this list just references
+    // them; `gpa`-owned so it survives per-file arena churn and `run` reads it
+    // after join. Empty in the streaming (non-sorted) path.
+    recs: std.ArrayList(SortedRec) = .empty,
     // Reusable boolean-match scratch (`Matcher.Sim` is per-thread by design):
     // lazily built once on first use, then reused for every file this worker
     // searches — the Pike generation counter self-invalidates between calls,
@@ -737,6 +794,10 @@ const Worker = struct {
     // for the single trailing `summary` record.
     jss: ?Matcher.SpanSim = null,
     jstats: json.Stats = .{},
+    // `--stats` per-worker tally (`files_with_match` is filled once in `run`
+    // from `sink.matched_files`; `bytes_printed` from `sink.bytes_printed`).
+    // Summed across workers into the trailing stats block after the walk.
+    stats: grepfile.Stats = .{},
 };
 
 /// Flush a worker's coalesced path-list buffer once it reaches this size — big
@@ -749,10 +810,28 @@ const files_flush_cap: usize = 64 * 1024;
 /// private buffer, flushing in a single locked write once it fills. Replaces a
 /// per-file `Sink.emit` (lock + raw syscall) on the `-l`/`--files` hot paths.
 fn bufferPath(w: *Worker, path: []const u8, term: []const u8) void {
+    if (w.cfg.collect_sorted) {
+        // `--sort`/`--sortr`: hold the path for the ordered emit (`emitSorted`
+        // rewrites the terminator in sorted order); `path` lives in the arena.
+        w.recs.append(w.gpa, .{ .path = path, .kind = .text_hit, .buf = "" }) catch oom();
+        return;
+    }
     w.out.appendSlice(w.gpa, path) catch oom();
     w.out.appendSlice(w.gpa, term) catch oom();
     w.out_files += 1;
     if (w.out.items.len >= files_flush_cap) flushFiles(w);
+}
+
+/// Stream one rendered fragment to the sink, or — under `--sort`/`--sortr` —
+/// hold it in this worker's arena keyed by `dpath` for the ordered final emit.
+/// The rendered bytes already live in the worker arena (which outlives the
+/// walk), so holding a reference costs one record, never a copy.
+fn deliver(w: *Worker, kind: FragKind, dpath: []const u8, buf: []const u8) void {
+    if (w.cfg.collect_sorted) {
+        w.recs.append(w.gpa, .{ .path = dpath, .kind = kind, .buf = buf }) catch oom();
+        return;
+    }
+    w.cfg.sink.emit(kind, buf);
 }
 
 /// Drain the worker's buffered path list into the sink as one chunk.
@@ -846,7 +925,15 @@ fn flushPending(w: *Worker, a: std.mem.Allocator, scratch: []u8, final: bool) vo
         // read. A cheap acquire load guarding an open+read, and it never idles —
         // a page-cache-warm reread just reads until the flip, so warm is untouched.
         if (final and !ready) ready = lz.ready.load(.acquire);
-        if (ready) if (lz.val) |*el| if (el.skip(stripDot(d.rel), d.mtime_ns, d.ctime_ns)) continue;
+        if (ready) if (lz.val) |*el| if (el.skip(stripDot(d.rel), d.mtime_ns, d.ctime_ns)) {
+            // Index proves no match: `--files-without-match` emits the path
+            // without reading (the invert of `-l`'s elide-and-skip).
+            if (o.files_without) {
+                const dpath = if (o.path_sep) |sep| replaceSep(a, d.rel, sep) else d.rel;
+                bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
+            }
+            continue;
+        };
         const dpath = if (o.path_sep) |sep| replaceSep(a, d.rel, sep) else d.rel;
         if (w.cfg.shard) |sh| if (sh.slice(stripDot(d.rel), d.mtime_ns, d.ctime_ns)) |bytes| {
             searchShardBody(w, a, dpath, bytes);
@@ -1072,7 +1159,16 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     };
     if (cfg.lazy) |lz| {
         if (lz.ready.load(.acquire)) {
-            if (lz.val) |*el| if (el.skip(stripDot(rel), mtime, ctime)) return;
+            if (lz.val) |*el| if (el.skip(stripDot(rel), mtime, ctime)) {
+                // Index proves no match: `--files-without-match` emits without
+                // reading (invert of `-l`'s elide-and-skip). `--stats` never
+                // arms the oracle (see `want_elision`), so it can't land here.
+                if (o.files_without) {
+                    const dpath = if (o.path_sep) |sep| replaceSep(a, rel, sep) else rel;
+                    bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
+                }
+                return;
+            };
         } else {
             // Oracle still loading — hold the file back so it can still be
             // elided (the walk races ahead; deferring costs three slices + metadata).
@@ -1116,8 +1212,17 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
 fn searchShardBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, bytes: []const u8) void {
     const body = grepfile.decodeBom(a, bytes);
     if (w.cfg.o.json) return emitJson(w, a, dpath, body);
-    if (body.len == 0) return;
+    if (body.len == 0) return noteEmpty(w, dpath);
     emitBody(w, a, dpath, body, 0, 0);
+}
+
+/// Empty-body bookkeeping shared by the live and shard read paths. An empty
+/// file has no match: `--files-without-match` emits its path; `--stats` skips
+/// it unless `--include-zero` (mirrors serial `renderFile`'s `count_zero` gate,
+/// which parallel never arms for `--stats` alone).
+fn noteEmpty(w: *Worker, dpath: []const u8) void {
+    const o = w.cfg.o;
+    if (o.files_without) bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
 }
 
 /// The `--json` per-file render on the parallel walk: emit ripgrep's
@@ -1178,7 +1283,7 @@ fn searchFile(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.
         defer sf.close();
         const raw = sf.readRest(a, scratch) orelse return;
         const body = ingest.apply(a, icfg, openable, dpath, raw) orelse return;
-        if (body.len == 0) return;
+        if (body.len == 0) return noteEmpty(w, dpath);
         return emitBody(w, a, dpath, body, 0, 0);
     }
 
@@ -1193,22 +1298,24 @@ fn searchFile(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.
     if (!utf16) {
         // NUL in buffer 0: rg's emission cutoff is the start of the buffer that
         // holds the first NUL — the very first — so an implicit walked file
-        // contributes NOTHING in any parallel-engine mode (`-l`, default, `-c`,
-        // context, `-o` all key off lines before the cutoff; `--binary`-style
-        // explicit files never reach this engine). Skip without the tail read.
-        if (cfg.binary_detect and std.mem.indexOfScalar(u8, sf.prefix, 0) != null) return;
-        // `-l` + a >64 KiB file: a match PROVEN inside the NUL-free prefix is a
-        // match of the file (a partial trailing line only truncates a real
-        // line, and the literal gates never over-claim) — emit and skip the
-        // tail. Absence proves nothing; fall through to the full read.
+        // contributes NOTHING in content modes (`-l`, default, `-c`, context,
+        // `-o`, `--files-without-match`). `--stats` still needs the committed-
+        // prefix tally (serial `renderFile`'s binary arm), so it falls through
+        // to the full read + `emitBody` binary path. `--binary`-style explicit
+        // files never reach this engine.
+        if (cfg.binary_detect and std.mem.indexOfScalar(u8, sf.prefix, 0) != null and !o.stats) return;
+        // `-l` / `--files-without-match` + a >64 KiB file: a match PROVEN
+        // inside the NUL-free prefix settles the file — `-l` emits and skips
+        // the tail; `--files-without-match` skips WITHOUT emitting (the file
+        // HAS a match). Absence proves nothing; fall through to the full read.
         if (cfg.fast_l and sf.more and prefixProvesMatch(w, re, grepfile.stripBom(sf.prefix))) {
-            bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
+            if (!o.files_without) bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
             return;
         }
     }
     const raw = if (sf.more) (sf.readRest(a, scratch) orelse return) else sf.prefix;
     const body = grepfile.decodeBom(a, raw);
-    if (body.len == 0) return;
+    if (body.len == 0) return noteEmpty(w, dpath);
     // Bytes of `body` already covered by the stage-1 prefix scans, in body
     // space: `body` aliases `raw` at offset 0 or 3 (UTF-8 BOM strip), so the
     // scanned raw prefix maps to `body[0..covered]`. A UTF-16 transcode built a
@@ -1234,10 +1341,20 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     // The `Wide` gates are the plain SIMD kernels until a body crosses
     // `verify.wide_threshold` (16 MiB) — then the presence test itself fans
     // out across cores. One worker owning an mmap'd multi-GiB blob (which the
-    // rg-parity walk legitimately admits via explicit-root re-anchoring) stops
+    // rg-parity walk legitimately admits via explicit-root scoping) stops
     // serializing the whole walk behind a single-thread scan.
-    if (cfg.file_needle) |n| if (!verify.gateWide(a, body[gate_from..], n)) return;
-    if (cfg.file_alts.len > 0 and !verify.containsAnyWide(a, body[gate_from..], cfg.file_alts)) return;
+    // Whole-file gate miss: the body can't match. `-l` drops it; `--files-
+    // without-match` emits the path (the invert); `--stats` tallies a searched
+    // zero-hit file (rg counts non-matching bytes as searched) and drops the
+    // content stream. Content modes return silently.
+    if (cfg.file_needle) |n| if (!verify.gateWide(a, body[gate_from..], n)) {
+        gateMiss(w, dpath, body);
+        return;
+    };
+    if (cfg.file_alts.len > 0 and !verify.containsAnyWide(a, body[gate_from..], cfg.file_alts)) {
+        gateMiss(w, dpath, body);
+        return;
+    }
 
     var buf: std.ArrayList(u8) = .empty;
     var em: Emitter = .{
@@ -1265,20 +1382,33 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
         // `\n`; slice model + NUL beyond the 64K sniff means the searcher never
         // notices it — ordinary text, fall through to the normal path.
         if (!(o.multiline and re.canMatchNewline() and !grepfile.multilineBinary(body.len, nul))) {
+            // `--files-without-match` skips binary files entirely (serial
+            // `fileWithoutMatch` returns before any emit) — no path, no tally.
+            if (o.files_without) return;
+            if (o.stats) {
+                // Walked (implicit) file: only the committed prefix was
+                // searched — mirror serial `renderFile`'s binary stats arm.
+                const searched = body[0..grepfile.committedPrefix(body, nul)];
+                var blines: std.ArrayList([]const u8) = .empty;
+                if (!o.multiline) grepfile.collectLines(a, searched, o.term(), &blines);
+                const fs = grepfile.fileMatchStats(re, a, o, searched, blines.items, cfg.line_needle);
+                w.stats.add(.{ .files_searched = 1, .matches = fs.matches, .matched_lines = fs.lines, .bytes_searched = fs.bytes });
+            }
             const matched = grepfile.handleBinary(a, re, o, &buf, &em, dpath, false, body, nul, cfg.show_name);
             if (matched or buf.items.len > 0)
-                cfg.sink.emit(if (matched) .bin_hit else .text_plain, buf.items);
+                deliver(w, if (matched) .bin_hit else .text_plain, dpath, buf.items);
             return;
         }
     };
 
-    // `-l` fused fast path: one early-exit whole-buffer pass answers the file —
-    // no line split, no per-line engine dispatch. When the pattern is a pure
-    // literal (alternation), the whole-file gate above already PROVED the match
-    // (equivalence, not containment), so not even `docMatch` runs. A
-    // containment-only gate still drives the scan: jump gate hit to gate hit
-    // at SIMD speed and run the engine on just each hit's line, instead of
-    // paying the engine over every admitted byte (`gatedDocMatch`).
+    // `-l` / `--files-without-match` fused fast path: one early-exit whole-
+    // buffer pass answers the file — no line split, no per-line engine
+    // dispatch. When the pattern is a pure literal (alternation), the whole-
+    // file gate above already PROVED the match (equivalence, not containment),
+    // so not even `docMatch` runs. A containment-only gate still drives the
+    // scan: jump gate hit to gate hit at SIMD speed and run the engine on just
+    // each hit's line (`gatedDocMatch`). `--files-without-match` emits on a
+    // MISS (the invert of `-l`).
     if (cfg.fast_l) {
         const hit = cfg.lits_equiv or blk: {
             const sim = workerSim(w) orelse break :blk false;
@@ -1291,7 +1421,7 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
             if (cfg.file_needle) |n| if (n.ci) break :blk gatedDocMatch(re, sim, n, body);
             break :blk re.docMatch(sim, body);
         };
-        if (hit) bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
+        if (hit != o.files_without) bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
         return;
     }
 
@@ -1302,19 +1432,39 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     // exactly the count/`-o`/`-n`/plain literal regime `fast_l` above does not
     // cover; without it every worker paid a full line split + per-line engine
     // dispatch on a ubiquitous literal the index can't prune. Mirrors the serial
-    // engine's per-file dispatch exactly.
+    // engine's per-file dispatch exactly. `--stats` disables the fused class-run
+    // shortcut (it needs the line array for `fileMatchStats`, like serial).
     const fast = !o.multiline and em.litFastEligible();
-    // The fused `-c`/`-l` class-run paths answer from the whole buffer —
-    // skip the line split they'd never read (mirrors the serial driver).
-    const fused = !o.multiline and !fast and em.fusedFileEligible();
+    const fused = !o.multiline and !fast and !o.stats and em.fusedFileEligible();
     var lines: std.ArrayList([]const u8) = .empty;
     if (!o.multiline and !fast and !fused) grepfile.collectLines(a, body, o.term(), &lines);
+    if (o.stats) {
+        const fs = grepfile.fileMatchStats(re, a, o, body, lines.items, cfg.line_needle);
+        w.stats.add(.{ .files_searched = 1, .matches = fs.matches, .matched_lines = fs.lines, .bytes_searched = fs.bytes });
+    }
     if (cfg.heading) buf.print(a, "{s}{s}", .{ dpath, o.outTerm() }) catch oom();
     const before_body = buf.items.len;
     const hits = if (o.multiline) em.buffer(dpath, body) else if (fast) em.fileLit(dpath, body, 0, body.len, 0, true) else em.file(dpath, lines.items);
-    if (hits > 0) return cfg.sink.emit(.text_hit, buf.items);
+    if (hits > 0) return deliver(w, .text_hit, dpath, buf.items);
     // No heading header to keep, and (except --passthru) no body either.
-    if (!cfg.heading and buf.items.len > before_body) cfg.sink.emit(.text_plain, buf.items);
+    if (!cfg.heading and buf.items.len > before_body) deliver(w, .text_plain, dpath, buf.items);
+}
+
+/// Whole-file gate / alts miss: settle `--files-without-match` (emit) and
+/// `--stats` (tally a zero-hit searched file); every other mode is a silent drop.
+/// `--stats` bytes follow the binary cutoff: a walked file with a NUL only
+/// contributes its committed prefix (serial `renderFile`'s binary arm).
+fn gateMiss(w: *Worker, dpath: []const u8, body: []const u8) void {
+    const o = w.cfg.o;
+    if (o.files_without) {
+        bufferPath(w, dpath, if (o.null_sep) "\x00" else o.outTerm());
+    } else if (o.stats) {
+        var bytes = body.len;
+        if (w.cfg.binary_detect) if (std.mem.indexOfScalar(u8, body, 0)) |nul| {
+            bytes = grepfile.committedPrefix(body, nul);
+        };
+        w.stats.add(.{ .files_searched = 1, .bytes_searched = bytes });
+    }
 }
 
 /// The gate-driven `-l` boolean: every matching line must contain the gate
@@ -1363,6 +1513,48 @@ fn prefixProvesMatch(w: *Worker, re: *const Matcher, prefix: []const u8) bool {
     return re.docMatch(sim, prefix[0 .. nl + 1]);
 }
 
+// ─────────────────────────── sorted emit ───────────────────────────
+
+/// `--sort`/`--sortr path` order over the collected fragments. Ascending is
+/// `serial.pathLess` (rg's `Path::cmp`, `/` ranked below every byte); this
+/// engine only takes ascending path for a single/implicit root, where rg's
+/// per-argv-root walker order (`lessAscPathWalk`) collapses to exactly that.
+/// Descending is the global mirror (`--sortr`'s `ordering.reverse()`), valid for
+/// any root count — swapping the operands flips the tiebreak too.
+fn recLess(reverse: bool, x: SortedRec, y: SortedRec) bool {
+    return if (reverse) serial.pathLess(y.path, x.path) else serial.pathLess(x.path, y.path);
+}
+
+/// Gather every worker's held fragments, order them once, and replay them
+/// through the SAME `Sink` the streaming path uses — so heading/context
+/// separators (`emit`'s `first`/`join_groups` logic, now driven in sorted
+/// order) and the `matched_files` exit-code tally stay byte-identical to the
+/// serial sort oracle. `-l`/`--files` records carry only a path: rewrite the
+/// terminator here and emit them as one coalesced chunk.
+fn emitSorted(gpa: std.mem.Allocator, sink: *Sink, workers: []Worker, o: Opts) void {
+    var total: usize = 0;
+    for (workers) |*w| total += w.recs.items.len;
+    if (total == 0) return;
+    const recs = gpa.alloc(SortedRec, total) catch oom();
+    defer gpa.free(recs);
+    var k: usize = 0;
+    for (workers) |*w| for (w.recs.items) |r| {
+        recs[k] = r;
+        k += 1;
+    };
+    std.mem.sort(SortedRec, recs, o.sort_reverse, recLess);
+    if (o.files_list or o.files_only) {
+        const term: []const u8 = if (o.null_sep) "\x00" else o.outTerm();
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(gpa);
+        for (recs) |r| {
+            out.appendSlice(gpa, r.path) catch oom();
+            out.appendSlice(gpa, term) catch oom();
+        }
+        sink.emitFilesChunk(out.items, recs.len);
+    } else for (recs) |r| sink.emit(r.kind, r.buf);
+}
+
 // ─────────────────────────── run ───────────────────────────
 
 /// Fan out, walk, search, stream, exit. `filters` powers inline index elision;
@@ -1371,8 +1563,12 @@ fn prefixProvesMatch(w: *Worker, re: *const Matcher, prefix: []const u8) bool {
 pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re: ?*const Matcher, use_color: bool, filters: []const []const u8, sieve: crest.Vector, file_needle: ?simd.Gate, line_needle: ?simd.Gate, icfg: *const ingest.Config) noreturn {
     // Heading needs a printable path: `--no-filename` suppresses the header
     // like rg (the walk is recursive, so `.auto` filenames are always on here).
-    const heading = o.heading and o.filename != .never and !o.count_only and !o.count_matches and !o.files_only and !o.vimgrep;
-    const want_elision = indexElisionWanted(io, parsed, filters, sieve);
+    const heading = o.heading and o.filename != .never and !o.count_only and !o.count_matches and !o.files_only and !o.files_without and !o.vimgrep;
+    // `--stats` must visit every admitted file for `files searched` /
+    // `bytes searched`, so the index oracle (which drops proven non-matches)
+    // stays off — the fused walk still beats serial's collect-then-shard.
+    // `--files-without-match` KEEPS elision: a proven non-match IS the emit.
+    const want_elision = !o.stats and indexElisionWanted(io, parsed, filters, sieve);
     // Internal gate-only contract: load synchronously and fail closed unless
     // the real elision oracle is admitted. This makes freshness_fs.sh prove the
     // accelerated path instead of accidentally passing via an async/full-read
@@ -1427,10 +1623,12 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     const compiled = ignore.Compiled.build(gpa, &ig);
     var q: Queue = .{ .gpa = gpa, .io = io };
     defer q.items.deinit(gpa);
-    var sink: Sink = .{ .q = &q, .io = io, .heading = heading, .join_groups = o.wantsContext() and !o.files_only and !o.count_only and !o.count_matches and !heading };
+    var sink: Sink = .{ .q = &q, .io = io, .heading = heading, .join_groups = o.wantsContext() and !o.files_only and !o.files_without and !o.count_only and !o.count_matches and !heading };
     // Pure-literal alternation gate/equivalence (see `Cfg.file_alts`): only when
     // no single required literal already gates, and never for modes that must
     // read every body (`-v` needs zero-hit files; passthru emits them).
+    // `--stats` keeps the gate: a miss still tallies via `gateMiss` (zero hits +
+    // full bytes) without a regex run — faster than serial's ungated collect.
     const lits: []const []const u8 = if (re) |m| m.lits() else &.{};
     const file_alts: []const []const u8 = if (lits.len > 0 and file_needle == null and !o.invert and !o.passthru) lits else &.{};
     // Equivalence proof: the whole-file gate that will run (`file_needle`, a
@@ -1439,10 +1637,11 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // mined from the raw unfolded twin in `run.zig::caselessGate`).
     const lits_equiv = (file_needle != null and (file_needle.?.equiv or (lits.len == 1 and std.mem.eql(u8, lits[0], file_needle.?.bytes)))) or file_alts.len > 0;
     // Under `-U` the fused boolean is `bufMatch`; admit it only when that
-    // boolean provably equals the whole-buffer emit model's `-l` verdict
-    // (`bufBoolExact` — a nullable `\z`-style pattern falls to `Emitter.buffer`).
-    const fast_l = o.files_only and !o.invert and !o.word and !o.crlf and !o.null_data and o.max_per_file == 0 and !o.only_matching and
-        !o.count_only and !o.count_matches and !o.passthru and !o.vimgrep and !o.stop_on_nonmatch and o.replace == null and
+    // boolean provably equals the whole-buffer emit model's `-l` /
+    // `--files-without-match` verdict (`bufBoolExact` — a nullable `\z`-style
+    // pattern falls to `Emitter.buffer`).
+    const fast_l = (o.files_only or o.files_without) and !o.invert and !o.word and !o.crlf and !o.null_data and o.max_per_file == 0 and !o.only_matching and
+        !o.count_only and !o.count_matches and !o.passthru and !o.vimgrep and !o.stop_on_nonmatch and o.replace == null and !o.stats and
         (!o.multiline or (re != null and re.?.bufBoolExact()));
     var gate_len: usize = if (file_needle) |n| n.bytes.len else 0;
     for (file_alts) |n| gate_len = @max(gate_len, n.len);
@@ -1469,6 +1668,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         .snap = if (snap_view) |*v| v else null,
         .shard = if (shard_view) |*v| v else null,
         .sink = &sink,
+        .collect_sorted = o.sort_key != .none,
     };
     const roots: []const []const u8 = if (parsed.roots.len > 0) parsed.roots else &.{"."};
     {
@@ -1510,6 +1710,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     defer for (workers) |*w| {
         w.arena.deinit();
         w.out.deinit(gpa);
+        w.recs.deinit(gpa);
     };
 
     const threads = gpa.alloc(std.Thread, nworkers) catch oom();
@@ -1521,6 +1722,14 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     }
     workerMain(&workers[0]); // the main thread is a worker too
     for (threads[0..spawned]) |t| t.join();
+
+    // `--sort`/`--sortr path`: the fused walk held every worker's rendered output
+    // in its arena keyed by path (`deliver`/`bufferPath`) instead of racing it to
+    // stdout. Order the whole result once now and replay it through the SAME
+    // `Sink` — a single global sort over a parallel walk+read+match, so separators
+    // and the matched-files exit code stay byte-identical to the serial oracle,
+    // just sorted. Falls through to the shared exit tail below.
+    if (cfg.collect_sorted) emitSorted(gpa, &sink, workers, o);
 
     // Every byte is already on stdout — each worker streamed its fragments
     // through `sink.emit` the instant it rendered them (see `Sink`). Nothing
@@ -1560,7 +1769,25 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         _ = corpus_mod.writeStdout(sbuf.items);
         std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (st.with_match > 0) 0 else 1);
     }
-    if (re != null and !o.quiet and !o.files_list and sink.matched_files == 0 and !nothing_searched and !q.walk_error.load(.acquire))
+    // `--stats`: every worker streamed its match fragments; fold their per-
+    // worker tallies, stamp `files_with_match` / `bytes_printed` from the sink
+    // (the serial engine does the same post-pass), and append ripgrep's trailing
+    // stats block. Quiet is declined by `eligible`, so the match stream always
+    // ran and `bytes_printed` is the live write count.
+    if (o.stats) {
+        var st: grepfile.Stats = .{};
+        for (workers) |*wk| st.add(wk.stats);
+        st.files_with_match = sink.matched_files;
+        st.bytes_printed = sink.bytes_printed;
+        var sbuf: std.ArrayList(u8) = .empty;
+        grepfile.emitStats(gpa, &sbuf, st);
+        _ = corpus_mod.writeStdout(sbuf.items);
+        std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);
+    }
+    // `--files-without-match`: `matched_files` counts files that LACKED the
+    // pattern (each `bufferPath` → `emitFilesChunk`), so exit 0 iff at least
+    // one such file was found — ripgrep's success predicate for this mode.
+    if (re != null and !o.quiet and !o.files_list and !o.files_without and sink.matched_files == 0 and !nothing_searched and !q.walk_error.load(.acquire))
         hints.noMatches(hints.shape(parsed.patterns, o, parsed.roots, parsed.roots.len > 0), null);
     std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);
 }
@@ -1618,6 +1845,27 @@ test "index loading stays off narrow explicit roots" {
     try t.expect(broadIndexedRoots(&.{"."}));
     try t.expect(!broadIndexedRoots(&.{"pkg/kernels/irregex"}));
     try t.expect(!broadIndexedRoots(&.{"/tmp/corpus"}));
+}
+
+test "sorted-emit order matches the serial --sort path oracle" {
+    const t = std.testing;
+    const mk = struct {
+        fn r(p: []const u8) SortedRec {
+            return .{ .path = p, .kind = .text_hit, .buf = "" };
+        }
+    }.r;
+    // Ascending rides `serial.pathLess` (rg's `Path::cmp`): `/` ranks below every
+    // other byte, so a directory sorts before a sibling file sharing its stem —
+    // a raw byte compare (`.`=0x2e < `/`=0x2f) would flip these.
+    try t.expect(recLess(false, mk("warroom/service.go"), mk("warroom.go")));
+    try t.expect(!recLess(false, mk("warroom.go"), mk("warroom/service.go")));
+    try t.expect(recLess(false, mk("a.zig"), mk("b.zig")));
+    // `--sortr` is the exact mirror (operands swapped), matching rg's `.reverse()`.
+    try t.expect(recLess(true, mk("b.zig"), mk("a.zig")));
+    try t.expect(recLess(true, mk("warroom.go"), mk("warroom/service.go")));
+    // Equal paths compare false either way — a stable, no-adjacent-reorder sort.
+    try t.expect(!recLess(false, mk("x"), mk("x")));
+    try t.expect(!recLess(true, mk("x"), mk("x")));
 }
 
 test "worker topology keeps scans wide and selective walks lean" {

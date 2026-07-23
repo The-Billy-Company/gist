@@ -380,10 +380,10 @@ expectations by hand. The gates cover parallel and serial walks, indexed versus
 ordering/ignore flags, encodings, preprocessing, compressed input, binary
 handling, streams, and resident-versus-cold answers.
 
-The tracked ripgrep 15.1.0 snapshot contains 441 invocations per walk engine:
+The tracked ripgrep 15.2.0 snapshot contains 446 invocations per walk engine:
 
-- **Mined upstream suite:** 405 PASS, 0 ORDER, 0 FAIL, 16 NA, and 20 SKIP.
-  Supported-surface parity is **405/405 = 100%**; every supported-surface case
+- **Mined upstream suite:** 409 PASS, 0 ORDER, 0 FAIL, 16 NA, and 21 SKIP.
+  Supported-surface parity is **409/409 = 100%**; every supported-surface case
   matches ripgrep, with zero deferred divergences.
 - **Multiline:** 30/30 adversarial cases pass for stdout, exit code, and
   indexed-versus-`--no-index` equality.

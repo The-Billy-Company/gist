@@ -1,7 +1,7 @@
 ---
 doc_radar:
   occurrences:
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 405}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 409}
     - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
   sentinels:
     - file: pkg/kernels/irregex/src/surface/exec/cold/engine/serial.zig
@@ -222,7 +222,7 @@ and a compatibility surface mined against the live ripgrep oracle.
 
 ## 4. Evidence before adjectives
 
-The tracked differential replay passes all 405 scoreable ripgrep cases on
+The tracked differential replay passes all 409 scoreable ripgrep cases on
 each independent walk engine with zero in-scope failures. The committed
 certificate records statistically gated wins in all 12 registered cold query
 classes; its other layers audit port pressure, roofline headroom, candidate

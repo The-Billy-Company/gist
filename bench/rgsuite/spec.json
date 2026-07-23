@@ -2002,7 +2002,7 @@
    "Sherlock"
   ],
   "stdin": null,
-  "cmp": "plain",
+  "cmp": "sort",
   "terminal": "stdout",
   "exit_code": null,
   "current_dir": null,
@@ -2032,7 +2032,7 @@
    "Sherlock"
   ],
   "stdin": null,
-  "cmp": "plain",
+  "cmp": "sort",
   "terminal": "stdout",
   "exit_code": null,
   "current_dir": null,
@@ -2059,7 +2059,7 @@
    "Sherlock"
   ],
   "stdin": null,
-  "cmp": "plain",
+  "cmp": "sort",
   "terminal": "stdout",
   "exit_code": null,
   "current_dir": null,
@@ -2090,7 +2090,7 @@
    "Sherlock"
   ],
   "stdin": null,
-  "cmp": "plain",
+  "cmp": "sort",
   "terminal": "stdout",
   "exit_code": null,
   "current_dir": null,
@@ -6237,6 +6237,168 @@
   "terminal": "stdout",
   "exit_code": null,
   "current_dir": "foo",
+  "pcre2": false,
+  "status": "ok",
+  "skip": []
+ },
+ {
+  "file": "misc.rs",
+  "name": "ignore_git_multi_root_order#1",
+  "files": [
+   {
+    "path": ".gitignore",
+    "b64": "c3JjL2ludmFsaWQK"
+   },
+   {
+    "path": "src/invalid",
+    "b64": "dGhpcwo="
+   },
+   {
+    "path": "src/valid",
+    "b64": "dGhpcwo="
+   },
+   {
+    "path": "tests/valid",
+    "b64": "dGhpcwo="
+   }
+  ],
+  "dirs": [
+   ".git",
+   "src",
+   "tests"
+  ],
+  "symlinks": [],
+  "sized": [],
+  "argv": [
+   "--files-with-matches",
+   "this",
+   "src",
+   "tests"
+  ],
+  "stdin": null,
+  "cmp": "sort",
+  "terminal": "stdout",
+  "exit_code": null,
+  "current_dir": null,
+  "pcre2": false,
+  "status": "ok",
+  "skip": []
+ },
+ {
+  "file": "misc.rs",
+  "name": "ignore_git_multi_root_order#2",
+  "files": [
+   {
+    "path": ".gitignore",
+    "b64": "c3JjL2ludmFsaWQK"
+   },
+   {
+    "path": "src/invalid",
+    "b64": "dGhpcwo="
+   },
+   {
+    "path": "src/valid",
+    "b64": "dGhpcwo="
+   },
+   {
+    "path": "tests/valid",
+    "b64": "dGhpcwo="
+   }
+  ],
+  "dirs": [
+   ".git",
+   "src",
+   "tests"
+  ],
+  "symlinks": [],
+  "sized": [],
+  "argv": [
+   "--files-with-matches",
+   "this",
+   "tests",
+   "src"
+  ],
+  "stdin": null,
+  "cmp": "sort",
+  "terminal": "stdout",
+  "exit_code": null,
+  "current_dir": null,
+  "pcre2": false,
+  "status": "ok",
+  "skip": []
+ },
+ {
+  "file": "misc.rs",
+  "name": "ignore_rgignore_multi_root_order#1",
+  "files": [
+   {
+    "path": ".rgignore",
+    "b64": "YmV0YS8qKi8qLnN2Zwo="
+   },
+   {
+    "path": "alpha/a.txt",
+    "b64": "QVdTCg=="
+   },
+   {
+    "path": "beta/x.svg",
+    "b64": "QVdTCg=="
+   }
+  ],
+  "dirs": [
+   "alpha",
+   "beta"
+  ],
+  "symlinks": [],
+  "sized": [],
+  "argv": [
+   "--files-with-matches",
+   "AWS",
+   "alpha",
+   "beta"
+  ],
+  "stdin": null,
+  "cmp": "sort",
+  "terminal": "stdout",
+  "exit_code": null,
+  "current_dir": null,
+  "pcre2": false,
+  "status": "ok",
+  "skip": []
+ },
+ {
+  "file": "misc.rs",
+  "name": "ignore_rgignore_multi_root_order#2",
+  "files": [
+   {
+    "path": ".rgignore",
+    "b64": "YmV0YS8qKi8qLnN2Zwo="
+   },
+   {
+    "path": "alpha/a.txt",
+    "b64": "QVdTCg=="
+   },
+   {
+    "path": "beta/x.svg",
+    "b64": "QVdTCg=="
+   }
+  ],
+  "dirs": [
+   "alpha",
+   "beta"
+  ],
+  "symlinks": [],
+  "sized": [],
+  "argv": [
+   "--files-with-matches",
+   "AWS",
+   "beta",
+   "alpha"
+  ],
+  "stdin": null,
+  "cmp": "sort",
+  "terminal": "stdout",
+  "exit_code": null,
+  "current_dir": null,
   "pcre2": false,
   "status": "ok",
   "skip": []
@@ -11996,7 +12158,7 @@
    "."
   ],
   "stdin": null,
-  "cmp": "plain",
+  "cmp": "sort",
   "terminal": "stdout",
   "exit_code": null,
   "current_dir": null,
@@ -12770,5 +12932,46 @@
   "pcre2": false,
   "status": "ok",
   "skip": []
+ },
+ {
+  "file": "regression.rs",
+  "name": "r3275_git_global_config_env",
+  "files": [
+   {
+    "path": ".git",
+    "b64": ""
+   },
+   {
+    "path": "foo/foo1",
+    "b64": ""
+   },
+   {
+    "path": "foo/foo2",
+    "b64": ""
+   },
+   {
+    "path": "global-excludes-nonstandard",
+    "b64": "Zm9vMg=="
+   }
+  ],
+  "dirs": [
+   "foo"
+  ],
+  "symlinks": [],
+  "sized": [],
+  "argv": [
+   "--files",
+   "foo"
+  ],
+  "stdin": null,
+  "cmp": "plain",
+  "terminal": "stdout",
+  "exit_code": null,
+  "current_dir": null,
+  "pcre2": false,
+  "status": "ok",
+  "skip": [
+   "dir.create:unresolved"
+  ]
  }
 ]

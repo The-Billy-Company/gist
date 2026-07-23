@@ -366,7 +366,7 @@
   "file": "binary.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "f1_sjis",
@@ -1363,7 +1363,7 @@
   "file": "feature.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "f1404_nothing_searched_warning#1",
@@ -1700,14 +1700,14 @@
   "file": "json.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "notutf8_file",
   "file": "json.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "crlf",
@@ -2491,6 +2491,54 @@
   "detail": ""
  },
  {
+  "name": "ignore_git_multi_root_order#1",
+  "file": "misc.rs",
+  "bucket": "PASS",
+  "argv": [
+   "--files-with-matches",
+   "this",
+   "src",
+   "tests"
+  ],
+  "detail": "order-agnostic oracle (eqnice_sorted)"
+ },
+ {
+  "name": "ignore_git_multi_root_order#2",
+  "file": "misc.rs",
+  "bucket": "PASS",
+  "argv": [
+   "--files-with-matches",
+   "this",
+   "tests",
+   "src"
+  ],
+  "detail": ""
+ },
+ {
+  "name": "ignore_rgignore_multi_root_order#1",
+  "file": "misc.rs",
+  "bucket": "PASS",
+  "argv": [
+   "--files-with-matches",
+   "AWS",
+   "alpha",
+   "beta"
+  ],
+  "detail": ""
+ },
+ {
+  "name": "ignore_rgignore_multi_root_order#2",
+  "file": "misc.rs",
+  "bucket": "PASS",
+  "argv": [
+   "--files-with-matches",
+   "AWS",
+   "beta",
+   "alpha"
+  ],
+  "detail": ""
+ },
+ {
   "name": "symlink_nofollow",
   "file": "misc.rs",
   "bucket": "PASS",
@@ -2577,77 +2625,77 @@
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "preprocessing_glob",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_gzip",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_bzip2",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_xz",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_lz4",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_lzma",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_brotli",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_zstd",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_uncompress",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "compressed_failing_gzip",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "binary_convert",
@@ -2740,21 +2788,21 @@
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "sort_accessed",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "sortr_accessed",
   "file": "misc.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "overlap1",
@@ -3091,7 +3139,7 @@
   "file": "regression.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "r228",
@@ -4888,7 +4936,7 @@
   "file": "regression.rs",
   "bucket": "SKIP",
   "argv": [],
-  "detail": "control-flow/unresolved"
+  "detail": "control-flow/unreproducible-fixture"
  },
  {
   "name": "r3180_look_around_panic",
@@ -4901,5 +4949,15 @@
    "-rx"
   ],
   "detail": ""
+ },
+ {
+  "name": "r3275_git_global_config_env",
+  "file": "regression.rs",
+  "bucket": "SKIP",
+  "argv": [
+   "--files",
+   "foo"
+  ],
+  "detail": "control-flow/unreproducible-fixture"
  }
 ]

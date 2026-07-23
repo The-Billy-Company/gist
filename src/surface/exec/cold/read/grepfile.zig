@@ -491,7 +491,7 @@ pub const StagedFile = struct {
 /// the hot common-case function above. A regular file this large is
 /// memory-MAPPED read-only rather than slurped through a read loop: the copy
 /// loop paid 2× the bytes (kernel→ArrayList reads plus growth memcpys) on
-/// multi-GB leaked-in blobs (rg's multi-root re-anchor admits gitignored
+/// multi-GB leaked-in blobs (explicit-root scoping admits gitignored
 /// training corpora — `gist pat services libs` spent ~0.5 s copying one 2.1 GB
 /// text file rg mmaps in ~0.2 s), while the map costs one syscall, faults in
 /// only the pages the SIMD gate actually touches before its first hit, and

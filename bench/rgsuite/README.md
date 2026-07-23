@@ -22,35 +22,35 @@ code path, and a single-engine run has already once missed a real regression
 
 ## Track A — correctness scoreboard
 
-`rg 15.1.0`, 441 mined `rgtest!` cases (invocations; a multi-command `rgtest!`
+`rg 15.2.0`, 446 mined `rgtest!` cases (invocations; a multi-command `rgtest!`
 mines one case per command), replayed against **both** engines:
 
 | Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                         |
 | --------- | ------------------------: | -----------------: | ------------------------------------------------------------------------------- |
-| **PASS**  |                       405 |                405 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)     |
+| **PASS**  |                       409 |                409 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)     |
 | **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole        |
 | **FAIL**  |                         0 |                  0 | a supported-surface divergence, each phase-tracked in `coverage_manifest.toml`  |
 | NA        |                        16 |                 16 | unsupported **by design** (see boundaries below)                                |
-| SKIP      |                        20 |                 20 | not replayable as one argv — each mapped to a companion proof / upstream reason |
+| SKIP      |                        21 |                 21 | not replayable as one argv — each mapped to a companion proof / upstream reason |
 
-**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 405/405 = 100.0%
+**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 409/409 = 100.0%
 on both engines** — identical on whichever engine a given case dispatches to.
 There are zero FAILs and zero deferred divergences: every supported-surface case
-is replayed and matches ripgrep byte-for-byte. Together the 441 mined obligations
+is replayed and matches ripgrep byte-for-byte. Together the 446 mined obligations
 account completely — every case is replayed (PASS/ORDER/FAIL/NA) or claimed by
 exactly one manifest entry (SKIP) — and `check_results.py` fails the build on any
 orphan skip, double credit, undeferred FAIL, undocumented divergence, or README drift.
 
 ### Complete obligation accounting (no misleading denominator)
 
-The 441 mined `rgtest!` obligations split into what the harness can drive against
+The 446 mined `rgtest!` obligations split into what the harness can drive against
 live `rg` as one argv, and what it accounts for out-of-band in
 `coverage_manifest.toml` (`tomllib`-parsed, gate-enforced):
 
-- **405 replayed** — executed against real ripgrep and bucketed above
-  (405 PASS + 0 FAIL); NA (16) are replayed too but fall outside the parity
+- **409 replayed** — executed against real ripgrep and bucketed above
+  (409 PASS + 0 FAIL); NA (16) are replayed too but fall outside the parity
   denominator as announced design refusals.
-- **20 SKIP, each claimed once** by a manifest entry: **companion** (the miner
+- **21 SKIP, each claimed once** by a manifest entry: **companion** (the miner
   couldn't lower a control-flow `rgtest!` to one argv, but a sibling proof —
   `flags.py`/`modes.py`/`transforms.py` — drives the same flags byte-for-byte),
   **boundary** (a purposeful decline whose adverse test is the loud exit-2
@@ -343,7 +343,7 @@ formats; bzip2 and the external-codec tail have no in-process Zig decoder).
 
 | File            | Role                                                                                                                                                                                                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `spec.json`     | frozen, self-contained mined spec (441 `rgtest!` invocations)                                                                                                                                                                                                     |
+| `spec.json`     | frozen, self-contained mined spec (446 `rgtest!` invocations)                                                                                                                                                                                                     |
 | `mine.py`       | regenerates `spec.json` from a ripgrep checkout                                                                                                                                                                                                                   |
 | `run.py`        | differential runner + honest scoreboard (the gate)                                                                                                                                                                                                                |
 | `modes.py`      | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers)                                                                                                                                                                                            |

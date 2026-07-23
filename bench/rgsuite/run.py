@@ -51,14 +51,19 @@ def score(rec, engine_env=None):
     Dispatched by the stream its upstream `rgtest!` asserted on (`terminal`).
     A case with no replayable argv (a `control-flow`/`fixture-helper` miner skip)
     stays SKIP — those are credited through the coverage manifest, not replayed
-    here. Everything else runs on BOTH tools and is scored at the *upstream test's
-    own oracle*: `stdout` diffs bytes, `exit` diffs the return code, `stderr`
-    (`assert_non_empty_stderr`) requires a matching diagnostic + exit class, and
-    `output` (`.output()`/`.raw_output()`) asserts stdout + exit + that a warning
-    ripgrep emits is not silently dropped.
+    here. A record whose fixture the miner could NOT fully reproduce (a non-empty
+    `skip` on an otherwise-`ok` record — e.g. rg 15.2's `r3275_git_global_config`,
+    whose determinism rides a `format!`-built config file embedding a run-time
+    absolute `excludesFile` path the self-contained miner can't template) is SKIP
+    too: scoring a case against an admittedly-incomplete fixture is not a faithful
+    diff, only order-nondeterministic noise. Everything else runs on BOTH tools
+    and is scored at the *upstream test's own oracle*: `stdout` diffs bytes, `exit`
+    diffs the return code, `stderr` (`assert_non_empty_stderr`) requires a matching
+    diagnostic + exit class, and `output` (`.output()`/`.raw_output()`) asserts
+    stdout + exit + that a warning ripgrep emits is not silently dropped.
     """
-    if rec["status"] == "skip" or not rec["argv"]:
-        return "SKIP", "control-flow/unresolved"
+    if rec["status"] == "skip" or rec.get("skip") or not rec["argv"]:
+        return "SKIP", "control-flow/unreproducible-fixture"
 
     # ignore_cleanup_errors: gist's resident-session auto-serve may asynchronously
     # touch its working dir after the child returns; that's a perf-tier daemon,

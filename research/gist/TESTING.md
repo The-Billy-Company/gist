@@ -1,10 +1,10 @@
 ---
 doc_radar:
   occurrences:
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 405}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 409}
     - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
     - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "NA"', equals: 16}
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 20}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 21}
     - {file: pkg/kernels/irregex/bench/matrix/matrix.toml, pattern: '\[\[shape\]\]', equals: 19}
   sentinels:
     - file: pkg/kernels/irregex/bench/gates/ci_order.sh
@@ -18,7 +18,7 @@ doc_radar:
 # Gist — the evidence story
 
 Gist has several independent evidence layers. The tracked ripgrep replay is
-**fully green**: 405/405 scoreable mined cases pass on each walk engine, with
+**fully green**: 409/409 scoreable mined cases pass on each walk engine, with
 zero deferred divergences. This document distinguishes a passing parity proof
 from complete accounting of the surface.
 
@@ -65,17 +65,17 @@ ripgrep's expected output. Parallel and serial walk engines are scored
 separately because they have distinct implementations; their totals are not
 added together.
 
-The tracked ripgrep 15.1.0 snapshot contains 441 invocations **per engine**:
+The tracked ripgrep 15.2.0 snapshot contains 446 invocations **per engine**:
 
 | bucket | count | meaning                                                   |
 | ------ | ----: | --------------------------------------------------------- |
-| PASS   |   405 | Gist matches the oracle at the upstream test's own bar    |
+| PASS   |   409 | Gist matches the oracle at the upstream test's own bar    |
 | ORDER  |     0 | byte-exact case differs only by order                     |
 | FAIL   |     0 | in-scope divergence                                       |
 | NA     |    16 | deliberate, documented product boundary                   |
-| SKIP   |    20 | accounted companion, boundary, or irreplayable obligation |
+| SKIP   |    21 | accounted companion, boundary, or irreplayable obligation |
 
-Supported-surface parity is therefore **405/405 = 100%**.
+Supported-surface parity is therefore **409/409 = 100%**.
 `check_results.py` proves that every PASS/NA/SKIP is accounted for and that the
 README and result artifact agree; with zero FAIL rows the strict gate passes
 without `--allow-fail`.

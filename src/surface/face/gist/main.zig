@@ -280,7 +280,7 @@ pub fn main(init: std.process.Init) !void {
     // `rg [flags] <pattern> [PATH...]` — the same whole-tree engine the bare
     // shorthand below uses, addressed explicitly (the shape an `alias
     // rg=gist` drop-in takes). It also backs the rgsuite differential-parity
-    // certificate (441 mined `rg`-argv replays via `bench/rgsuite/run.py`).
+    // certificate (446 mined `rg`-argv replays via `bench/rgsuite/run.py`).
     // Omitted from `usage()`'s three-verb list (it isn't index-backed — see
     // the bare shorthand, which IS documented there) and from `--schema`
     // (its flag surface is rg's own, not gist's native vocabulary), but it is
