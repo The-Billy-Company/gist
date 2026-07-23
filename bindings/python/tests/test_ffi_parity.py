@@ -19,10 +19,30 @@ import pytest
 
 import irregex
 from irregex import _ffi, engine
-from irregex.request import SearchEngine, SearchRequest
+from irregex.request import Match, SearchEngine, SearchRequest
 
 
 pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirregex/cffi unavailable")
+
+
+def _by_file(matches: list[Match]) -> dict[str, list[Match]]:
+    """Group records by path, preserving each file's emission order.
+
+    Cross-file ORDER is a documented degree of freedom: cold's default parallel
+    pipeline emits in worker-discovery order (for a small tree, the filesystem's
+    readdir order), while the warm engine canonicalizes to a deterministic
+    `pathLess` total order (`resident.zig`; the rgsuite oracle certifies the two
+    equivalent via `sort_lines`). So warm ≡ cold means the SAME files with a
+    byte-identical record SEQUENCE WITHIN each file (line order, context
+    interleave, submatch spans) — not a shared cross-file order the engine never
+    promises. `dict` equality compares the path set and each ordered per-file
+    list, so a wrong line/text/span/context or a missing/extra record still
+    fails; only the free inter-file order is neutralized.
+    """
+    grouped: dict[str, list[Match]] = {}
+    for m in matches:
+        grouped.setdefault(m.path, []).append(m)
+    return grouped
 
 
 @pytest.fixture
@@ -79,8 +99,9 @@ def test_run_equals_cold(corpus, req: SearchRequest) -> None:
     warm = _ffi.run(req, cwd=None)
     cold = engine.run(req, cwd=None)
     assert warm is not None  # eligible + lib present → served warm
-    # Byte parity: identical order, path, line number, text, and submatch spans.
-    assert warm == cold
+    # Byte parity: same files, and identical per-file record sequence — path,
+    # line number, text, submatch spans (cross-file order is a free choice).
+    assert _by_file(warm) == _by_file(cold)
 
 
 def test_files_and_count_equal_cold(corpus) -> None:
@@ -119,7 +140,9 @@ def test_quiet_and_max_count_faces_equal_cold(corpus, req: SearchRequest) -> Non
     ],
 )
 def test_invert_faces_equal_cold(corpus, req: SearchRequest) -> None:
-    assert _ffi.run(req, cwd=None) == engine.run(req, cwd=None)
+    warm = _ffi.run(req, cwd=None)
+    assert warm is not None
+    assert _by_file(warm) == _by_file(engine.run(req, cwd=None))
     assert _ffi.files(req, cwd=None) == engine.files(req, cwd=None)
     assert _ffi.count(req, cwd=None) == engine.count(req, cwd=None)
 
@@ -134,7 +157,9 @@ def test_invert_faces_equal_cold(corpus, req: SearchRequest) -> None:
     ],
 )
 def test_context_is_stream_only_and_all_faces_equal_cold(corpus, req: SearchRequest) -> None:
-    assert _ffi.run(req, cwd=None) == engine.run(req, cwd=None)
+    warm = _ffi.run(req, cwd=None)
+    assert warm is not None
+    assert _by_file(warm) == _by_file(engine.run(req, cwd=None))
     assert _ffi.files(req, cwd=None) == engine.files(req, cwd=None)
     assert _ffi.count(req, cwd=None) == engine.count(req, cwd=None)
 
@@ -216,7 +241,7 @@ def test_session_run_is_warm_and_matches_cold(corpus) -> None:
     # files/count) — it must equal the cold `--json` matches exactly.
     with irregex.Session(cwd=None) as s:
         warm = s.run(SearchRequest(pattern="TODO"))
-    assert warm == engine.run(SearchRequest(pattern="TODO"), cwd=None)
+    assert _by_file(warm) == _by_file(engine.run(SearchRequest(pattern="TODO"), cwd=None))
 
 
 def test_abi_version_parity() -> None:

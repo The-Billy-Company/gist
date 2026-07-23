@@ -89,31 +89,53 @@ _ELIGIBLE: list[SearchRequest] = [
     SearchRequest(pattern="TODO", invert=True, max_count=2),
 ]
 
-# One request per ineligible DIMENSION — every field/scope that must fall to cold,
-# plus the pattern-shape boundary (`\n`) that `warm_eligible` used to miss.
+# Cold on BOTH sides — a dimension neither the pure predicate nor the built
+# classifier serves warm, plus the pattern-shape boundary (`\n`) `warm_eligible`
+# used to miss. (`.` is cold because cold `./`-prefixes it; `--iglob`/`-T`/
+# `--hidden`/`-uu`/`-L`/`--no-index`/`--max-depth`/multiline/explicit-unicode/
+# `--engine=auto` all sit outside `classify`'s fast path — see `request.zig`.)
 _INELIGIBLE: list[SearchRequest] = [
     SearchRequest(pattern="TODO", paths=(".",)),  # even `.` (cold `./`-prefixes)
-    SearchRequest(pattern="TODO", paths=("services",)),  # a foreign/subtree root
-    SearchRequest(pattern="TODO", globs=("*.py",)),
     SearchRequest(pattern="TODO", iglobs=("*.PY",)),
-    SearchRequest(pattern="TODO", types=("py",)),
     SearchRequest(pattern="TODO", not_types=("py",)),
     SearchRequest(pattern="TODO", hidden=True),
     SearchRequest(pattern="TODO", no_ignore=True),
     SearchRequest(pattern="TODO", follow=True),
     SearchRequest(pattern="TODO", no_index=True),
-    SearchRequest(pattern="TODO", before=2),
-    SearchRequest(pattern="TODO", after=2),
-    SearchRequest(pattern="TODO", context=2),
     SearchRequest(pattern="TODO", max_depth=2),
     SearchRequest(pattern="TODO", multiline=True),
     SearchRequest(pattern="TODO", multiline_dotall=True),
     SearchRequest(pattern="TODO", unicode=False),
     SearchRequest(pattern="TODO", unicode=True),
     SearchRequest(pattern="TODO", engine=SearchEngine.AUTO),
-    SearchRequest(pattern="TODO", engine=SearchEngine.PCRE2),
-    SearchRequest(pattern="TODO", extra_flags=("-P",)),
     SearchRequest(pattern="multi\nline"),  # a `\n` pattern steps outside per-line
+]
+
+# The one-directional gap: dimensions the built classifier (and the daemon it
+# gates) DO serve warm — scoped roots, `-g` globs, `-t` types, `-A`/`-B`/`-C`
+# context, and `-P`/`--pcre2` — but which the pure-Python UDS `warm_eligible`
+# predicate deliberately declines (`session.py::_INELIGIBLE_FIELDS`, mirrored by
+# `bindings/rust` and `tests/test_session.py::test_warm_eligible_rejects_rich_requests`).
+# Declining is SOUND: `warm_eligible ⟹ classify eligible` is the safety-critical
+# direction (never send the daemon a warm query it must decline), and a declined
+# request is answered on the certified cold path — or, for roots/context, in
+# process via the wider FFI predicate (`ffi_eligible`). The reverse (warm serves
+# everything the binary does) is an optimization, not a correctness property, so
+# the UDS predicate keeps a narrow, table-free surface: `-t` alone would force
+# the ~230-row Zig type registry (`corpus/scope/types.zig`) into the binding,
+# a cross-language duplication that would drift. This list mechanically guards
+# the subset in BOTH directions — narrowing the binary, or widening the
+# predicate to serve one of these, trips the assertion and demands the pair move
+# together.
+_BINDING_COLD_BINARY_WARM: list[SearchRequest] = [
+    SearchRequest(pattern="TODO", paths=("services",)),  # a clean relative subtree root
+    SearchRequest(pattern="TODO", globs=("*.py",)),  # `-g` include glob
+    SearchRequest(pattern="TODO", types=("py",)),  # `-t` type scope (Zig-only registry)
+    SearchRequest(pattern="TODO", before=2),  # `-B` context
+    SearchRequest(pattern="TODO", after=2),  # `-A` context
+    SearchRequest(pattern="TODO", context=2),  # `-C` context
+    SearchRequest(pattern="TODO", engine=SearchEngine.PCRE2),  # `-P` PCRE2 engine
+    SearchRequest(pattern="TODO", extra_flags=("-P",)),  # raw `-P` argv
 ]
 
 
@@ -156,6 +178,22 @@ def test_ineligible_shapes_agree(corpus, req: SearchRequest) -> None:
     assert _binary_verdict(req, corpus) is False
 
 
+@needs_gist
+@pytest.mark.parametrize(
+    "req",
+    _BINDING_COLD_BINARY_WARM,
+    ids=lambda r: f"gap:{'|'.join([*r.to_argv(), *r.paths]) or r.pattern!r}",
+)
+def test_binding_declines_what_binary_serves_warm(corpus, req: SearchRequest) -> None:
+    # The sound one-directional gap: the pure UDS predicate declines (→ cold /
+    # FFI) exactly where the built classifier would serve warm. Guarded in BOTH
+    # directions — if the binary is narrowed to decline one of these, or the
+    # predicate widened to accept one, this fails and the pair must move to the
+    # matching list together (never silently drift).
+    assert warm_eligible(req) is False
+    assert _binary_verdict(req, corpus) is True
+
+
 def test_pattern_shape_boundary_is_cold_without_a_binary() -> None:
     # A `\n`/NUL/empty pattern steps outside rg's per-line model (a NUL can't be
     # passed through argv, so it is pinned here only): `warm_eligible` must decline
@@ -184,7 +222,13 @@ def test_ffi_predicate_extends_uds_with_roots_unicode_and_auto() -> None:
         assert ffi_eligible(ffi_option) is True
     for req in _ELIGIBLE:
         assert ffi_eligible(req) is warm_eligible(req)
-    for req in _INELIGIBLE:
+    # The FFI options ABI + `irregex_open` root array extend the UDS subset with
+    # invert, `-A`/`-B`/`-C` context, explicit roots, explicit Unicode, and the
+    # linear arm of `engine="auto"` — but NOT `-g`/`-t` globs (no glob ABI) or
+    # `-P` (no PCRE ABI), so those stay FFI-cold even though the daemon serves
+    # them warm. The predicate agrees on that split for every cold-BOTH and
+    # binding-cold-binary-warm dimension.
+    for req in (*_INELIGIBLE, *_BINDING_COLD_BINARY_WARM):
         ffi_extension = (
             req.invert
             or bool(req.before or req.after or req.context)

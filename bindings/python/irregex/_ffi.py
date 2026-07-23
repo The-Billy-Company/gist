@@ -5,8 +5,10 @@ per-Python build) and drives the `irregex_open` / `irregex_search` /
 `irregex_close` C ABI (`../../../include/irregex.h`,
 implemented in `src/surface/ffi/session.zig`). It holds one corpus WARM in this
 very process — no subprocess, Unix socket, `stdout`, or `exit` — and streams
-full `Match` records over a callback, byte-identical to the cold `gist --json`
-stream (and to the UDS daemon).
+full `Match` records over a callback: the same record SET the cold `gist --json`
+stream produces, each file's lines in the same order, but canonicalized to
+`pathLess` file order (cold's parallel/discovery file order is a certified
+degree of freedom — see `resident.zig`).
 
 **Fail-open by construction.** Every entry returns `None` (never raises) when
 the library is absent, `cffi` is missing, the ABI version disagrees, the corpus
@@ -263,7 +265,7 @@ class Handle:
             )
 
     def search(self, request: SearchRequest) -> list[Match] | None:
-        """Full `Match` records for `request` over the warm corpus, in cold `--json` order.
+        """Full `Match` records for `request` over the warm corpus, in `pathLess` file order.
 
         Returns None to fall back cold (closed handle, or a `IRREGEX_STALE`/error
         status from an unsupported pattern).

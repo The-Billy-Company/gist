@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use crate::error::Result;
 use crate::request::SearchRequest;
 
-const PROTOCOL_VERSION: u8 = 2; // must match `protocol.protocol_version`
+const PROTOCOL_VERSION: u8 = 6; // must match `protocol.protocol_version`
 const DEFAULT_OUT_DIR: &str = ".local/gist-verify"; // `$GIST_DIR` default
 const MAX_FRAME: u32 = 16 << 20; // `protocol.max_frame`
 
