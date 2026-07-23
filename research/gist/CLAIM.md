@@ -141,10 +141,12 @@ The index and resident session compound across a work session. The first
 query establishes reusable state; later queries pay for the question, not the
 repository again. Warm paths remain optional accelerators: if a request shape,
 buffer, watcher, or freshness condition is uncertain, they decline to the
-authoritative cold path. On macOS, per-file FSEvents make reconciliation
-proportional to the changed set; on Linux, inotify overflow or an unregistered
-subtree permanently revokes watcher trust and forces live reconciliation on
-every query.
+authoritative cold path. On both macOS (per-file FSEvents) and Linux (inotify,
+whose realpath'd roots note every changed path and arm exactness on
+case-sensitive volumes), reconciliation is proportional to the changed set;
+non-ASCII paths scope too, resolved through the `realpath` canonicalization
+oracle. A queue overflow, an unregistered subtree, or a casefolded Linux root
+declines exactness and forces live reconciliation — never a stale answer.
 
 ### Context is scarce
 

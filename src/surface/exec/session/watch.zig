@@ -19,19 +19,25 @@
 //! (the common auto-spawned daemon) watches `.` — the same CWD tree its
 //! corpus walks.
 //!
-//! The macOS backend additionally requests PER-FILE events and `note`s every
-//! delivered path into the session's `DirtyLog` (arming its `exact` promise),
-//! which is what lets the reconcile verify only the changed paths — O(changed)
-//! instead of O(tree). Any event flag it cannot attribute to exact paths
-//! (`MustScanSubDirs`, kernel/user drops, id wrap, mount churn) becomes
-//! `noteDoubt`, forcing that drain onto the full walk. The Linux backend stays
-//! coarse (never arms `exact` — its drains always walk), but it now parses its
-//! event stream for the two conditions that would silently BREAK the clean
-//! fast path itself: a queue overflow, and a directory created/moved in after
-//! arming (inotify watches don't recurse on their own). It re-registers new
-//! subtrees on the fly and, if it cannot, calls `markDoubtForever` — the
-//! session then reconciles every query instead of ever trusting a blind
-//! quiescence claim (fail-closed).
+//! BOTH backends request PER-FILE events and `note` every delivered path into
+//! the session's `DirtyLog` (arming its `exact` promise), which is what lets the
+//! reconcile verify only the changed paths — O(changed) instead of O(tree). Any
+//! event a backend cannot attribute to an exact path — macOS's inexact flags
+//! (`MustScanSubDirs`, kernel/user drops, id wrap, mount churn), or Linux's
+//! unmapped watch descriptor / malformed record / queue overflow — becomes
+//! `noteDoubt`, forcing that drain onto the full walk. Linux keys its notes to
+//! absolute paths (the roots are realpath'd at arm time) so they match the
+//! canonical shape `delta.resolve` expects, exactly like FSEvents' delivery.
+//!
+//! The Linux backend also parses its stream for the two conditions that would
+//! silently BREAK the clean fast path itself: a queue overflow, and a directory
+//! created/moved in after arming (inotify watches don't recurse on their own).
+//! It re-registers new subtrees on the fly and, if it cannot, calls
+//! `markDoubtForever` — the session then reconciles every query instead of ever
+//! trusting a blind quiescence claim (fail-closed). Exact mode arms only when
+//! every root is on a case-SENSITIVE directory: a casefolded root (ext4/f2fs
+//! `+F`) would alias distinct byte-spellings, which the byte-exact Linux key
+//! model does not represent, so such a session stays coarse (reconcile-always).
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -47,6 +53,13 @@ const linux = std.os.linux;
 const in_mask: u32 = linux.IN.MODIFY | linux.IN.CREATE | linux.IN.DELETE |
     linux.IN.MOVED_FROM | linux.IN.MOVED_TO | linux.IN.ATTRIB |
     linux.IN.CLOSE_WRITE | linux.IN.ONLYDIR;
+
+/// `FS_IOC_GETFLAGS` (`_IOR('f', 1, long)`) + `FS_CASEFOLD_FL` from
+/// `<linux/fs.h>`: read a directory's inode flags to detect a casefolded
+/// (case-INsensitive) directory, which the byte-exact Linux key model can't
+/// represent — such a root never arms exact (stays reconcile-always).
+const FS_IOC_GETFLAGS: u32 = 0x8008_6601;
+const FS_CASEFOLD_FL: c_long = 0x4000_0000;
 
 // ── macOS FSEvents backend ──
 //
@@ -86,8 +99,16 @@ pub fn Watcher(comptime Session: type) type {
         /// Linux: watch descriptor → the directory it covers (gpa-owned), so a
         /// dir-create event can be resolved to a path and its subtree watched
         /// before the next reconcile walks it. Built on the main thread before the
-        /// loop thread spawns; grown only by the loop thread afterward.
+        /// loop thread spawns; grown only under `read_lock` afterward.
         wd_paths: std.AutoHashMapUnmanaged(i32, []u8) = .empty,
+        /// Linux: serializes reads of `inotify_fd` (and the `wd_paths` growth a
+        /// dir-create drain triggers) between the loop thread and a `flushSync`
+        /// barrier, keeping the single-consumer fd and the watch map race-free. An
+        /// atomic spinlock — not an `Io.Mutex` — because the raw watcher OS thread
+        /// has no `std.Io` handle (same reason `dirty.zig` spins); both critical
+        /// sections are a bounded non-blocking drain, and the loop's idle `poll`
+        /// sits outside it, so contention is brief and rare. Unused off Linux.
+        read_lock: std.atomic.Value(bool) = .init(false),
         /// macOS: the watch thread's CFRunLoop, published so `stop` can wake it. Null
         /// until the loop thread stores it (before it signals `ready`).
         run_loop: std.atomic.Value(?*anyopaque) = .init(null),
@@ -112,17 +133,48 @@ pub fn Watcher(comptime Session: type) type {
             return .{ .session = session, .io = io, .gpa = gpa };
         }
 
-        /// Force synchronous delivery of every FSEvents event already queued for
-        /// the live stream — the causal barrier an annals query runs behind: after
-        /// this returns, every change that OCCURRED before the call has been
-        /// `note`d. Returns false when there is no live macOS stream to flush
-        /// (caller must treat the annals as unable to vouch).
+        /// Force synchronous delivery of every watcher event already queued — the
+        /// causal barrier a freshness-sensitive query runs behind: after this
+        /// returns, every change that OCCURRED before the call has been `note`d, so
+        /// the reconcile that follows cannot answer over pre-edit bytes. macOS
+        /// flushes the live FSEvents stream; Linux drains the inotify fd (whose
+        /// events are queued synchronously inside the causing syscall, so every
+        /// write that happened-before is already readable). Returns false when no
+        /// backend is armed — the caller treats that as unvouched, but the unarmed
+        /// session already reconciles every query, so correctness is unaffected.
         pub fn flushSync(self: *@This()) bool {
-            if (comptime !is_macos) return false;
-            const s = if (self.syms) |*p| p else return false;
-            const stream = self.fs_stream.load(.acquire) orelse return false;
-            s.FSEventStreamFlushSync(stream);
+            if (comptime is_macos) {
+                const s = if (self.syms) |*p| p else return false;
+                const stream = self.fs_stream.load(.acquire) orelse return false;
+                s.FSEventStreamFlushSync(stream);
+                return true;
+            }
+            if (comptime builtin.os.tag == .linux) return self.flushInotify();
+            return false;
+        }
+
+        /// Linux causal barrier: drain every inotify record currently queued under
+        /// `read_lock` (serialized against the loop thread's own drain so the fd
+        /// and `wd_paths` stay single-consumer). Sound because inotify queues an
+        /// event within the syscall that produces it — once the writer's
+        /// `write`/`close` has returned, its record is already readable here — so a
+        /// drain-to-empty captures everything that happened-before. False when
+        /// unarmed (no fd), where the session reconciles every query anyway.
+        fn flushInotify(self: *@This()) bool {
+            if (comptime builtin.os.tag != .linux) return false;
+            if (self.inotify_fd < 0) return false;
+            self.readLock();
+            defer self.readUnlock();
+            self.drainInotifyLocked();
             return true;
+        }
+
+        /// Acquire/release the inotify-read spinlock (see `read_lock`).
+        fn readLock(self: *@This()) void {
+            while (self.read_lock.swap(true, .acquire)) std.atomic.spinLoopHint();
+        }
+        fn readUnlock(self: *@This()) void {
+            self.read_lock.store(false, .release);
         }
 
         /// Best-effort start. Arms the session (enabling the clean fast path) only
@@ -177,21 +229,47 @@ pub fn Watcher(comptime Session: type) type {
             const fd: i32 = @intCast(linux.inotify_init1(linux.IN.NONBLOCK));
             if (fd < 0) return; // no inotify → stay in baseline
 
-            // Recursively watch every directory under the roots. If ANY watch
-            // fails to register we cannot prove quiescence for that subtree, so
-            // we bail out unarmed (fail-closed): the session keeps reconciling.
+            // Recursively watch every directory under the roots, keyed ABSOLUTE
+            // (realpath'd) so noted paths match the canonical shape
+            // `delta.resolve` expects. If ANY watch fails to register we cannot
+            // prove quiescence for that subtree, so we bail out unarmed
+            // (fail-closed): the session keeps reconciling. `exact` arms only
+            // when every root is case-sensitive (`rootsCaseSensitive`).
+            var exact = true;
+            var buf: [std.fs.max_path_bytes]u8 = undefined;
             for (self.watchRoots()) |root| {
-                if (!self.addWatchesRecursive(fd, root)) return self.closeUnarmed(fd);
+                const rootz = std.posix.toPosixPath(root) catch return self.closeUnarmed(fd);
+                const resolved = std.c.realpath(&rootz, &buf) orelse return self.closeUnarmed(fd);
+                const abs = std.mem.span(resolved);
+                if (self.casefolded(abs)) exact = false;
+                if (!self.addWatchesRecursive(fd, abs)) return self.closeUnarmed(fd);
             }
 
             self.inotify_fd = fd;
             self.running.store(true, .release);
+            // Promise exactness BEFORE arming the watcher, so the very first
+            // event the loop notes is already covered by the exact contract.
+            if (exact) self.session.dirty_log.armExact();
             self.session.armWatcher();
             self.thread = std.Thread.spawn(.{}, inotifyLoop, .{self}) catch {
                 self.running.store(false, .release);
                 self.inotify_fd = -1;
                 return self.closeUnarmed(fd); // spawn failed — unarm by leaving watcher inactive
             };
+        }
+
+        /// Is directory `path` casefolded (case-INsensitive)? A confirmed
+        /// `FS_CASEFOLD_FL` bit blocks exact mode; every other outcome — no bit,
+        /// or an `ioctl` the filesystem doesn't implement (`ENOTTY`, the common
+        /// case on non-casefold volumes) — means case-sensitive, so exact arms.
+        fn casefolded(self: *@This(), path: []const u8) bool {
+            if (comptime builtin.os.tag != .linux) return false;
+            var dir = Dir.cwd().openDir(self.io, path, .{}) catch return false;
+            defer dir.close(self.io);
+            var flags: c_long = 0;
+            const rc = linux.ioctl(dir.handle, FS_IOC_GETFLAGS, @intFromPtr(&flags));
+            if (linux.errno(rc) != .SUCCESS) return false;
+            return flags & FS_CASEFOLD_FL != 0;
         }
 
         /// Shared inotify bail-out: release the fd and every recorded watch path.
@@ -240,39 +318,64 @@ pub fn Watcher(comptime Session: type) type {
 
         fn inotifyLoop(self: *@This()) void {
             if (comptime builtin.os.tag != .linux) return;
-            var buf: [8192]u8 align(@alignOf(linux.inotify_event)) = undefined;
             var pfd = [_]std.posix.pollfd{.{ .fd = self.inotify_fd, .events = std.posix.POLL.IN, .revents = 0 }};
             while (self.running.load(.acquire)) {
                 const ready = std.posix.poll(&pfd, 500) catch break;
                 if (ready == 0) continue;
-                const n = std.posix.read(self.inotify_fd, &buf) catch |e| switch (e) {
-                    error.WouldBlock => continue,
-                    else => break,
-                };
-                if (n == 0) continue;
-                // Walk the event records for the two conditions that would
-                // silently break the clean fast path: a queue overflow (events
-                // were LOST — quiescence can never be proven again on this fd)
-                // and a directory created/moved in after arming (inotify does
-                // not recurse; an unwatched subtree is a blind spot). Extend
-                // coverage inline; if that fails, poison the session so it
-                // reconciles every query (fail-closed).
-                var off: usize = 0;
-                while (off + @sizeOf(linux.inotify_event) <= n) {
-                    // Cast-free record view (zig-safety): the fixed header is
-                    // copied out by value — 16 bytes on a cold path — instead
-                    // of reinterpreting the buffer pointer.
-                    const ev = std.mem.bytesToValue(linux.inotify_event, buf[off..][0..@sizeOf(linux.inotify_event)]);
-                    off += @sizeOf(linux.inotify_event) + ev.len;
-                    if (ev.mask & linux.IN.Q_OVERFLOW != 0) {
-                        self.session.markDoubtForever();
-                        continue;
-                    }
-                    const grew_dir = ev.mask & linux.IN.ISDIR != 0 and
-                        ev.mask & (linux.IN.CREATE | linux.IN.MOVED_TO) != 0;
-                    if (grew_dir) self.coverNewDir(&ev, &buf, off);
+                // Drain under `read_lock` so this loop and a concurrent
+                // `flushInotify` barrier never both consume the single-reader fd —
+                // nor both grow `wd_paths` via `coverNewDir` — at once. The `poll`
+                // above sits OUTSIDE the lock, so the barrier contends only for the
+                // brief drain, not the loop's idle wait.
+                self.readLock();
+                self.drainInotifyLocked();
+                self.readUnlock();
+            }
+        }
+
+        /// Read and process every inotify record currently queued (until the fd
+        /// would block), noting each changed path and extending coverage into
+        /// directories created after arming. Caller MUST hold `read_lock`. Every
+        /// `note` precedes the single trailing `markDirty` — the dirty-log/seqlock
+        /// ordering contract a scoped reconcile relies on. Linux only.
+        fn drainInotifyLocked(self: *@This()) void {
+            if (comptime builtin.os.tag != .linux) return;
+            var buf: [8192]u8 align(@alignOf(linux.inotify_event)) = undefined;
+            var noted = false;
+            while (true) {
+                const n = std.posix.read(self.inotify_fd, &buf) catch break; // WouldBlock/err → drained
+                if (n == 0) break;
+                self.processRecords(buf[0..n]);
+                noted = true;
+            }
+            if (noted) self.session.markDirty();
+        }
+
+        /// Walk one inotify read buffer's variable-length records, applying the two
+        /// fail-closed conditions that would silently break the clean fast path — a
+        /// queue overflow (events were LOST — quiescence can never be proven again
+        /// on this fd) and a directory created/moved in after arming (inotify does
+        /// not recurse; an unwatched subtree is a blind spot) — and noting the
+        /// EXACT changed path of every other record. Caller holds `read_lock`.
+        fn processRecords(self: *@This(), buf: []const u8) void {
+            var off: usize = 0;
+            while (off + @sizeOf(linux.inotify_event) <= buf.len) {
+                // Cast-free record view (zig-safety): the fixed header is copied
+                // out by value — 16 bytes on a cold path — instead of
+                // reinterpreting the buffer pointer.
+                const ev = std.mem.bytesToValue(linux.inotify_event, buf[off..][0..@sizeOf(linux.inotify_event)]);
+                off += @sizeOf(linux.inotify_event) + ev.len;
+                if (ev.mask & linux.IN.Q_OVERFLOW != 0) {
+                    self.session.markDoubtForever();
+                    continue;
                 }
-                self.session.markDirty();
+                // An unmapped wd or malformed record can't be attributed, so
+                // `noteEvent` declines to doubt (full walk); coverage extension
+                // that cannot resolve poisons the session (fail-closed).
+                self.noteEvent(&ev, buf, off);
+                const grew_dir = ev.mask & linux.IN.ISDIR != 0 and
+                    ev.mask & (linux.IN.CREATE | linux.IN.MOVED_TO) != 0;
+                if (grew_dir) self.coverNewDir(&ev, buf, off);
             }
         }
 
@@ -290,6 +393,22 @@ pub fn Watcher(comptime Session: type) type {
             // the next query's reconcile to walk it regardless.
             if (!self.addWatchesRecursive(self.inotify_fd, child))
                 self.session.markDoubtForever();
+        }
+
+        /// Note the exact path an inotify record attributes to, into the session's
+        /// `DirtyLog`. A record with a name (`ev.len > 0`) is an entry inside the
+        /// wd's directory (`parent/name`); a nameless record (`ev.len == 0`) is the
+        /// watched directory itself. Either resolves to an absolute path (the wds
+        /// were realpath'd at arm time). An unmapped wd (evicted/racing) or a
+        /// malformed name field can't be attributed → `noteDoubt` (that drain
+        /// takes the full walk).
+        fn noteEvent(self: *@This(), ev: *const linux.inotify_event, buf: []const u8, rec_end: usize) void {
+            const parent = self.wd_paths.get(ev.wd) orelse return self.session.dirty_log.noteDoubt();
+            if (ev.len == 0) return self.session.dirty_log.note(parent);
+            const name = nameOf(ev, buf, rec_end) orelse return self.session.dirty_log.noteDoubt();
+            const child = haystack.joinPath(self.gpa, parent, name) catch return self.session.dirty_log.noteDoubt();
+            defer self.gpa.free(child);
+            self.session.dirty_log.note(child);
         }
 
         /// The NUL-terminated name trailing a variable-length inotify record, or

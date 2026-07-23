@@ -502,6 +502,73 @@ test "serve: an idle persistent client does not starve a second connection" {
     // Deferred teardown sends SHUTDOWN and joins even if an assertion above fails.
 }
 
+test "serve: a blocked query occupies only its worker — a second client's ping still answers" {
+    const gpa = std.testing.allocator;
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const root = try freshRoot(io, a, "pool", @intFromPtr(&threaded));
+    defer Dir.cwd().deleteTree(io, root) catch {};
+    try putFile(io, a, root, "a.txt", "needle\n");
+
+    // Arm the in-flight gate: a query blocks in its handler until we set it,
+    // pinning it on its worker. Reset the hook regardless of outcome; the safety
+    // `defer gate.set(io)` (registered LAST, so it runs FIRST at scope exit)
+    // unblocks any pinned worker before teardown joins the pool — a failed
+    // assertion can never deadlock the join (`set` latches, so it is idempotent).
+    var gate: std.Io.Event = .unset;
+    serve.query_gate_for_test.store(&gate, .release);
+    defer serve.query_gate_for_test.store(null, .release);
+
+    const daemon = try spawnDaemon(gpa, io, a, root);
+    defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
+    defer gate.set(io);
+
+    // Client A fires a query and does NOT read it: it is now stuck in a worker
+    // on the gate, holding that worker for the whole test.
+    const a_stream = try dial(io, daemon.socket);
+    defer a_stream.close(io);
+    try handshake(gpa, a_stream.socket.handle);
+    try sendQuery(gpa, a_stream.socket.handle, .{ .pattern = "needle", .mode = .files, .fixed = true });
+
+    // Client B — while A's query is pinned — must still handshake and get a PONG
+    // from the poll thread. Under the old serial daemon A's query held the only
+    // thread and this would time out (`SecondClientStarved`).
+    const b_stream = try dial(io, daemon.socket);
+    defer b_stream.close(io);
+    const b_fd = b_stream.socket.handle;
+    try handshake(gpa, b_fd);
+    try protocol.sendFrame(gpa, b_fd, .ping, "");
+    try expectReadable(b_fd);
+    {
+        var pong = try protocol.recvFrame(gpa, b_fd);
+        defer pong.deinit();
+        try std.testing.expectEqual(protocol.Opcode.pong, pong.op);
+    }
+
+    // Release the gate: A's pinned query completes and returns its file set —
+    // proving the worker ran the real answer, it was only the transport that
+    // overlapped with B.
+    gate.set(io);
+    var resp = try protocol.recvFrame(gpa, a_stream.socket.handle);
+    defer resp.deinit();
+    try std.testing.expectEqual(protocol.Opcode.result, resp.op);
+    var iter = switch (try protocol.decodeResult(resp.payload())) {
+        .files => |it| it,
+        else => return error.UnexpectedResultMode,
+    };
+    var got_a = false;
+    while (try iter.next()) |p| {
+        if (std.mem.endsWith(u8, p, "a.txt")) got_a = true;
+    }
+    try std.testing.expect(got_a);
+}
+
 /// Send an eligible query and expect the daemon to DECLINE it — the shape a
 /// budget-aborted walk produces (the client then answers on the certified cold
 /// path). Bounded readability so a regression that hangs the walk fails loud.

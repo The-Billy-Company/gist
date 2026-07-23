@@ -14,9 +14,14 @@
 //!
 //! ## The corpus is a faithful mirror
 //!
-//! Base docs load through `corpus.zig`: full reads (no cap), BOM/UTF-16 decode,
-//! whole-body first-NUL offsets, empty docs dropped — the same per-file ingest
-//! a cold run applies. Binary docs are ADMITTED (cold does not skip a walked
+//! Base docs load through `corpus.zig` as a TWO-TIER byte store: an unchanged
+//! member binds its bytes to the persisted `content.shard` mmap (zero heap,
+//! page-cache-evictable), and only a changed/new/binary/oversize/BOM-carrying
+//! doc — or the whole corpus when no shard is on disk — heap-reads. Either tier
+//! yields the SAME faithful ingest a cold run applies: full body (no cap),
+//! BOM/UTF-16 decode, whole-body first-NUL offsets, empty docs dropped, so
+//! resident heap drops from O(corpus) to O(churn + exceptions) with no answer
+//! drift. Binary docs are ADMITTED (cold does not skip a walked
 //! binary; it searches up to the buffer that revealed the first NUL), and each
 //! mode applies cold's own binary rule at answer time:
 //!
@@ -62,6 +67,7 @@
 //! over a ward-guarded engine.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const bulkstat = @import("../../../corpus/tree/bulkstat.zig");
 const corpus = @import("corpus.zig");
@@ -96,6 +102,14 @@ const MatchScratch = query_mod.MatchScratch;
 const Span = query_mod.Span;
 const request = @import("request.zig");
 const Dir = std.Io.Dir;
+
+/// A case-INsensitive filesystem (macOS APFS/HFS+) folds ASCII case AND Unicode
+/// normalization (NFC/NFD) to one on-disk spelling, so a scoped reconcile there
+/// must sweep the corpus's non-ASCII keys against the `realpath` oracle to catch
+/// a stale twin the ASCII fold can't equate. Linux only ever scopes over
+/// case-SENSITIVE (byte-exact) roots (watch.zig gates casefold roots to coarse),
+/// so no sweep is needed and the set stays unused (zero cost).
+const is_macos = builtin.os.tag == .macos;
 
 pub const Mode = request.Mode;
 pub const Request = request.Request;
@@ -306,6 +320,16 @@ pub const ResidentSession = struct {
     scoped_reconciles: std.atomic.Value(u64) = .init(0),
     full_reconciles: std.atomic.Value(u64) = .init(0),
 
+    /// macOS only: the live corpus keys carrying a byte ≥ 0x80 (owned dupes,
+    /// independent of base/overlay key lifetimes). A scoped reconcile on a
+    /// case-insensitive fs re-verifies exactly this (almost always empty) set
+    /// through `keyIsCurrent`, tombstoning a stale Unicode normalization/case
+    /// TWIN of a path the batch never named — the one aliasing the ASCII fold
+    /// in `applyGones`/`applySubtree` cannot model. Maintained at the single
+    /// overlay chokepoint (`putOverlay`) and rebuilt on reload; unused (empty)
+    /// on every other target, where the fs is byte-exact.
+    nonascii_keys: std.StringHashMapUnmanaged(void) = .empty,
+
     /// The reachable file-level un-hide/un-ignore candidates the certified
     /// default walk SKIPPED (`serial.zig::Extra`): hidden dotfiles and directly
     /// gitignored leaves whose parent directory the walk still descended. These
@@ -388,7 +412,13 @@ pub const ResidentSession = struct {
         const gen = try readGen(gpa, io);
         errdefer gpa.free(gen);
 
-        return .{ .gpa = gpa, .io = io, .roots_arena = roots_arena, .roots = owned_roots, .mir = mir, .idx = idx, .by_path = by_path, .index_gen = gen, .fresh_ns = load_ns, .overlay = std.StringHashMap(Overlay).init(gpa), .dirty_log = dirtylog.DirtyLog.init(gpa), .annals = annalslog.Annals.init(gpa), .extras = owned_extras, .extras_arena = extras_arena };
+        // Seed the non-ASCII key sweep set (macOS only; empty elsewhere) from the
+        // base mirror, so the very first scoped reconcile already covers a stale
+        // normalization/case twin among the loaded corpus keys.
+        var nonascii = try buildNonAscii(gpa, mir.paths);
+        errdefer freeNonAscii(&nonascii, gpa);
+
+        return .{ .gpa = gpa, .io = io, .roots_arena = roots_arena, .roots = owned_roots, .mir = mir, .idx = idx, .by_path = by_path, .index_gen = gen, .fresh_ns = load_ns, .overlay = std.StringHashMap(Overlay).init(gpa), .dirty_log = dirtylog.DirtyLog.init(gpa), .annals = annalslog.Annals.init(gpa), .extras = owned_extras, .extras_arena = extras_arena, .nonascii_keys = nonascii };
     }
 
     /// Does this daemon serve no explicit scope — the bare `gist serve` whole-CWD
@@ -422,12 +452,65 @@ pub const ResidentSession = struct {
         self.dirty_log.deinit();
         self.clearOverlay();
         self.overlay.deinit();
+        freeNonAscii(&self.nonascii_keys, self.gpa);
         self.gpa.free(self.index_gen);
         self.by_path.deinit();
         self.idx.deinit();
         self.mir.deinit();
         self.extras_arena.deinit();
         self.roots_arena.deinit();
+    }
+
+    /// True when `s` carries any byte outside 7-bit ASCII — the keys the scoped
+    /// reconcile's ASCII fold cannot canonicalize, and thus the ones the sweep
+    /// must re-verify against the `realpath` oracle on a case-insensitive fs.
+    fn hasNonAscii(s: []const u8) bool {
+        for (s) |b| if (b >= 0x80) return true;
+        return false;
+    }
+
+    /// Build the non-ASCII key set (owned dupes) from a path list — a no-op
+    /// returning empty off macOS, where the fs is byte-exact and no sweep runs.
+    fn buildNonAscii(gpa: std.mem.Allocator, paths: []const []const u8) std.mem.Allocator.Error!std.StringHashMapUnmanaged(void) {
+        var set: std.StringHashMapUnmanaged(void) = .empty;
+        if (comptime !is_macos) return set;
+        errdefer freeNonAscii(&set, gpa);
+        for (paths) |p| if (hasNonAscii(p)) {
+            const owned = try gpa.dupe(u8, p);
+            set.put(gpa, owned, {}) catch |e| {
+                gpa.free(owned);
+                return e;
+            };
+        };
+        return set;
+    }
+
+    /// Free every owned key and the set itself.
+    fn freeNonAscii(set: *std.StringHashMapUnmanaged(void), gpa: std.mem.Allocator) void {
+        var it = set.keyIterator();
+        while (it.next()) |k| gpa.free(k.*);
+        set.deinit(gpa);
+        set.* = .empty;
+    }
+
+    /// Keep the non-ASCII key set in step with one overlay mutation: a `.doc`
+    /// makes a non-ASCII key live (tracked), a `.tombstone` retires it. Zero
+    /// cost off macOS and for the ASCII-only common case. A tracking OOM
+    /// propagates so the reconcile declines to cold rather than sweep an
+    /// incomplete set (fail-closed).
+    fn trackNonAscii(self: *ResidentSession, path: []const u8, live: bool) std.mem.Allocator.Error!void {
+        if (comptime !is_macos) return;
+        if (!hasNonAscii(path)) return;
+        if (live) {
+            if (self.nonascii_keys.contains(path)) return;
+            const owned = try self.gpa.dupe(u8, path);
+            self.nonascii_keys.put(self.gpa, owned, {}) catch |e| {
+                self.gpa.free(owned);
+                return e;
+            };
+        } else if (self.nonascii_keys.fetchRemove(path)) |kv| {
+            self.gpa.free(kv.key);
+        }
     }
 
     /// Dupe an `Extra` slice (path bytes + kind) into `a` — the session-lived
@@ -460,7 +543,9 @@ pub const ResidentSession = struct {
         self.overlay.clearRetainingCapacity();
     }
 
-    /// Set the overlay for `path`, freeing any prior value and reusing the key.
+    /// Set the overlay for `path`, freeing any prior value and reusing the key,
+    /// and keep the non-ASCII sweep set in step (`.doc` ⇒ live, `.tombstone` ⇒
+    /// retired) — the single overlay chokepoint every mutation flows through.
     fn putOverlay(self: *ResidentSession, path: []const u8, ov: Overlay) !void {
         const gop = try self.overlay.getOrPut(path);
         if (gop.found_existing) {
@@ -472,6 +557,7 @@ pub const ResidentSession = struct {
             };
         }
         gop.value_ptr.* = ov;
+        try self.trackNonAscii(path, ov == .doc);
     }
 
     // ── watcher hooks (called from the watch thread; lock-free) ──
@@ -522,6 +608,7 @@ pub const ResidentSession = struct {
         // Free only the stale DATA.
         self.clearOverlay();
         self.overlay.deinit();
+        freeNonAscii(&self.nonascii_keys, self.gpa);
         self.gpa.free(self.index_gen);
         self.by_path.deinit();
         self.idx.deinit();
@@ -546,6 +633,8 @@ pub const ResidentSession = struct {
         self.index_gen = fresh.index_gen;
         self.fresh_ns = fresh.fresh_ns;
         self.overlay = fresh.overlay;
+        // The rebuilt corpus carries its own freshly-seeded non-ASCII key set.
+        self.nonascii_keys = fresh.nonascii_keys;
         // The fresh init re-walked the extras from the rebuilt corpus (fresh and
         // authoritative); move the arena + list and drop the scoped-stale latch.
         self.extras_arena = fresh.extras_arena;
@@ -757,10 +846,12 @@ pub const ResidentSession = struct {
     /// the live tree, with `delta.Delta` re-deriving each membership verdict
     /// through the walk's own ignore machinery. Returns false whenever ANY
     /// resolution cannot be scoped soundly (ignore-source edit, root event,
-    /// unmappable or non-ASCII path, unreadable directory) — the caller then
-    /// runs the full walk. Partial overlay mutations before a false return are
-    /// harmless: each only moved a path toward its current on-disk truth, and
-    /// the full walk re-derives everything.
+    /// unmappable path, unreadable directory) — the caller then runs the full
+    /// walk. Partial overlay mutations before a false return are harmless: each
+    /// only moved a path toward its current on-disk truth, and the full walk
+    /// re-derives everything. Non-ASCII paths ARE scoped (the `realpath` oracle
+    /// canonicalizes them); a stale normalization/case twin the batch never
+    /// named is caught by the closing `sweepNonAscii` on a case-insensitive fs.
     fn reconcileScoped(self: *ResidentSession, abs_paths: []const []const u8) QueryError!bool {
         var arena = std.heap.ArenaAllocator.init(self.gpa);
         defer arena.deinit();
@@ -794,7 +885,30 @@ pub const ResidentSession = struct {
         }
         for (subtrees.items) |rel| if (!try self.applySubtree(&dl, a, rel)) return false;
         if (gones.count() != 0) try self.applyGones(&dl, a, &gones);
+        if (comptime is_macos) try self.sweepNonAscii(&dl);
         return true;
+    }
+
+    /// Re-verify every live corpus key carrying a byte ≥ 0x80 against the
+    /// `realpath` oracle, tombstoning any that is no longer a current,
+    /// canonically-spelled member. This is the one aliasing the ASCII fold in
+    /// `applyGones`/`applySubtree` can't model: on a case-insensitive fs a stale
+    /// Unicode normalization/case TWIN of a path this batch never named (café
+    /// NFC vs NFD, café.txt after a case-rename its own event didn't carry) is
+    /// invisible to byte/ASCII-fold matching but resolves — through realpath — to
+    /// a DIFFERENT on-disk key than it spells. O(|non-ASCII keys|), zero when the
+    /// set is empty (the overwhelming common case). macOS-only (the caller gates
+    /// it); Linux scopes only byte-exact roots, so no twin can exist.
+    fn sweepNonAscii(self: *ResidentSession, dl: *delta_mod.Delta) QueryError!void {
+        if (self.nonascii_keys.count() == 0) return;
+        var doomed: std.ArrayList([]const u8) = .empty;
+        defer doomed.deinit(self.gpa);
+        var it = self.nonascii_keys.keyIterator();
+        while (it.next()) |k| if (!dl.keyIsCurrent(k.*)) try doomed.append(self.gpa, k.*);
+        // `putOverlay(.tombstone)` retires each doomed key FROM the set as it
+        // goes; `doomed` holds the distinct backing slices, so this drains the
+        // snapshot without mutating the map mid-iteration.
+        for (doomed.items) |k| try self.putOverlay(k, .tombstone);
     }
 
     /// Fold one live-directory event into the overlay: read/refresh everything
