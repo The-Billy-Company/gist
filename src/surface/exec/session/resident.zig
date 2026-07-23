@@ -1,4 +1,4 @@
-// MONOLITHIC: warm-session engine — the freshness seqlock, reconcile overlay, and the three answer faces (fold, lines, record stream) share one mutex-guarded session state
+// MONOLITHIC: warm-session engine — the freshness seqlock, reconcile overlay, and the three answer faces (fold, lines, record stream) share one ward-guarded session state
 //! gist resident session — the warm, in-memory search engine (ADR-352 rung 2.5).
 //!
 //! A `ResidentSession` owns the corpus bytes + trigram index for one repository,
@@ -55,9 +55,11 @@
 //!     `die()`; the client's dropped connection then falls back cold and the
 //!     next query re-spawns a fresh daemon — fail-open too.)
 //!
-//! Queries are serialized by `mutex`; the watcher only ever touches the shared
-//! `Seqlock` (`seqlock.zig`), never the overlay, so the barrier is a lock-free
-//! seqlock over a mutex-guarded engine.
+//! Concurrent reads overlap under a shared `Ward` lease
+//! (`kernel/primitives/ward.zig`) while a reconcile runs alone under the
+//! exclusive lease; the watcher only ever touches the shared `Seqlock`
+//! (`seqlock.zig`), never the overlay, so the barrier is a lock-free seqlock
+//! over a ward-guarded engine.
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
@@ -65,6 +67,7 @@ const bulkstat = @import("../../../corpus/tree/bulkstat.zig");
 const corpus = @import("corpus.zig");
 const render = @import("render.zig");
 const parallel = @import("../../../kernel/primitives/parallel.zig");
+const Ward = @import("../../../kernel/primitives/ward.zig").Ward;
 // The resident file set is the certified rg-default walk the cold path uses, NOT
 // `haystack`'s coarse superset — this is what makes `resident == --no-index ==
 // rg` true for hidden files, `.gitignore` precedence, and root scope. `session`
@@ -151,9 +154,35 @@ pub const RunBudget = struct {
     deadline_ns: ?i128 = null,
 };
 
-/// One eligible query's answer. `files` aliases session-owned path strings
-/// (mirror path table or overlay keys) valid until the next reconcile; the
-/// caller (daemon frame builder / test) copies them out under the session lock.
+/// The per-query wall-clock ceiling — computed once under the lock at the top of
+/// each query and threaded down the O(corpus) walks as a VALUE, not session
+/// state, so concurrent readers each carry their own deadline (the reader/writer
+/// session runs many folds at once). `deadline_ns` is an absolute `.awake`
+/// instant; 0 disables the ceiling (the embedder/FFI/test default), which
+/// short-circuits before any clock read. Distinct from `RunBudget`, the hosted
+/// record stream's cooperative CLEAN halt: an overrun here DECLINES the query
+/// (→ certified cold path via `Stale`), it is the daemon's liveness backstop.
+pub const Ceiling = struct {
+    deadline_ns: i128 = 0,
+
+    /// Has this query overrun its ceiling? Sampled at strided checkpoints in the
+    /// O(corpus) walks — the caller passes its loop index, so the clock is read
+    /// at most once per `budget_stride` visits (amortized to noise; the fast
+    /// path returns before the first sample for a small candidate set). An
+    /// unbudgeted query short-circuits before any clock read. Each parallel
+    /// shard walks its own contiguous range with its own index, so the read-only
+    /// deadline is sampled independently per shard.
+    inline fn over(self: Ceiling, io: std.Io, i: usize) bool {
+        if (self.deadline_ns == 0) return false;
+        if (i & budget_stride != 0) return false;
+        return std.Io.Clock.now(.awake, io).nanoseconds >= self.deadline_ns;
+    }
+};
+
+/// One eligible query's answer. `files` are duped into the caller's per-query
+/// arena (see `ownFiles`), so they own their bytes rather than aliasing session
+/// memory — the caller may release the session read lock before encoding the
+/// answer, which is what lets concurrent readers overlap.
 pub const Result = struct { mode: Mode, files: []const []const u8 = &.{}, count: u64 = 0 };
 
 /// A `lines`-mode answer: the pre-rendered output bytes (owned by the caller's
@@ -238,7 +267,17 @@ pub const ResidentSession = struct {
     /// bounded because a re-touched path replaces its entry in place.
     overlay: std.StringHashMap(Overlay),
 
-    mutex: std.Io.Mutex = .init,
+    /// Reader/writer discipline (ADR-352 rung 2.5): `reconcile` (overlay
+    /// mutation, `maybeReload` engine swap, `fresh_ns` + counter bumps) is the
+    /// WRITER; all five answer faces are READERS over the then-immutable mirror +
+    /// overlay. Concurrent warm queries thus overlap — the whole point of the
+    /// daemon worker pool — while a reconcile still runs alone. `beginRead` owns
+    /// the fast-clean-read / drop-to-write / reconcile / drop-to-read dance,
+    /// which the `Ward` (`kernel/primitives/ward.zig`) gathers into one
+    /// double-checked primitive — `beginRead` just supplies the freshness
+    /// predicate and the reconcile. Writer-preferring (a queued reconcile can't
+    /// be starved by a stream of readers) over the same `io` seam the mutex used.
+    ward: Ward = .{},
     /// The freshness barrier: the watcher-driven seqlock (event counter, clean
     /// witness, permanent-doubt latch) whose subtle memory ordering lives once
     /// in `seqlock.zig`. Without a live watcher it never proves clean, so every
@@ -260,9 +299,30 @@ pub const ResidentSession = struct {
     /// overlapped the live event stream (the watcher arms before the first
     /// query, so the first reconcile is always the covering full pass).
     full_pass_done: bool = false,
-    /// Observability + test hooks: how many reconciles took each path.
-    scoped_reconciles: u64 = 0,
-    full_reconciles: u64 = 0,
+    /// Observability + test hooks: how many reconciles took each path. Atomic
+    /// because the daemon's poll thread samples them (for its operator `note`
+    /// line) while a worker mutates them under the write lock (the increments
+    /// themselves are serialized by that lock; the atomicity is for the reader).
+    scoped_reconciles: std.atomic.Value(u64) = .init(0),
+    full_reconciles: std.atomic.Value(u64) = .init(0),
+
+    /// The reachable file-level un-hide/un-ignore candidates the certified
+    /// default walk SKIPPED (`serial.zig::Extra`): hidden dotfiles and directly
+    /// gitignored leaves whose parent directory the walk still descended. These
+    /// are EXACTLY the files a `-t`/`-g` query surfaces (rg / cold) but the
+    /// mirror — built from the same hidden/ignore-excluding walk — cannot supply.
+    /// `declineForExtras` consults this list to fail a filtered warm query over
+    /// to the certified cold path, restoring `resident == --no-index == rg` for
+    /// `-t`/`-g`. Owned by `extras_arena` (rebuilt whole on refresh → arena reset).
+    extras: []const run.Extra = &.{},
+    extras_arena: std.heap.ArenaAllocator,
+    /// A scoped reconcile (O(changed)) does NOT recompute `extras`, so a filtered
+    /// query afterward cannot trust the list — `declineForExtras` forces one full
+    /// extras walk (`ensureExtrasFresh`) before deciding; a full reconcile clears
+    /// it. Quiescent trees (watcher-clean) keep whatever the last reconcile set,
+    /// so a `-t`/`-g` query pays the refresh only right after a real change. Set
+    /// only under the write lock, read only under the read lock (no torn access).
+    extras_stale: bool = false,
 
     /// Monotonic per-daemon-boot id, echoed to clients so they can detect a
     /// restarted daemon and re-handshake. Assigned by the server.
@@ -276,10 +336,6 @@ pub const ResidentSession = struct {
     /// latency SLA: no legitimate local warm query approaches it, and overrunning
     /// it declines the query (→ certified cold path), never a wrong answer.
     query_budget_ns: i128 = 0,
-    /// The armed absolute deadline for the in-flight query (`.awake` clock), set
-    /// from `query_budget_ns` under the lock at the top of each `reconcile` so it
-    /// spans reconcile + fold/gather. 0 ⇒ no ceiling for this query.
-    query_deadline_ns: i128 = 0,
     /// Observability: how many queries the budget declined. Atomic because the
     /// abort can fire inside a parallel fold/stream shard.
     budget_aborts: std.atomic.Value(u64) = .init(0),
@@ -306,10 +362,18 @@ pub const ResidentSession = struct {
         // doesn't fail init (the daemon may still come up); the first reconcile
         // re-walks and declines the query if the error persists. A short-lived
         // arena owns the path list just for the read.
+        // The un-hide/un-ignore extras (see the `extras` field) are captured from
+        // this SAME walk and duped into a session-lived arena, so the very first
+        // filtered query already decides against a real list, no cold-start walk.
+        var extras_arena = std.heap.ArenaAllocator.init(gpa);
+        errdefer extras_arena.deinit();
+        var owned_extras: []const run.Extra = &.{};
         var mir = blk: {
             var sel_arena = std.heap.ArenaAllocator.init(gpa);
             defer sel_arena.deinit();
-            const sel = run.defaultFileSet(sel_arena.allocator(), io, owned_roots);
+            var sel_extras: []const run.Extra = &.{};
+            const sel = run.defaultFileSetExtras(sel_arena.allocator(), io, owned_roots, &sel_extras);
+            owned_extras = try dupeExtras(extras_arena.allocator(), sel_extras);
             break :blk try corpus.load(gpa, io, sel.paths);
         };
         errdefer mir.deinit();
@@ -324,7 +388,7 @@ pub const ResidentSession = struct {
         const gen = try readGen(gpa, io);
         errdefer gpa.free(gen);
 
-        return .{ .gpa = gpa, .io = io, .roots_arena = roots_arena, .roots = owned_roots, .mir = mir, .idx = idx, .by_path = by_path, .index_gen = gen, .fresh_ns = load_ns, .overlay = std.StringHashMap(Overlay).init(gpa), .dirty_log = dirtylog.DirtyLog.init(gpa), .annals = annalslog.Annals.init(gpa) };
+        return .{ .gpa = gpa, .io = io, .roots_arena = roots_arena, .roots = owned_roots, .mir = mir, .idx = idx, .by_path = by_path, .index_gen = gen, .fresh_ns = load_ns, .overlay = std.StringHashMap(Overlay).init(gpa), .dirty_log = dirtylog.DirtyLog.init(gpa), .annals = annalslog.Annals.init(gpa), .extras = owned_extras, .extras_arena = extras_arena };
     }
 
     /// Does this daemon serve no explicit scope — the bare `gist serve` whole-CWD
@@ -362,7 +426,25 @@ pub const ResidentSession = struct {
         self.by_path.deinit();
         self.idx.deinit();
         self.mir.deinit();
+        self.extras_arena.deinit();
         self.roots_arena.deinit();
+    }
+
+    /// Dupe an `Extra` slice (path bytes + kind) into `a` — the session-lived
+    /// copy of the walk-arena list, so it survives the walk arena's teardown.
+    fn dupeExtras(a: std.mem.Allocator, src: []const run.Extra) std.mem.Allocator.Error![]const run.Extra {
+        const out = try a.alloc(run.Extra, src.len);
+        for (src, out) |s, *d| d.* = .{ .rel = try a.dupe(u8, s.rel), .kind = s.kind };
+        return out;
+    }
+
+    /// Replace `extras` with a freshly-walked list, resetting the owning arena,
+    /// and clear the scoped-staleness latch. Writer-only (`reconcileFull` and
+    /// `ensureExtrasFresh`).
+    fn setExtras(self: *ResidentSession, src: []const run.Extra) QueryError!void {
+        _ = self.extras_arena.reset(.retain_capacity);
+        self.extras = dupeExtras(self.extras_arena.allocator(), src) catch return QueryError.OutOfMemory;
+        self.extras_stale = false;
     }
 
     fn freeOverlayValue(self: *ResidentSession, ov: Overlay) void {
@@ -444,16 +526,18 @@ pub const ResidentSession = struct {
         self.by_path.deinit();
         self.idx.deinit();
         self.mir.deinit();
+        self.extras_arena.deinit();
         self.roots_arena.deinit();
 
         // Move the fresh engine's data fields into place, field-by-field, and
-        // leave the synchronization + identity fields alone: `mutex` is HELD by
-        // the caller (a whole-struct `self.* = fresh` reset it to `.unlocked`,
-        // so the caller's `defer unlock` hit `unreachable`); the `seqlock`
-        // (event counter, clean witness, arm/poison state) stays monotonic;
-        // `gpa`/`io`/`daemon_gen` are unchanged. `fresh`'s own mutex/seqlock/
-        // identity are default-initialized and unused, and every owning field
-        // has been moved out of it, so it needs no deinit.
+        // leave the synchronization + identity fields alone: the `ward` is HELD
+        // exclusively by the caller (reconcile is the writer; a whole-struct
+        // `self.* = fresh` would reset it, dropping the write lock out from under
+        // the caller's `defer`); the `seqlock` (event counter, clean witness,
+        // arm/poison state) stays monotonic; `gpa`/`io`/`daemon_gen` are
+        // unchanged. `fresh`'s own ward/seqlock/identity are
+        // default-initialized and unused, and every owning field has been moved
+        // out of it, so it needs no deinit.
         self.roots_arena = fresh.roots_arena;
         self.roots = fresh.roots;
         self.mir = fresh.mir;
@@ -462,32 +546,26 @@ pub const ResidentSession = struct {
         self.index_gen = fresh.index_gen;
         self.fresh_ns = fresh.fresh_ns;
         self.overlay = fresh.overlay;
+        // The fresh init re-walked the extras from the rebuilt corpus (fresh and
+        // authoritative); move the arena + list and drop the scoped-stale latch.
+        self.extras_arena = fresh.extras_arena;
+        self.extras = fresh.extras;
+        self.extras_stale = fresh.extras_stale;
 
         self.markDirty(); // a rebuilt index demands a reconcile pass
     }
 
-    /// Arm this query's wall-clock ceiling from the configured budget — a no-op
-    /// when unbudgeted (the embedder/FFI/test default), which skips the clock
-    /// read entirely. Called under the session lock at the top of `reconcile`, so
-    /// the deadline spans reconcile + fold/gather for every query face.
-    fn armBudget(self: *ResidentSession) void {
-        self.query_deadline_ns = if (self.query_budget_ns != 0)
+    /// Build this query's wall-clock ceiling from the configured budget — a
+    /// disabled ceiling when unbudgeted (the embedder/FFI/test default), which
+    /// skips every clock read. Called under the session lock at the top of each
+    /// query and threaded into `reconcile` + the fold/gather walks, so one value
+    /// spans the whole query without any shared session field the concurrent
+    /// readers would race.
+    fn ceiling(self: *const ResidentSession) Ceiling {
+        return .{ .deadline_ns = if (self.query_budget_ns != 0)
             std.Io.Clock.now(.awake, self.io).nanoseconds + self.query_budget_ns
         else
-            0;
-    }
-
-    /// Has this query overrun its armed ceiling? Sampled at strided checkpoints
-    /// in the O(corpus) walks — the caller passes its loop index, so the clock is
-    /// read at most once per `budget_stride` visits (amortized to noise; the fast
-    /// path returns before the first sample for a small candidate set). An
-    /// unbudgeted query short-circuits before any clock read, so the common case
-    /// pays nothing. Each parallel shard walks its own contiguous range with its
-    /// own index, so the read-only `query_deadline_ns` is sampled per shard.
-    inline fn overBudget(self: *const ResidentSession, i: usize) bool {
-        if (self.query_deadline_ns == 0) return false;
-        if (i & budget_stride != 0) return false;
-        return std.Io.Clock.now(.awake, self.io).nanoseconds >= self.query_deadline_ns;
+            0 };
     }
 
     /// Record a budget decline and surface it as `Stale` — the client answers on
@@ -496,6 +574,104 @@ pub const ResidentSession = struct {
     fn budgetAbort(self: *ResidentSession) QueryError {
         _ = self.budget_aborts.fetchAdd(1, .monotonic);
         return QueryError.Stale;
+    }
+
+    /// A held read lease over the fresh session plus this query's wall-clock
+    /// ceiling — what `beginRead` hands each answer face, which holds it for the
+    /// answer and `held.lease.release()`s on the way out.
+    const Held = struct { lease: Ward.Read, ceil: Ceiling };
+
+    /// Acquire the session for READING over a fresh corpus, returning the read
+    /// lease + this query's ceiling. On success the caller holds the READ lock
+    /// and MUST `held.lease.release()`; on error nothing is held (so a `defer`
+    /// registered only after the `try` never runs on the error path).
+    ///
+    /// The fast/slow dance lives in `Ward.readReconciled` (the double-checked
+    /// upgrade): the fast path answers under the read lock when the watcher
+    /// proves the tree clean (`seqlock.skip()`) — no writer, no reconcile, where
+    /// concurrent warm queries overlap; the slow path drops read, takes WRITE,
+    /// reconciles (which re-checks `skip()` at its top, so a writer that raced us
+    /// and already brought the tree current makes ours a no-op), and downgrades
+    /// back to read. The write→read downgrade gap only admits staleness a
+    /// concurrent writer would introduce — already covered by the
+    /// `provenClean`-gated existence stat every answer face applies off the clean
+    /// path — so a just-deleted file is still never reported.
+    fn beginRead(self: *ResidentSession) QueryError!Held {
+        const ceil = self.ceiling();
+        const Ctx = struct { s: *ResidentSession, c: Ceiling };
+        const lease = try self.ward.readReconciled(
+            self.io,
+            Ctx{ .s = self, .c = ceil },
+            struct {
+                fn fresh(x: Ctx) bool {
+                    return x.s.seqlock.skip(); // watcher-clean witness
+                }
+            }.fresh,
+            struct {
+                fn refresh(x: Ctx) QueryError!void {
+                    return x.s.reconcile(x.c);
+                }
+            }.refresh,
+        );
+        return .{ .lease = lease, .ceil = ceil };
+    }
+
+    /// Copy the published index generation under a shared lease so a concurrent
+    /// reconcile's `maybeReload` engine swap (which frees + reassigns
+    /// `index_gen`) can't free the slice mid-read. The daemon's poll thread
+    /// reads this for the READY handshake OFF the query path while worker-pool
+    /// threads may be reconciling; `daemon_gen` beside it is boot-constant and
+    /// needs no lease. Caller owns the returned dupe.
+    pub fn indexGenDup(self: *ResidentSession, a: std.mem.Allocator) ![]u8 {
+        const lease = self.ward.read(self.io);
+        defer lease.release();
+        return a.dupe(u8, self.index_gen);
+    }
+
+    /// Re-derive `extras` from one certified default walk (extras-only; the
+    /// mirror was already reconciled), replacing the prior list and clearing the
+    /// scoped-stale latch. A gapped walk declines (→ cold), like `reconcileFull`.
+    /// Writer-only — the caller holds the exclusive lease.
+    fn refreshExtras(self: *ResidentSession) QueryError!void {
+        var walk_arena = std.heap.ArenaAllocator.init(self.gpa);
+        defer walk_arena.deinit();
+        var sel_extras: []const run.Extra = &.{};
+        const fs = run.defaultFileSetExtras(walk_arena.allocator(), self.io, self.roots, &sel_extras);
+        if (fs.path_error) return QueryError.Stale;
+        try self.setExtras(sel_extras);
+    }
+
+    /// Fail-closed guard for the `Extra` gap (`serial.zig`): a `-t`/`-g` query
+    /// un-hides/un-ignores files the mirror — built from the same
+    /// hidden/ignore-excluding walk — cannot hold. If any reachable extra would
+    /// be surfaced by this request's filter, decline so the client answers on the
+    /// certified cold path (which walks them): the flagship "index changes speed,
+    /// never results" claim, restored for filtered queries. A request with no
+    /// type/glob filter can't surface an extra and returns at once (the common
+    /// path pays only two length checks). When a prior scoped reconcile left the
+    /// list stale, upgrade the held lease to exclusive, refresh with one walk, and
+    /// downgrade back — the double-checked dance `Ward.reconcileHeld` runs — so
+    /// `*held` always ends holding a valid read lease and the caller's `defer`
+    /// release stays balanced on every path, error included.
+    fn guardExtras(self: *ResidentSession, held: *Held, req: Request) QueryError!void {
+        if (req.filter.exts.len == 0 and req.filter.includes.len == 0) return;
+        const res = self.ward.reconcileHeld(
+            held.lease,
+            self,
+            struct {
+                fn fresh(s: *ResidentSession) bool {
+                    return !s.extras_stale;
+                }
+            }.fresh,
+            struct {
+                fn refresh(s: *ResidentSession) QueryError!void {
+                    return s.refreshExtras();
+                }
+            }.refresh,
+        );
+        held.lease = res.lease; // always live — the caller's `defer` stays balanced
+        if (res.err) |e| return e;
+        for (self.extras) |ex| if (req.filter.surfacesHidden(ex.rel, ex.kind == .ignored)) return QueryError.Stale;
     }
 
     /// Bring the overlay current against the certified rg-default walk. No-op on
@@ -508,8 +684,7 @@ pub const ResidentSession = struct {
     /// drift from `gist --no-index`/`rg`. A reconcile allocation failure OR a
     /// walk error (unreadable directory — cold reports it and exits 2) surfaces
     /// as `error.Stale` (→ cold fallback); see the module header on walk OOM.
-    fn reconcile(self: *ResidentSession) QueryError!void {
-        self.armBudget();
+    fn reconcile(self: *ResidentSession, ceil: Ceiling) QueryError!void {
         try self.maybeReload();
         if (self.seqlock.skip()) return;
 
@@ -527,11 +702,15 @@ pub const ResidentSession = struct {
             self.full_pass_done and drained.exact and !drained.doubt;
         const applied = scoped_eligible and try self.reconcileScoped(drained.paths);
         if (applied) {
-            self.scoped_reconciles += 1;
+            _ = self.scoped_reconciles.fetchAdd(1, .monotonic);
+            // A scoped pass touched only the changed paths, never the whole-tree
+            // extras derivation — so a `-t`/`-g` query must refresh before it can
+            // trust the list (`guardExtras` → `refreshExtras`).
+            self.extras_stale = true;
         } else {
-            try self.reconcileFull();
+            try self.reconcileFull(ceil);
             if (self.seqlock.active) self.full_pass_done = true;
-            self.full_reconciles += 1;
+            _ = self.full_reconciles.fetchAdd(1, .monotonic);
         }
 
         self.fresh_ns = now;
@@ -543,10 +722,14 @@ pub const ResidentSession = struct {
 
     /// The O(tree) barrier: re-derive the whole authoritative set and diff it
     /// against base + overlay. Always sound; the scoped path's fallback.
-    fn reconcileFull(self: *ResidentSession) QueryError!void {
+    fn reconcileFull(self: *ResidentSession, ceil: Ceiling) QueryError!void {
         var walk_arena = std.heap.ArenaAllocator.init(self.gpa);
         defer walk_arena.deinit();
-        const fs = run.defaultFileSet(walk_arena.allocator(), self.io, self.roots);
+        // Capture the un-hide/un-ignore extras from the SAME certified walk that
+        // builds the file set — a full pass re-derives the whole tree, so its
+        // extras are authoritative and the scoped-stale latch clears (`setExtras`).
+        var sel_extras: []const run.Extra = &.{};
+        const fs = run.defaultFileSetExtras(walk_arena.allocator(), self.io, self.roots, &sel_extras);
         // An errored walk is a GAPPED set. Cold would report the unreadable
         // directory to stderr and exit 2; serving a clean-looking warm answer
         // over the gap would silently drop its files. Decline (and never mark
@@ -560,10 +743,14 @@ pub const ResidentSession = struct {
         for (cur) |p| cur_set.putAssumeCapacity(p, {});
 
         for (cur, 0..) |p, i| {
-            if (self.overBudget(i)) return self.budgetAbort();
+            if (ceil.over(self.io, i)) return self.budgetAbort();
             try self.reconcileOne(p);
         }
         try self.tombstoneVanished(&cur_set);
+        // Only once the walk completed without error/abort: a partial pass would
+        // leave a truncated extras list, so refresh at the end (a budget abort
+        // above returns first, keeping the prior list until a full pass lands).
+        try self.setExtras(sel_extras);
     }
 
     /// The O(changed) barrier: verify ONLY the drained watcher paths against
@@ -775,10 +962,11 @@ pub const ResidentSession = struct {
         // `-m0`: ripgrep matches nothing in every mode — an empty answer, no
         // corpus walk (cold exits 1 before searching a byte; `serial.zig`).
         if (req.matchNothing()) return .{ .mode = req.mode, .files = &.{}, .count = 0 };
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-        try self.reconcile();
-        if (req.invert) return self.queryInvert(arena, req);
+        var held = try self.beginRead();
+        defer held.lease.release();
+        try self.guardExtras(&held, req);
+        const ceil = held.ceil;
+        if (req.invert) return self.queryInvert(arena, req, ceil);
 
         // Lower the request through the shared search core (`kernel/match/query.zig`):
         // the SAME compile → prefilter → match kernels the cold CLI is built on,
@@ -806,12 +994,12 @@ pub const ResidentSession = struct {
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
         var acc = Accumulator{ .mode = req.mode, .arena = arena, .io = self.io, .verify_existence = verify, .cq = &cq, .sc = &sc };
-        if (!try self.foldBaseParallel(arena, req, &cq, cand, verify, &acc))
-            try self.eachBase(cand, &acc);
+        if (!try self.foldBaseParallel(arena, req, &cq, cand, verify, &acc, ceil))
+            try self.eachBase(cand, &acc, ceil);
         try self.eachOverlay(req.filter, &acc); // the (bounded) overlay always folds serially
 
         if (req.mode == .files) std.mem.sort([]const u8, acc.files.items, {}, lessPath);
-        return .{ .mode = req.mode, .files = acc.files.items, .count = acc.count };
+        return .{ .mode = req.mode, .files = try ownFiles(arena, acc.files.items), .count = acc.count };
     }
 
     /// The scanned-byte weight of one base candidate id — the sharding key for
@@ -831,7 +1019,7 @@ pub const ResidentSession = struct {
     /// path lists (the caller sorts once with `lessPath`). Each merged path aliases
     /// immutable mirror memory, so a shard's arena — which backed only its
     /// transient list — is freed here. The overlay is the caller's serial job.
-    fn foldBaseParallel(self: *ResidentSession, arena: std.mem.Allocator, req: Request, cq: *const CompiledQuery, cand: []const u32, verify: bool, acc: *Accumulator) QueryError!bool {
+    fn foldBaseParallel(self: *ResidentSession, arena: std.mem.Allocator, req: Request, cq: *const CompiledQuery, cand: []const u32, verify: bool, acc: *Accumulator, ceil: Ceiling) QueryError!bool {
         const bounds = parallel.shardBounds(u32, cand, self, candWeight, render.par_min_bytes, render.par_max_shards, arena) orelse return false;
         const nthr = bounds.len - 1;
 
@@ -841,6 +1029,7 @@ pub const ResidentSession = struct {
             ids: []const u32,
             mode: Mode,
             verify: bool,
+            ceil: Ceiling,
             arena: std.heap.ArenaAllocator,
             files: std.ArrayList([]const u8) = .empty,
             count: u64 = 0,
@@ -857,7 +1046,7 @@ pub const ResidentSession = struct {
                     return;
                 };
                 var a = Accumulator{ .mode = sh.mode, .arena = sa, .io = sh.session.io, .verify_existence = sh.verify, .cq = sh.cq, .sc = &sc };
-                sh.session.eachBase(sh.ids, &a) catch |e| {
+                sh.session.eachBase(sh.ids, &a, sh.ceil) catch |e| {
                     sh.err = e;
                     return;
                 };
@@ -873,6 +1062,7 @@ pub const ResidentSession = struct {
             .ids = cand[bounds[i]..bounds[i + 1]],
             .mode = req.mode,
             .verify = verify,
+            .ceil = ceil,
             .arena = std.heap.ArenaAllocator.init(self.gpa),
         };
         defer for (shards) |*sh| sh.arena.deinit();
@@ -901,7 +1091,7 @@ pub const ResidentSession = struct {
     /// non-matching contribution. Binary/empty parity is folded into the cached
     /// count (a NUL-in-first-buffer file caches `lines = 0` and drops out, as
     /// cold suppresses it; a later-NUL file counts its pre-NUL buffers).
-    fn queryInvert(self: *ResidentSession, arena: std.mem.Allocator, req: Request) QueryError!Result {
+    fn queryInvert(self: *ResidentSession, arena: std.mem.Allocator, req: Request, ceil: Ceiling) QueryError!Result {
         // Uncapped match kernel: `-m N` bounds the COMPLEMENT (non-matching)
         // output per file, applied below once the true match count is known —
         // a capped matcher would under-count matches and over-count the invert.
@@ -922,7 +1112,7 @@ pub const ResidentSession = struct {
 
         var inv = InvertFold{ .mode = req.mode, .arena = arena, .io = self.io, .cap = req.max_count, .verify_existence = !self.seqlock.provenClean() };
         for (self.mir.paths, self.mir.docs, self.mir.nuls, self.mir.lines, 0..) |path, bytes, nul, nlines, i| {
-            if (self.overBudget(i)) return self.budgetAbort();
+            if (ceil.over(self.io, i)) return self.budgetAbort();
             if (nlines == 0) continue; // empty / NUL-in-first-buffer: cold suppresses it
             if (self.overlay.contains(path)) continue; // the overlay pass owns it
             if (!req.filter.admits(path)) continue; // out-of-scope: cold never walks it under `-v`
@@ -944,7 +1134,7 @@ pub const ResidentSession = struct {
         };
 
         if (req.mode == .files) std.mem.sort([]const u8, inv.files.items, {}, lessPath);
-        return .{ .mode = req.mode, .files = inv.files.items, .count = inv.count };
+        return .{ .mode = req.mode, .files = try ownFiles(arena, inv.files.items), .count = inv.count };
     }
 
     /// Answer a bare `gist <pattern>` (`.lines`) request: the default
@@ -959,9 +1149,10 @@ pub const ResidentSession = struct {
     /// declines and the client answers cold.
     pub fn queryLines(self: *ResidentSession, arena: std.mem.Allocator, req: Request) QueryError!Lines {
         if (req.matchNothing()) return .{ .out = "", .matched = false }; // `-m0` (see `query`)
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-        try self.reconcile();
+        var held = try self.beginRead();
+        defer held.lease.release();
+        try self.guardExtras(&held, req);
+        const ceil = held.ceil;
 
         var cq = try self.compileFor(req, .files); // the whole-doc gate; presentation is render's job
         defer cq.deinit(self.gpa);
@@ -975,7 +1166,7 @@ pub const ResidentSession = struct {
         // doc is admitted whole (a doc with zero matching lines is entirely
         // selected), so the emit gather walks every doc — the invert emit's own
         // cost, which Lever B parallelizes.
-        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert, .{});
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert, .{}, ceil);
         var out: std.ArrayList(u8) = .empty;
         // Both faces shard the emit over cores through the SAME primitive
         // (`render.renderLinesParallel` → `parallel.shardBounds`): `-v` selects
@@ -1000,16 +1191,17 @@ pub const ResidentSession = struct {
     /// `queryLines` for the same corpus state; `-m0` is the empty chunk answer.
     pub fn queryLinesShm(self: *ResidentSession, arena: std.mem.Allocator, req: Request, floor: usize) QueryError!render.LinesEmit {
         if (req.matchNothing()) return .{ .chunk = .{ .bytes = "", .matched = false } };
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-        try self.reconcile();
+        var held = try self.beginRead();
+        defer held.lease.release();
+        try self.guardExtras(&held, req);
+        const ceil = held.ceil;
 
         var cq = try self.compileFor(req, .files);
         defer cq.deinit(self.gpa);
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
 
-        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert, .{});
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .lines, req.invert, .{}, ceil);
         return render.renderLinesShm(self.gpa, arena, req, docs, floor) catch |e| switch (e) {
             error.OutOfMemory => return QueryError.OutOfMemory,
             error.Unsupported => return QueryError.Stale,
@@ -1030,9 +1222,10 @@ pub const ResidentSession = struct {
     /// compile decline) or an OOM surfaces as `error.Stale`/`OutOfMemory` → cold.
     /// `k` is the surfaced-row cap (`0` ⇒ cold's default 20).
     pub fn queryRank(self: *ResidentSession, arena: std.mem.Allocator, req: Request, k: usize) QueryError![]const u8 {
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-        try self.reconcile();
+        var held = try self.beginRead();
+        defer held.lease.release();
+        try self.guardExtras(&held, req);
+        const ceil = held.ceil;
 
         // The whole-doc gate doubles as the candidate compiler; its regex body IS
         // the linear engine cold ranks with (`serial.zig`'s `re.linear`), compiled
@@ -1061,7 +1254,7 @@ pub const ResidentSession = struct {
         // to cold's, and the array position (the RRF tiebreak) matches too.
         var files: std.ArrayList(ranked.LiveFile) = .empty;
         for (cand, 0..) |id, i| {
-            if (self.overBudget(i)) return self.budgetAbort();
+            if (ceil.over(self.io, i)) return self.budgetAbort();
             const path = self.mir.paths[id];
             if (self.overlay.contains(path)) continue; // the overlay pass owns it
             files.append(arena, .{ .path = path, .bytes = self.mir.docs[id] }) catch return QueryError.OutOfMemory;
@@ -1093,9 +1286,10 @@ pub const ResidentSession = struct {
     /// arena: only a boolean crosses back. `-m0` short-circuits to `false`.
     pub fn queryExists(self: *ResidentSession, req: Request) QueryError!bool {
         if (req.matchNothing()) return false; // `-m0` (see `query`)
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-        try self.reconcile();
+        var held = try self.beginRead();
+        defer held.lease.release();
+        try self.guardExtras(&held, req);
+        const ceil = held.ceil;
 
         var cq = try self.compileFor(req, .files); // the whole-doc gate is all `-q` needs
         defer cq.deinit(self.gpa);
@@ -1114,7 +1308,7 @@ pub const ResidentSession = struct {
             .verify_existence = !self.seqlock.provenClean(),
         };
         defer ex.spans.deinit(self.gpa);
-        if (req.invert) try self.eachDoc(req.filter, &ex) else try self.eachCandidate(&cq, req.filter, &ex);
+        if (req.invert) try self.eachDoc(req.filter, &ex, ceil) else try self.eachCandidate(&cq, req.filter, &ex, ceil);
         return ex.found;
     }
 
@@ -1137,9 +1331,10 @@ pub const ResidentSession = struct {
     pub fn search(self: *ResidentSession, arena: std.mem.Allocator, req: Request, sink: anytype) QueryError!bool {
         if (req.matchNothing()) return false;
         if (req.quiet) return self.queryExists(req);
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-        try self.reconcile();
+        var held = try self.beginRead();
+        defer held.lease.release();
+        try self.guardExtras(&held, req);
+        const ceil = held.ceil;
 
         // Mode is irrelevant to span emission — compile the cheap `files` body.
         var cq = try self.compileFor(req, .files);
@@ -1156,7 +1351,7 @@ pub const ResidentSession = struct {
         var sc = cq.scratch(self.gpa) catch return QueryError.OutOfMemory;
         defer sc.deinit();
 
-        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .json_stream, req.invert, sinkBudget(sink));
+        const docs = try self.matchingDocs(arena, &cq, req.filter, &sc, .json_stream, req.invert, sinkBudget(sink), ceil);
 
         // A common token's matching-doc set is large enough that the per-line span
         // scan — not the sink emit — is the 1-core-vs-16-core loss to cold. Above
@@ -1287,9 +1482,9 @@ pub const ResidentSession = struct {
     /// a scan that emits few or no records still respects the caller's budget;
     /// it is empty for the daemon `lines` faces, whose completeness the session
     /// ceiling guards instead.
-    fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, filter: PathFilter, sc: *Scratch, admit: Admit, invert: bool, budget: RunBudget) QueryError![]const DocRef {
+    fn matchingDocs(self: *ResidentSession, arena: std.mem.Allocator, cq: *const CompiledQuery, filter: PathFilter, sc: *Scratch, admit: Admit, invert: bool, budget: RunBudget, ceil: Ceiling) QueryError![]const DocRef {
         var g = Gather{ .arena = arena, .io = self.io, .cq = cq, .sc = sc, .admit = admit, .require_match = !invert, .check_exists = !self.seqlock.provenClean(), .cancel = budget.cancel, .deadline_ns = budget.deadline_ns };
-        if (invert) try self.eachDoc(filter, &g) else try self.eachCandidate(cq, filter, &g);
+        if (invert) try self.eachDoc(filter, &g, ceil) else try self.eachCandidate(cq, filter, &g, ceil);
         std.mem.sort(DocRef, g.docs.items, {}, docLess);
         return g.docs.items;
     }
@@ -1297,9 +1492,9 @@ pub const ResidentSession = struct {
     /// Walk every live document without trigram pruning. Invert-match needs this:
     /// a document excluded by the positive candidate set may be entirely made of
     /// selected nonmatching lines.
-    fn eachDoc(self: *ResidentSession, filter: PathFilter, v: anytype) QueryError!void {
+    fn eachDoc(self: *ResidentSession, filter: PathFilter, v: anytype, ceil: Ceiling) QueryError!void {
         for (self.mir.paths, self.mir.docs, self.mir.nuls, 0..) |path, bytes, nul, i| {
-            if (self.overBudget(i)) return self.budgetAbort();
+            if (ceil.over(self.io, i)) return self.budgetAbort();
             if (self.overlay.contains(path)) continue;
             if (!filter.admits(path)) continue; // out-of-scope for a scoped `-v` walk
             try v.visit(path, bytes, nul);
@@ -1323,10 +1518,10 @@ pub const ResidentSession = struct {
     /// always visited directly — the index is stale for exactly those. Shared
     /// by the files/count fold (`Accumulator`) and the doc gather (`Gather`),
     /// so every answer face prunes candidates identically.
-    fn eachCandidate(self: *ResidentSession, cq: *const CompiledQuery, filter: PathFilter, v: anytype) QueryError!void {
+    fn eachCandidate(self: *ResidentSession, cq: *const CompiledQuery, filter: PathFilter, v: anytype, ceil: Ceiling) QueryError!void {
         var cand_buf: ?[]u32 = null;
         defer if (cand_buf) |c| self.gpa.free(c);
-        try self.eachBase(try self.candidateIds(cq, filter, &cand_buf), v);
+        try self.eachBase(try self.candidateIds(cq, filter, &cand_buf), v, ceil);
         if (wantsStop(v)) return;
         try self.eachOverlay(filter, v);
     }
@@ -1337,9 +1532,9 @@ pub const ResidentSession = struct {
     /// each with its own scratch over the immutable mirror), while the bounded
     /// overlay stays serial. `cand` is contiguous and ordered, so a sharded walk
     /// yields the same visits in the same per-shard order.
-    fn eachBase(self: *ResidentSession, cand: []const u32, v: anytype) QueryError!void {
+    fn eachBase(self: *ResidentSession, cand: []const u32, v: anytype, ceil: Ceiling) QueryError!void {
         for (cand, 0..) |id, i| {
-            if (self.overBudget(i)) return self.budgetAbort();
+            if (ceil.over(self.io, i)) return self.budgetAbort();
             if (self.overlay.contains(self.mir.paths[id])) continue; // overlay owns it
             try v.visit(self.mir.paths[id], self.mir.docs[id], self.mir.nuls[id]);
             if (wantsStop(v)) return; // `-q` early-halt (comptime no-op for other visitors)
@@ -1691,6 +1886,20 @@ const InvertFold = struct {
 /// byte-identical to a cold `gist -l` run, not merely set-equal.
 fn lessPath(_: void, a: []const u8, b: []const u8) bool {
     return run.pathLess(a, b);
+}
+
+/// Copy a matched-path list into the caller's per-query `arena`, so the returned
+/// `Result.files` OWNS its bytes instead of aliasing session memory (mirror path
+/// table or overlay keys). This is what decouples an answer from the session
+/// lock: with the paths duped, the daemon worker can release the read lock before
+/// encoding the frame, and a concurrent reconcile writer can't pull the bytes out
+/// from under an in-flight `-l` response. The lists are file-set sized (small);
+/// `queryLines`/`queryRank`/shm answers are already arena-rendered, so only the
+/// `-l` faces need this.
+fn ownFiles(arena: std.mem.Allocator, files: []const []const u8) QueryError![]const []const u8 {
+    const out = try arena.alloc([]const u8, files.len);
+    for (files, out) |src, *dst| dst.* = try arena.dupe(u8, src);
+    return out;
 }
 
 const readGen = persist.readPublishedGeneration;
