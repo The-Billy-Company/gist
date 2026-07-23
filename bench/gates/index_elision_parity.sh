@@ -54,7 +54,10 @@ git init -q . 2> /dev/null || true # a repo so the rg-compat walk honors .gitign
 
 # A corpus with signal + noise: a handful of files that DO contain the needles
 # scattered among many that don't (so elision has something to elide), plus a
-# .gitignored file and a hidden file (both must be walk-invisible either way).
+# .gitignored file and a hidden file. Both are invisible to the DEFAULT walk,
+# but a `-t`/`-g` query un-hides/un-ignores them (rg parity): the `type-scoped`
+# case below (`-tzig`) surfaces `.hidden.zig`, so the index-accelerated run must
+# too — the guard against the warm mirror silently omitting an un-hidden file.
 mkdir -p libs/deep/nested
 for i in $(seq 1 200); do printf 'package noise\nfn f%d() void {}\n' "${i}" > "libs/noise_${i}.zig"; done
 printf 'const needle_alpha = 1;\nfn Handler() void {}\n' > libs/hit_a.zig
@@ -113,6 +116,12 @@ chk "invert" -v needle_alpha
 chk "only-matching" -o needle_alpha
 chk "no-match" zzz_nonexistent_qxv
 chk "type-scoped" -tzig needle_alpha
+# `-tzig` un-HIDES `.hidden.zig` (a dotfile) but must NOT un-ignore `ignored.zig`
+# (a type filter never un-ignores — rg parity); `-g '*.zig'` un-hides AND
+# un-ignores, so it surfaces BOTH. These are the reachable file-level extras the
+# default walk skips: the warm mirror lacks them, so the daemon must decline a
+# filtered query to cold rather than answer short (the flagship parity claim).
+chk "glob-unhide-unignore" -g '*.zig' needle_alpha
 chk "path-scoped" needle_alpha libs/deep
 
 # Content-shard path: a 2-byte literal extracts no trigram, so the index cannot
