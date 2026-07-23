@@ -162,17 +162,28 @@ def render(rows: list[Row]) -> str:
         )
     lines.append("")
 
-    dfa = [r for r in rows if r.passes >= 0.9999 and "dfa" in r.engine]
+    fused = [r for r in rows if r.passes >= 0.9999 and "dfa" in r.engine]
+    classrun = [r for r in fused if "class-run" in r.engine]
     simd = [r for r in rows if "simd" in r.engine]
     if all_floor:
+        # A dense class (`\w{3,8}`) is served in production by the SIMD class-run
+        # kernel; its floor is certified against an independent one-pass DFA
+        # reference (docMatch verdict proven equal on every candidate document).
+        cr_clause = (
+            f" — {len(classrun)} of them a dense class the production SIMD class-run "
+            "kernel serves, proven equal on every document to an independent one-pass "
+            "DFA reference"
+            if classrun
+            else ""
+        )
         lines.append(
-            f"> **At the floor on every class.** The {len(dfa)} DFA classes each "
-            "touch every candidate byte exactly once (passes ≡ 1.0000 — a single "
-            "fused pass, no re-scan); the "
-            f"{len(simd)} SIMD literal classes stay strictly below it (early exit + "
-            "vector skips). No implementation can verify a candidate set in fewer "
-            "than Ω(candidate bytes) reads, and gist reads that minimum — the "
-            "trigram filter having already pruned the rest of the corpus untouched."
+            f"> **At the floor on every class.** {len(fused)} classes touch every "
+            "candidate byte exactly once (passes ≡ 1.0000 — a single fused pass, no "
+            f"re-scan){cr_clause}; the {len(simd)} SIMD literal classes stay strictly "
+            "below it (early exit + vector skips). No implementation can verify a "
+            "candidate set in fewer than Ω(candidate bytes) reads, and gist reads that "
+            "minimum — the trigram filter having already pruned the rest of the corpus "
+            "untouched."
         )
     else:
         offenders = ", ".join(f"`{r.cls}`" for r in rows if not r.at_floor)

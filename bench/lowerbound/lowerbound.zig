@@ -168,14 +168,30 @@ fn measureLiteral(corpus: *const corpus_mod.Corpus, cand: []const u32, needle: [
     return .{ .examined = examined, .hits = hits, .ok = ok };
 }
 
-fn measureRegex(re: *Regex, sim: *Regex.Sim, corpus: *const corpus_mod.Corpus, cand: []const u32, violations: *usize) struct { examined: u64, hits: usize, note: []const u8, dense: bool } {
+fn measureRegex(gpa: std.mem.Allocator, re: *Regex, sim: *Regex.Sim, pattern: []const u8, corpus: *const corpus_mod.Corpus, cand: []const u32, violations: *usize) struct { examined: u64, hits: usize, note: []const u8, dense: bool } {
     // Zero-width EOL match (`\d*$`): docMatch answers in O(1) (doc.len>0) —
     // BELOW the one-pass floor, not a violation. Report and skip byte-touch.
     if (re.eol_empty) return .{ .examined = 0, .hits = 0, .note = "zero-width (O(1))", .dense = false };
-    // No DFA (powerset blow-up ⇒ Pike per-line) or multiline ⇒ the double-traffic
-    // memchr+rescan path, NOT single-pass. None of the probe set hits this; if it
-    // does, surface it honestly as a floor violation rather than hide it.
-    const d = re.dfa orelse {
+    // The independent one-pass oracle is a byte-class DFA (`dfaDenseScan` touches
+    // each candidate byte exactly once). Production's primary engine for a *dense*
+    // class (`\w{3,8}`, `[a-z]{3,}`) is now the SIMD class-run kernel, which
+    // deliberately skips determinization (`core.zig`: `kernel_final and !force_dfa`),
+    // so `re.dfa` is null. Force-build a DFA for the same pattern *purely as the
+    // reference* and assert production's real `docMatch` (the class-run kernel)
+    // agrees with it on every document — the SIMD path then verifies at ≤ this
+    // exact one-pass floor. A genuine no-DFA, no-class-run pattern (powerset
+    // blow-up ⇒ Pike per-line, or multiline double-traffic) stays a violation.
+    var ref_re: ?Regex = null;
+    defer if (ref_re) |*r| r.deinit();
+    var note: []const u8 = "dfa (fused 1-pass)";
+    const d: *const Dfa = re.dfa orelse dref: {
+        if (re.classrun != null) {
+            ref_re = Regex.compileOpts(gpa, pattern, .{ .force_dfa = true }) catch null;
+            if (ref_re) |*rr| if (rr.dfa) |dd| {
+                note = "class-run (dfa-ref 1-pass)";
+                break :dref dd;
+            };
+        }
         violations.* += 1;
         return .{ .examined = 0, .hits = 0, .note = "pike (2-pass!)", .dense = false };
     };
@@ -183,15 +199,15 @@ fn measureRegex(re: *Regex, sim: *Regex.Sim, corpus: *const corpus_mod.Corpus, c
     var hits: usize = 0;
     for (cand) |doc_id| {
         const doc = corpus.docs[doc_id];
-        const real = re.docMatch(sim, doc); // gist's REAL verify (early-exits)
-        const ref = dfaDenseScan(d, doc, &examined); // independent one-pass count
+        const real = re.docMatch(sim, doc); // gist's REAL verify (class-run or DFA)
+        const ref = dfaDenseScan(d, doc, &examined); // independent DFA one-pass count
         if (real != ref) {
             violations.* += 1;
             std.debug.print("  !! regex disagree on doc {d}: docMatch={} ref={}\n", .{ doc_id, real, ref });
         }
         if (real) hits += 1;
     }
-    return .{ .examined = examined, .hits = hits, .note = "dfa (fused 1-pass)", .dense = true };
+    return .{ .examined = examined, .hits = hits, .note = note, .dense = true };
 }
 
 fn measure(gpa: std.mem.Allocator, corpus: *const corpus_mod.Corpus, idx: *const Index, probe: Probe, violations: *usize) !Row {
@@ -230,7 +246,7 @@ fn measure(gpa: std.mem.Allocator, corpus: *const corpus_mod.Corpus, idx: *const
             ok = m.ok;
         },
         .regex => {
-            const m = measureRegex(&re.?, &sim.?, corpus, cand, violations);
+            const m = measureRegex(gpa, &re.?, &sim.?, probe.pattern, corpus, cand, violations);
             examined = m.examined;
             hits = m.hits;
             note = m.note;

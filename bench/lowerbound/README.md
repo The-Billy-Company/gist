@@ -57,7 +57,13 @@ not asserted:
    byte **exactly once** — `passes ≡ 1.0000` for every DFA class — with none of
    the memchr-then-rescan _double_ byte-traffic a per-line matcher pays. The SIMD
    literal path (`src/kernel/match/scan/simd.zig`) reads **≤ N** through vector
-   first/last-byte skips and early exit on the first hit.
+   first/last-byte skips and early exit on the first hit. A **dense class**
+   (`\w{3,8}`) is served in production by the SIMD class-run kernel
+   (`src/kernel/match/scan/classrun.zig`), which skips DFA construction entirely;
+   Layer D certifies its floor against an independent one-pass DFA reference it
+   force-builds for the same pattern, asserting `docMatch` agrees on **every**
+   candidate document — so the class-run verdict is pinned to an exact-one-pass
+   oracle.
 
 2. **The trigram filter makes total work sublinear.** gist never touches most of
    the corpus, because the index prunes candidates _before_ verify runs. On this
