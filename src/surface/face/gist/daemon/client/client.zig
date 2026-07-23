@@ -301,10 +301,14 @@ fn emitFiles(gpa: std.mem.Allocator, files_iter: protocol.FileIter) Outcome {
     return .{ .served = if (any) 0 else 1 };
 }
 
-/// Emit a fully-assembled pre-rendered `lines` answer verbatim (the daemon
-/// already produced cold's exact bytes) and return rg's exit code.
+/// Emit a fully-assembled pre-rendered `lines` answer (the daemon already
+/// produced cold's exact bytes, path-sorted) and return rg's exit code. Bounded
+/// by `writeStdoutCapped`, not a raw `writeStdout`: the whole answer is one
+/// buffer, so the soft agent-context guard must be applied HERE (at a whole-line
+/// boundary) rather than trusting the per-fragment straddle — otherwise a warm
+/// hit dumps the firehose a daemon-less cold run would have truncated.
 fn emitRaw(bytes: []const u8, matched: bool) Outcome {
-    if (bytes.len > 0) _ = corpus.writeStdout(bytes);
+    if (bytes.len > 0) _ = corpus.writeStdoutCapped(bytes);
     return .{ .served = if (matched) 0 else 1 };
 }
 
@@ -320,6 +324,8 @@ fn emitFd(shm_fd: std.posix.fd_t, length: u64, matched: bool, prior_chunks: usiz
     if (len == 0) return .{ .served = if (matched) 0 else 1 }; // empty answer; nothing to map
     const view = shm.mapReadonly(shm_fd, len) catch return .cold;
     defer shm.unmap(view);
-    _ = corpus.writeStdout(view[0..len]);
+    // Same soft-cap bound as `emitRaw` — the mapped answer is one buffer, so the
+    // guard is applied here at a whole-line boundary (see `writeStdoutCapped`).
+    _ = corpus.writeStdoutCapped(view[0..len]);
     return .{ .served = if (matched) 0 else 1 };
 }
