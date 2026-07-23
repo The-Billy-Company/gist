@@ -1,3 +1,4 @@
+// MONOLITHIC: resident-session UDS wire protocol — framing, opcodes, HELLO/READY capabilities, and the additive query_ext/annals codecs are one versioned contract (ADR-352 rung 2.5)
 //! gist resident session — the Unix-domain-socket wire protocol (ADR-352 rung 2.5).
 //!
 //! Length-prefixed framing over a stream socket: `[u32 len][u8 opcode][payload…]`,

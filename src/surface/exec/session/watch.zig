@@ -1,3 +1,4 @@
+// MONOLITHIC: freshness watcher — the FSEvents/kqueue event loop, drop/flood policy, and barrier-sync accelerator co-maintain one fail-open watch state (ADR-352 rung 2.5)
 //! gist resident session — the freshness watcher (ADR-352 rung 2.5).
 //!
 //! The watcher is a pure *accelerator* for the freshness barrier, never a
