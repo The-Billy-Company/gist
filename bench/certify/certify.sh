@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# certify.sh — full Certificate of Optimality (Layers A–E).
+# certify.sh — full Certificate of Optimality (Layers A–F).
 #
-# Layer A has two halves: microscopic (`zig build certify` — cycles/byte for the
-# in-process verify kernel; auto-re-runs under sudo when available for PMU) and
+# Layer A has three lanes: microscopic (`zig build certify` — cycles/byte for the
+# in-process verify kernel; auto-re-runs under sudo when available for PMU),
 # macroscopic (this script's hyperfine race — cold fresh-process gist vs the
-# field, fail-closed bootstrap-CI + Mann-Whitney vs ripgrep). Layers B/B′/C/D/E
-# are then spliced automatically via `certify_layers.sh` so the committed
-# artifact never ships a header that promises five layers and delivers one.
+# field, fail-closed bootstrap-CI + Mann-Whitney vs ripgrep), the warm resident
+# tier, and the `--rank` lane. Layers B/B′/C/D/E/F are then spliced automatically
+# via `certify_layers.sh` so the committed artifact never ships a header that
+# promises the layers and delivers one.
 #
 # The 12 classes are byte-identical to certify.zig's probes, so the macroscopic
 # table and the microscopic table in CERTIFICATE.md map 1:1 by class name.
@@ -348,6 +349,19 @@ echo "racing the warm tier (resident daemon)…"
 RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/certify_warm.sh" \
   || echo "  warm tier skipped (daemon/rival unavailable) — cold cert unaffected" >&2
 
+# --rank lane — the one output shape rg can't express (Layer A). Fail-closed: the
+# report enforces no-fabrication + coverage + def-boost + codegen-demote + bounded
+# overhead + beats-rg, and any violation aborts the mint. Needs only rg + the
+# index this run already persisted, both guaranteed on a certification machine.
+echo "certifying the --rank lane (fail-closed)…"
+RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/certify_rank.sh" || exit 1
+
+# Layer G — the relate face (retrieval by description length). Fail-closed on a
+# retrieval-quality contract + boundary proof; not a dominance claim. Needs only
+# the staged relate binary + a deterministic synthetic corpus it mints itself.
+echo "certifying the relate face (Layer G, fail-closed)…"
+bash "${HERE}/certify_relate.sh" || exit 1
+
 # Structural completeness only. `--require-head` (git_commit==HEAD + clean tree)
 # is unsatisfiable for a fresh mint — hyperfine timings differ every run and the
 # Layer B/C/D publish above rewrites the tracked artifact/, so the tree is
@@ -363,10 +377,12 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   cp -f "${CERT}" "${OUT}/certify.csv" "${MACRO_CSV}" "${OUT}/machine.json" \
     "${OUT}/tool-versions.txt" "${OUT}/corpus-manifest.tsv" \
     "${OUT}/command-log.txt" "${OUT}/index-sizes.json" "${pub}/"
-  # Warm-tier CSV — additive side-car (present when the warm race ran).
+  # Warm-tier + rank-lane CSVs — additive side-cars (present when those lanes ran).
   [[ -f "${OUT}/certify_warm.csv" ]] && cp -f "${OUT}/certify_warm.csv" "${pub}/"
-  # Layer B/C/D/E side-cars — the certificate is incomplete without them.
-  for side in portcert.json portcert.csv portbound.json roofline.json lowerbound.csv crest.csv; do
+  [[ -f "${OUT}/certify_rank.csv" ]] && cp -f "${OUT}/certify_rank.csv" "${pub}/"
+  [[ -f "${OUT}/relate.csv" ]] && cp -f "${OUT}/relate.csv" "${pub}/"
+  # Layer B/C/D/E/F side-cars — the certificate is incomplete without them.
+  for side in portcert.json portcert.csv portbound.json roofline.json lowerbound.csv crest.csv codex.csv; do
     [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
   done
   cp -f "${OUT}/raw/"*.json "${pub}/raw/" || exit 1

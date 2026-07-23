@@ -9,9 +9,17 @@
 #
 # But an agent does not fork a fresh gist per query — it drives the resident daemon
 # (`gist serve`), which holds the corpus + trigram index warm in RAM and, when its
-# FSEvents/inotify watcher proves the tree quiescent, elides the walk entirely
+# FSEvents/inotify watcher proves the tree quiescent, elides the freshness walk
 # (`seqlock.skip()`) OR reconciles only the exact dirty set. This tier measures THAT
 # path — the one the warm workload actually uses — against the same field.
+#
+# FAIL-CLOSED (this is the upgrade over the old descriptive-geomean tier): each
+# probe class now exports the full per-run hyperfine sample vector, and the report
+# renders the SAME statistic the cold macro uses — a 95% bootstrap-CI median + a
+# Mann-Whitney U verdict vs ripgrep. A warm WIN requires a lower median AND
+# p < 0.05; a warm LOSS vs ripgrep on any class aborts the mint (a real regression,
+# not box noise). Warm no longer inherits Layer A's claim descriptively — it earns
+# its own statistically-significant one.
 #
 # FAIRNESS — same corpus, honest oracle:
 #   * The daemon is scoped to the SAME ROOTS as the cold race (`gist serve $ROOTS`)
@@ -25,7 +33,7 @@
 #     immune to a concurrently-rebuilt `index.gist` (the one flake a live coworking
 #     tree can inject). Proving `warm == --no-index` therefore proves `warm == cold`
 #     transitively, without a shared index the two paths could disagree on mid-mint.
-#     The `cold_ms` column separately times INDEX-BACKED cold gist over the same
+#     The `cold` cell separately times INDEX-BACKED cold gist over the same
 #     roots — the honest "warm vs cold" speedup. csearch/zoekt/rg stay TIMING rivals
 #     over their near-identical corpus (the ~0.1% build-output delta the cold tier documents).
 #   * Quiescence is the warm regime by construction: the cert runs in an isolated,
@@ -47,7 +55,10 @@ RUNS="${RUNS:-30}"
 WARMUP="${WARMUP:-5}"
 CERT="${OUT}/CERTIFICATE.md"
 WARM_CSV="${OUT}/certify_warm.csv"
+WORK="${COMPETE_DIR}/warmcert"
 WSOCK="${COMPETE_DIR}/warmcert.$$.sock"
+rm -rf "${WORK}"
+mkdir -p "${WORK}" "${OUT}"
 
 # The 12 classes — byte-identical to certify.sh's PROBES so the warm table maps
 # 1:1 onto the cold macroscopic table by class name.
@@ -147,45 +158,65 @@ echo "warm-tier race — resident daemon, hyperfine runs=${RUNS} (+${WARMUP} war
 echo "field: gist-warm gist-cold ${tools[*]}"
 echo
 
-: > "${WARM_CSV}.tmp"
-echo "class,warm_ms,cold_ms,csearch_ms,zoekt_ms,rg_ms,vs_cold,vs_csearch" >> "${WARM_CSV}.tmp"
+# One hyperfine JSON per (class, cell) into ${WORK}, exactly like the cold macro,
+# so the report can run the same bootstrap-CI + Mann-Whitney statistic. A warm
+# cell is equivalence-gated vs its `--no-index` oracle before it may be timed; a
+# competitor cell is status-gated. Retries one clean cell on a transient failure.
+bench_cell() { # <class> <cell-id> <cmd> [oracle] → 0 timed, 1 rejected
+  local class="$1" cell="$2" cmd="$3" oracle="${4:-}" attempt
+  [[ -z "${cmd}" || "${cmd}" = "false" ]] && return 1
+  if [[ -n "${oracle}" ]]; then
+    compete_precheck_equivalent "${cmd}" "${oracle}" "${class}/${cell}" || return 1
+  else
+    compete_precheck_status "${cmd}" "${class}/${cell}" || return 1
+  fi
+  for attempt in 1 2; do
+    rm -f "${WORK}/${class}__${cell}.json"
+    if compete_hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
+      --export-json "${WORK}/${class}__${cell}.json" "${cmd}" > /dev/null 2>&1; then
+      return 0
+    fi
+    [[ "${attempt}" = 1 ]] && echo "  transient warm-timing failure ${class}/${cell}; retrying…" >&2
+  done
+  echo "  warm CELL FAILED ${class}/${cell}: ${cmd}" >&2
+  return 1
+}
 
-# One class row: warm gist (equivalence-checked vs the `--no-index` ground truth),
-# index-backed cold gist, and each rival. Missing/failed cells become "?" and drop
-# out of the geomeans.
+: > "${WORK}/order.tsv"
 for row in "${PROBES[@]}"; do
   read -r class kind pat <<< "${row}"
-  wc="$(warm_cmd "${kind}" "${pat}")"
-  oracle="$(oracle_cmd "${kind}" "${pat}")"
-  cc="$(cold_cmd "${kind}" "${pat}")"
+  printf '%s\t%s\t%s\n' "${class}" "${kind}" "${pat}" >> "${WORK}/order.tsv"
 
-  # Warm must equal the `--no-index` ground truth before it may be timed.
-  warm_ms="$(hf_mean "${WARMUP}" "${RUNS}" "${wc}" "${oracle}")" || {
-    echo "  ${class}: warm gist failed equivalence/timing — excluded" >&2
-    warm_ms="?"
+  # Warm gist is the subject: it must equal the --no-index ground truth AND time
+  # cleanly, or the warm certificate is invalid — abort the mint (fail-closed).
+  bench_cell "${class}" warm "$(warm_cmd "${kind}" "${pat}")" "$(oracle_cmd "${kind}" "${pat}")" || {
+    echo "certificate aborted: warm gist failed equivalence/timing on ${class}" >&2
+    exit 1
   }
-  cold_ms="$(hf_mean "${WARMUP}" "${RUNS}" "${cc}")" || cold_ms="?"
-
-  declare -A rival=([csearch]="?" [zoekt]="?" [rg]="?")
+  # Index-backed cold gist — the honest vs-cold reference (subject too: abort).
+  bench_cell "${class}" cold "$(cold_cmd "${kind}" "${pat}")" || {
+    echo "certificate aborted: cold gist reference failed on ${class}" >&2
+    exit 1
+  }
+  printf "  %-18s warm+cold timed" "${class}"
+  # Rivals: a competitor hard failure warns + excludes that cell, never aborts.
   for t in "${tools[@]}"; do
-    [[ -v "rival[${t}]" ]] || continue
     if [[ "${kind}" = literal ]]; then cmd="$(compete_lit_cmd "${t}" "${pat}")"; else cmd="$(compete_rgx_cmd "${t}" "${pat}")"; fi
-    rival[${t}]="$(hf_mean "${WARMUP}" "${RUNS}" "${cmd}")" || rival[${t}]="?"
+    bench_cell "${class}" "${t}" "${cmd}" && printf " %s" "${t}"
   done
-
-  vs_cold="$(ratio "${cold_ms}" "${warm_ms}")"
-  vs_csearch="$(ratio "${rival[csearch]}" "${warm_ms}")"
-  printf "  %-18s warm=%-7s cold=%-7s csearch=%-7s zoekt=%-7s rg=%-7s | %s vs cold, %s vs csearch\n" \
-    "${class}" "${warm_ms}" "${cold_ms}" "${rival[csearch]}" "${rival[zoekt]}" "${rival[rg]}" "${vs_cold}" "${vs_csearch}"
-  echo "${class},${warm_ms},${cold_ms},${rival[csearch]},${rival[zoekt]},${rival[rg]},${vs_cold},${vs_csearch}" >> "${WARM_CSV}.tmp"
+  echo " done"
 done
-mv "${WARM_CSV}.tmp" "${WARM_CSV}"
-echo
-echo "warm-tier CSV → ${WARM_CSV}"
 
-# ── splice the warm section into CERTIFICATE.md (idempotent) ─────────────────
-if [[ -s "${CERT}" ]]; then
-  python3 "${HERE}/certify_warm_report.py" --certificate "${CERT}" --csv "${WARM_CSV}" \
-    --runs "${RUNS}" --warmup "${WARMUP}" --roots "${ROOTS[*]}" \
-    && echo "warm tier spliced into ${CERT}"
-fi
+cat > "${WORK}/meta.json" << EOF
+{ "runs": ${RUNS}, "warmup": ${WARMUP}, "roots": "${ROOTS[*]}" }
+EOF
+
+echo
+echo "computing bootstrap-CI medians + Mann-Whitney dominance (warm gist vs rg)…"
+python3 "${HERE}/certify_warm_report.py" "${WORK}" \
+  --certificate "${CERT}" \
+  --csv "${WARM_CSV}" \
+  --order "${WORK}/order.tsv" \
+  --meta "${WORK}/meta.json" || exit 1
+echo "warm tier (fail-closed dominance) spliced into ${CERT}"
+echo "warm-tier CSV → ${WARM_CSV}"

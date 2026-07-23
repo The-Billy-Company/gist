@@ -42,7 +42,8 @@ PORTBOUND="${KERNEL}/zig-out/bin/gist-portbound"
 ROOFLINE="${KERNEL}/zig-out/bin/gist-roofline"
 LOWERBOUND="${KERNEL}/zig-out/bin/gist-lowerbound"
 CREST="${KERNEL}/zig-out/bin/crest"
-for bin in "${PORTBOUND}" "${ROOFLINE}" "${LOWERBOUND}" "${CREST}"; do
+CODEX_SCALE="${KERNEL}/zig-out/bin/codex-scale"
+for bin in "${PORTBOUND}" "${ROOFLINE}" "${LOWERBOUND}" "${CREST}" "${CODEX_SCALE}"; do
   [[ -x "${bin}" ]] || die "missing executable ${bin}"
 done
 
@@ -127,13 +128,32 @@ python3 "${HERE}/certify_crest_report.py" \
   --zig "$(cd "${KERNEL}" && zig version)" \
   || die "certify_crest_report.py failed"
 
+# Layer F — codex self-index (compressed, searchable, decodable). The codex-scale
+# harness is fail-closed by construction (die on restore/oracle/cento drift); the
+# report re-asserts F1-F5 over its JSONL and refuses to splice on any violation.
+note "Layer F — codex self-index proof (fail-closed)…"
+CODEX_WORK="${OUT}/codex"
+rm -rf "${CODEX_WORK}"
+CODEX_OUT="${CODEX_WORK}" CODEX_BIN="${CODEX_SCALE}" \
+  bash "${HERE}/../codex/race.sh" "${CODEX_SIZES:-1,4,16}" \
+  || die "codex-scale harness failed (correctness violation) — fix src/corpus/index/codex, never weaken the oracle"
+python3 "${HERE}/certify_codex_report.py" \
+  --certificate "${CERT}" \
+  --scale "${CODEX_WORK}/scale.jsonl" \
+  --compressors "${CODEX_WORK}/compressors.jsonl" \
+  --csv "${OUT}/codex.csv" \
+  --machine "${crest_machine}" \
+  --zig "$(cd "${KERNEL}" && zig version)" \
+  || die "certify_codex_report.py failed (Layer F invariant violated)"
+
 # Completeness gate (layers only — full artifact check stays with certify.sh)
 missing=0
 for hdr in \
   "## Layer B — port-optimality" \
   "## Layer C — roofline" \
   "## Layer D — algorithmic lower bound" \
-  "## Layer E — crest sieve"; do
+  "## Layer E — crest sieve" \
+  "## Layer F — codex self-index"; do
   if ! grep -qF "${hdr}" "${CERT}"; then
     echo "certify_layers: CERTIFICATE.md missing section: ${hdr}" >&2
     missing=1
@@ -147,17 +167,19 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   mkdir -p "${pub}/raw"
   for f in CERTIFICATE.md certify.csv certify_macro.csv machine.json \
     tool-versions.txt corpus-manifest.tsv command-log.txt index-sizes.json \
-    portcert.json portcert.csv portbound.json roofline.json lowerbound.csv crest.csv; do
+    portcert.json portcert.csv portbound.json roofline.json lowerbound.csv crest.csv \
+    codex.csv; do
     [[ -f "${OUT}/${f}" ]] && cp -f "${OUT}/${f}" "${pub}/"
   done
   if compgen -G "${OUT}/raw/*.json" > /dev/null; then
     cp -f "${OUT}/raw/"*.json "${pub}/raw/"
   fi
-  python3 "${HERE}/check_artifacts.py" \
-    --artifacts-dir "${pub}" --artifacts --no-require-head \
-    || die "published bundle failed check_artifacts"
-  note "published → ${pub}"
+  # A layers-only publish (B–F) is a PARTIAL bundle: the --rank and relate lanes
+  # (Layer A rank / Layer G) are minted by certify.sh, not here, so the full
+  # reproducibility gate would rightly fail. The canonical committed bundle comes
+  # from `certify.sh`, which re-runs check_artifacts over the complete A–G set.
+  note "published (partial B–F layers) → ${pub} — full A–G gate runs under certify.sh"
 fi
 
-note "Layers B/B′/C/D spliced into ${CERT}"
+note "Layers B/B′/C/D/E/F spliced into ${CERT}"
 grep -n '^## Layer\|^### Layer' "${CERT}" || true

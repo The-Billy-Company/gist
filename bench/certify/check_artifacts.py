@@ -41,18 +41,26 @@ REQUIRED_FILES = (
     "command-log.txt",
     "index-sizes.json",
 )
-# Side-cars that prove Layers B/C/D/E were minted, not merely named in the header.
+# Side-cars that prove Layers B–G were minted, not merely named in the header.
+# Every narrower surface the header promises (codex space, the --rank lane, the
+# relate face) ships its own fail-closed sidecar — no claim without a receipt.
 REQUIRED_LAYER_FILES = (
     "portcert.json",
     "roofline.json",
     "lowerbound.csv",
     "crest.csv",
+    "codex.csv",
+    "certify_rank.csv",
+    "relate.csv",
 )
 REQUIRED_LAYER_HEADERS = (
     "## Layer B — port-optimality",
     "## Layer C — roofline (measured headroom)",
     "## Layer D — algorithmic lower bound",
     "## Layer E — crest sieve (the trigram blind spot, measured)",
+    "## Layer F — codex self-index",
+    "## Layer G — relate",
+    "## Layer A — the `--rank` lane",
 )
 FORBIDDEN_LAYER_C_CLAIMS = (
     "cycles/byte sits on the hardware ceiling",
@@ -307,10 +315,10 @@ def _check_cells(d: Path, meta: dict[str, object], tools: set[str], problems: li
 
 
 def _check_layers(d: Path, problems: list[str]) -> None:
-    """Fail closed when the certificate promises five layers but only ships A."""
+    """Fail closed when the certificate promises layers/surfaces it does not ship."""
     problems.extend(
-        f"missing Layer B/C/D/E artifact: {name} "
-        "(run bench/certify/certify_layers.sh or full certify.sh)"
+        f"missing Layer B–G artifact: {name} "
+        "(run the full bench/certify/certify.sh — never a partial mint)"
         for name in REQUIRED_LAYER_FILES
         if not (d / name).is_file()
     )
@@ -320,7 +328,7 @@ def _check_layers(d: Path, problems: list[str]) -> None:
     text = cert.read_text(errors="replace")
     problems.extend(
         f"CERTIFICATE.md missing section {header!r} — "
-        "header promises five layers; splice with certify_layers.sh"
+        "the header promises this layer/surface; run the full certify.sh"
         for header in REQUIRED_LAYER_HEADERS
         if header not in text
     )
