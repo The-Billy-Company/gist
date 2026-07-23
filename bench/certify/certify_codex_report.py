@@ -43,8 +43,11 @@ HEADER = "## Layer F — codex self-index (compressed, searchable, decodable)"
 # F3: count latency may grow at most this much across a 16× corpus (flat ⇒ n-free);
 # count must beat the naive scan at the LARGEST corpus by at least this factor (the
 # honest asymptotic point — the margin is smaller on a tiny slice by construction);
-# and the naive scan itself must grow at least this fraction of the corpus ratio,
-# proving it is the O(n) baseline count is escaping.
+# and across its asymptotic step (the two largest slices) the naive scan must grow at
+# least this fraction of that step's corpus ratio, proving it is the O(n) baseline
+# count escapes. Slope is read on the asymptotic step, not the full range: a tiny
+# slice is fixed-per-query-cost-bound, so a full-range slope deflates a genuinely
+# linear scan into looking sublinear.
 COUNT_FLAT_FACTOR = 2.0
 NAIVE_MIN_SPEEDUP = 100.0
 NAIVE_GROWTH_FRAC = 0.5
@@ -154,13 +157,22 @@ def render(scale: Path, compressors: Path, machine: str, zig: str, csv_out: Path
             f"count beat the naive scan by only {big_speedup:.0f}× at {_mib(naive_hi[0])} "
             f"(< {NAIVE_MIN_SPEEDUP:.0f}×)"
         )
-    if naive_hi[0] > naive_lo[0]:
-        naive_growth = naive_hi[3] / naive_lo[3]
-        need = NAIVE_GROWTH_FRAC * (naive_hi[0] / naive_lo[0])
+    # Prove the naive scan is the O(n) baseline from its ASYMPTOTIC slope — the two
+    # largest slices, where the fixed per-query cost that dominates a tiny corpus is
+    # amortized away and only the linear scan term remains. A full-range slope folds
+    # that fixed cost in and understates linearity (a genuinely O(n) scan reads as
+    # sublinear across 1MB→16MB purely because the 1MB point is overhead-bound).
+    seg_lo, seg_hi = naive_lo, naive_hi
+    naive_growth = naive_hi[3] / naive_lo[3] if naive_lo[3] else float("inf")
+    if len(naive_pts) >= 2 and naive_pts[-2][0] < naive_hi[0]:
+        seg_lo, seg_hi = naive_pts[-2], naive_pts[-1]
+        naive_growth = seg_hi[3] / seg_lo[3]
+        need = NAIVE_GROWTH_FRAC * (seg_hi[0] / seg_lo[0])
         if naive_growth < need:
             raise Fail(
-                f"naive oracle grew only {naive_growth:.1f}× across a {naive_hi[0] // naive_lo[0]}× "
-                f"corpus (< {need:.1f}×) — cannot claim it is the O(n) baseline"
+                f"naive oracle grew only {naive_growth:.1f}× across the asymptotic "
+                f"{seg_hi[0] // seg_lo[0]}× step ({_mib(seg_lo[0])}→{_mib(seg_hi[0])}, "
+                f"< {need:.1f}×) — cannot claim it is the O(n) baseline"
             )
 
     # ── F4 cheap byte-exact persistence ──────────────────────────────────────
@@ -262,8 +274,9 @@ def render(scale: Path, compressors: Path, machine: str, zig: str, csv_out: Path
         "",
         (
             f"The naive oracle at m={naive_lo[1]} grows {naive_lo[3]:.0f} ns → {naive_hi[3]:.0f} ns "
-            f"({naive_hi[3] / naive_lo[3]:.1f}× over the {n_max // n_min}× corpus) — the O(n) scan gist "
-            "does not do; count stays flat because it walks the BWT, never the text."
+            f"end-to-end, and {seg_lo[3]:.0f} ns → {seg_hi[3]:.0f} ns ({naive_growth:.1f}×) across the "
+            f"asymptotic {seg_hi[0] // seg_lo[0]}× step where its fixed per-query cost is amortized — "
+            "the O(n) scan gist does not do; count stays flat because it walks the BWT, never the text."
         ),
         "",
         (
