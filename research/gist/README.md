@@ -44,11 +44,11 @@ stand in for novelty and benchmark speed does not stand in for correctness.
 
 | where                                                | what                                                                       |
 | ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| `src/cli/gist/`                                      | the product CLI face (search, index, status, serve, codex)                 |
-| `src/runtime/cold/`                                  | authoritative cold path: argv → walk → index elision → verify → emit       |
-| `src/index/trigrams/` + `src/index/crest/`           | candidate filters (trigrams + crest sidecar)                               |
-| `src/search/rank/`                                   | definition-biased `--rank` view                                            |
-| `src/runtime/session/`                               | fail-open resident UDS session                                             |
+| `src/surface/face/gist/`                                      | the product CLI face (search, index, status, serve, codex)                 |
+| `src/surface/exec/cold/`                                  | authoritative cold path: argv → walk → index elision → verify → emit       |
+| `src/corpus/index/trigrams/` + `src/corpus/index/crest/`           | candidate filters (trigrams + crest sidecar)                               |
+| `src/kernel/rank/`                                   | definition-biased `--rank` view                                            |
+| `src/surface/exec/session/`                               | fail-open resident UDS session                                             |
 | `bench/gates/` + `bench/rgsuite/` + `bench/certify/` | correctness-before-speed gates, mined rg parity, Certificate of Optimality |
 
 Novel math that rides inside gist (forced-class-run pruning) is documented

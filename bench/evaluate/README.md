@@ -87,5 +87,5 @@ refused at publish and the bundle is flagged `exploratory` so it can never
 masquerade as evidence. Mac-arm64 and Anvil-linux-x86_64 stay in separate
 per-machine directories — never averaged into one blended number.
 
-See [ADR-352](../../../../docs/architecture/3-decisions/352-gist-unified-search-api.md)
+See [ADR-352](../../../../../docs/architecture/3-decisions/352-gist-unified-search-api.md)
 and the certificate's [`certify/README.md`](../certify/README.md).

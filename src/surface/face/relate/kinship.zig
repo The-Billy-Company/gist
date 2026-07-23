@@ -5,7 +5,7 @@
 //! sound source, then hand the verb pure arrays. Three rungs, elide-only
 //! (identical answers, fewer bytes touched):
 //!
-//!   1. persisted atlas + freshness fold (`index/atlas/atlas.zig`) — load
+//!   1. persisted atlas + freshness fold (`corpus/index/atlas/atlas.zig`) — load
 //!      ~1 KiB/file, re-sketch only what changed since the anchor;
 //!   2. live corpus build — read every corpus byte and sketch in parallel
 //!      (the pre-atlas path), taken when the atlas is missing, corrupt,

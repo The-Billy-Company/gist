@@ -9,7 +9,7 @@ doc_radar:
         - '"tool": "gist"'
 ---
 
-# cli/gist/schema — `gist --schema`
+# surface/face/gist/schema — `gist --schema`
 
 Agents and codegen must not scrape `--help`. This package emits one deterministic
 JSON capability manifest: verbs, search args, the ripgrep-compatible flag

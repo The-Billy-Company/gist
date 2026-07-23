@@ -9,9 +9,9 @@ doc_radar:
       contains: ["pub fn run", "pub fn socketPath", "decline"]
 ---
 
-# cli/gist/daemon/serve — `gist serve`
+# surface/face/gist/daemon/serve — `gist serve`
 
-Keeps one [`ResidentSession`](../../../../session/resident.zig) warm behind a
+Keeps one [`ResidentSession`](../../../../exec/session/resident.zig) warm behind a
 Unix-domain socket so a persistent client answers an eligible query without
 re-paying the cold subprocess's process + index-mmap + candidate-read startup —
 the mechanism behind the warm session certificate.
@@ -27,6 +27,6 @@ loses a warm acceleration, never correctness.
 
 `socketPath` resolves `$GIST_SESSION_SOCK`, else `.local/gist-verify/gistd.sock`.
 
-The wire grammar is [`session/protocol.zig`](../../../../session/protocol.zig);
+The wire grammar is [`exec/session/protocol.zig`](../../../../exec/session/protocol.zig);
 the client that dials it is [`../client`](../client). End-to-end lifecycle is
 pinned in [`serve_test.zig`](serve_test.zig).

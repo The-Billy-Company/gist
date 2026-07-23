@@ -5,7 +5,7 @@
 //!   gist index                        build + persist the trigram index
 //!   gist status [--json]              read-only: is an index ready, how fresh, how big
 //!   gist codex <build|count|tally|status>  the exact existence/count tier over the
-//!                                     compressed self-index shelf (src/index/codex/)
+//!                                     compressed self-index shelf (src/corpus/index/codex/)
 //!
 //! Everything else is the search itself — no verb at all, the shape an agent's
 //! `rg <pattern>` reflex already takes:
@@ -235,7 +235,7 @@ pub fn main(init: std.process.Init) !void {
         return indexer.run(gpa, io, resolved);
     }
     // `gist codex <build|count|tally|status>` — the exact existence/count tier
-    // over the compressed self-index (`src/index/codex/`): corpus-wide occurrence
+    // over the compressed self-index (`src/corpus/index/codex/`): corpus-wide occurrence
     // counts in O(|pattern|) with zero corpus I/O and zero false positives,
     // freshness-reported against the shelf's own build anchor.
     if (std.mem.eql(u8, mode, "codex")) {

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-PROTOCOL_VERSION = 2  # must match `protocol.protocol_version`
+PROTOCOL_VERSION = 6  # must match `protocol.protocol_version`
 # `$GIST_SESSION_SOCK`, else `$GIST_DIR/gistd.sock` (default `.local/gist-verify`).
 DEFAULT_OUT_DIR = ".local/gist-verify"
 
@@ -51,7 +51,7 @@ _FLAG_FIXED, _FLAG_IGNORE_CASE, _FLAG_WORD, _FLAG_SMART_CASE = 1 << 0, 1 << 1, 1
 _FLAG_INVERT, _FLAG_QUIET, _FLAG_MAX_COUNT = 1 << 4, 1 << 6, 1 << 7
 _MAX_FRAME = 16 << 20  # `protocol.max_frame`
 
-# Warm-ineligible fields — projection of `session/request.zig::classify`
+# Warm-ineligible fields — projection of `surface/exec/session/request.zig::classify`
 # (`tests/test_classify_parity.py`). `quiet`/`max_count`/`invert` are NOT here:
 # the UDS daemon and the payload-bearing FFI options entry both serve them
 # (existence early-halt, per-file cap, and — lane 3b — the set-complement
@@ -122,7 +122,7 @@ def _eligible(
 
 
 def warm_eligible(request: SearchRequest) -> bool:
-    r"""True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping — ±case including `smart_case` (sent raw; the Zig session resolves it), ±`word` (the session applies cold's exact post-match word rule), ±`invert` (lane 3b: the session answers `-v` by the `lines(f) − matches(f)` set-complement, sound under the trigram index), ±`quiet` (the existence early-halt) and ±`max_count` including `-m0` (the per-file cap, resolved in the resident session). Every clause mirrors `session/request.zig::classify` term-for-term (a `\n`/`\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
+    r"""True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping — ±case including `smart_case` (sent raw; the Zig session resolves it), ±`word` (the session applies cold's exact post-match word rule), ±`invert` (lane 3b: the session answers `-v` by the `lines(f) − matches(f)` set-complement, sound under the trigram index), ±`quiet` (the existence early-halt) and ±`max_count` including `-m0` (the per-file cap, resolved in the resident session). Every clause mirrors `surface/exec/session/request.zig::classify` term-for-term (a `\n`/`\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
     return _eligible(request, _INELIGIBLE_FIELDS)
 
 

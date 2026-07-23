@@ -15,7 +15,7 @@ doc_radar:
         - "fresh.changedSince"
 ---
 
-# cli/gist/lifecycle — `gist index` · `gist codex`
+# surface/face/gist/lifecycle — `gist index` · `gist codex`
 
 The _mutating_ lifecycle actions. Everything else in the CLI is read-only
 against the live tree or the artifacts these verbs publish.
@@ -29,7 +29,7 @@ generation-publishes four things into `.local/gist-verify/`:
 2. the doc-id → path table (NUL-separated, doc-id order)
 3. the build roots (`roots.list`, NUL-separated) — queries and freshness
    walks scope to _these_, so an index built anywhere stays self-describing
-4. the T3 freshness wall-clock anchor (`index/trigrams/fresh.zig`)
+4. the T3 freshness wall-clock anchor (`corpus/index/trigrams/fresh.zig`)
 
 Roots are never hardcoded: `gist index [ROOT...]` takes them positionally,
 else `corpus.resolveRoots` picks them per tree — `GIST_ROOTS` env override
@@ -63,7 +63,7 @@ See [`../status/`](../status) for the matching read-only verb.
 ## `gist codex` — the exact existence/count tier
 
 `codex.zig` owns the verb group over the compressed self-index shelf
-([`src/index/codex/shelf.zig`](../../../index/codex/README.md)): `build` loads the
+([`src/corpus/index/codex/shelf.zig`](../../../../corpus/index/codex/README.md)): `build` loads the
 same index corpus, builds the FM-index shelf, and writes `codex.shelf`
 atomically (temp-then-rename); `count` / `tally` / `status` are read-only
 queries against it. Where the trigram index nominates _candidate_ files

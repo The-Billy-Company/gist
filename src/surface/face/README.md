@@ -11,12 +11,12 @@ doc_radar:
       contains: "search | pack | quote | similar | dups | clusters | echoes | concepts | patterns | index | status"
 ---
 
-# `src/cli/` — the product faces
+# `src/surface/face/` — the product faces
 
 Thin argv faces over the shared floor. Every binary classifies flags, picks a
 verb, and shapes stdout/stderr — they do **not** own matching, walking, or
 index formats. If a decision changes what matches, it belongs under
-`search/`, `corpus/`, `index/`, or `runtime/`.
+`kernel/`, `corpus/`, or `surface/exec/`.
 
 | Face                  | Binary    | Question it answers                                                                                                                                     |
 | --------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -41,9 +41,9 @@ drift the cold/warm/FFI faces apart the moment one face forks them.
 - Unknown flags fail loud (exit 2), never look like a clean empty hit.
 - Results on stdout; diagnostics / coaching / timing on stderr.
 - Faces stay thin on purpose: cold search re-exports live under
-  `runtime/cold/`; warm work lives under `runtime/session/`.
+  `surface/exec/cold/`; warm work lives under `surface/exec/session/`.
 - Contract authority for request options and relate verbs:
-  [`../../contract/search_api.toml`](../../contract/search_api.toml).
+  [`../../../contract/search_api.toml`](../../../contract/search_api.toml).
 
 See [`gist/README.md`](gist/README.md), [`relate/README.md`](relate/README.md),
 and [`irregex/README.md`](irregex/README.md) for the per-face verb map and

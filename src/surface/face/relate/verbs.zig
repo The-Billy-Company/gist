@@ -1,6 +1,6 @@
 //! relate — the `similar`, `dups`, and `patterns` verbs over irregex primitives.
 //!
-//! The CLI surface over `src/search/{similarity,batch}/`: three native shapes no
+//! The CLI surface over `src/kernel/{similarity,batch}/`: three native shapes no
 //! rg flag can express (like `--rank`, they are irregex vocabulary, not rg's):
 //!
 //!   relate similar <path> [--lens bytes|structure|fused] [--top N] [--json]

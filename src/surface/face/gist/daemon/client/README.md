@@ -9,14 +9,14 @@ doc_radar:
       contains: ["maybeSpawn", "GIST_NO_AUTOSERVE"]
 ---
 
-# cli/gist/daemon/client — warm dial + cold fallback
+# surface/face/gist/daemon/client — warm dial + cold fallback
 
 The fail-open bridge from the bare `gist <pattern>` front door to the resident
 daemon ([`../serve`](../serve)). Warm acceleration is opportunistic; correctness
 always has the cold engine behind it.
 
 `attempt(gpa, io, argv, socket_path)` classifies the argv
-([`session/request.zig`](../../../../session/request.zig)) and only dials when
+([`exec/session/request.zig`](../../../../exec/session/request.zig)) and only dials when
 the request is one the warm path can answer with **cold's own per-file bytes
 and exit code**:
 

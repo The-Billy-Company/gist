@@ -11,7 +11,7 @@
 #
 #   relate search  one pass — persisted trigram codebook nominates, then a
 #                  bounded suffix-automaton cross-parse decides
-#                  (src/search/similarity/retrieval.zig)
+#                  (src/surface/exec/cold/engine/retrieval.zig)
 #   gist exact     the paraphrase as a literal — must find NOTHING (capability
 #                  line, not a timing lane)
 #   gist tokens    K single-token gist runs + awk count aggregation — today's

@@ -3,7 +3,7 @@
 //!   relate quote <text> [--json]
 //!       rewrite <text> as a cento — a sequence of maximal verbatim quotations
 //!       from the WHOLE corpus (Ziv–Merhav cross-parse on the FM-index shelf;
-//!       src/index/codex/cento.zig) — and price it in bits. One pass, O(|text|)
+//!       src/corpus/index/codex/cento.zig) — and price it in bits. One pass, O(|text|)
 //!       rank operations: corpus size never appears in the query cost.
 //!
 //! What `search` answers per-document ("which file describes this most

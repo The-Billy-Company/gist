@@ -32,13 +32,13 @@ together, how much does the corpus already know, what forked from what, what
 repeats a shape under different names, which FUNCTIONS across the tree are the
 same idea, and which of these N intents hit where?_ Nine query verbs and two
 lifecycle verbs tell that story
-([ADR-363](../../../../../../docs/architecture/3-decisions/363-irregex-primitives.md)):
+([ADR-363](../../../../../../../docs/architecture/3-decisions/363-irregex-primitives.md)):
 
 The positive product thesis, the mathematical ancestry, and the falsification
 record are kept separately in
-[`CLAIM.md`](../../../research/relate/CLAIM.md),
-[`PRIOR_ART.md`](../../../research/relate/PRIOR_ART.md), and
-[`TESTING.md`](../../../research/relate/TESTING.md). This README explains the
+[`CLAIM.md`](../../../../research/relate/CLAIM.md),
+[`PRIOR_ART.md`](../../../../research/relate/PRIOR_ART.md), and
+[`TESTING.md`](../../../../research/relate/TESTING.md). This README explains the
 shipped instrument; the dossier explains why compression earns each verb.
 
 ```text
@@ -191,7 +191,7 @@ For humans and coding agents:
   diagnostics stay on stderr. Pair, family, and pattern outputs have stable
   orderings, so agents should parse records instead of scraping prose.
 
-The checked-in [`search_api.toml`](../../../contract/search_api.toml) is the
+The checked-in [`search_api.toml`](../../../../contract/search_api.toml) is the
 versioned verb contract. The sections below explain the math, corpus policy,
 and evidence behind each choice.
 
@@ -200,12 +200,12 @@ off to the sibling drivers (`search.zig` · `pack.zig` · `quote.zig` ·
 `verbs.zig` · `family.zig` · `echoes.zig` · `concepts.zig` · `lifecycle.zig`
 · `schema.zig`), with the shared view resolver + pair machinery in
 `kinship.zig`. The engines live under
-[`src/search/similarity/`](../../search/similarity/README.md)
+[`src/kernel/kinship/`](../../../kernel/kinship/README.md)
 (sketch · silhouette · concepts · lexicon · zipper),
-[`src/search/batch/`](../../search/batch/README.md)
-(patterns · loom), [`src/index/codex/`](../../index/codex/README.md) (the
+[`src/kernel/batch/`](../../../kernel/batch/README.md)
+(patterns · loom), [`src/corpus/index/codex/`](../../../corpus/index/codex/README.md) (the
 FM-index shelf behind `quote`), and
-[`src/index/atlas/`](../../index/atlas/README.md) (the persisted kinship
+[`src/corpus/index/atlas/`](../../../corpus/index/atlas/README.md) (the persisted kinship
 atlas behind the warm verbs).
 
 ## The warm tier: why relate is an engine, not a shim
@@ -281,7 +281,7 @@ pulls one of those loops into the kernel:
   scale table—an **88–94×** separation. Each phrase is attributed to an
   exemplar file, with query work linear in text length
   (`zig build codex-scale`, tables in
-  [`src/index/codex/README.md`](../../index/codex/README.md)).
+  [`src/corpus/index/codex/README.md`](../../../corpus/index/codex/README.md)).
 - **`search`** is the retrieval shape of the same idea: rank files by how
   cheaply each would describe the query, two-stage so the exact (expensive)
   decider only prices nominated candidates.
@@ -300,7 +300,7 @@ The proof strength is intentionally uneven and visible:
 | echo ranking quality                   | heuristic + unit properties               | no checked-in labeled evaluation |
 
 The durable test inventory is
-[`research/relate/TESTING.md`](../../../research/relate/TESTING.md). Numbers
+[`research/relate/TESTING.md`](../../../../research/relate/TESTING.md). Numbers
 without a committed artifact do not become product guarantees.
 
 ## Corpus policy: read this before comparing to `gist`
@@ -329,13 +329,13 @@ well one text's language describes another. That paper turned compression from
 storage into comparison for me.
 
 The positive case for files, sets, families, and provenance lives in
-[`CLAIM.md`](../../../research/relate/CLAIM.md). The full citation trail—LZJD,
+[`CLAIM.md`](../../../../research/relate/CLAIM.md). The full citation trail—LZJD,
 winnowing/MOSS, Ziv–Merhav, FM-indexes, submodular selection, and the
 neighboring systems we measured and left—lives in
-[`PRIOR_ART.md`](../../../research/relate/PRIOR_ART.md). Exactness, atlas
+[`PRIOR_ART.md`](../../../../research/relate/PRIOR_ART.md). Exactness, atlas
 identity, the embedding boundary, and reproduction commands live in
-[`TESTING.md`](../../../research/relate/TESTING.md).
+[`TESTING.md`](../../../../research/relate/TESTING.md).
 
 What is mine here is the measured composition, not the theorems. The stronger
 novel-math claim in this kernel is Gist's Crest sieve
-([`research/crest/PROOF.md`](../../../research/crest/PROOF.md)).
+([`research/crest/PROOF.md`](../../../../research/crest/PROOF.md)).

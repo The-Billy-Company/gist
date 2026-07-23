@@ -8,14 +8,14 @@
 //!   relate search <text> [--top N] [--json] [ROOT...]
 //!       which files would describe this text most cheaply? — the two-stage
 //!       compression retrieval (persisted codebook nomination → bounded
-//!       suffix-automaton cross-parse; runtime/cold/engine/retrieval.zig)
+//!       suffix-automaton cross-parse; surface/exec/cold/engine/retrieval.zig)
 //!   relate pack <text> [--top N] [--json] [ROOT...]
 //!       the SET of files that jointly describes <text> cheapest — greedy
-//!       submodular coverage, each pick priced by what it ADDS (cli/relate/pack.zig)
+//!       submodular coverage, each pick priced by what it ADDS (surface/face/relate/pack.zig)
 //!   relate quote <text> [--json]
 //!       rewrite <text> as quotations from the WHOLE corpus, priced in bits —
 //!       the Ziv–Merhav cross-parse on the persisted codex shelf
-//!       (cli/relate/quote.zig + src/index/codex/cento.zig; `relate index --shelf`)
+//!       (surface/face/relate/quote.zig + src/corpus/index/codex/cento.zig; `relate index --shelf`)
 //!   relate similar <path> [--lens bytes|structure|fused] [--top N] [--json] [ROOT...]
 //!       nearest files by compression kinship — the lens picks the distance
 //!       channel: raw bytes (LZJD), normalized structure (silhouette), or
@@ -26,7 +26,7 @@
 //!       fork FAMILIES — connected components of the dup graph, largest first
 //!   relate echoes [--min-echo E] [--top N] [--json] [ROOT...]
 //!       DRY candidates dups cannot see: pairs far apart in bytes but close
-//!       in structure, ranked by that gap (cli/relate/echoes.zig)
+//!       in structure, ranked by that gap (surface/face/relate/echoes.zig)
 //!   relate patterns -e P [-e P…] [--by pattern|file] [--under GLOB] [ROOT...]
 //!       one walk, N patterns, exact per-pattern attribution, loom-shaped
 //!
@@ -37,8 +37,8 @@
 //! (a JSON capability manifest for agents/codegen).
 //!
 //! This is the thin dispatch shell only: verb drivers live beside this file
-//! under `src/cli/relate/`; the compression engines live under
-//! `src/search/similarity/` and the persisted tiers under `src/index/`,
+//! under `src/surface/face/relate/`; the compression engines live under
+//! `src/kernel/kinship/` and the persisted tiers under `src/corpus/index/`,
 //! reached through the `irregex` module.
 
 const std = @import("std");

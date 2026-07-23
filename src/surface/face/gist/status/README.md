@@ -9,14 +9,14 @@ doc_radar:
       contains: 'std.mem.eql(u8, value, "--json")'
 ---
 
-# cli/gist/status — `gist status`
+# surface/face/gist/status — `gist status`
 
 Read-only introspection of the persisted index. Answers the question agents ask
 before a search loop: _am I ready to search fast, and how fresh?_
 
 `status.zig` derives a `Snapshot` from the same mmap'd artifacts the query path
-loads (`index/trigrams/persist.zig`) plus the freshness anchor
-(`index/trigrams/fresh.zig`): index presence, files indexed, distinct trigrams,
+loads (`corpus/index/trigrams/persist.zig`) plus the freshness anchor
+(`corpus/index/trigrams/fresh.zig`): index presence, files indexed, distinct trigrams,
 postings, on-disk size, build age, corpus roots. No build, no scan, no
 mutation — a missing index is an actionable `unavailable` state ("run
 `gist index`"), never an error, so `status` is safe to call blind.

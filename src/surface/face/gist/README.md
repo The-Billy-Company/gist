@@ -63,9 +63,9 @@ tree.
 
 That product thesis, the competitive ancestry behind it, and the gates that
 try to falsify it are separated into
-[`CLAIM.md`](../../../research/gist/CLAIM.md),
-[`PRIOR_ART.md`](../../../research/gist/PRIOR_ART.md), and
-[`TESTING.md`](../../../research/gist/TESTING.md). This README explains the
+[`CLAIM.md`](../../../../research/gist/CLAIM.md),
+[`PRIOR_ART.md`](../../../../research/gist/PRIOR_ART.md), and
+[`TESTING.md`](../../../../research/gist/TESTING.md). This README explains the
 shipped instrument; the dossier explains why its claims deserve belief.
 
 ## Quickstart
@@ -277,7 +277,7 @@ invariant.
 To stop paying startup costs, `gist serve` holds corpus bytes and a trigram
 index behind a per-repository Unix socket. The CLI may auto-spawn it after an
 eligible cold miss. The request classifier deliberately keeps the warm surface
-small. This table is a readable snapshot; `runtime/session/request.zig` remains
+small. This table is a readable snapshot; `surface/exec/session/request.zig` remains
 the executable authority:
 
 | warm-eligible CLI shape                    | stays authoritative-cold                                      |
@@ -296,7 +296,7 @@ Freshness is fail-closed. macOS FSEvents or Linux inotify can narrow the work,
 but a reconcile barrier decides whether resident bytes are safe. Doubt,
 overflow, an index generation change, or a walk error declines the warm answer
 and returns to the subprocess. See the
-[`ResidentSession`](../../runtime/session/README.md) invariant.
+[`ResidentSession`](../../exec/session/README.md) invariant.
 
 ### In-process FFI: embedders
 
@@ -307,7 +307,7 @@ then falls open to UDS or subprocess. It is another route to the same matcher,
 not a second implementation.
 
 The cross-face request and transport contract is
-[`contract/search_api.toml`](../../../contract/search_api.toml).
+[`contract/search_api.toml`](../../../../contract/search_api.toml).
 
 ## The two indexes do different jobs
 
@@ -319,7 +319,7 @@ per file recording its longest run in each byte-class, which prunes the
 literal-free class repetitions (`[0-9a-f]{12}`, `[0-9]{6}`) that extract no
 trigram at all. That one is my own math — a sound forced-run necessary
 condition, proof and measurements in
-[`research/crest/`](../../../research/crest/PROOF.md). Both filters only ever
+[`research/crest/`](../../../../research/crest/PROOF.md). Both filters only ever
 skip reads; caseless queries, changed files, and a missing sidecar all fall
 back to reading.
 
@@ -328,7 +328,7 @@ can count in O(pattern length), locate occurrences, recover the indexed corpus,
 and answer without opening source files. `gist codex count` is a proof of
 absence only when the shelf's freshness report is clean; the command reports
 files changed since the shelf was built rather than hiding that qualification.
-See [`index/codex`](../../index/codex/README.md).
+See [`corpus/index/codex`](../../../corpus/index/codex/README.md).
 
 ## Ranked search
 
@@ -379,7 +379,7 @@ pass, and with zero FAIL rows the strict `check_results.py` gate is green
 without `--allow-fail`.
 
 Reproduce the cited results from
-[`bench/rgsuite`](../../../bench/rgsuite/README.md):
+[`bench/rgsuite`](../../../../bench/rgsuite/README.md):
 
 ```bash
 python3 run.py
@@ -390,7 +390,7 @@ python3 transforms.py run
 ```
 
 The permanent integration order is documented in
-[`bench/gates`](../../../bench/gates/README.md): correctness gates run before
+[`bench/gates`](../../../../bench/gates/README.md): correctness gates run before
 performance gates, so a faster wrong answer cannot earn a benchmark win.
 
 Performance claims come from the committed fail-closed certificate: fresh
@@ -403,19 +403,19 @@ microscopic cycles/byte and lower-bound layers run over that same RAM-resident
 corpus; those single-thread kernel numbers must not be attached to the
 end-to-end speedups.
 
-![gist fail-closed statistical certificate forest plot](../../../assets/gist-certify-forest.png)
+![gist fail-closed statistical certificate forest plot](../../../../assets/gist-certify-forest.png)
 
 The full data, machine description, losses against other indexed tools, and
 rerun procedure live in
-[`bench/certify/artifact/CERTIFICATE.md`](../../../bench/certify/artifact/CERTIFICATE.md)
-and [`bench/README.md`](../../../bench/README.md).
+[`bench/certify/artifact/CERTIFICATE.md`](../../../../bench/certify/artifact/CERTIFICATE.md)
+and [`bench/README.md`](../../../../bench/README.md).
 
 ## Research claim and prior art
 
 Most of the pieces are borrowed and cited. I joined them for one specific job:
 searching a local, constantly changing tree over and over for coding agents.
 The positive product case and precise composition claim live in
-[`CLAIM.md`](../../../research/gist/CLAIM.md). The contribution is that
+[`CLAIM.md`](../../../../research/gist/CLAIM.md). The contribution is that
 measured composition, the contract around it—and one genuinely new piece of
 math where the field had a hole (the Crest sieve, below).
 
@@ -435,7 +435,7 @@ place in gist where the math is new rather than borrowed: a per-file
 longest-run-per-class signature paired with a forced-run lower bound derived
 from the regex itself. Theorem, calculus, refereed prior-art review, and the
 fail-closed corpus proof live in
-[`research/crest/`](../../../research/crest/PROOF.md).
+[`research/crest/`](../../../../research/crest/PROOF.md).
 
 [Zoekt](https://github.com/sourcegraph/zoekt) is the closest production indexed
 code-search comparison: positional trigrams, regex planning, ranking, mmapable
@@ -481,8 +481,8 @@ graphs, and it is not an LSP, SCIP, or semantic-retrieval engine.
 `gist codex` is a thin lifecycle face over the shared compressed self-index
 (`count` / `find` / shelf status). The Shannon–Manzini / FM-index bibliography
 and novelty framing live with `relate` —
-[`research/relate/PRIOR_ART.md`](../../../research/relate/PRIOR_ART.md) §
-Corpus quotation — and [`index/codex`](../../index/codex/README.md).
+[`research/relate/PRIOR_ART.md`](../../../../research/relate/PRIOR_ART.md) §
+Corpus quotation — and [`corpus/index/codex`](../../../corpus/index/codex/README.md).
 
 ### Outside the claim
 
@@ -494,12 +494,12 @@ exact/regex leg those systems and agents can compose with.
 
 The full landscape—unindexed peers, indexed neighbors, matcher/ranking
 ancestry, and semantic/structural systems—lives in
-[`PRIOR_ART.md`](../../../research/gist/PRIOR_ART.md). The positive product
-thesis lives in [`CLAIM.md`](../../../research/gist/CLAIM.md); the exact
+[`PRIOR_ART.md`](../../../../research/gist/PRIOR_ART.md). The positive product
+thesis lives in [`CLAIM.md`](../../../../research/gist/CLAIM.md); the exact
 evidence inventory and known losses live in
-[`TESTING.md`](../../../research/gist/TESTING.md). Codex /
+[`TESTING.md`](../../../../research/gist/TESTING.md). Codex /
 Shannon–Manzini literature stays with Relate in
-[`research/relate/PRIOR_ART.md`](../../../research/relate/PRIOR_ART.md).
+[`research/relate/PRIOR_ART.md`](../../../../research/relate/PRIOR_ART.md).
 Where prose lags implementation, `gist --schema`, the live differential
 harness, and the committed certificate are authoritative.
 

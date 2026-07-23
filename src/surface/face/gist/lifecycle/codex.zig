@@ -1,7 +1,7 @@
 //! gist `codex` — the exact existence/count tier over the compressed self-index.
 //!
 //! Four verbs over one persisted artifact (`codex.shelf`: the FM-index shelf
-//! from `src/index/codex/shelf.zig`, built over the SAME corpus policy as `gist
+//! from `src/corpus/index/codex/shelf.zig`, built over the SAME corpus policy as `gist
 //! index`):
 //!
 //!   gist codex build                    build + persist the shelf (`codex.shelf`)
