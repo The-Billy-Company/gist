@@ -535,17 +535,9 @@ fn routeFrame(server: *Server, slot: u16) Route {
         // the worker reports back; without one (pool spawn failed) it runs inline
         // here, the classic serial shape.
         .query, .query_ext => {
-            // Read-your-writes causal barrier (mirrors the annals consult): force
-            // synchronous delivery of every FSEvents change that happened-before
-            // this query — the client sent it AFTER its own writes completed, and
-            // this poll read is after that — so the reconcile the worker runs
-            // observes them (markDirty clears `clean`, defeating the stale
-            // fast path). Without it a query landing inside the ~50 ms watcher
-            // latency answers over pre-edit bytes, breaking the "index changes
-            // speed, never results" claim (`index_elision_parity` freshness). Run
-            // on the poll thread so `flushSync` stays single-threaded (its
-            // documented invariant); a no-op off macOS / with no live stream,
-            // where the session already reconciles every query.
+            // Read-your-writes barrier. Linux drains causally queued inotify
+            // records; macOS rejects asynchronous FSEvents as a witness and
+            // marks doubt, forcing the authoritative stat walk before dispatch.
             _ = server.watcher.flushSync();
             if (server.pool_ready) {
                 server.dispatch(slot, frame); // frame ownership moves into the job
@@ -595,13 +587,10 @@ fn routeFrame(server: *Server, slot: u16) Route {
     }
 }
 
-/// Answer an annals consult: force synchronous delivery of every FSEvents
-/// event already queued (the causal barrier — after `flushSync` returns, any
-/// change that OCCURRED before the client captured its own witness instant has
-/// been `note`d), then snapshot the ledger at/after `since_ns`. Every
-/// uncertainty — no live stream to flush, an unarmed/poisoned ledger, a
-/// pre-floor query, OOM — answers `ok=0`, sending the client to its proven
-/// fallback (journal replay → stat walk). Never a partial list.
+/// Answer an annals consult only when the watcher supplies a causal barrier.
+/// macOS FSEvents deliberately declines because service journaling is
+/// asynchronous to writer syscalls; the client then takes its conservative
+/// journal/stat-walk fallback. Never return a partial list.
 fn handleChanged(session: *ResidentSession, watcher: *watch.Watcher(ResidentSession), gpa: std.mem.Allocator, fd: std.posix.fd_t, payload: []const u8) !void {
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);

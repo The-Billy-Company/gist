@@ -63,7 +63,6 @@ pub const Syms = struct {
     FSEventStreamStop: *const fn (Ref) callconv(.c) void,
     FSEventStreamInvalidate: *const fn (Ref) callconv(.c) void,
     FSEventStreamRelease: *const fn (Ref) callconv(.c) void,
-    FSEventStreamFlushSync: *const fn (Ref) callconv(.c) void,
     run_loop_default_mode: Ref,
     array_callbacks: ?*const anyopaque,
 
@@ -100,7 +99,6 @@ pub const Syms = struct {
         s.FSEventStreamStop = cs.lookup(@TypeOf(s.FSEventStreamStop), "FSEventStreamStop") orelse return s.fail();
         s.FSEventStreamInvalidate = cs.lookup(@TypeOf(s.FSEventStreamInvalidate), "FSEventStreamInvalidate") orelse return s.fail();
         s.FSEventStreamRelease = cs.lookup(@TypeOf(s.FSEventStreamRelease), "FSEventStreamRelease") orelse return s.fail();
-        s.FSEventStreamFlushSync = cs.lookup(@TypeOf(s.FSEventStreamFlushSync), "FSEventStreamFlushSync") orelse return s.fail();
         return s;
     }
 

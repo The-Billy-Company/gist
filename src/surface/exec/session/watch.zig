@@ -12,22 +12,18 @@
 //! that reconcile (`resident.zig`), so a missing or degraded watcher only costs
 //! speed, never soundness (fail-closed).
 //!
-//! Backends: Linux `inotify` (recursive watches, arm-only-on-full-success) and
-//! macOS `FSEvents` (one recursive stream over the roots, driven on a private
-//! CFRunLoop thread — the OS's native subtree watcher, coalesced at the kernel);
-//! every other target uses the reconcile-always baseline. A rootless session
-//! (the common auto-spawned daemon) watches `.` — the same CWD tree its
-//! corpus walks.
+//! Backend: Linux `inotify` (recursive watches, arm-only-on-full-success).
+//! macOS `FSEvents` remains observation-only because its service journal is
+//! asynchronous to writer syscalls: it cannot prove causal quiescence, so macOS
+//! deliberately keeps the reconcile-always baseline. Every other target does
+//! likewise. A rootless session watches `.` — the same CWD tree its corpus walks.
 //!
-//! BOTH backends request PER-FILE events and `note` every delivered path into
-//! the session's `DirtyLog` (arming its `exact` promise), which is what lets the
-//! reconcile verify only the changed paths — O(changed) instead of O(tree). Any
-//! event a backend cannot attribute to an exact path — macOS's inexact flags
-//! (`MustScanSubDirs`, kernel/user drops, id wrap, mount churn), or Linux's
-//! unmapped watch descriptor / malformed record / queue overflow — becomes
-//! `noteDoubt`, forcing that drain onto the full walk. Linux keys its notes to
-//! absolute paths (the roots are realpath'd at arm time) so they match the
-//! canonical shape `delta.resolve` expects, exactly like FSEvents' delivery.
+//! Linux requests per-file events and `note`s every delivered path into the
+//! session's `DirtyLog` (arming its `exact` promise), which lets reconcile verify
+//! only changed paths — O(changed) instead of O(tree). An unattributable event
+//! (unmapped descriptor, malformed record, queue overflow) becomes `noteDoubt`,
+//! forcing a full walk. Linux keys notes to absolute realpaths so they match the
+//! canonical shape `delta.resolve` expects.
 //!
 //! The Linux backend also parses its stream for the two conditions that would
 //! silently BREAK the clean fast path itself: a queue overflow, and a directory
@@ -112,16 +108,11 @@ pub fn Watcher(comptime Session: type) type {
         /// macOS: the watch thread's CFRunLoop, published so `stop` can wake it. Null
         /// until the loop thread stores it (before it signals `ready`).
         run_loop: std.atomic.Value(?*anyopaque) = .init(null),
-        /// macOS: the live FSEvents stream ref, published by the loop thread once
-        /// `FSEventStreamStart` succeeds so the serve thread can `flushSync` it —
-        /// the annals query's causal barrier. Cleared by the loop thread before
-        /// the stream is torn down; readers only ever run while the daemon's
-        /// single serve thread is live (i.e. before `stop`).
+        /// macOS: the observation-only FSEvents stream ref, published once
+        /// started and cleared before teardown. Its presence lets `flushSync`
+        /// explicitly reject FSEvents as a causal witness.
         fs_stream: std.atomic.Value(?*anyopaque) = .init(null),
-        /// macOS start handshake: 0 pending, 1 stream armed, 2 failed. The loop
-        /// thread publishes it once; `startFsevents` polls it to decide whether to
-        /// arm the session (kept on the main thread so the plain `watcher_active`
-        /// bool the query path reads is never written concurrently).
+        /// macOS start handshake: 0 pending, 1 stream observing, 2 failed.
         start_result: std.atomic.Value(u8) = .init(0),
 
         /// Does this session carry the annals ledger (the never-drained changed-path
@@ -133,23 +124,28 @@ pub fn Watcher(comptime Session: type) type {
             return .{ .session = session, .io = io, .gpa = gpa };
         }
 
-        /// Force synchronous delivery of every watcher event already queued — the
-        /// causal barrier a freshness-sensitive query runs behind: after this
-        /// returns, every change that OCCURRED before the call has been `note`d, so
-        /// the reconcile that follows cannot answer over pre-edit bytes. macOS
-        /// flushes the live FSEvents stream; Linux drains the inotify fd (whose
-        /// events are queued synchronously inside the causing syscall, so every
-        /// write that happened-before is already readable). Returns false when no
-        /// backend is armed — the caller treats that as unvouched, but the unarmed
-        /// session already reconciles every query, so correctness is unaffected.
+        /// Establish the backend's causal freshness barrier. Linux drains inotify,
+        /// whose records are queued inside the writer syscall. macOS always
+        /// returns false and forces the stat-walk fallback because FSEvents'
+        /// service journal is asynchronous to that syscall.
         pub fn flushSync(self: *@This()) bool {
             if (comptime is_macos) {
-                const s = if (self.syms) |*p| p else return false;
-                const stream = self.fs_stream.load(.acquire) orelse return false;
-                s.FSEventStreamFlushSync(stream);
-                return true;
+                _ = self.syms orelse return false;
+                _ = self.fs_stream.load(.acquire) orelse return false;
+                // FSEvents is asynchronously journaled: FlushSync drains what
+                // fseventsd already knows, but cannot prove every completed write
+                // has reached the service. Never use it as a causal freshness
+                // witness; force the authoritative stat walk and make annals
+                // callers take their journal/walk fallback.
+                return self.barrierDoubt();
             }
             if (comptime builtin.os.tag == .linux) return self.flushInotify();
+            return false;
+        }
+
+        fn barrierDoubt(self: *@This()) bool {
+            self.session.dirty_log.noteDoubt();
+            self.session.markDirty();
             return false;
         }
 
@@ -422,11 +418,8 @@ pub fn Watcher(comptime Session: type) type {
 
         // ── macOS FSEvents backend ──
 
-        /// Spawn the CFRunLoop thread and arm the session iff the stream started —
-        /// same fail-closed contract as inotify: an unstarted watcher leaves the
-        /// session in the reconcile-always baseline (correct, just not fast). The
-        /// handshake keeps `armWatcher` on THIS thread so the plain `watcher_active`
-        /// bool the query path reads is never written concurrently.
+        /// Spawn the observation-only CFRunLoop thread. Unlike inotify, a started
+        /// FSEvents stream deliberately leaves the session reconcile-always.
         fn startFsevents(self: *@This()) void {
             if (comptime !is_macos) return;
             // Bind the frameworks on THIS thread before the loop spawns; a miss
@@ -447,17 +440,15 @@ pub fn Watcher(comptime Session: type) type {
             const deadline = std.Io.Clock.now(.real, self.io).nanoseconds + 2 * std.time.ns_per_s;
             while (self.start_result.load(.acquire) == 0 and std.Io.Clock.now(.real, self.io).nanoseconds < deadline)
                 std.atomic.spinLoopHint();
-            if (self.start_result.load(.acquire) == 1) {
-                // Per-file events are live from stream start, so every markDirty is
-                // now preceded by a note/noteDoubt: promise exactness, then arm.
-                self.session.dirty_log.armExact();
-                self.session.armWatcher();
-            }
+            // FSEvents delivery is asynchronously journaled relative to the
+            // writer syscall. Even a started per-file stream cannot prove causal
+            // quiescence, so macOS deliberately stays reconcile-always. The
+            // stream remains useful for diagnostics/annals observation, while
+            // every answer derives freshness from the authoritative stat walk.
         }
 
-        /// Build one recursive FSEvents stream over the roots, run its CFRunLoop
-        /// until `stop`, then tear the stream down. Any setup failure publishes
-        /// `start_result = 2` and returns unarmed.
+        /// Build one recursive observation stream over the roots, run its
+        /// CFRunLoop until `stop`, then tear it down.
         fn fseventsLoop(self: *@This()) void {
             if (comptime !is_macos) return;
             const s = &self.syms.?; // load() proved non-null before this spawned
