@@ -9,6 +9,12 @@ doc_radar:
     - description: "the full mint automatically splices Layers B through E"
       file: pkg/kernels/irregex/bench/certify/certify.sh
       contains: 'CERT_OUT="${OUT}" bash "${HERE}/certify_layers.sh"'
+    - description: "the release gate requires a certificate on both the Mac and the Linux machine"
+      file: pkg/kernels/irregex/bench/certify/check_release.py
+      contains: ['"darwin": "Mac"', '"linux": "Linux"']
+    - description: "Town Crier (chronicle) gates the irregex release on the cross-machine certificate"
+      file: pkg/tools/support/chronicle/packages.py
+      contains: "check_release.py"
 ---
 
 # bench/certify
@@ -38,7 +44,8 @@ elsewhere.
 | `check_artifacts.py`  | reproducibility gate — required files + Layer B/C/D/E headers/side-cars + corpus hashes + tool identities + raw-cell matrix                                  |
 | `ratio_regress.py`    | principia-style **ratio** regression — committed `certify_macro.csv` vs `ratio_baseline.json` floors; optional live remasure behind `GIST_BENCH=1`           |
 | `ratio_baseline.json` | min gist/rg cold speedup floors (hardware cancels; refresh after a deliberate republish)                                                                     |
-| `artifact/`           | committed, reproducible certificate bundle (`CERT_PUBLISH_DIR=… certify.sh` / `CERT_PUBLISH=1 make bench-gist-certify`)                                      |
+| `check_release.py`    | **release gate** — refuses a release until a valid, current certificate is attached for **both** the Mac and the Linux machine; run by Town Crier (`changelog build`) |
+| `artifact/`           | committed, reproducible certificate bundle (`CERT_PUBLISH_DIR=… certify.sh` / `CERT_PUBLISH=1 make bench-gist-certify`); per-platform mints live in `artifact/<platform-id>/` |
 
 The 12 classes are byte-identical to `../harness/certify.zig`'s probes, so the
 macroscopic table here and the microscopic table there map 1:1 by class name.
@@ -77,3 +84,37 @@ A full mint must see immutable corpus bytes. Use a clean checkout or isolated
 worktree; do not certify the actively changing coworking tree. The manifest
 hashes detect mutation late, but a benchmark that races file creation/removal
 is already invalid before that gate.
+
+## Release gate — a certificate on every machine
+
+Cold-CLI dominance is **machine-specific** (an M2 mint once showed 0 wins where
+an M4 Max shows a clean sweep vs ripgrep — see ADR-320). So a release is only
+allowed to claim optimality once the certificate has been re-minted on **each**
+supported architecture and attached. `check_release.py` is what Town Crier
+([`chronicle`](../../../../tools/changelog/README.md)) runs before it will cut an
+irregex release — `changelog build` refuses unless a valid, current-to-history
+certificate exists for **both** the Mac and the Linux machine:
+
+```bash
+# What `make changelog-build PKG=irregex VERSION=x.y.z` enforces automatically:
+python3 bench/certify/check_release.py            # → 0 only when both machines are covered
+python3 bench/certify/check_release.py --json     # per-platform coverage + speeds
+```
+
+The layout is **additive** — the flat `artifact/` stays the current-machine mint
+(the Mac today); the Linux mint publishes into its own per-platform subdir, and
+an explicit `artifact/<platform-id>/` always wins over the flat dir for its
+platform:
+
+```bash
+# On the Mac (flat bundle, unchanged):
+CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify
+# On the Linux box (Anvil / x86_64) — publish beside it, do not overwrite:
+CERT_PUBLISH_DIR=bench/certify/artifact/linux-x86_64 bash bench/certify/certify.sh
+```
+
+Each bundle must pass `check_artifacts.py` (internal reproducibility) and its
+recorded `git_commit` must belong to the released line of history (`--pin <sha>`
+locks it to an exact release commit; `--max-age-commits N` bounds staleness).
+`CHRONICLE_SKIP_RELEASE_GATE=1` (or `changelog build --skip-release-gate`) is the
+audited emergency override.
