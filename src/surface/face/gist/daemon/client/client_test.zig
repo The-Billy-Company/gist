@@ -74,8 +74,7 @@ test "client: wedged daemon times out to cold" {
     }});
     defer t.join();
 
-    var i: usize = 0;
-    while (i < 400) : (i += 1) {
+    for (0..400) |_| {
         if (Dir.cwd().access(io, ready, .{})) |_| break else |_| {}
         try io.sleep(.fromNanoseconds(5 * std.time.ns_per_ms), .real);
     } else return error.WedgedNeverReady;

@@ -226,7 +226,7 @@ fn runStatus(gpa: std.mem.Allocator, io: std.Io, json: bool) !void {
 /// Dispatch `gist codex <verb> …` (argv excludes the `codex` token itself).
 pub fn run(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
     if (argv.len == 0) dieUsage();
-    const verb = argv[0];
+    const verb = std.meta.stringToEnum(enum { build, status, count, tally }, argv[0]) orelse dieUsage();
     var json = false;
     var top: ?usize = null;
     var pattern: ?[]const u8 = null;
@@ -244,22 +244,19 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
         } else dieUsage();
     }
 
-    if (std.mem.eql(u8, verb, "build")) {
-        if (pattern != null or json or top != null) dieUsage();
-        return runBuild(gpa, io);
+    switch (verb) {
+        .build => {
+            if (pattern != null or json or top != null) dieUsage();
+            return runBuild(gpa, io);
+        },
+        .status => {
+            if (pattern != null or top != null) dieUsage();
+            return runStatus(gpa, io, json);
+        },
+        .count => {
+            if (top != null) dieUsage();
+            return runQuery(gpa, io, pattern orelse dieUsage(), null, json);
+        },
+        .tally => return runQuery(gpa, io, pattern orelse dieUsage(), top orelse 20, json),
     }
-    if (std.mem.eql(u8, verb, "status")) {
-        if (pattern != null or top != null) dieUsage();
-        return runStatus(gpa, io, json);
-    }
-    if (std.mem.eql(u8, verb, "count")) {
-        const p = pattern orelse dieUsage();
-        if (top != null) dieUsage();
-        return runQuery(gpa, io, p, null, json);
-    }
-    if (std.mem.eql(u8, verb, "tally")) {
-        const p = pattern orelse dieUsage();
-        return runQuery(gpa, io, p, top orelse 20, json);
-    }
-    dieUsage();
 }

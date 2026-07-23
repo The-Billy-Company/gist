@@ -221,11 +221,10 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
             }
         }
         if (dropped) {
-            var i: usize = 0;
-            while (i < clients.items.len) {
-                if (clients.items[i].gen == 0) {
-                    _ = clients.swapRemove(i); // order is not load-bearing
-                } else i += 1;
+            var i = clients.items.len;
+            while (i > 0) {
+                i -= 1;
+                if (clients.items[i].gen == 0) _ = clients.swapRemove(i); // order is not load-bearing
             }
         }
 

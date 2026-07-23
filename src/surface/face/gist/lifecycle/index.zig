@@ -45,9 +45,7 @@ const ms = @import("../../../exec/cold/argv/args.zig").ms;
 /// Refresh the persisted index: amend incrementally when the base admits it,
 /// else build + persist the full pair.
 pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
-    if (!amendDisabled()) {
-        if (amend(gpa, io, roots) catch false) return;
-    }
+    if (!envDisabled("GIST_NO_AMEND") and (amend(gpa, io, roots) catch false)) return;
     try full(gpa, io, roots);
 }
 
@@ -264,10 +262,6 @@ fn envDisabled(name: [*:0]const u8) bool {
         !std.ascii.eqlIgnoreCase(s, "false") and !std.ascii.eqlIgnoreCase(s, "no");
 }
 
-fn amendDisabled() bool {
-    return envDisabled("GIST_NO_AMEND");
-}
-
 /// Above this many changed paths an amend stops paying: reading the drift
 /// costs a meaningful fraction of the full build, and the codicil's postings
 /// stop being "small". Compaction = the full rebuild the caller falls back to.
@@ -286,7 +280,7 @@ fn normalizeRoot(r: []const u8) []const u8 {
 }
 
 fn strLess(_: void, a: []const u8, b: []const u8) bool {
-    return std.mem.order(u8, a, b) == .lt;
+    return std.mem.lessThan(u8, a, b);
 }
 
 /// Do this invocation's roots cover the SAME corpus the base was built over?

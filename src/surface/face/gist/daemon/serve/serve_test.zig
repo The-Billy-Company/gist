@@ -33,8 +33,7 @@ fn daemonMain(args: DaemonArgs) void {
 /// CPU-starved daemon thread must never turn a scheduling delay into a failure.
 fn dial(io: std.Io, socket: []const u8) !net.Stream {
     const ua = try net.UnixAddress.init(socket);
-    var attempt: usize = 0;
-    while (attempt < 1000) : (attempt += 1) {
+    for (0..1000) |_| {
         if (ua.connect(io)) |s| return s else |_| {}
         try io.sleep(.fromNanoseconds(10 * std.time.ns_per_ms), .real);
     }
@@ -52,35 +51,52 @@ fn shutdownAndJoin(gpa: std.mem.Allocator, io: std.Io, socket: []const u8, threa
     thread.join();
 }
 
-fn collectFiles(gpa: std.mem.Allocator, fd: std.posix.fd_t, arena: std.mem.Allocator, req: request.Request) ![]const []const u8 {
+/// Create a fresh throwaway tree under /tmp, unique per run via `key`.
+/// The caller `defer`s its removal.
+fn freshRoot(io: std.Io, a: std.mem.Allocator, comptime tag: []const u8, key: usize) ![]const u8 {
+    const root = try std.fmt.allocPrint(a, "/tmp/gist_" ++ tag ++ "_{x}", .{key});
+    Dir.cwd().deleteTree(io, root) catch {};
+    try Dir.cwd().createDirPath(io, root);
+    return root;
+}
+
+fn putFile(io: std.Io, a: std.mem.Allocator, root: []const u8, name: []const u8, data: []const u8) !void {
+    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/{s}", .{ root, name }), .data = data });
+}
+
+/// Allocate the daemon's socket path under `root` and spawn `serve.run` over
+/// just that root on its own thread. Pair with `defer shutdownAndJoin(...)`.
+fn spawnDaemon(gpa: std.mem.Allocator, io: std.Io, a: std.mem.Allocator, root: []const u8) !struct { socket: []const u8, thread: std.Thread } {
+    const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
+    const roots = try a.dupe([]const u8, &.{root});
+    const thread = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
+    return .{ .socket = socket, .thread = thread };
+}
+
+fn sendQuery(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request) !void {
     var qbuf: std.ArrayList(u8) = .empty;
     defer qbuf.deinit(gpa);
     try protocol.encodeQuery(&qbuf, gpa, req);
     try std.testing.expect(protocol.writeAll(fd, qbuf.items));
+}
 
+fn collectFiles(gpa: std.mem.Allocator, fd: std.posix.fd_t, arena: std.mem.Allocator, req: request.Request) ![]const []const u8 {
+    try sendQuery(gpa, fd, req);
     var resp = try protocol.recvFrame(gpa, fd);
     defer resp.deinit();
     try std.testing.expectEqual(protocol.Opcode.result, resp.op);
-    const view = try protocol.decodeResult(resp.payload());
-
-    var out: std.ArrayList([]const u8) = .empty;
-    switch (view) {
-        .files => |iter0| {
-            var iter = iter0;
-            while (try iter.next()) |p| try out.append(arena, try arena.dupe(u8, p));
-        },
+    var iter = switch (try protocol.decodeResult(resp.payload())) {
+        .files => |it| it,
         .count => return error.UnexpectedCountFrame,
         .lines => return error.UnexpectedLinesFrame,
-    }
+    };
+    var out: std.ArrayList([]const u8) = .empty;
+    while (try iter.next()) |p| try out.append(arena, try arena.dupe(u8, p));
     return out.toOwnedSlice(arena);
 }
 
 fn collectCount(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request) !u64 {
-    var qbuf: std.ArrayList(u8) = .empty;
-    defer qbuf.deinit(gpa);
-    try protocol.encodeQuery(&qbuf, gpa, req);
-    try std.testing.expect(protocol.writeAll(fd, qbuf.items));
-
+    try sendQuery(gpa, fd, req);
     var resp = try protocol.recvFrame(gpa, fd);
     defer resp.deinit();
     try std.testing.expectEqual(protocol.Opcode.result, resp.op);
@@ -96,23 +112,16 @@ const LinesAnswer = struct { out: []const u8, matched: bool };
 /// `chunk` frames of raw pre-rendered bytes, then the terminal `result(lines)`
 /// frame carrying the matched flag — the exact grammar the warm CLI client speaks.
 fn collectLines(gpa: std.mem.Allocator, fd: std.posix.fd_t, arena: std.mem.Allocator, req: request.Request) !LinesAnswer {
-    var qbuf: std.ArrayList(u8) = .empty;
-    defer qbuf.deinit(gpa);
-    try protocol.encodeQuery(&qbuf, gpa, req);
-    try std.testing.expect(protocol.writeAll(fd, qbuf.items));
-
+    try sendQuery(gpa, fd, req);
     var out: std.ArrayList(u8) = .empty;
     while (true) {
         var resp = try protocol.recvFrame(gpa, fd);
         defer resp.deinit();
         switch (resp.op) {
             .chunk => try out.appendSlice(arena, resp.payload()),
-            .result => {
-                const view = try protocol.decodeResult(resp.payload());
-                return switch (view) {
-                    .lines => |matched| .{ .out = out.items, .matched = matched },
-                    else => error.UnexpectedResultMode,
-                };
+            .result => return switch (try protocol.decodeResult(resp.payload())) {
+                .lines => |matched| .{ .out = out.items, .matched = matched },
+                else => error.UnexpectedResultMode,
             },
             else => return error.UnexpectedFrame,
         }
@@ -132,11 +141,7 @@ const FdLinesAnswer = struct { out: []const u8, matched: bool, via_fd: bool };
 /// passed shm fd, never off the socket — or the classic `chunk`+`result` stream.
 /// `via_fd` reports which path served it; bytes are duped into `arena`.
 fn collectLinesFd(gpa: std.mem.Allocator, fd: std.posix.fd_t, arena: std.mem.Allocator, req: request.Request) !FdLinesAnswer {
-    var qbuf: std.ArrayList(u8) = .empty;
-    defer qbuf.deinit(gpa);
-    try protocol.encodeQuery(&qbuf, gpa, req);
-    try std.testing.expect(protocol.writeAll(fd, qbuf.items));
-
+    try sendQuery(gpa, fd, req);
     var out: std.ArrayList(u8) = .empty;
     while (true) {
         const got = try protocol.recvFrameWithFd(gpa, fd);
@@ -190,9 +195,7 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
     defer arena.deinit();
     const a = arena.allocator();
 
-    const root = try std.fmt.allocPrint(a, "/tmp/gist_fd_{x}", .{@intFromPtr(&threaded)});
-    Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().createDirPath(io, root);
+    const root = try freshRoot(io, a, "fd", @intFromPtr(&threaded));
     defer Dir.cwd().deleteTree(io, root) catch {};
 
     // An emit-heavy fixture: enough matching lines that the rendered answer
@@ -203,16 +206,13 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
     var rendered_estimate: usize = 0;
     while (rendered_estimate <= protocol.fd_transport_floor * 2) : (rendered_estimate += root.len + 9 + line.len)
         try big.appendSlice(gpa, line);
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/big.txt", .{root}), .data = big.items });
+    try putFile(io, a, root, "big.txt", big.items);
     // A tiny fixture whose answer stays below the floor (chunk frames even when
     // fd is advertised).
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/small.txt", .{root}), .data = "needle once\n" });
+    try putFile(io, a, root, "small.txt", "needle once\n");
 
-    const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
-    const roots = try a.dupe([]const u8, &.{root});
-
-    const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
-    defer shutdownAndJoin(gpa, io, socket, t);
+    const daemon = try spawnDaemon(gpa, io, a, root);
+    defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
     defer shm.force_fail_for_test.store(false, .monotonic); // never leak the fault flag
 
     // "payload" occurs ONLY in big.txt, so the emit-heavy answer is a single doc
@@ -223,7 +223,7 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
 
     // (1) Connection advertising fd-transport: the emit-heavy answer rides an fd.
     const fd_out = blk: {
-        const s = try dial(io, socket);
+        const s = try dial(io, daemon.socket);
         defer s.close(io);
         try handshakeCaps(gpa, s.socket.handle, protocol.caps_supported);
         const big_ans = try collectLinesFd(gpa, s.socket.handle, a, q);
@@ -241,7 +241,7 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
     // (3) Negotiation OFF: a 1-byte HELLO (no caps) gets chunk frames — and the
     // bytes are IDENTICAL to the fd answer.
     {
-        const s = try dial(io, socket);
+        const s = try dial(io, daemon.socket);
         defer s.close(io);
         try handshakeCaps(gpa, s.socket.handle, 0);
         const ans = try collectLinesFd(gpa, s.socket.handle, a, q);
@@ -254,7 +254,7 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
     // floor. Proves the fail-open is not a new failure mode.
     {
         shm.force_fail_for_test.store(true, .monotonic);
-        const s = try dial(io, socket);
+        const s = try dial(io, daemon.socket);
         defer s.close(io);
         try handshakeCaps(gpa, s.socket.handle, protocol.caps_supported);
         const ans = try collectLinesFd(gpa, s.socket.handle, a, q);
@@ -274,28 +274,23 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     defer arena.deinit();
     const a = arena.allocator();
 
-    const root = try std.fmt.allocPrint(a, "/tmp/gist_serve_{x}", .{@intFromPtr(&threaded)});
-    Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().createDirPath(io, root);
+    const root = try freshRoot(io, a, "serve", @intFromPtr(&threaded));
     defer Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/a.txt", .{root}), .data = "WalletService here\n" });
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/b.txt", .{root}), .data = "nothing\n" });
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/c.txt", .{root}), .data = "also WalletService\n" });
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/d.txt", .{root}), .data = "walletservice lower\n" });
+    try putFile(io, a, root, "a.txt", "WalletService here\n");
+    try putFile(io, a, root, "b.txt", "nothing\n");
+    try putFile(io, a, root, "c.txt", "also WalletService\n");
+    try putFile(io, a, root, "d.txt", "walletservice lower\n");
     // Word-boundary fixtures (lane 2): e has a word-valid `run` per line (the
     // second only AFTER a word-rejected `rerun` occurrence), f only substring
     // hits, g only a Unicode-neighbor-rejected hit (`é` beside the match).
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/e.txt", .{root}), .data = "run runner\nrerun run\n" });
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/f.txt", .{root}), .data = "runner only\n" });
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/g.txt", .{root}), .data = "\xc3\xa9run here\n" });
+    try putFile(io, a, root, "e.txt", "run runner\nrerun run\n");
+    try putFile(io, a, root, "f.txt", "runner only\n");
+    try putFile(io, a, root, "g.txt", "\xc3\xa9run here\n");
 
-    const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
-    const roots = try a.dupe([]const u8, &.{root});
+    const daemon = try spawnDaemon(gpa, io, a, root);
+    defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
 
-    const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
-    defer shutdownAndJoin(gpa, io, socket, t);
-
-    const stream = try dial(io, socket);
+    const stream = try dial(io, daemon.socket);
     defer stream.close(io);
     const fd = stream.socket.handle;
 
@@ -475,27 +470,22 @@ test "serve: an idle persistent client does not starve a second connection" {
     defer arena.deinit();
     const a = arena.allocator();
 
-    const root = try std.fmt.allocPrint(a, "/tmp/gist_mux_{x}", .{@intFromPtr(&threaded)});
-    Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().createDirPath(io, root);
+    const root = try freshRoot(io, a, "mux", @intFromPtr(&threaded));
     defer Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/a.txt", .{root}), .data = "needle\n" });
+    try putFile(io, a, root, "a.txt", "needle\n");
 
-    const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
-    const roots = try a.dupe([]const u8, &.{root});
-
-    const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
-    defer shutdownAndJoin(gpa, io, socket, t);
+    const daemon = try spawnDaemon(gpa, io, a, root);
+    defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
 
     // Client A: handshake, then go idle WITHOUT disconnecting — the exact shape
     // of a long-lived warm `Session` an agent batch holds open for minutes.
-    const a_stream = try dial(io, socket);
+    const a_stream = try dial(io, daemon.socket);
     defer a_stream.close(io);
     try handshake(gpa, a_stream.socket.handle);
 
     // Client B must connect, handshake, and get an answer while A idles. Under
     // the old serial accept loop B sat in the listen backlog until A hung up.
-    const b_stream = try dial(io, socket);
+    const b_stream = try dial(io, daemon.socket);
     defer b_stream.close(io);
     const b_fd = b_stream.socket.handle;
     try handshake(gpa, b_fd);
@@ -516,10 +506,7 @@ test "serve: an idle persistent client does not starve a second connection" {
 /// budget-aborted walk produces (the client then answers on the certified cold
 /// path). Bounded readability so a regression that hangs the walk fails loud.
 fn expectDecline(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request) !void {
-    var qbuf: std.ArrayList(u8) = .empty;
-    defer qbuf.deinit(gpa);
-    try protocol.encodeQuery(&qbuf, gpa, req);
-    try std.testing.expect(protocol.writeAll(fd, qbuf.items));
+    try sendQuery(gpa, fd, req);
     try expectReadable(fd);
     var resp = try protocol.recvFrame(gpa, fd);
     defer resp.deinit();
@@ -536,14 +523,9 @@ test "serve: a query that overruns its budget is declined and the daemon stays r
     defer arena.deinit();
     const a = arena.allocator();
 
-    const root = try std.fmt.allocPrint(a, "/tmp/gist_budget_{x}", .{@intFromPtr(&threaded)});
-    Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().createDirPath(io, root);
+    const root = try freshRoot(io, a, "budget", @intFromPtr(&threaded));
     defer Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/a.txt", .{root}), .data = "needle here\n" });
-
-    const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
-    const roots = try a.dupe([]const u8, &.{root});
+    try putFile(io, a, root, "a.txt", "needle here\n");
 
     // A 1 ns budget: the first checkpoint in the reconcile/fold walk is already
     // past the deadline, so every eligible query declines — a deterministic
@@ -552,10 +534,10 @@ test "serve: a query that overruns its budget is declined and the daemon stays r
     serve.query_budget_ns_override.store(1, .monotonic);
     defer serve.query_budget_ns_override.store(-1, .monotonic);
 
-    const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
-    defer shutdownAndJoin(gpa, io, socket, t);
+    const daemon = try spawnDaemon(gpa, io, a, root);
+    defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
 
-    const stream = try dial(io, socket);
+    const stream = try dial(io, daemon.socket);
     defer stream.close(io);
     const fd = stream.socket.handle;
     try handshake(gpa, fd);
@@ -600,25 +582,21 @@ test "serve: annals consult declines pre-coverage instants and vouches for a liv
     defer arena.deinit();
     const a = arena.allocator();
 
-    const root = try std.fmt.allocPrint(a, "/tmp/gist_annals_{x}", .{@intFromPtr(&threaded)});
-    Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().createDirPath(io, root);
+    const root = try freshRoot(io, a, "annals", @intFromPtr(&threaded));
     defer Dir.cwd().deleteTree(io, root) catch {};
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/seed.txt", .{root}), .data = "needle\n" });
+    try putFile(io, a, root, "seed.txt", "needle\n");
 
-    const socket = try std.fmt.allocPrint(a, "{s}/gistd.sock", .{root});
-    const roots = try a.dupe([]const u8, &.{root});
-    const t = try std.Thread.spawn(.{}, daemonMain, .{DaemonArgs{ .gpa = gpa, .io = io, .roots = roots, .socket = socket }});
-    defer shutdownAndJoin(gpa, io, socket, t);
+    const daemon = try spawnDaemon(gpa, io, a, root);
+    defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
 
-    const stream = try dial(io, socket);
+    const stream = try dial(io, daemon.socket);
     defer stream.close(io);
     const fd = stream.socket.handle;
     try handshake(gpa, fd);
 
     // (1) An instant far before any possible coverage floor ALWAYS declines —
     // armed or not, the ledger never vouches for a window it did not watch.
-    try std.testing.expectEqual(@as(@TypeOf(try consultChanged(gpa, a, fd, 1)), null), try consultChanged(gpa, a, fd, 1));
+    try std.testing.expect((try consultChanged(gpa, a, fd, 1)) == null);
 
     // (2) The vouch path needs a live per-file-exact watcher (macOS FSEvents).
     // Elsewhere — or when fseventsd won't arm in this environment — every
@@ -631,7 +609,7 @@ test "serve: annals consult declines pre-coverage instants and vouches for a liv
     // `since = t_before` — that delivery-forcing is exactly what the one-shot
     // amend relies on for soundness.
     const t_before = std.Io.Clock.now(.real, io).nanoseconds;
-    try Dir.cwd().writeFile(io, .{ .sub_path = try std.fmt.allocPrint(a, "{s}/late.txt", .{root}), .data = "fresh\n" });
+    try putFile(io, a, root, "late.txt", "fresh\n");
 
     var vouched: bool = false;
     var saw_late: bool = false;

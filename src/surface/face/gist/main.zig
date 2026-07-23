@@ -54,7 +54,7 @@ fn normalizeRootArg(raw: []const u8) []const u8 {
     var root = raw;
     while (std.mem.startsWith(u8, root, "./")) root = root[2..];
     root = std.mem.trimEnd(u8, root, "/");
-    return if (root.len == 0 or std.mem.eql(u8, root, ".")) "." else root;
+    return if (root.len == 0) "." else root;
 }
 
 /// Try the resident daemon for an eligible query; on a served answer this exits
@@ -70,21 +70,16 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
     // disagree on which files `-l` returns). Classify is stack-only + pure; an
     // ineligible argv routes cold below, where `serial.run` applies the same rule.
     var mode_sa: gist.session.request.ScopeArgs = .{};
-    if (gist.session.request.classify(argv, &mode_sa)) |req| {
+    const eligible = if (gist.session.request.classify(argv, &mode_sa)) |req| blk: {
         if (req.mode == .files or req.mode == .count) gist.corpus.exemptSoftCap();
-    } else |_| {}
+        break :blk true;
+    } else |_| false;
     const debug = env.get("GIST_DEBUG_WARM") != null; // observe the routing decision
-    if (debug) {
-        // Surface the CLASSIFY verdict independently of daemon availability, so a
-        // cold outcome from "ineligible argv" is distinguishable from "eligible
-        // but no daemon up". This is the oracle the cross-binding parity test
-        // reads to prove Python `warm_eligible` tracks this classifier exactly.
-        var dbg_sa: gist.session.request.ScopeArgs = .{};
-        if (gist.session.request.classify(argv, &dbg_sa)) |_|
-            std.debug.print("gist: [eligible]\n", .{})
-        else |_|
-            std.debug.print("gist: [ineligible]\n", .{});
-    }
+    // Surface the CLASSIFY verdict independently of daemon availability, so a
+    // cold outcome from "ineligible argv" is distinguishable from "eligible but
+    // no daemon up" — the oracle the cross-binding parity test reads to prove
+    // Python `warm_eligible` tracks this classifier exactly.
+    if (debug) std.debug.print("gist: [{s}]\n", .{if (eligible) "eligible" else "ineligible"});
     switch (client.attempt(gpa, io, argv, sock)) {
         .served => |code| {
             if (debug) std.debug.print("gist: [warm]\n", .{});

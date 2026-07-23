@@ -295,8 +295,7 @@ fn emitFiles(gpa: std.mem.Allocator, files_iter: protocol.FileIter) Outcome {
     var any = false;
     while (it.next() catch return .cold) |path| {
         any = true;
-        out.appendSlice(gpa, path) catch return .cold;
-        out.append(gpa, '\n') catch return .cold;
+        out.print(gpa, "{s}\n", .{path}) catch return .cold;
     }
     if (out.items.len > 0) _ = corpus.writeStdout(out.items);
     return .{ .served = if (any) 0 else 1 };

@@ -63,8 +63,7 @@ pub const Snapshot = struct {
 /// The on-disk byte size of `path`, or 0 if it can't be stat'd (treated as
 /// absent — this is a report, never a hard failure).
 fn fileSize(io: std.Io, path: []const u8) u64 {
-    const st = Dir.cwd().statFile(io, path, .{}) catch return 0;
-    return @intCast(st.size);
+    return @intCast((Dir.cwd().statFile(io, path, .{}) catch return 0).size);
 }
 
 fn mib(bytes: u64) f64 {
