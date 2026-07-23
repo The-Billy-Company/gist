@@ -1,4 +1,3 @@
-// MONOLITHIC: freshness watcher — the FSEvents/kqueue event loop, drop/flood policy, and barrier-sync accelerator co-maintain one fail-open watch state (ADR-352 rung 2.5)
 //! gist resident session — the freshness watcher (ADR-352 rung 2.5).
 //!
 //! The watcher is a pure *accelerator* for the freshness barrier, never a
@@ -37,6 +36,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const haystack = @import("../../../corpus/tree/haystack.zig");
+const cs = @import("coreservices.zig");
 const Dir = std.Io.Dir;
 
 const is_macos = builtin.os.tag == .macos;
@@ -48,29 +48,14 @@ const in_mask: u32 = linux.IN.MODIFY | linux.IN.CREATE | linux.IN.DELETE |
     linux.IN.MOVED_FROM | linux.IN.MOVED_TO | linux.IN.ATTRIB |
     linux.IN.CLOSE_WRITE | linux.IN.ONLYDIR;
 
-// ── macOS FSEvents backend — lazily `dlopen`'d, never link-time bound ──
+// ── macOS FSEvents backend ──
 //
 // The CoreServices (FSEvents) + CoreFoundation (CFRunLoop) surface the macOS
-// watcher drives, resolved at RUNTIME through `std.DynLib` instead of linked
-// into the binary. Link-time framework loading runs the CoreFoundation + ObjC
-// image initializers on EVERY process launch (~0.9 ms measured, ~1.8× a bare
-// exe's startup) — a tax the cold one-shot search (`gist <pat>`, the product's
-// whole reason to out-run ripgrep) would pay for an accelerator only the
-// resident daemon ever arms. Loading on demand keeps the frameworks out of the
-// cold binary's load commands entirely, so a search pays zero for the watcher.
-// Fail-closed by construction: a `dlopen`/`dlsym` miss (or any non-macOS
-// target) leaves `syms` null → the session is never armed → every query
-// reconciles (correct, just not fast), the exact contract a missing backend
-// already carried.
-const Ref = ?*anyopaque;
-const CFIndex = isize;
-const kCFStringEncodingUTF8: u32 = 0x0800_0100;
-const kFSEventStreamEventIdSinceNow: u64 = 0xFFFF_FFFF_FFFF_FFFF;
-// NoDefer: deliver the first event immediately, then coalesce at `fsevents_latency`.
-const kFSEventStreamCreateFlagNoDefer: u32 = 0x0000_0002;
-// FileEvents: report the changed ITEM's own path (file or dir) instead of its
-// parent directory — the exact dirty set the scoped reconcile needs.
-const kFSEventStreamCreateFlagFileEvents: u32 = 0x0000_0010;
+// watcher drives is bound at RUNTIME (`dlopen`, never link-time) in `cs`
+// (`coreservices.zig`) — that module owns the ABI types + symbol table and the
+// fail-closed load; this file owns the event loop + drop/flood policy that use
+// them. The two policy knobs below stay here, next to the loop they govern.
+//
 // Event flags meaning "these paths are NOT an exact account of what changed":
 // subtree-rescan hints, kernel/user queue drops, id wrap, history replay
 // boundary, root moves, mount churn. Any → the batch is a doubt (full walk).
@@ -78,104 +63,6 @@ const inexact_flags: u32 = 0x0000_00FF;
 // Coalescing window (s): small keeps the read-your-writes stale window tight
 // while still folding a build's event storm into a handful of markDirty calls.
 const fsevents_latency: f64 = 0.05;
-
-// FSEvents delivers `info` as an opaque pointer (the session, type-erased so the
-// symbol table stays generic-free); `fseventsCallback` casts it back to its
-// concrete `*Session`. The retaining `kCFTypeArrayCallBacks` lets the paths
-// array own the CFString roots, so the loop drops its own references at once and
-// the stream copies the list on create.
-const FsCallback = *const fn (Ref, ?*anyopaque, usize, ?[*]const [*:0]const u8, [*]const u32, [*]const u64) callconv(.c) void;
-
-const CFContext = extern struct {
-    version: CFIndex = 0,
-    info: ?*anyopaque = null,
-    retain: ?*const anyopaque = null,
-    release: ?*const anyopaque = null,
-    copy_description: ?*const anyopaque = null,
-};
-
-/// The dlopen'd CoreFoundation + CoreServices entry points, bound once when a
-/// macOS session arms its watcher. Session-independent (the callback's `info` is
-/// `?*anyopaque`), so it lives at module scope and off-macOS is simply never
-/// populated — the field type stays valid on every target.
-const Syms = struct {
-    cf: std.DynLib,
-    cs: std.DynLib,
-    CFStringCreateWithBytes: *const fn (Ref, [*]const u8, CFIndex, u32, u8) callconv(.c) Ref,
-    CFArrayCreate: *const fn (Ref, [*]const Ref, CFIndex, ?*const anyopaque) callconv(.c) Ref,
-    CFRelease: *const fn (Ref) callconv(.c) void,
-    CFRunLoopGetCurrent: *const fn () callconv(.c) Ref,
-    CFRunLoopRunInMode: *const fn (Ref, f64, u8) callconv(.c) i32,
-    CFRunLoopStop: *const fn (Ref) callconv(.c) void,
-    FSEventStreamCreate: *const fn (Ref, FsCallback, ?*const CFContext, Ref, u64, f64, u32) callconv(.c) Ref,
-    FSEventStreamScheduleWithRunLoop: *const fn (Ref, Ref, Ref) callconv(.c) void,
-    FSEventStreamStart: *const fn (Ref) callconv(.c) u8,
-    FSEventStreamStop: *const fn (Ref) callconv(.c) void,
-    FSEventStreamInvalidate: *const fn (Ref) callconv(.c) void,
-    FSEventStreamRelease: *const fn (Ref) callconv(.c) void,
-    FSEventStreamFlushSync: *const fn (Ref) callconv(.c) void,
-    run_loop_default_mode: Ref,
-    array_callbacks: ?*const anyopaque,
-
-    const cf_path = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
-    const cs_path = "/System/Library/Frameworks/CoreServices.framework/CoreServices";
-
-    /// Open both frameworks and bind every symbol, or null on the first miss
-    /// (closing whatever opened). CoreFoundation carries the CF functions + the
-    /// two data symbols; CoreServices carries FSEvents.
-    fn load() ?Syms {
-        if (comptime !is_macos) return null;
-        var cf = std.DynLib.open(cf_path) catch return null;
-        var cs = std.DynLib.open(cs_path) catch {
-            cf.close();
-            return null;
-        };
-        var s: Syms = undefined;
-        s.cf = cf;
-        s.cs = cs;
-        s.CFStringCreateWithBytes = cf.lookup(@TypeOf(s.CFStringCreateWithBytes), "CFStringCreateWithBytes") orelse return s.fail();
-        s.CFArrayCreate = cf.lookup(@TypeOf(s.CFArrayCreate), "CFArrayCreate") orelse return s.fail();
-        s.CFRelease = cf.lookup(@TypeOf(s.CFRelease), "CFRelease") orelse return s.fail();
-        s.CFRunLoopGetCurrent = cf.lookup(@TypeOf(s.CFRunLoopGetCurrent), "CFRunLoopGetCurrent") orelse return s.fail();
-        s.CFRunLoopRunInMode = cf.lookup(@TypeOf(s.CFRunLoopRunInMode), "CFRunLoopRunInMode") orelse return s.fail();
-        s.CFRunLoopStop = cf.lookup(@TypeOf(s.CFRunLoopStop), "CFRunLoopStop") orelse return s.fail();
-        // Data symbols: `lookup` returns the symbol's address. `kCFRunLoopDefaultMode`
-        // is a CFStringRef *variable* → deref to the value; `kCFTypeArrayCallBacks`
-        // is the callbacks struct → its address is what CFArrayCreate wants.
-        s.run_loop_default_mode = (cf.lookup(*Ref, "kCFRunLoopDefaultMode") orelse return s.fail()).*;
-        s.array_callbacks = cf.lookup(*const anyopaque, "kCFTypeArrayCallBacks") orelse return s.fail();
-        s.FSEventStreamCreate = cs.lookup(@TypeOf(s.FSEventStreamCreate), "FSEventStreamCreate") orelse return s.fail();
-        s.FSEventStreamScheduleWithRunLoop = cs.lookup(@TypeOf(s.FSEventStreamScheduleWithRunLoop), "FSEventStreamScheduleWithRunLoop") orelse return s.fail();
-        s.FSEventStreamStart = cs.lookup(@TypeOf(s.FSEventStreamStart), "FSEventStreamStart") orelse return s.fail();
-        s.FSEventStreamStop = cs.lookup(@TypeOf(s.FSEventStreamStop), "FSEventStreamStop") orelse return s.fail();
-        s.FSEventStreamInvalidate = cs.lookup(@TypeOf(s.FSEventStreamInvalidate), "FSEventStreamInvalidate") orelse return s.fail();
-        s.FSEventStreamRelease = cs.lookup(@TypeOf(s.FSEventStreamRelease), "FSEventStreamRelease") orelse return s.fail();
-        s.FSEventStreamFlushSync = cs.lookup(@TypeOf(s.FSEventStreamFlushSync), "FSEventStreamFlushSync") orelse return s.fail();
-        return s;
-    }
-
-    /// A partial resolve must never half-arm the watcher: close both handles and
-    /// report the miss as null so the session stays in the reconcile-always base.
-    fn fail(s: *Syms) ?Syms {
-        s.close();
-        return null;
-    }
-
-    fn close(s: *Syms) void {
-        s.cf.close();
-        s.cs.close();
-    }
-};
-
-/// Wall-clock nanoseconds off the raw libc clock — the FSEvents callback thread
-/// has no `std.Io` handle, and the annals compare against `base.ns` instants
-/// minted from the SAME realtime clock. Null on failure (callers degrade to
-/// doubt/uncovered, never to a guessed instant).
-fn wallNowNs() ?i128 {
-    var ts: std.c.timespec = undefined;
-    if (std.c.clock_gettime(.REALTIME, &ts) != 0) return null;
-    return @as(i128, ts.sec) * std.time.ns_per_s + ts.nsec;
-}
 
 /// The freshness watcher, generic over any resident `Session` that exposes the
 /// change-tracking surface it drives: `roots: []const []const u8`,
@@ -195,7 +82,7 @@ pub fn Watcher(comptime Session: type) type {
         /// `startFsevents` before the loop thread spawns and closed by `stop`.
         /// Null on every non-macOS target and whenever the frameworks fail to
         /// load (→ unarmed, reconcile-always).
-        syms: ?Syms = null,
+        syms: ?cs.Syms = null,
         /// Linux: watch descriptor → the directory it covers (gpa-owned), so a
         /// dir-create event can be resolved to a path and its subtree watched
         /// before the next reconcile walks it. Built on the main thread before the
@@ -426,7 +313,7 @@ pub fn Watcher(comptime Session: type) type {
             // Bind the frameworks on THIS thread before the loop spawns; a miss
             // (unavailable framework / symbol) leaves the session unarmed —
             // reconcile-always, still correct.
-            self.syms = Syms.load() orelse return;
+            self.syms = cs.Syms.load() orelse return;
             self.thread = std.Thread.spawn(.{}, fseventsLoop, .{self}) catch {
                 if (self.syms) |*s| {
                     s.close();
@@ -458,21 +345,21 @@ pub fn Watcher(comptime Session: type) type {
             const paths = self.buildPathsArray() orelse return self.start_result.store(2, .release);
             defer s.CFRelease(paths);
 
-            var ctx = CFContext{ .info = @ptrCast(self.session) };
+            var ctx = cs.CFContext{ .info = @ptrCast(self.session) };
             // Annals coverage instant: captured BEFORE the stream exists. `SinceNow`
             // resolves at creation and fseventsd's journal replays anything between
             // create and start, so every event at/after this instant is delivered —
             // the floor is conservative by construction. A clock failure leaves the
             // annals uncovered (never answerable), not wrong.
-            const coverage_ns: ?i128 = if (comptime has_annals) wallNowNs() else null;
+            const coverage_ns: ?i128 = if (comptime has_annals) cs.wallNowNs() else null;
             const stream = s.FSEventStreamCreate(
                 null,
                 fseventsCallback,
                 &ctx,
                 paths,
-                kFSEventStreamEventIdSinceNow,
+                cs.kFSEventStreamEventIdSinceNow,
                 fsevents_latency,
-                kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagFileEvents,
+                cs.kFSEventStreamCreateFlagNoDefer | cs.kFSEventStreamCreateFlagFileEvents,
             ) orelse return self.start_result.store(2, .release);
             defer {
                 self.fs_stream.store(null, .release);
@@ -503,11 +390,11 @@ pub fn Watcher(comptime Session: type) type {
         /// watches `.`, its whole CWD walk). Returns null on any allocation/CF
         /// failure so the caller stays unarmed. The array retains the strings, so
         /// we release our own references before returning it.
-        fn buildPathsArray(self: *@This()) ?Ref {
+        fn buildPathsArray(self: *@This()) ?cs.Ref {
             if (comptime !is_macos) return null;
             const s = &self.syms.?;
             const roots = self.watchRoots();
-            const refs = self.gpa.alloc(Ref, roots.len) catch return null;
+            const refs = self.gpa.alloc(cs.Ref, roots.len) catch return null;
             defer self.gpa.free(refs);
 
             var made: usize = 0;
@@ -518,7 +405,7 @@ pub fn Watcher(comptime Session: type) type {
                 defer self.gpa.free(rootz);
                 const resolved = std.c.realpath(rootz, &buf) orelse return null;
                 const abs = std.mem.span(resolved);
-                const cfstr = s.CFStringCreateWithBytes(null, abs.ptr, @intCast(abs.len), kCFStringEncodingUTF8, 0) orelse return null;
+                const cfstr = s.CFStringCreateWithBytes(null, abs.ptr, @intCast(abs.len), cs.kCFStringEncodingUTF8, 0) orelse return null;
                 refs[made] = cfstr;
                 made += 1;
                 // Annals deliveries are keyed absolute; arm the strip prefix now —
@@ -537,13 +424,13 @@ pub fn Watcher(comptime Session: type) type {
         /// the log's drain contract relies on); any flag that means the paths are
         /// not an exact account of what changed (rescan hints, drops, id wrap,
         /// mounts) becomes `noteDoubt`, so that batch's reconcile walks fully.
-        fn fseventsCallback(_: Ref, info: ?*anyopaque, num_events: usize, event_paths: ?[*]const [*:0]const u8, event_flags: [*]const u32, _: [*]const u64) callconv(.c) void {
+        fn fseventsCallback(_: cs.Ref, info: ?*anyopaque, num_events: usize, event_paths: ?[*]const [*:0]const u8, event_flags: [*]const u32, _: [*]const u64) callconv(.c) void {
             const session: *Session = @ptrCast(@alignCast(info orelse return));
             // One delivery instant for the whole batch — coalesced events share a
             // callback anyway, and delivery-at-or-after-occurrence is what the
             // annals' `since` filter relies on. A dead clock poisons the ledger
             // (never guesses); the dirty log is untouched either way.
-            const now_ns: ?i128 = if (comptime has_annals) wallNowNs() else null;
+            const now_ns: ?i128 = if (comptime has_annals) cs.wallNowNs() else null;
             if (event_paths) |paths| {
                 for (0..num_events) |i| {
                     if (event_flags[i] & inexact_flags != 0) {
