@@ -43,14 +43,23 @@ HEADER = "## Layer A — the `--rank` lane (definition-first, the shape rg can't
 # scanner (rg) throughout.
 OVERHEAD_CEIL = 12.0
 COVERAGE_FLOOR = 0.90  # ranking surfaces >=90% of the located set; the rest are files past the 4 MiB read bound
-ROW_RE = re.compile(r"^\s*(\d+)\.\s+(\S+?):\d+\s+\[(\w+)\]")
+# A ranked row is `NN. path:line  [kind]  <count>  snippet`. The path may hold
+# spaces (`…/The Energy Landscape — ….md`), so capture it non-greedily as any
+# bytes up to the `:line  [kind]` anchor rather than `\S+?` (which stopped at the
+# first space and silently dropped space-bearing paths from the ranked set).
+ROW_RE = re.compile(r"^\s*(\d+)\.\s+(.+?):\d+\s+\[(\w+)\]")
 DEMOTED = {"gen", "mirror"}
 
 
 def parse_rank(path: Path) -> list[tuple[int, str, str]]:
-    """(position, path, kind) for every ranked row in a --rank=inf capture."""
+    """(position, path, kind) for every ranked row in a --rank=inf capture.
+
+    A ranked row echoes a matched source line, which may hold non-UTF-8 bytes;
+    ``surrogateescape`` round-trips them so the ASCII ``pos. path:line [kind]``
+    prefix the regex reads stays intact instead of aborting the whole lane.
+    """
     rows = []
-    for ln in path.read_text().splitlines():
+    for ln in path.read_text(errors="surrogateescape").splitlines():
         m = ROW_RE.match(ln)
         if m:
             rows.append((int(m.group(1)), m.group(2), m.group(3)))
@@ -67,7 +76,9 @@ def _fmt(x: float | None) -> str:
 
 def analyze(results_dir: Path, name: str, rng: random.Random) -> dict:
     """All measured facts + per-claim verdicts for one probe."""
-    setl = {ln for ln in (results_dir / f"{name}.setl").read_text().splitlines() if ln}
+    setl = {
+        ln for ln in (results_dir / f"{name}.setl").read_text(errors="surrogateescape").splitlines() if ln
+    }
     rows = parse_rank(results_dir / f"{name}.rank")
     rankset = {p for _, p, _ in rows}
 

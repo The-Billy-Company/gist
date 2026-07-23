@@ -1383,7 +1383,12 @@ pub const ResidentSession = struct {
         };
 
         var out: std.ArrayList(u8) = .empty;
-        _ = ranked.renderLive(arena, self.io, rex, files.items, k, &out) catch |err|
+        // `binary_detect=true` = cold's `!-a` default: `renderLive`'s `fileDoc`
+        // clips a NUL-bearing walked file to its committed prefix, so warm rank
+        // excludes compiled-binary symbol hits exactly as cold does (the search
+        // visitors above already drop them; `-a` is an exotic flag that falls to
+        // cold, so the resident rank path never needs to read a binary as text).
+        _ = ranked.renderLive(arena, self.io, rex, files.items, k, &out, true) catch |err|
             return if (err == error.OutOfMemory) QueryError.OutOfMemory else QueryError.Stale;
         return out.items;
     }
