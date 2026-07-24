@@ -746,6 +746,11 @@ const Cfg = struct {
     // keyed by path (`Worker.recs`) rather than streaming it, so `run` can order
     // the whole result once (`emitSorted`). False ⇒ the streaming sink path.
     collect_sorted: bool = false,
+    // `collectFileSet` only: force the clock-bearing `listOneLevel` listing and
+    // carry each admitted file's walk-time mtime/ctime into its `recs` entry, so
+    // the resident daemon's `reconcileOne` reads freshness straight off the walk
+    // instead of re-`statFile`ing every path from CWD. Inert for search runs.
+    freshness_meta: bool = false,
 };
 
 /// One rendered file fragment held for the ordered `--sort`/`--sortr` emit. The
@@ -754,7 +759,9 @@ const Cfg = struct {
 /// the walk) keyed by `path`, so `run` orders the whole result once. `buf` is the
 /// rendered block for a content mode; in `-l`/`--files` mode `buf` is unused (the
 /// path IS the output) and `kind` is immaterial — `emitSorted` writes path+term.
-const SortedRec = struct { path: []const u8, kind: FragKind, buf: []const u8 };
+// `mtime_ns`/`ctime_ns` are populated only on the `collectFileSet` freshness
+// path (`Cfg.freshness_meta`); every other producer leaves them null.
+const SortedRec = struct { path: []const u8, kind: FragKind, buf: []const u8, mtime_ns: ?i128 = null, ctime_ns: ?i128 = null };
 
 /// A file discovered before the elide oracle finished loading — held back so
 /// it can still be elided (or searched) once `LazyElide.ready` flips.
@@ -1128,7 +1135,7 @@ fn needsElisionMetadata(cfg: *const Cfg) bool {
 /// from names-only listing back to the clock-bearing `listOneLevel`, trading a
 /// per-directory bulk-attr call for ~20k avoided file opens.
 fn freshnessWanted(cfg: *const Cfg) bool {
-    return needsElisionMetadata(cfg) or cfg.shard != null;
+    return needsElisionMetadata(cfg) or cfg.shard != null or cfg.freshness_meta;
 }
 
 fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix.fd_t, task: DirTask, chain: ?*const IgNode, children: *std.ArrayList(DirTask), e: Entry) void {
@@ -1182,6 +1189,12 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
 
     const dpath = if (o.path_sep) |sep| replaceSep(a, rel, sep) else rel;
     if (cfg.files_mode) {
+        // `collectFileSet`: carry the walk-time clocks with the path so the
+        // daemon's reconcile reads freshness off the walk (no per-file stat).
+        if (cfg.freshness_meta) {
+            w.recs.append(w.gpa, .{ .path = dpath, .kind = .text_hit, .buf = "", .mtime_ns = mtime, .ctime_ns = ctime }) catch oom();
+            return;
+        }
         // Coalesced into the worker's path-list buffer — one locked write per
         // ~64 KiB chunk instead of a lock+syscall per listed file.
         bufferPath(w, dpath, if (o.null_sep) "\x00" else "\n");
@@ -1794,6 +1807,122 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     if (re != null and !o.quiet and !o.files_list and !o.files_without and sink.matched_files == 0 and !nothing_searched and !q.walk_error.load(.acquire))
         hints.noMatches(hints.shape(parsed.patterns, o, parsed.roots, parsed.roots.len > 0), null);
     std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);
+}
+
+// ─────────────────────── callable file-set walk ───────────────────────
+
+/// One admitted file plus its walk-time freshness clocks (from the same
+/// `getattrlistbulk` listing that enumerated it — never a separate stat). Null
+/// clocks mean the listing couldn't supply them (a `getattrlistbulk`-unsupported
+/// fallback); the caller then re-stats that one path.
+pub const FileEntry = struct { path: []const u8, mtime_ns: ?i128, ctime_ns: ?i128 };
+
+/// The admitted rg-default file set under `roots`, plus whether the walk hit an
+/// unreadable directory. The `-t`/`-g` un-hide/un-ignore extras a serial
+/// `defaultFileSetExtras` walk gathers are deliberately NOT collected: a
+/// files-only parallel walk drops every rejected entry silently. The one caller
+/// (the resident daemon's `reconcileFull`) defers them — it marks its extras
+/// stale so the next `-t`/`-g` query refreshes on demand, the identical contract
+/// the scoped reconcile path already uses.
+pub const FileSet = struct { entries: []const FileEntry, walk_error: bool };
+
+/// The fused work-stealing walk as a CALLABLE — everything `run` does up to the
+/// fan-out/join, WITHOUT the per-file search, the streaming sink, or the
+/// `noreturn` exit tail. It runs the identical ignore-certified directory walk
+/// `run` runs in `--files` mode (same `Ignore`/`Cfg`/`Worker`/`Queue`/
+/// `processDir`/`handleEntry`, so admission is parity-identical to the serial
+/// `defaultFileSet` by construction), but COLLECTS each admitted path into `a`
+/// and RETURNS the set instead of racing it to stdout and exiting. Membership is
+/// live ground truth: the phantom snapshot and content shard are never consulted
+/// (a file created since the last index build must still appear), which is
+/// exactly what the daemon's freshness reconcile needs. `roots` empty ⇒ the CWD
+/// walked with rootless corpus keys. Caller owns `a`; every internal scratch
+/// allocation is released before return.
+pub fn collectFileSet(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, a: std.mem.Allocator) FileSet {
+    // `files_list` gates only `files_mode`/worker topology; `ignore.Options.from`
+    // reads none of it, so the admission layer is byte-identical to serial
+    // `defaultFileSet`'s default `Opts{}`.
+    const o: Opts = .{ .files_list = true };
+    var scratch = std.heap.ArenaAllocator.init(gpa);
+    defer scratch.deinit();
+    const sa = scratch.allocator();
+    var ig = ignore.Ignore.init(sa, io, ignore.Options.from(o), roots);
+    const compiled = ignore.Compiled.build(sa, &ig);
+    var q: Queue = .{ .gpa = gpa, .io = io };
+    defer q.items.deinit(gpa);
+    // Never streamed to: files+`collect_sorted` route every path into the
+    // worker's `recs` (see `bufferPath`), so the sink exists only to satisfy
+    // `Cfg`. Its `heading`/`join_groups` are inert in files mode.
+    var sink: Sink = .{ .q = &q, .io = io, .heading = false, .join_groups = false };
+    const cfg: Cfg = .{
+        .o = o,
+        .re = null,
+        .ig = &ig,
+        .compiled = if (compiled) |*c| c else null,
+        .lazy = null,
+        .file_needle = null,
+        .file_alts = &.{},
+        .lits_equiv = false,
+        .gate_len = 0,
+        .line_needle = null,
+        .fast_l = false,
+        .use_color = false,
+        .show_name = true,
+        .heading = false,
+        .join_groups = false,
+        .binary_detect = false,
+        .files_mode = true,
+        .ingest = null,
+        .snap = null, // live ground truth — no phantom membership
+        .shard = null, // no bytes read in files mode
+        .sink = &sink,
+        .collect_sorted = true, // route `bufferPath` into each worker's `recs`
+        .freshness_meta = true, // clock-bearing listing; carry mtime/ctime in `recs`
+    };
+    {
+        const eff_roots: []const []const u8 = if (roots.len > 0) roots else &.{"."};
+        var seed: std.ArrayList(DirTask) = .empty;
+        defer seed.deinit(gpa);
+        for (eff_roots) |r| {
+            const prefix = if (std.mem.eql(u8, r, ".") and roots.len == 0) "" else std.mem.trimEnd(u8, r, "/");
+            seed.append(gpa, .{ .disk = r, .rel = prefix, .depth = 0, .root_depth = rootDepth(prefix), .chain = null, .snap_ix = treemap.not_walked }) catch oom();
+        }
+        q.push(seed.items);
+    }
+    const ncpu = std.Thread.getCpuCount() catch 6;
+    var nworkers = defaultWorkerCount(ncpu, true);
+    if (args.envSpan("GIST_WORKERS")) |s| if (std.fmt.parseInt(usize, s, 10)) |n| {
+        nworkers = @max(1, n);
+    } else |_| {};
+    const workers = gpa.alloc(Worker, nworkers) catch oom();
+    defer gpa.free(workers);
+    for (workers) |*w| w.* = .{ .q = &q, .io = io, .gpa = gpa, .cfg = &cfg, .arena = std.heap.ArenaAllocator.init(std.heap.page_allocator) };
+    defer for (workers) |*w| {
+        w.arena.deinit();
+        w.out.deinit(gpa);
+        w.recs.deinit(gpa);
+    };
+    const threads = gpa.alloc(std.Thread, nworkers) catch oom();
+    defer gpa.free(threads);
+    var spawned: usize = 0;
+    for (workers[1..]) |*w| {
+        threads[spawned] = std.Thread.spawn(.{}, workerMain, .{w}) catch break;
+        spawned += 1;
+    }
+    workerMain(&workers[0]); // the main thread is a worker too
+    for (threads[0..spawned]) |t| t.join();
+
+    // Each worker held its admitted paths in its own arena (torn down by the
+    // defer above); dupe them into the caller's allocator before that fires.
+    var total: usize = 0;
+    for (workers) |*w| total += w.recs.items.len;
+    const entries = a.alloc(FileEntry, total) catch oom();
+    var k: usize = 0;
+    for (workers) |*w| for (w.recs.items) |r| {
+        entries[k] = .{ .path = a.dupe(u8, r.path) catch oom(), .mtime_ns = r.mtime_ns, .ctime_ns = r.ctime_ns };
+        k += 1;
+    };
+    return .{ .entries = entries, .walk_error = q.walk_error.load(.acquire) };
 }
 
 /// Worker pool size for a plaintext walk. macOS serializes the walk in the

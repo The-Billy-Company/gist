@@ -80,6 +80,12 @@ const Ward = @import("../../../kernel/primitives/ward.zig").Ward;
 // depending on `surface/exec/cold` is a one-way edge (serial.zig never imports
 // session), so no import cycle.
 const run = @import("../cold/engine/serial.zig");
+// The parallel fused walk (`parallel.zig`), reached ONLY through its callable
+// `collectFileSet` — the full-reconcile file set via the same work-stealing
+// getattrlistbulk walk the cold `--files` path uses, ~3x faster than the serial
+// `defaultFileSet` readdir walk. Named `pengine` because `parallel` above binds
+// the kernel thread-pool primitive. One-way edge (cold never imports session).
+const pengine = @import("../cold/engine/parallel.zig");
 // The gist-native `--rank` kernel (`ranked.zig`): its `renderLive` extracts
 // features over in-memory `LiveFile`s, fuses via RRF, and renders the top-K —
 // the SAME emission cold's `runLive` produces, returned to buffer instead of
@@ -812,34 +818,47 @@ pub const ResidentSession = struct {
     /// The O(tree) barrier: re-derive the whole authoritative set and diff it
     /// against base + overlay. Always sound; the scoped path's fallback.
     fn reconcileFull(self: *ResidentSession, ceil: Ceiling) QueryError!void {
+        const trace = std.c.getenv("GIST_RECONCILE_TRACE") != null;
+        const t0 = if (trace) std.Io.Clock.now(.awake, self.io).nanoseconds else 0;
         var walk_arena = std.heap.ArenaAllocator.init(self.gpa);
         defer walk_arena.deinit();
-        // Capture the un-hide/un-ignore extras from the SAME certified walk that
-        // builds the file set — a full pass re-derives the whole tree, so its
-        // extras are authoritative and the scoped-stale latch clears (`setExtras`).
-        var sel_extras: []const run.Extra = &.{};
-        const fs = run.defaultFileSetExtras(walk_arena.allocator(), self.io, self.roots, &sel_extras);
+        // Re-derive the whole authoritative set through the parallel fused walk
+        // (`collectFileSet`) — the same ignore-certified work-stealing
+        // getattrlistbulk enumeration the cold `--files` path uses, ~3x faster
+        // than the serial readdir walk. Ground truth: no phantom snapshot, so a
+        // file created since the last index build is seen. Its `-t`/`-g` extras
+        // are NOT gathered here (a files-only walk drops rejected entries), so
+        // they are deferred below exactly as the scoped path defers them.
+        const fs = pengine.collectFileSet(self.gpa, self.io, self.roots, walk_arena.allocator());
         // An errored walk is a GAPPED set. Cold would report the unreadable
         // directory to stderr and exit 2; serving a clean-looking warm answer
         // over the gap would silently drop its files. Decline (and never mark
         // clean) until a walk completes without error.
-        if (fs.path_error) return QueryError.Stale;
-        const cur = fs.paths;
+        if (fs.walk_error) return QueryError.Stale;
+        const cur = fs.entries;
+        const t1 = if (trace) std.Io.Clock.now(.awake, self.io).nanoseconds else 0;
 
         var cur_set = std.StringHashMap(void).init(self.gpa);
         defer cur_set.deinit();
         try cur_set.ensureTotalCapacity(@intCast(cur.len));
-        for (cur) |p| cur_set.putAssumeCapacity(p, {});
+        for (cur) |e| cur_set.putAssumeCapacity(e.path, {});
 
-        for (cur, 0..) |p, i| {
+        for (cur, 0..) |e, i| {
             if (ceil.over(self.io, i)) return self.budgetAbort();
-            try self.reconcileOne(p);
+            try self.reconcileOne(e.path, e.mtime_ns, e.ctime_ns);
+        }
+        if (trace) {
+            const t2 = std.Io.Clock.now(.awake, self.io).nanoseconds;
+            std.debug.print("reconcileFull: walk {d:.1} ms ({d} files) · reread {d:.1} ms\n", .{
+                @as(f64, @floatFromInt(t1 - t0)) / 1e6, cur.len, @as(f64, @floatFromInt(t2 - t1)) / 1e6,
+            });
         }
         try self.tombstoneVanished(&cur_set);
-        // Only once the walk completed without error/abort: a partial pass would
-        // leave a truncated extras list, so refresh at the end (a budget abort
-        // above returns first, keeping the prior list until a full pass lands).
-        try self.setExtras(sel_extras);
+        // The parallel files walk yields no `-t`/`-g` extras, so latch them stale
+        // (like the scoped path): the next `-t`/`-g` query fail-closed-refreshes
+        // via `guardExtras` → `refreshExtras`. Set only after a clean, complete
+        // pass — a budget abort above returns first, keeping the prior list.
+        self.extras_stale = true;
     }
 
     /// The O(changed) barrier: verify ONLY the drained watcher paths against
@@ -866,7 +885,7 @@ pub const ResidentSession = struct {
             switch (verdict) {
                 .skip => {},
                 .needs_full => return false,
-                .file => |rel| try self.reconcileOne(rel),
+                .file => |rel| try self.reconcileOne(rel, null, null),
                 .subtree => |rel| try subtrees.append(a, rel),
                 .gone => |rel| try gones.put(a, try delta_mod.foldLower(a, rel), {}),
             }
@@ -924,7 +943,7 @@ pub const ResidentSession = struct {
             error.OutOfMemory => return QueryError.OutOfMemory,
         };
         var it = sink.keyIterator();
-        while (it.next()) |k| try self.reconcileOne(k.*);
+        while (it.next()) |k| try self.reconcileOne(k.*, null, null);
 
         const fold_rel = try delta_mod.foldLower(a, rel);
         var doomed: std.ArrayList([]const u8) = .empty;
@@ -998,17 +1017,27 @@ pub const ResidentSession = struct {
     /// reappeared (previously tombstoned) path is read unconditionally; an
     /// already-known path is re-read only when its mtime/ctime advanced past the
     /// freshness cursor — the incremental catch-up that keeps reconcile from
-    /// re-reading an unchanged corpus every query.
-    fn reconcileOne(self: *ResidentSession, p: []const u8) QueryError!void {
+    /// re-reading an unchanged corpus every query. `mtime_ns`/`ctime_ns` are the
+    /// clocks the enumerating walk already captured (`collectFileSet`'s
+    /// `getattrlistbulk` listing); null (the scoped/subtree callers) falls back
+    /// to one `statFile`. Using the walk-time clocks is sound: `fresh_ns` is
+    /// anchored BEFORE the walk (see `reconcile`), so any write the walk didn't
+    /// observe is caught on the next pass — the same window `statFile` raced.
+    fn reconcileOne(self: *ResidentSession, p: []const u8, mtime_ns: ?i128, ctime_ns: ?i128) QueryError!void {
         if (self.overlay.get(p)) |ov| switch (ov) {
             .tombstone => return self.readInto(p), // reappeared since its delete
             .doc => {}, // already substituted — fall through to the mtime gate
         } else if (!self.by_path.contains(p)) {
             return self.readInto(p); // brand-new file, not in the base corpus
         }
-        const st = Dir.cwd().statFile(self.io, p, .{}) catch return self.readInto(p);
-        if (bulkstat.needsLiveRead(self.fresh_ns, st.mtime.nanoseconds, st.ctime.nanoseconds))
-            return self.readInto(p);
+        var mt = mtime_ns;
+        var ct = ctime_ns;
+        if (mt == null or ct == null) {
+            const st = Dir.cwd().statFile(self.io, p, .{}) catch return self.readInto(p);
+            mt = st.mtime.nanoseconds;
+            ct = st.ctime.nanoseconds;
+        }
+        if (bulkstat.needsLiveRead(self.fresh_ns, mt, ct)) return self.readInto(p);
     }
 
     /// Read `p` into an overlay entry with the SAME faithful ingest the base
