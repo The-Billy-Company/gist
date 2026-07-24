@@ -82,8 +82,8 @@ pub const Opcode = enum(u8) {
     query_ext = 13, // C→S: [u8 mode][u8 flags][opt u64 max_count][u32 plen][pattern] then 4×([u8 n]{[u32 len][bytes]}) = roots,includes,excludes,exts, then [u8 rank_present][opt u64 rank_k], then [u8 ctx_present][opt u64 before][opt u64 after], then [u8 pcre] (`-P`/`--pcre2`; self-describing, absent tail ⇒ 0)
     // The annals consult (`gist index` amend fast path): "which corpus files
     // changed at/after instant S?" — answered only when the daemon's
-    // never-drained watcher ledger (`annals.zig`) can causally vouch. Async
-    // macOS FSEvents currently declines to the journal/stat-walk fallback.
+    // never-drained watcher ledger (`annals.zig`) can causally vouch, which both
+    // syscall-synchronous backends (Linux inotify, macOS kqueue — ADR-372) can.
     // ADDITIVE like `query_ext`: an old daemon's `BadOpcode` drop / `decline`
     // sends the client to its proven fallback (journal replay → stat walk).
     changed = 14, // C→S: [i64 since_ns]

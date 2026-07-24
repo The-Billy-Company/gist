@@ -1,6 +1,6 @@
 {
   "armed": true,
-  "watcher": "FSEvents (recursive stream)",
+  "watcher": "kqueue (per-vnode EVFILT_VNODE)",
   "platform": "Darwin arm64",
   "geomean_speedup": 693.0,
   "needles": 20

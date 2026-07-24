@@ -17,7 +17,7 @@
 #     like-for-like set. Exact warm==cold==oracle correctness is gated
 #     hermetically by the Zig suite (serve/resident/freshness tests), not here.
 #   * The warm fast path is only armed where a filesystem watcher can prove
-#     quiescence (Linux inotify + macOS FSEvents today). Without one, every query
+#     quiescence (Linux inotify + macOS kqueue today). Without one, every query
 #     reconciles (a full metadata walk): correct, but it pays the freshness tax.
 #     We measure and label whatever THIS platform delivers, and the latency gate
 #     (`gate_session.py`) enforces a floor ONLY on the armed path.
@@ -50,7 +50,7 @@ case "${sys}" in
     ;;
   Darwin)
     armed="yes"
-    watcher="FSEvents (recursive stream)"
+    watcher="kqueue (per-vnode EVFILT_VNODE)"
     ;;
   *) ;;
 esac

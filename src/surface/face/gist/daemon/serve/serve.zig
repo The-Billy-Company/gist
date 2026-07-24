@@ -536,9 +536,11 @@ fn routeFrame(server: *Server, slot: u16) Route {
         // the worker reports back; without one (pool spawn failed) it runs inline
         // here, the classic serial shape.
         .query, .query_ext => {
-            // Read-your-writes barrier. Linux drains causally queued inotify
-            // records; macOS rejects asynchronous FSEvents as a witness and
-            // marks doubt, forcing the authoritative stat walk before dispatch.
+            // Read-your-writes barrier, drained BEFORE dispatch: both backends
+            // post their event inside the syscall that caused it (Linux inotify ·
+            // macOS kqueue), so any write that completed before this request was
+            // sent is already queued here and gets noted for the reconcile
+            // (ADR-372). An unarmed session reconciles fully anyway.
             _ = server.watcher.flushSync();
             if (server.pool_ready) {
                 server.dispatch(slot, frame); // frame ownership moves into the job
@@ -588,10 +590,9 @@ fn routeFrame(server: *Server, slot: u16) Route {
     }
 }
 
-/// Answer an annals consult only when the watcher supplies a causal barrier.
-/// macOS FSEvents deliberately declines because service journaling is
-/// asynchronous to writer syscalls; the client then takes its conservative
-/// journal/stat-walk fallback. Never return a partial list.
+/// Answer an annals consult only when the watcher supplies a causal barrier — an
+/// unarmed or non-syscall-synchronous backend declines, and the client takes its
+/// conservative journal/stat-walk fallback. Never return a partial list.
 fn handleChanged(session: *ResidentSession, watcher: *watch.Watcher(ResidentSession), gpa: std.mem.Allocator, fd: std.posix.fd_t, payload: []const u8) !void {
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);

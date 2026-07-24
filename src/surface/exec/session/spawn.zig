@@ -15,7 +15,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-/// Only these targets have the fork+exec (+ `flock`/FSEvents/inotify) machinery
+/// Only these targets have the fork+exec (+ `flock`/kqueue/inotify) machinery
 /// the daemons rely on; everywhere else the query just runs its fallback (no-op).
 pub const can_spawn = builtin.os.tag == .macos or builtin.os.tag == .linux;
 

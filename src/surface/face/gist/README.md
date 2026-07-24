@@ -317,7 +317,7 @@ per-file layout and stays cold. Warm I/O has a two-second deadline;
 `GIST_NO_AUTOSERVE=1` disables automatic session startup. Eligibility is an
 optimization decision, never a support boundary.
 
-Freshness is fail-closed. macOS FSEvents or Linux inotify can narrow the work,
+Freshness is fail-closed. macOS kqueue or Linux inotify can narrow the work,
 but a reconcile barrier decides whether resident bytes are safe. Doubt,
 overflow, an index generation change, or a walk error declines the warm answer
 and returns to the subprocess. See the

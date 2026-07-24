@@ -160,7 +160,7 @@ eligibility classifier. Zig tests pin answer identity and lifecycle behavior:
   status; the wire also supports a corpus-wide count for embedders;
 - explicit paths, readable stdin, TTY output, context, JSON, rank,
   replacement, multiline, and other unsupported warm shapes stay cold;
-- macOS FSEvents and Linux inotify can arm the watcher-clean fast path, while
+- macOS kqueue and Linux inotify can arm the watcher-clean fast path, while
   the reconcile barrier remains the safety authority;
 - doubt, overflow, index-generation change, or walk error → decline warm,
   return to subprocess;

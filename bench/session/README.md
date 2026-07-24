@@ -45,18 +45,18 @@ path — the only honest basis for a warm-speedup claim — and gates it fail-cl
      [`freshness_test`](../../src/surface/exec/session/freshness_test.zig)) — not by a live-tree
      count race.
   2. The microsecond fast path is armed only where a filesystem watcher proves
-     quiescence (**Linux inotify** and **macOS FSEvents** today; every other
+     quiescence (**Linux inotify** and **macOS kqueue** today; every other
      target reconciles each query and pays the _freshness tax_). The certificate
      labels whatever the platform delivers, and the gate enforces the floor
      **only on the armed path**.
 
-Even unarmed, the resident path wins: the committed macOS certificate — captured
-before the FSEvents backend landed — measures a **7.2× geomean** over `rg` cold,
-because `rg` re-walks and re-scans the whole monorepo (~350 ms) every call while
-the daemon pays only the reconcile walk (~45 ms) plus an in-RAM index query. Now
-that macOS arms via FSEvents (as Linux does via inotify) the reconcile vanishes
-on a quiescent tree and the number approaches the in-process ceiling; re-run
-`certify_session.sh` to republish the armed figure.
+Even unarmed, the resident path wins: an unarmed macOS certificate measures a
+**7.2× geomean** over `rg` cold, because `rg` re-walks and re-scans the whole
+monorepo (~350 ms) every call while the daemon pays only the reconcile walk
+(~45 ms) plus an in-RAM index query. Both platforms now arm — macOS via kqueue
+([ADR-372](../../../../docs/architecture/3-decisions/372-macos-kqueue-freshness-barrier.md)),
+Linux via inotify — so that walk disappears on a quiescent tree and the
+committed figure is an armed one.
 
 ## Files
 

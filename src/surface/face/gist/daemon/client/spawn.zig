@@ -6,7 +6,7 @@
 //! cold CLI fires one off detached and then answers this query cold as usual:
 //! the current call pays the cold walk, every subsequent eligible query within
 //! the daemon's warm window is served from RAM (~in-memory latency, no per-query
-//! tree walk — on macOS the FSEvents watcher even elides the reconcile).
+//! tree walk — the kqueue/inotify watcher even elides the reconcile).
 //!
 //! It is a pure accelerator, exactly like the watcher: any failure (fork/exec
 //! error, unsupported target, a peer that won the race) is swallowed and the

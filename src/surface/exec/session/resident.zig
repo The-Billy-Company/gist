@@ -45,7 +45,7 @@
 //!   - A query is answered from resident bytes directly ONLY when the freshness
 //!     barrier proves the roots quiescent since the last reconcile — a
 //!     watcher-clean window (`markClean`/`markDirty`, driven by inotify on Linux
-//!     / FSEvents on macOS; `src/surface/exec/session/watch.zig`). This is the microsecond path.
+//!     / kqueue on macOS; `src/surface/exec/session/watch.zig`). This is the microsecond path.
 //!   - Otherwise (no watcher, any pending event, first query) the session
 //!     RECONCILES: it re-walks the authoritative set and diffs it against
 //!     base + overlay — a path that left the set (deleted, or newly
@@ -305,15 +305,16 @@ pub const ResidentSession = struct {
     seqlock: Seqlock = .{},
 
     /// The exact dirty-path hand-off from a path-reporting watcher backend
-    /// (macOS FSEvents today). When its drain is exact and doubt-free, the
-    /// reconcile verifies ONLY the drained paths — O(changed), not O(tree).
+    /// (Linux inotify · macOS kqueue). When its drain is exact and doubt-free,
+    /// the reconcile verifies ONLY the drained paths — O(changed), not O(tree).
     dirty_log: dirtylog.DirtyLog,
     /// The never-drained sibling ledger: every exact watcher delivery accretes
     /// as `path → last delivery instant`, so a one-shot `gist index` amend can
     /// dial in and ask "what changed since anchor S?" without a stat walk.
-    /// Armed by the watcher (single-root FSEvents only); fail-closed everywhere
-    /// else (`annals.zig`). Like `dirty_log`, it belongs to the SESSION's
-    /// lifetime, not an index generation — reloads leave it untouched.
+    /// Armed by the watcher (single-root watches only, for one unambiguous
+    /// prefix); fail-closed everywhere else (`annals.zig`). Like `dirty_log`, it
+    /// belongs to the SESSION's lifetime, not an index generation — reloads
+    /// leave it untouched.
     annals: annalslog.Annals,
     /// A scoped reconcile is sound only downstream of one full walk that
     /// overlapped the live event stream (the watcher arms before the first

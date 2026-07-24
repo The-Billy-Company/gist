@@ -1,4 +1,4 @@
-// MONOLITHIC: freshness watcher — the inotify (Linux) and FSEvents (macOS) backends plus the reconcile-always baseline are one dirty/clean/doubt/poison accelerator FSM feeding the exact dirty log; per-OS split fragments the arm-exactness / overflow-poison invariants (never a correctness dependency).
+// MONOLITHIC: freshness watcher — the inotify (Linux) and kqueue (macOS) backends plus the reconcile-always baseline are one dirty/clean/doubt/poison accelerator FSM feeding the exact dirty log; per-OS split fragments the arm-exactness / coverage-poison invariants (never a correctness dependency).
 //! gist resident session — the freshness watcher (ADR-352 rung 2.5).
 //!
 //! The watcher is a pure *accelerator* for the freshness barrier, never a
@@ -7,39 +7,51 @@
 //! roots it calls `session.markDirty()`, forcing the next query to reconcile;
 //! when it has proven no event since the last reconcile the session takes the
 //! microsecond fast path. If a watcher cannot be started (unsupported platform,
-//! a watch that won't register, a queue that could overflow), the session is
-//! simply **never armed** — `watcher_active` stays false and every query
+//! a watch that won't register, a descriptor budget that won't fit), the session
+//! is simply **never armed** — `watcher_active` stays false and every query
 //! reconciles the changed set against the live filesystem. Correctness rests on
 //! that reconcile (`resident.zig`), so a missing or degraded watcher only costs
 //! speed, never soundness (fail-closed).
 //!
-//! Backend: Linux `inotify` (recursive watches, arm-only-on-full-success).
-//! macOS `FSEvents` remains observation-only because its service journal is
-//! asynchronous to writer syscalls: it cannot prove causal quiescence, so macOS
-//! deliberately keeps the reconcile-always baseline. Every other target does
-//! likewise. A rootless session watches `.` — the same CWD tree its corpus walks.
+//! Backends: Linux `inotify` and macOS `kqueue` (`EVFILT_VNODE`). Both post
+//! their event inside the syscall that caused it, which is what makes
+//! drain-to-empty (`flushSync`) a genuine happens-before witness and lets each
+//! arm `DirtyLog.exact` — the promise that unlocks the O(changed) scoped
+//! reconcile. Every other target keeps the reconcile-always baseline. A rootless
+//! session watches `.` — the same CWD tree its corpus walks.
 //!
-//! Linux requests per-file events and `note`s every delivered path into the
-//! session's `DirtyLog` (arming its `exact` promise), which lets reconcile verify
-//! only changed paths — O(changed) instead of O(tree). An unattributable event
-//! (unmapped descriptor, malformed record, queue overflow) becomes `noteDoubt`,
-//! forcing a full walk. Linux keys notes to absolute realpaths so they match the
-//! canonical shape `delta.resolve` expects.
+//! Both backends `note` every changed path into the session's `DirtyLog`, so
+//! reconcile verifies only changed paths — O(changed) instead of O(tree). An
+//! unattributable event becomes `noteDoubt`, forcing one full walk; coverage
+//! that cannot be re-established calls `markDoubtForever`, retiring the fast
+//! path for the session's life (fail-closed). Notes are keyed to absolute
+//! realpaths, the canonical shape `delta.resolve` expects.
 //!
-//! The Linux backend also parses its stream for the two conditions that would
-//! silently BREAK the clean fast path itself: a queue overflow, and a directory
-//! created/moved in after arming (inotify watches don't recurse on their own).
-//! It re-registers new subtrees on the fly and, if it cannot, calls
-//! `markDoubtForever` — the session then reconciles every query instead of ever
-//! trusting a blind quiescence claim (fail-closed). Exact mode arms only when
-//! every root is on a case-SENSITIVE directory: a casefolded root (ext4/f2fs
-//! `+F`) would alias distinct byte-spellings, which the byte-exact Linux key
-//! model does not represent, so such a session stays coarse (reconcile-always).
+//! The two differ in what they must refuse, because their event KEY SPACES
+//! differ. inotify reports a parent watch descriptor plus a kernel-supplied
+//! name, so a casefolded root (ext4/f2fs `+F`) would alias distinct
+//! byte-spellings the exact key model cannot represent — such a session stays
+//! coarse. kqueue reports a DESCRIPTOR this process opened itself, with the
+//! walk's own canonical spelling, so a writer's choice of spelling never enters
+//! the key space and exact arms even on a case-insensitive volume (ADR-372).
+//! inotify must also watch for a queue overflow and for directories created
+//! after arming, since its watches neither recurse nor coalesce; kqueue has no
+//! queue to overflow (events fold into a knote's `fflags`) but must still extend
+//! coverage into new entries, and must hold one descriptor per watched vnode.
+//!
+//! That descriptor-per-vnode price is why the macOS set is selected by the
+//! WALK'S OWN admission policy (`corpus/tree/ignore.zig`), not by the raw tree:
+//! inotify watches directories and gets their entries named for free, while
+//! keeping gitignored files on macOS cost 193k descriptors against 25k admitted
+//! ones here. The set therefore also carries the hidden per-directory ignore
+//! SOURCES that decide admission, and a change to one re-derives both the rules
+//! and the set (`refreshCoverage` via `Cover.refresh`) — otherwise a rule edit
+//! could admit a file that nothing was watching.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const haystack = @import("../../../corpus/tree/haystack.zig");
-const cs = @import("coreservices.zig");
+const ignore = @import("../../../corpus/tree/ignore.zig");
 const Dir = std.Io.Dir;
 
 const is_macos = builtin.os.tag == .macos;
@@ -58,21 +70,130 @@ const in_mask: u32 = linux.IN.MODIFY | linux.IN.CREATE | linux.IN.DELETE |
 const FS_IOC_GETFLAGS: u32 = 0x8008_6601;
 const FS_CASEFOLD_FL: c_long = 0x4000_0000;
 
-// ── macOS FSEvents backend ──
+// ── macOS kqueue backend ──
 //
-// The CoreServices (FSEvents) + CoreFoundation (CFRunLoop) surface the macOS
-// watcher drives is bound at RUNTIME (`dlopen`, never link-time) in `cs`
-// (`coreservices.zig`) — that module owns the ABI types + symbol table and the
-// fail-closed load; this file owns the event loop + drop/flood policy that use
-// them. The two policy knobs below stay here, next to the loop they govern.
+// Raw syscalls, no frameworks: the watcher costs the cold one-shot search
+// nothing, where the FSEvents stream this replaced needed CoreServices +
+// CoreFoundation (whose image initializers ran on every process launch, which is
+// why they were `dlopen`'d rather than linked).
 //
-// Event flags meaning "these paths are NOT an exact account of what changed":
-// subtree-rescan hints, kernel/user queue drops, id wrap, history replay
-// boundary, root moves, mount churn. Any → the batch is a doubt (full walk).
-const inexact_flags: u32 = 0x0000_00FF;
-// Coalescing window (s): small keeps the read-your-writes stale window tight
-// while still folding a build's event storm into a handful of markDirty calls.
-const fsevents_latency: f64 = 0.05;
+/// `EVFILT_VNODE` notes, from `<sys/event.h>`. Content (`WRITE`/`EXTEND`) is the
+/// whole reason files are watched individually — a directory does not change when
+/// a file's bytes do. Membership (`DELETE`/`RENAME`/`LINK`) plus a directory's own
+/// `WRITE` cover the corpus's shape, and `ATTRIB` catches the mode/mtime edits the
+/// freshness cursor reads.
+const NOTE = struct {
+    const DELETE: u32 = 0x0001;
+    const WRITE: u32 = 0x0002;
+    const EXTEND: u32 = 0x0004;
+    const ATTRIB: u32 = 0x0008;
+    const LINK: u32 = 0x0010;
+    const RENAME: u32 = 0x0020;
+    const REVOKE: u32 = 0x0040;
+};
+
+/// The note mask every watch requests (see `NOTE`).
+const vnode_notes: u32 = NOTE.DELETE | NOTE.WRITE | NOTE.EXTEND |
+    NOTE.ATTRIB | NOTE.LINK | NOTE.RENAME | NOTE.REVOKE;
+
+/// Descriptors left for everything else the process needs — its listening
+/// socket, per-request fds, index mmaps. A watch set that will not fit under
+/// `RLIMIT_NOFILE` with this much headroom leaves the session unarmed rather
+/// than partially covered (fail-closed).
+const fd_reserve: usize = 512;
+
+/// One registered vnode watch. `path` is the absolute path to `note` when the
+/// descriptor fires; `is_dir` marks the events that mean "membership changed
+/// here" rather than "these bytes changed". `key` is that directory's path in
+/// the walk's own key space (empty for a file, which is never re-scanned), the
+/// spelling the ignore policy judges entries by. Slots are addressed by the
+/// `udata` each event carries, so an event resolves to its path without a hash
+/// lookup.
+const Watch = struct { fd: i32, path: []const u8, key: []const u8, is_dir: bool };
+
+/// The per-directory files that DEFINE what the walk admits. They are hidden,
+/// so the visibility rule would drop them from the watch set — but an edit to
+/// one changes the admitted set without touching a single admitted file, and
+/// `delta.classify` already calls such a path `.semantics` (full walk). They
+/// are therefore the one hidden shape macOS watches, and a change to one
+/// re-derives the policy AND the watch set (`Watcher.refreshCoverage`).
+/// Why a tree is being covered — three questions a first registration and a
+/// live extension answer differently: is a newly-watched path ANNOUNCED, may an
+/// already-watched directory be trusted to report itself, and is a listing that
+/// fails midway a coverage failure?
+const Cover = enum {
+    /// Boot. Nothing has changed, nothing is covered yet, and a directory that
+    /// cannot be read contributes nothing to the corpus either.
+    initial,
+    /// A watched directory's membership moved. Announce the newcomers, and
+    /// descend only into directories NOT already watched — an existing watch
+    /// reports its own membership, which is the whole point of one descriptor
+    /// per vnode, and re-walking its subtree would make every root-level event
+    /// cost a full tree walk inside the drain.
+    extend,
+    /// An ignore source changed. The rules that SELECTED the set are different,
+    /// so every directory is revisited however well-watched it already is.
+    refresh,
+};
+
+fn isIgnoreSource(name: []const u8) bool {
+    return std.mem.eql(u8, name, ".gitignore") or
+        std.mem.eql(u8, name, ".ignore") or
+        std.mem.eql(u8, name, ".rgignore");
+}
+
+test "ignore sources: exactly the three per-directory rule files" {
+    const t = std.testing;
+    try t.expect(isIgnoreSource(".gitignore"));
+    try t.expect(isIgnoreSource(".ignore"));
+    try t.expect(isIgnoreSource(".rgignore"));
+    try t.expect(!isIgnoreSource("gitignore.md"));
+    try t.expect(!isIgnoreSource(".gitignore.bak"));
+    try t.expect(!isIgnoreSource(".gitattributes"));
+}
+
+/// Wall-clock nanoseconds off the raw libc clock — the watcher's OS thread has
+/// no `std.Io` handle, and the annals compare against `base.ns` instants minted
+/// from the SAME realtime clock. Null on failure (callers degrade to
+/// doubt/uncovered, never to a guessed instant).
+fn wallNowNs() ?i128 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.REALTIME, &ts) != 0) return null;
+    return @as(i128, ts.sec) * std.time.ns_per_s + ts.nsec;
+}
+
+/// How many vnode watches may be held: whatever `RLIMIT_NOFILE` allows beyond
+/// `fd_reserve`, after trying to raise the soft limit to the hard one (a daemon
+/// holding one descriptor per corpus file is exactly what the limit is for).
+/// Zero when the limit cannot be read — the caller then stays unarmed.
+fn watchBudget() usize {
+    var rl = std.posix.getrlimit(.NOFILE) catch return 0;
+    if (rl.cur < rl.max) {
+        rl.cur = rl.max;
+        std.posix.setrlimit(.NOFILE, rl) catch {};
+        rl = std.posix.getrlimit(.NOFILE) catch return 0;
+    }
+    return budgetFrom(rl.cur);
+}
+
+/// The budget arithmetic alone, split out so the fail-closed edges are testable
+/// without mutating the process's real limits: a ceiling at or under the reserve
+/// yields ZERO watches, which leaves the session unarmed (reconcile-always)
+/// rather than partially covered.
+fn budgetFrom(limit: std.posix.rlim_t) usize {
+    if (limit == std.posix.RLIM.INFINITY) return std.math.maxInt(usize);
+    const cur = std.math.cast(usize, limit) orelse return std.math.maxInt(usize);
+    return if (cur > fd_reserve) cur - fd_reserve else 0;
+}
+
+test "budget: a ceiling at or under the reserve arms nothing (fail-closed)" {
+    const t = std.testing;
+    try t.expectEqual(@as(usize, 0), budgetFrom(0));
+    try t.expectEqual(@as(usize, 0), budgetFrom(fd_reserve));
+    try t.expectEqual(@as(usize, 1), budgetFrom(fd_reserve + 1));
+    try t.expectEqual(@as(usize, 262144 - fd_reserve), budgetFrom(262144));
+    try t.expectEqual(std.math.maxInt(usize), budgetFrom(std.posix.RLIM.INFINITY));
+}
 
 /// The freshness watcher, generic over any resident `Session` that exposes the
 /// change-tracking surface it drives: `roots: []const []const u8`,
@@ -82,41 +203,57 @@ const fsevents_latency: f64 = 0.05;
 /// the accelerator is written once, the corpus/index model stays per-session.
 pub fn Watcher(comptime Session: type) type {
     return struct {
-        const Mac = cs.Bindings(Session);
-
         session: *Session,
         io: std.Io,
         gpa: std.mem.Allocator,
         thread: ?std.Thread = null,
         running: std.atomic.Value(bool) = .init(false),
         inotify_fd: i32 = -1,
-        /// macOS: the dlopen'd CoreFoundation/CoreServices entry points, bound by
-        /// `startFsevents` before the loop thread spawns and closed by `stop`.
-        /// Null on every non-macOS target and whenever the frameworks fail to
-        /// load (→ unarmed, reconcile-always).
-        syms: ?Mac.Syms = null,
         /// Linux: watch descriptor → the directory it covers (gpa-owned), so a
         /// dir-create event can be resolved to a path and its subtree watched
         /// before the next reconcile walks it. Built on the main thread before the
         /// loop thread spawns; grown only under `read_lock` afterward.
         wd_paths: std.AutoHashMapUnmanaged(i32, []u8) = .empty,
-        /// Linux: serializes reads of `inotify_fd` (and the `wd_paths` growth a
-        /// dir-create drain triggers) between the loop thread and a `flushSync`
-        /// barrier, keeping the single-consumer fd and the watch map race-free. An
+        /// Serializes consumption of the event queue (and the watch-set growth a
+        /// new directory triggers) between the loop thread and a `flushSync`
+        /// barrier, so a batch is never split between two consumers — the barrier
+        /// must not return "drained" while the loop still holds unnoted events. An
         /// atomic spinlock — not an `Io.Mutex` — because the raw watcher OS thread
         /// has no `std.Io` handle (same reason `dirty.zig` spins); both critical
         /// sections are a bounded non-blocking drain, and the loop's idle `poll`
-        /// sits outside it, so contention is brief and rare. Unused off Linux.
+        /// sits outside it, so contention is brief and rare.
         read_lock: std.atomic.Value(bool) = .init(false),
-        /// macOS: the watch thread's CFRunLoop, published so `stop` can wake it. Null
-        /// until the loop thread stores it (before it signals `ready`).
-        run_loop: std.atomic.Value(?*anyopaque) = .init(null),
-        /// macOS: the observation-only FSEvents stream ref, published once
-        /// started and cleared before teardown. Its presence lets `flushSync`
-        /// explicitly reject FSEvents as a causal witness.
-        fs_stream: std.atomic.Value(?*anyopaque) = .init(null),
-        /// macOS start handshake: 0 pending, 1 stream observing, 2 failed.
-        start_result: std.atomic.Value(u8) = .init(0),
+        /// macOS: the kqueue descriptor. -1 until the whole watch set registers.
+        kq_fd: i32 = -1,
+        /// macOS: one entry per watched vnode, addressed by the `udata` its events
+        /// carry. Retired slots (a vanished file's) are recycled via `free_slots`,
+        /// so an index stays stable for the life of its watch. Built on the calling
+        /// thread before the loop spawns; grown only under `read_lock` after.
+        watches: std.ArrayListUnmanaged(Watch) = .empty,
+        /// macOS: path → `watches` index, so a directory re-scan can tell an
+        /// already-watched entry from a newly-appeared one. Keys borrow the
+        /// corresponding `Watch.path`.
+        watch_index: std.StringHashMapUnmanaged(u32) = .empty,
+        /// macOS: `watches` slots whose vnode is gone, free for reuse.
+        free_slots: std.ArrayListUnmanaged(u32) = .empty,
+        /// macOS: the descriptor ceiling this session may spend on watches,
+        /// resolved once at start (see `watchBudget`).
+        budget: usize = 0,
+        /// macOS: the walk's own admission policy, so the watch set is the set
+        /// the corpus admits rather than the whole tree. Linux pays one inotify
+        /// watch per DIRECTORY and gets its entries named for free, so it can
+        /// afford to watch everything; macOS pays one DESCRIPTOR per watched
+        /// file, where the difference is 8× on this repo (25k admitted files
+        /// against 193k when gitignored output is kept) — enough for a single
+        /// daemon to hold 40% of the system-wide file table. Rules and their
+        /// arena are rebuilt wholesale whenever an ignore source changes.
+        ig: ?ignore.Ignore = null,
+        ig_arena: ?*std.heap.ArenaAllocator = null,
+        /// macOS: an ignore source changed during this drain, so the policy and
+        /// the watch set it selected are both stale. Refreshed once at the end
+        /// of the drain rather than mid-iteration (the refresh grows the very
+        /// set the drain is walking).
+        ig_stale: bool = false,
 
         /// Does this session carry the annals ledger (the never-drained changed-path
         /// map a one-shot `gist index` queries)? Comptime-gated so the watcher stays
@@ -127,38 +264,33 @@ pub fn Watcher(comptime Session: type) type {
             return .{ .session = session, .io = io, .gpa = gpa };
         }
 
-        /// Establish the backend's causal freshness barrier. Linux drains inotify,
-        /// whose records are queued inside the writer syscall. macOS always
-        /// returns false and forces the stat-walk fallback because FSEvents'
-        /// service journal is asynchronous to that syscall.
+        /// Establish the backend's causal freshness barrier: drain every event the
+        /// kernel has already queued, so anything that happened-before this call is
+        /// noted by the time it returns. Sound on both backends because each posts
+        /// its event inside the syscall that caused it — once a writer's
+        /// `write`/`close`/`rename` has returned, the event is already here
+        /// (ADR-372). False on an unarmed session, which reconciles every query
+        /// anyway.
         pub fn flushSync(self: *@This()) bool {
-            if (comptime is_macos) {
-                _ = self.syms orelse return false;
-                _ = self.fs_stream.load(.acquire) orelse return false;
-                // FSEvents is asynchronously journaled: FlushSync drains what
-                // fseventsd already knows, but cannot prove every completed write
-                // has reached the service. Never use it as a causal freshness
-                // witness; force the authoritative stat walk and make annals
-                // callers take their journal/walk fallback.
-                return self.barrierDoubt();
-            }
+            if (comptime is_macos) return self.flushKqueue();
             if (comptime builtin.os.tag == .linux) return self.flushInotify();
             return false;
         }
 
-        fn barrierDoubt(self: *@This()) bool {
-            self.session.dirty_log.noteDoubt();
-            self.session.markDirty();
-            return false;
+        /// macOS barrier: drain the kqueue to empty under `read_lock` (serialized
+        /// against the loop thread, which consumes from the same queue).
+        fn flushKqueue(self: *@This()) bool {
+            if (comptime !is_macos) return false;
+            if (self.kq_fd < 0) return false;
+            self.readLock();
+            defer self.readUnlock();
+            self.drainKqueueLocked();
+            return true;
         }
 
-        /// Linux causal barrier: drain every inotify record currently queued under
+        /// Linux barrier: drain every inotify record currently queued under
         /// `read_lock` (serialized against the loop thread's own drain so the fd
-        /// and `wd_paths` stay single-consumer). Sound because inotify queues an
-        /// event within the syscall that produces it — once the writer's
-        /// `write`/`close` has returned, its record is already readable here — so a
-        /// drain-to-empty captures everything that happened-before. False when
-        /// unarmed (no fd), where the session reconciles every query anyway.
+        /// and `wd_paths` stay single-consumer).
         fn flushInotify(self: *@This()) bool {
             if (comptime builtin.os.tag != .linux) return false;
             if (self.inotify_fd < 0) return false;
@@ -168,7 +300,7 @@ pub fn Watcher(comptime Session: type) type {
             return true;
         }
 
-        /// Acquire/release the inotify-read spinlock (see `read_lock`).
+        /// Acquire/release the event-consumption spinlock (see `read_lock`).
         fn readLock(self: *@This()) void {
             while (self.read_lock.swap(true, .acquire)) std.atomic.spinLoopHint();
         }
@@ -183,7 +315,7 @@ pub fn Watcher(comptime Session: type) type {
             if (comptime builtin.os.tag == .linux) {
                 self.startInotify();
             } else if (comptime is_macos) {
-                self.startFsevents();
+                self.startKqueue();
             }
             // Other targets: no watcher → reconcile-always baseline (already the
             // session's default; nothing to arm).
@@ -196,21 +328,15 @@ pub fn Watcher(comptime Session: type) type {
                     _ = linux.close(self.inotify_fd);
                     self.inotify_fd = -1;
                 }
-            } else if (comptime is_macos) {
-                // Wake the CFRunLoop out of its wait so the loop re-checks `running`
-                // and exits promptly instead of idling out its timeout slice.
-                if (self.syms) |*s| if (self.run_loop.load(.acquire)) |rl| s.CFRunLoopStop(rl);
             }
+            // The macOS loop waits in a `poll` with a timeout, so clearing
+            // `running` is enough to retire it — no cross-thread wake needed.
             if (self.thread) |t| {
                 t.join();
                 self.thread = null;
             }
-            // The loop thread is joined — no reader remains for the framework
-            // handles; drop them (a no-op on non-macOS, where `syms` is null).
-            if (self.syms) |*s| {
-                s.close();
-                self.syms = null;
-            }
+            // The loop thread is joined — no consumer remains for the watch set.
+            if (comptime is_macos) self.closeWatches();
             self.freeWdPaths();
             self.wd_paths.deinit(self.gpa);
             self.wd_paths = .empty;
@@ -419,149 +545,384 @@ pub fn Watcher(comptime Session: type) type {
             return if (z == 0) null else raw[0..z];
         }
 
-        // ── macOS FSEvents backend ──
+        // ── macOS kqueue backend ──
 
-        /// Spawn the observation-only CFRunLoop thread. Unlike inotify, a started
-        /// FSEvents stream deliberately leaves the session reconcile-always.
-        fn startFsevents(self: *@This()) void {
+        /// Register the whole watch set, then arm. Runs on the calling thread
+        /// (daemon boot) and takes ~300 ms for 22k descriptors — it does not need
+        /// to be instantaneous, because arming is not the same as claiming clean:
+        /// `Seqlock.arm` only marks a watcher live, `clean` is published solely by
+        /// a COMPLETED reconcile that no event raced, and `full_pass_done` forces
+        /// the first pass after arming to be the full walk. So a change that races
+        /// registration is caught by that walk (ADR-372).
+        fn startKqueue(self: *@This()) void {
             if (comptime !is_macos) return;
-            // Bind the frameworks on THIS thread before the loop spawns; a miss
-            // (unavailable framework / symbol) leaves the session unarmed —
-            // reconcile-always, still correct.
-            self.syms = Mac.Syms.load() orelse return;
-            self.thread = std.Thread.spawn(.{}, fseventsLoop, .{self}) catch {
-                if (self.syms) |*s| {
-                    s.close();
-                    self.syms = null;
-                }
-                return;
-            };
-            // Wait for the loop thread to publish its start result — FSEventStreamStart
-            // returns in microseconds, so this bounded spin (a one-time daemon-boot
-            // cost) resolves near-instantly; the 2 s deadline only guards a wedged
-            // launch, after which we stay unarmed (reconcile-always, still correct).
-            const deadline = std.Io.Clock.now(.real, self.io).nanoseconds + 2 * std.time.ns_per_s;
-            while (self.start_result.load(.acquire) == 0 and std.Io.Clock.now(.real, self.io).nanoseconds < deadline)
-                std.atomic.spinLoopHint();
-            // FSEvents delivery is asynchronously journaled relative to the
-            // writer syscall. Even a started per-file stream cannot prove causal
-            // quiescence, so macOS deliberately stays reconcile-always. The
-            // stream remains useful for diagnostics/annals observation, while
-            // every answer derives freshness from the authoritative stat walk.
-        }
+            self.budget = watchBudget();
+            if (self.budget == 0) return; // no descriptors to spend → stay in baseline
+            const kq = std.c.kqueue();
+            if (kq < 0) return;
+            self.kq_fd = kq;
 
-        /// Build one recursive observation stream over the roots, run its
-        /// CFRunLoop until `stop`, then tear it down.
-        fn fseventsLoop(self: *@This()) void {
-            if (comptime !is_macos) return;
-            const s = &self.syms.?; // load() proved non-null before this spawned
-            const paths = self.buildPathsArray() orelse return self.start_result.store(2, .release);
-            defer s.CFRelease(paths);
+            // Watch every directory the default walk descends plus the files in
+            // them, keyed ABSOLUTE (realpath'd) so noted paths match the canonical
+            // shape `delta.resolve` expects — and so a writer's own spelling never
+            // enters the key space. A registration we cannot complete leaves a
+            // subtree whose quiescence is unprovable, so we bail out unarmed
+            // (fail-closed): the session keeps reconciling.
+            if (!self.loadPolicy()) return self.closeWatches();
+            if (!self.coverRoots(.initial)) return self.closeWatches();
 
-            var ctx = Mac.CFContext{ .info = self.session };
-            // Annals coverage instant: captured BEFORE the stream exists. `SinceNow`
-            // resolves at creation and fseventsd's journal replays anything between
-            // create and start, so every event at/after this instant is delivered —
-            // the floor is conservative by construction. A clock failure leaves the
-            // annals uncovered (never answerable), not wrong.
-            const coverage_ns: ?i128 = if (comptime has_annals) cs.wallNowNs() else null;
-            const stream = s.FSEventStreamCreate(
-                null,
-                fseventsCallback,
-                &ctx,
-                paths,
-                cs.kFSEventStreamEventIdSinceNow,
-                fsevents_latency,
-                cs.kFSEventStreamCreateFlagNoDefer | cs.kFSEventStreamCreateFlagFileEvents,
-            ) orelse return self.start_result.store(2, .release);
-            defer {
-                self.fs_stream.store(null, .release);
-                s.FSEventStreamStop(stream);
-                s.FSEventStreamInvalidate(stream);
-                s.FSEventStreamRelease(stream);
-            }
-
-            const rl = s.CFRunLoopGetCurrent();
-            self.run_loop.store(rl, .release);
-            s.FSEventStreamScheduleWithRunLoop(stream, rl, s.run_loop_default_mode);
-            if (s.FSEventStreamStart(stream) == 0) return self.start_result.store(2, .release);
-
-            self.fs_stream.store(stream, .release);
-            if (comptime has_annals) if (coverage_ns) |ns| self.session.annals.openCoverage(ns);
             self.running.store(true, .release);
-            self.start_result.store(1, .release);
-
-            // Run in bounded slices so `stop` (which also calls CFRunLoopStop to
-            // wake us immediately) is observed even if it raced the loop entry —
-            // no unstoppable CFRunLoopRun, no CFRunLoopStop/entry ordering hazard.
-            while (self.running.load(.acquire))
-                _ = s.CFRunLoopRunInMode(s.run_loop_default_mode, 1.0, 0);
+            self.thread = std.Thread.spawn(.{}, kqueueLoop, .{self}) catch {
+                self.running.store(false, .release);
+                return self.closeWatches();
+            };
+            // Annals coverage opens only now: an event that predated its own watch
+            // was never observable, so the ledger must not claim the window
+            // registration spanned (conservative by construction — uncovered, never
+            // wrong). Then promise exactness, and arm LAST, so nothing can trust
+            // quiescence before a consumer exists to prove it.
+            if (comptime has_annals) if (wallNowNs()) |ns| self.session.annals.openCoverage(ns);
+            self.session.dirty_log.armExact();
+            self.session.armWatcher();
         }
 
-        /// Realpath each root into a retaining CFArray of CFStrings (FSEvents wants
-        /// absolute paths; the daemon's cwd is the repo root — a rootless session
-        /// watches `.`, its whole CWD walk). Returns null on any allocation/CF
-        /// failure so the caller stays unarmed. The array retains the strings, so
-        /// we release our own references before returning it.
-        fn buildPathsArray(self: *@This()) ?cs.Ref {
-            if (comptime !is_macos) return null;
-            const s = &self.syms.?;
-            const roots = self.watchRoots();
-            const refs = self.gpa.alloc(cs.Ref, roots.len) catch return null;
-            defer self.gpa.free(refs);
+        /// Build the admission policy the watch set is selected by — the same
+        /// `Ignore` the corpus walk and `delta` use, over the same roots — into a
+        /// fresh arena. False only when the arena itself cannot be created; the
+        /// rules are then the walk's, not a private approximation of them.
+        fn loadPolicy(self: *@This()) bool {
+            if (comptime !is_macos) return false;
+            self.dropPolicy();
+            const arena = self.gpa.create(std.heap.ArenaAllocator) catch return false;
+            arena.* = .init(self.gpa);
+            self.ig_arena = arena;
+            self.ig = ignore.Ignore.init(arena.allocator(), self.io, .{}, self.session.roots);
+            return true;
+        }
 
-            var made: usize = 0;
-            defer for (refs[0..made]) |r| s.CFRelease(r);
+        fn dropPolicy(self: *@This()) void {
+            if (comptime !is_macos) return;
+            self.ig = null;
+            if (self.ig_arena) |arena| {
+                arena.deinit();
+                self.gpa.destroy(arena);
+                self.ig_arena = null;
+            }
+        }
+
+        /// Cover every watched root from its realpath, in the walk's key space.
+        /// Called at start, and again whenever an ignore source rewrites the
+        /// policy — `addWatch` is idempotent, so a refresh adds exactly the
+        /// entries the new rules admit and leaves the rest untouched.
+        fn coverRoots(self: *@This(), comptime mode: Cover) bool {
+            if (comptime !is_macos) return false;
             var buf: [std.fs.max_path_bytes]u8 = undefined;
+            const roots = self.watchRoots();
             for (roots) |root| {
-                const rootz = self.gpa.dupeZ(u8, root) catch return null;
-                defer self.gpa.free(rootz);
-                const resolved = std.c.realpath(rootz, &buf) orelse return null;
+                const rootz = std.posix.toPosixPath(root) catch return false;
+                const resolved = std.c.realpath(&rootz, &buf) orelse return false;
                 const abs = std.mem.span(resolved);
-                const cfstr = s.CFStringCreateWithBytes(null, abs.ptr, @intCast(abs.len), cs.kCFStringEncodingUTF8, 0) orelse return null;
-                refs[made] = cfstr;
-                made += 1;
-                // Annals deliveries are keyed absolute; arm the strip prefix now —
-                // BEFORE the stream exists — so no delivery can outrun it. Only a
-                // single-root watch is annals-addressable (one unambiguous prefix);
-                // a multi-root session simply leaves the ledger unarmed (declines).
+                // Annals deliveries are keyed absolute; arm the strip prefix before
+                // any event can be noted. Only a single-root watch is
+                // annals-addressable (one unambiguous prefix); a multi-root session
+                // simply leaves the ledger unarmed (it declines).
                 if (comptime has_annals) if (roots.len == 1) self.session.annals.arm(abs);
+                // The key space is the corpus's: "" for the implicit CWD walk, the
+                // root's own spelling otherwise — the shape ignore rules are
+                // written against, and `scopeToRoot` exempts a named root from
+                // rules that govern only its descendants.
+                const key = if (std.mem.eql(u8, root, ".")) "" else root;
+                if (self.ig) |*ig| ig.scopeToRoot(key);
+                if (!self.coverTree(abs, key, mode)) return false;
             }
-            return s.CFArrayCreate(null, refs.ptr, @intCast(made), s.array_callbacks);
+            return true;
         }
 
-        /// FSEvents delivers here on any change under the roots. With per-file
-        /// events on (and no `UseCFTypes`), `event_paths` is a `char**` of the
-        /// changed items' own absolute paths. Every path is `note`d into the
-        /// session's dirty log BEFORE `markDirty` bumps the seqlock (the ordering
-        /// the log's drain contract relies on); any flag that means the paths are
-        /// not an exact account of what changed (rescan hints, drops, id wrap,
-        /// mounts) becomes `noteDoubt`, so that batch's reconcile walks fully.
-        fn fseventsCallback(_: cs.Ref, info: ?*Session, num_events: usize, event_paths: ?[*]const [*:0]const u8, event_flags: [*]const u32, _: [*]const u64) callconv(.c) void {
-            const session = info orelse return;
-            // One delivery instant for the whole batch — coalesced events share a
-            // callback anyway, and delivery-at-or-after-occurrence is what the
-            // annals' `since` filter relies on. A dead clock poisons the ledger
-            // (never guesses); the dirty log is untouched either way.
-            const now_ns: ?i128 = if (comptime has_annals) cs.wallNowNs() else null;
-            if (event_paths) |paths| {
-                for (0..num_events) |i| {
-                    if (event_flags[i] & inexact_flags != 0) {
-                        session.dirty_log.noteDoubt();
-                        if (comptime has_annals) session.annals.noteDoubt();
-                    } else {
-                        const p = std.mem.span(paths[i]);
-                        session.dirty_log.note(p);
-                        if (comptime has_annals) {
-                            if (now_ns) |ns| session.annals.note(p, ns) else session.annals.noteDoubt();
-                        }
-                    }
-                }
-            } else {
-                session.dirty_log.noteDoubt();
-                if (comptime has_annals) session.annals.noteDoubt();
+        /// Register `dir`, then recurse into exactly what the certified walk would
+        /// descend and search: subdirectories it enters, files it admits, plus the
+        /// hidden ignore SOURCES that decide both (`isIgnoreSource`). Matching the
+        /// walk is what keeps the descriptor cost proportional to the corpus, and
+        /// `delta` still makes the final admission call at reconcile time. False on
+        /// the first genuine failure or budget exhaustion.
+        ///
+        /// `mode` says which caller this is (see `Cover`). Live extension announces
+        /// every path that was not already watched, because such a path just
+        /// APPEARED and this is the only place it can be named — a directory's
+        /// event says its membership moved but not which entry, and a per-file
+        /// reader (the annals) needs the entry. A listing that fails midway may
+        /// have hidden exactly that newcomer, so live extension fails closed on it
+        /// where boot shrugs.
+        fn coverTree(self: *@This(), dir: []const u8, key: []const u8, comptime mode: Cover) bool {
+            if (comptime !is_macos) return false;
+            if (!self.addWatch(dir, key, true, mode)) return false;
+            // An unreadable directory is not a watch failure: the reconcile walk
+            // reports it and declines on its own terms (`fs.walk_error`).
+            var d = Dir.cwd().openDir(self.io, dir, .{ .iterate = true }) catch return true;
+            defer d.close(self.io);
+            // This directory's own ignore files, in walk order: after its parent's
+            // rules, before its entries are judged by them.
+            if (self.ig) |*ig| ig.loadDir(if (key.len == 0) "." else key, key);
+            var it = d.iterate();
+            while (true) {
+                const next = it.next(self.io) catch if (comptime mode == .initial) break else return false;
+                const e = next orelse break;
+                if (e.name.len == 0) continue;
+                const child = haystack.joinPath(self.gpa, dir, e.name) catch return false;
+                defer self.gpa.free(child);
+                const child_key = self.joinKey(key, e.name) catch return false;
+                defer self.gpa.free(child_key);
+                const covered = switch (e.kind) {
+                    .directory => !self.descends(e.name, child_key) or
+                        (mode == .extend and self.watch_index.contains(child)) or
+                        self.coverTree(child, child_key, mode),
+                    .file => !self.admits(e.name, child_key) or
+                        self.addWatch(child, "", false, mode),
+                    else => true, // symlinks/specials: the default walk never reads them
+                };
+                if (!covered) return false;
             }
-            session.markDirty();
+            return true;
+        }
+
+        /// `key/name`, with the implicit CWD walk's empty key contributing no
+        /// separator — the corpus's own spelling for a path (`haystack.joinRoot`).
+        fn joinKey(self: *const @This(), key: []const u8, name: []const u8) ![]const u8 {
+            return if (key.len == 0) self.gpa.dupe(u8, name) else haystack.joinPath(self.gpa, key, name);
+        }
+
+        /// Would the walk descend into this subdirectory? Hidden and skip-policy
+        /// directories are out of the walked set and can only enter it by a rename
+        /// their parent reports; the rest answer to the same ignore rules.
+        fn descends(self: *const @This(), name: []const u8, key: []const u8) bool {
+            if (name[0] == '.' or haystack.isSkipDir(name)) return false;
+            const ig = if (self.ig) |*p| p else return true;
+            return !ig.shouldSkip(key, true, name, false, false);
+        }
+
+        /// Would the walk search this file — or does it DECIDE what the walk
+        /// searches? An ignore source is watched though hidden (see
+        /// `isIgnoreSource`); everything else hidden or ignored stays out.
+        fn admits(self: *const @This(), name: []const u8, key: []const u8) bool {
+            if (isIgnoreSource(name)) return true;
+            if (name[0] == '.') return false;
+            const ig = if (self.ig) |*p| p else return true;
+            return !ig.shouldSkip(key, false, name, false, false);
+        }
+
+        /// Open an `O_EVTONLY` descriptor on `path` and register its vnode filter,
+        /// recording the slot its events will address. Idempotent per path (a
+        /// directory re-scan re-offers entries already watched). A path that
+        /// vanished between listing and open is skipped rather than failed — there
+        /// is nothing left to watch, and its parent reports any return. False only
+        /// when the budget is spent or a registration genuinely fails. Every mode
+        /// but `.initial` notes a genuinely-new watch as a changed path (see
+        /// `coverTree`).
+        fn addWatch(self: *@This(), path: []const u8, key: []const u8, is_dir: bool, comptime mode: Cover) bool {
+            if (comptime !is_macos) return false;
+            if (self.watch_index.contains(path)) return true;
+            if (self.watches.items.len - self.free_slots.items.len >= self.budget) return false;
+            const pathz = std.posix.toPosixPath(path) catch return false;
+            const fd = std.c.open(&pathz, .{ .ACCMODE = .RDONLY, .EVTONLY = true, .CLOEXEC = true });
+            if (fd < 0) return true;
+            const owned = self.gpa.dupe(u8, path) catch {
+                _ = std.c.close(fd);
+                return false;
+            };
+            const owned_key = self.gpa.dupe(u8, key) catch {
+                self.gpa.free(owned);
+                _ = std.c.close(fd);
+                return false;
+            };
+            const idx: u32 = self.free_slots.pop() orelse blk: {
+                self.watches.append(self.gpa, undefined) catch {
+                    self.gpa.free(owned_key);
+                    self.gpa.free(owned);
+                    _ = std.c.close(fd);
+                    return false;
+                };
+                break :blk @intCast(self.watches.items.len - 1);
+            };
+            // Publish the slot before anything that can fail, so `retire` is the one
+            // cleanup path for every failure below.
+            self.watches.items[idx] = .{ .fd = fd, .path = owned, .key = owned_key, .is_dir = is_dir };
+            self.watch_index.put(self.gpa, owned, idx) catch {
+                self.retire(idx);
+                return false;
+            };
+            var change = [_]std.c.Kevent{.{
+                .ident = @intCast(fd),
+                .filter = std.c.EVFILT.VNODE,
+                // EV_CLEAR: each firing is delivered once, and further notes fold
+                // into the knote instead of queuing — which is why kqueue has no
+                // overflow to guard (contrast inotify's `Q_OVERFLOW`).
+                .flags = std.c.EV.ADD | std.c.EV.CLEAR,
+                .fflags = vnode_notes,
+                .data = 0,
+                .udata = idx,
+            }};
+            if (std.c.kevent(self.kq_fd, &change, 1, &change, 0, null) < 0) {
+                self.retire(idx);
+                return false;
+            }
+            // Noted only once the watch is live, so a path can never be announced
+            // as changed while still uncovered for its next change.
+            if (comptime mode != .initial) self.note(owned, is_dir);
+            return true;
+        }
+
+        /// Wait for events OUTSIDE the consumption lock — a kqueue descriptor is
+        /// itself pollable — then consume the whole batch under it, so a concurrent
+        /// `flushSync` can never see an empty queue while this thread still holds
+        /// events it has not noted.
+        fn kqueueLoop(self: *@This()) void {
+            if (comptime !is_macos) return;
+            var pfd = [_]std.posix.pollfd{.{ .fd = self.kq_fd, .events = std.posix.POLL.IN, .revents = 0 }};
+            while (self.running.load(.acquire)) {
+                const ready = std.posix.poll(&pfd, 500) catch break;
+                if (ready == 0) continue;
+                self.readLock();
+                self.drainKqueueLocked();
+                self.readUnlock();
+            }
+        }
+
+        /// Consume queued vnode events until the queue is empty. Caller MUST hold
+        /// `read_lock`. Every `note` precedes the single trailing `markDirty` — the
+        /// dirty-log/seqlock ordering contract a scoped reconcile relies on. A
+        /// failed consume leaves events we cannot account for, so it raises doubt
+        /// (that reconcile walks fully) instead of reporting a clean drain.
+        fn drainKqueueLocked(self: *@This()) void {
+            if (comptime !is_macos) return;
+            var evs: [256]std.c.Kevent = undefined;
+            const immediately = std.c.timespec{ .sec = 0, .nsec = 0 };
+            var noted = false;
+            while (true) {
+                const n = std.c.kevent(self.kq_fd, &evs, 0, &evs, evs.len, &immediately);
+                if (n == 0) break;
+                if (n < 0) {
+                    self.session.dirty_log.noteDoubt();
+                    noted = true;
+                    break;
+                }
+                for (evs[0..@intCast(n)]) |ev| self.applyEvent(ev);
+                noted = true;
+            }
+            // An ignore source changed somewhere in this batch: the rules that
+            // selected the watch set no longer describe the walked set, so both
+            // are re-derived — once, after the batch, because the refresh grows
+            // the set this loop was walking. Coverage we cannot rebuild is a blind
+            // spot for every newly-admitted file, so it poisons (fail-closed);
+            // the query itself is already safe (`delta.classify` sends an ignore
+            // source to the full walk).
+            if (self.ig_stale) {
+                self.ig_stale = false;
+                if (!self.loadPolicy() or !self.coverRoots(.refresh)) self.session.markDoubtForever();
+            }
+            if (noted) self.session.markDirty();
+        }
+
+        /// Apply one vnode event: note the exact path that changed, extend coverage
+        /// when a directory's membership moved, and retire a watch whose vnode left.
+        fn applyEvent(self: *@This(), ev: std.c.Kevent) void {
+            if (comptime !is_macos) return;
+            if (ev.flags & std.c.EV.ERROR != 0) return self.session.dirty_log.noteDoubt();
+            const idx = std.math.cast(u32, ev.udata) orelse return self.session.dirty_log.noteDoubt();
+            if (idx >= self.watches.items.len) return self.session.dirty_log.noteDoubt();
+            if (self.watches.items[idx].fd < 0) return; // retired earlier in this drain
+            self.note(self.watches.items[idx].path, self.watches.items[idx].is_dir);
+            if (self.watches.items[idx].is_dir) self.rescanDir(idx);
+            // A vanished or renamed vnode's descriptor no longer names a member of
+            // the walked set, so retire it and let the paired directory event
+            // register the entry under its current spelling. This is about the
+            // DESCRIPTOR, not the file: a case-only rename reports RENAME and DELETE
+            // together while the file still very much exists.
+            if (ev.fflags & (NOTE.DELETE | NOTE.RENAME | NOTE.REVOKE) != 0) self.retire(idx);
+        }
+
+        /// Note one changed absolute path into the dirty log — and, for a FILE, the
+        /// annals ledger a one-shot `gist index` consults. A directory reaches only
+        /// the dirty log: its event means "membership here moved", which the
+        /// reconcile answers by diffing the subtree, while the ledger's reader
+        /// amends per file and would stat a directory away — and its capacity is
+        /// bounded, so an entry spent on shape is an entry evicted from content. A
+        /// dead clock poisons the ledger rather than guessing an instant.
+        fn note(self: *@This(), path: []const u8, is_dir: bool) void {
+            self.session.dirty_log.note(path);
+            if (is_dir) return;
+            if (isIgnoreSource(std.fs.path.basename(path))) self.ig_stale = true;
+            if (comptime has_annals) {
+                if (wallNowNs()) |ns| self.session.annals.note(path, ns) else self.session.annals.noteDoubt();
+            }
+        }
+
+        /// A watched directory's membership changed: register whatever appeared, so
+        /// a later content edit to a new file cannot go unseen (a directory does not
+        /// fire when its files' bytes change — that is the whole reason files are
+        /// watched individually). Coverage we cannot re-establish is a blind spot,
+        /// so it poisons the session (fail-closed). Each newcomer is also NOTED
+        /// (`report`) — the directory's event proves something arrived but not what,
+        /// and the annals reader needs the file. What LEFT needs no work here: the
+        /// directory was already noted, and reconcile diffs its subtree.
+        fn rescanDir(self: *@This(), idx: u32) void {
+            if (comptime !is_macos) return;
+            // Heap-owned and stable across the watch-set growth below — only the
+            // slot array can move, never a path's bytes. `coverTree` is the one
+            // place the walk's admission policy lives, so a re-scan applies
+            // exactly the rules the initial registration did; its own watch is
+            // already indexed, making that first `addWatch` a no-op.
+            const w = self.watches.items[idx];
+            if (self.ig) |*ig| ig.scopeToRoot(self.rootKeyOf(w.key));
+            if (!self.coverTree(w.path, w.key, .extend)) self.session.markDoubtForever();
+        }
+
+        /// The key-space root governing `key` — "" for the implicit CWD walk, and
+        /// the reason a rule written for one named root cannot judge another's
+        /// entries (`Ignore.scopeToRoot`).
+        fn rootKeyOf(self: *const @This(), key: []const u8) []const u8 {
+            for (self.session.roots) |r| {
+                if (std.mem.eql(u8, key, r)) return r;
+                if (key.len > r.len and std.mem.startsWith(u8, key, r) and key[r.len] == '/') return r;
+            }
+            return "";
+        }
+
+        /// Retire slot `idx`: close its descriptor (which removes the kevent with
+        /// it), drop its index entry, and offer the slot for reuse. The path bytes
+        /// are freed last — `watch_index` borrows them as its key.
+        fn retire(self: *@This(), idx: u32) void {
+            if (comptime !is_macos) return;
+            const w = self.watches.items[idx];
+            if (w.fd < 0) return;
+            _ = std.c.close(w.fd);
+            _ = self.watch_index.remove(w.path);
+            self.watches.items[idx] = .{ .fd = -1, .path = &.{}, .key = &.{}, .is_dir = false };
+            // A slot we cannot enqueue is simply never reused — never a coverage gap.
+            self.free_slots.append(self.gpa, idx) catch {};
+            self.gpa.free(w.key);
+            self.gpa.free(w.path);
+        }
+
+        /// Close every watch descriptor and the queue itself, freeing their
+        /// bookkeeping. Idempotent: `stop` calls it after a failed start too. A
+        /// partial watch set is never armed, so this doubles as the bail-out path.
+        fn closeWatches(self: *@This()) void {
+            if (comptime !is_macos) return;
+            for (self.watches.items) |w| if (w.fd >= 0) {
+                _ = std.c.close(w.fd);
+                self.gpa.free(w.key);
+                self.gpa.free(w.path);
+            };
+            self.dropPolicy();
+            self.watches.deinit(self.gpa);
+            self.watches = .empty;
+            self.watch_index.deinit(self.gpa);
+            self.watch_index = .empty;
+            self.free_slots.deinit(self.gpa);
+            self.free_slots = .empty;
+            if (self.kq_fd >= 0) {
+                _ = std.c.close(self.kq_fd);
+                self.kq_fd = -1;
+            }
         }
     };
 }
