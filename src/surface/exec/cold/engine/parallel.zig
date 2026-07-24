@@ -1885,7 +1885,15 @@ pub fn collectFileSet(gpa: std.mem.Allocator, io: std.Io, roots: []const []const
         defer seed.deinit(gpa);
         for (eff_roots) |r| {
             const prefix = if (std.mem.eql(u8, r, ".") and roots.len == 0) "" else std.mem.trimEnd(u8, r, "/");
-            seed.append(gpa, .{ .disk = r, .rel = prefix, .depth = 0, .root_depth = rootDepth(prefix), .chain = null, .snap_ix = treemap.not_walked }) catch oom();
+            seed.append(gpa, .{
+                .disk = r,
+                .rel = prefix,
+                .scope = paths_mod.cwdRelative(sa, io, prefix),
+                .depth = 0,
+                .root_depth = rootDepth(prefix),
+                .chain = null,
+                .snap_ix = treemap.not_walked,
+            }) catch oom();
         }
         q.push(seed.items);
     }
