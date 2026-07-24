@@ -490,7 +490,7 @@ fn seedAnnals(gpa: std.mem.Allocator, io: std.Io, session: *ResidentSession) voi
     // Rootless daemon semantics: the annals cover the whole CWD tree, so the
     // replay runs over `.` regardless of served roots (a scoped daemon's
     // annals prefix won't match the amend's CWD check anyway).
-    if (!journal.replay(gpa, io, &.{"."}, tok, arena.allocator(), &entries)) return;
+    if (!journal.replay(gpa, io, &.{"."}, tok, journal.boot_budget_ns, arena.allocator(), &entries)) return;
     for (entries.items) |e| {
         if (e.is_dir) continue;
         const ts: i128 = if (Dir.cwd().statFile(io, e.path, .{ .follow_symlinks = false })) |st|

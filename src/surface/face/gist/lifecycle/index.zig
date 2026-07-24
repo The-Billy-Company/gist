@@ -106,6 +106,13 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
     const t0 = nowNs(io);
     const trace = std.c.getenv("GIST_AMEND_TRACE") != null;
     const out_dir = corpus_mod.outDir();
+    // Re-mint the journal since-token on EVERY amend (same before-the-anchor
+    // discipline as the full build, so a replay from it strictly over-covers
+    // the new anchor). Without this the token aged from the last FULL build
+    // and the replay window only ever grew — on a busy tree the journal fast
+    // path lost its race permanently. A per-amend token keeps the window at
+    // "since the last amend", the size the per-query replay budget can answer.
+    const jtok = journal.capture(io);
     // New anchor, captured BEFORE the changed-set derivation (same discipline
     // as the full build): a file touched while we amend is re-verified by the
     // next query. The daemon consult stays sound against it because the
@@ -151,6 +158,7 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
     if (changed.items.len == 0) {
         // Nothing moved: advance the anchor and stop — the pair never loads.
         fresh.writeAnchor(io, built_ns) catch return false;
+        if (jtok) |t| fresh.writeJournalToken(io, t); // re-arm the journal fast path
         std.debug.print("amended 0 docs (fresh) · {d:.1} ms → {s}\n", .{ ms(nowNs(io) - t0), out_dir });
         return true;
     }
@@ -199,6 +207,7 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
         // corpus is untouched, so advancing the anchor alone is sound.
     }
     fresh.writeAnchor(io, built_ns) catch return false;
+    if (jtok) |t| fresh.writeJournalToken(io, t); // re-arm the journal fast path
 
     std.debug.print("amended {d} docs (+{d} new, {d} gone) of {d} · {d:.1} ms → {s}\n", .{
         stats.docs,
