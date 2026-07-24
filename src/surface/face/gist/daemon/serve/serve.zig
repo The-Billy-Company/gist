@@ -1,3 +1,4 @@
+// MONOLITHIC: resident daemon — accept/poll thread, bounded worker pool, HELLO/READY handshake, framing, SCM_RIGHTS shm-fd answer path, freshness-annals consult, and idle-TTL lifecycle share one listener state + completion pipe (framing is already in wire.zig, the engine in resident.zig).
 //! gist resident daemon — `gist serve` (ADR-352 rung 2.5).
 //!
 //! Holds one `ResidentSession` warm behind a Unix-domain socket so a persistent

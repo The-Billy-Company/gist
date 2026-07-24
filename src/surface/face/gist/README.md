@@ -30,7 +30,7 @@ doc_radar:
     - description: "the committed fail-closed certificate exists and is fail-closed"
       file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
       contains: ["Mann-Whitney significance test", "**fail-closed**"]
-    - description: "prose cites the live certificate corpus + cold speedup band (re-mint updates both)"
+    - description: "the certificate carries the live ripgrep macro comparison and its honest optimality disclaimer (re-mint preserves both)"
       file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
       contains: ["20492 files · 195.8 MiB", "7.76x", "2.10x"]
 ---

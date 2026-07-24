@@ -1,3 +1,4 @@
+// MONOLITHIC: freshness watcher — the inotify (Linux) and FSEvents (macOS) backends plus the reconcile-always baseline are one dirty/clean/doubt/poison accelerator FSM feeding the exact dirty log; per-OS split fragments the arm-exactness / overflow-poison invariants (never a correctness dependency).
 //! gist resident session — the freshness watcher (ADR-352 rung 2.5).
 //!
 //! The watcher is a pure *accelerator* for the freshness barrier, never a

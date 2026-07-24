@@ -15,7 +15,7 @@ doc_radar:
     - file: pkg/kernels/irregex/contract/search_api.toml
       contains: ["[session]", "eligible_modes", "fail-closed-reconcile", "\"lines\""]
     - file: pkg/kernels/irregex/src/surface/exec/session/protocol.zig
-      contains: ["chunk = 11", "protocol_version: u8 = 2", "known_flags", "flag_word", "flag_invert", "flag_smart_case", "flag_quiet", "flag_max_count_present"]
+      contains: ["chunk = 11", "protocol_version: u8 = 6", "known_flags", "flag_word", "flag_invert", "flag_smart_case", "flag_quiet", "flag_max_count_present"]
     - file: pkg/kernels/irregex/src/surface/exec/session/request.zig
       contains: ["effectiveIgnoreCase", "smart_case"]
     - file: pkg/kernels/irregex/src/surface/face/gist/main.zig
