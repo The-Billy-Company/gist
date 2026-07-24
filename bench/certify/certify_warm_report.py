@@ -43,7 +43,7 @@ def _load(results_dir: Path, cls: str, cell: str) -> list[float]:
         return []
     try:
         return load_times_ms(path)
-    except (json.JSONDecodeError, KeyError, IndexError):
+    except json.JSONDecodeError, KeyError, IndexError:
         return []
 
 

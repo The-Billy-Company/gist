@@ -81,6 +81,8 @@ const fsevents_latency: f64 = 0.05;
 /// the accelerator is written once, the corpus/index model stays per-session.
 pub fn Watcher(comptime Session: type) type {
     return struct {
+        const Mac = cs.Bindings(Session);
+
         session: *Session,
         io: std.Io,
         gpa: std.mem.Allocator,
@@ -91,7 +93,7 @@ pub fn Watcher(comptime Session: type) type {
         /// `startFsevents` before the loop thread spawns and closed by `stop`.
         /// Null on every non-macOS target and whenever the frameworks fail to
         /// load (→ unarmed, reconcile-always).
-        syms: ?cs.Syms = null,
+        syms: ?Mac.Syms = null,
         /// Linux: watch descriptor → the directory it covers (gpa-owned), so a
         /// dir-create event can be resolved to a path and its subtree watched
         /// before the next reconcile walks it. Built on the main thread before the
@@ -425,7 +427,7 @@ pub fn Watcher(comptime Session: type) type {
             // Bind the frameworks on THIS thread before the loop spawns; a miss
             // (unavailable framework / symbol) leaves the session unarmed —
             // reconcile-always, still correct.
-            self.syms = cs.Syms.load() orelse return;
+            self.syms = Mac.Syms.load() orelse return;
             self.thread = std.Thread.spawn(.{}, fseventsLoop, .{self}) catch {
                 if (self.syms) |*s| {
                     s.close();
@@ -455,7 +457,7 @@ pub fn Watcher(comptime Session: type) type {
             const paths = self.buildPathsArray() orelse return self.start_result.store(2, .release);
             defer s.CFRelease(paths);
 
-            var ctx = cs.CFContext{ .info = @ptrCast(self.session) };
+            var ctx = Mac.CFContext{ .info = self.session };
             // Annals coverage instant: captured BEFORE the stream exists. `SinceNow`
             // resolves at creation and fseventsd's journal replays anything between
             // create and start, so every event at/after this instant is delivered —
@@ -534,8 +536,8 @@ pub fn Watcher(comptime Session: type) type {
         /// the log's drain contract relies on); any flag that means the paths are
         /// not an exact account of what changed (rescan hints, drops, id wrap,
         /// mounts) becomes `noteDoubt`, so that batch's reconcile walks fully.
-        fn fseventsCallback(_: cs.Ref, info: ?*anyopaque, num_events: usize, event_paths: ?[*]const [*:0]const u8, event_flags: [*]const u32, _: [*]const u64) callconv(.c) void {
-            const session: *Session = @ptrCast(@alignCast(info orelse return));
+        fn fseventsCallback(_: cs.Ref, info: ?*Session, num_events: usize, event_paths: ?[*]const [*:0]const u8, event_flags: [*]const u32, _: [*]const u64) callconv(.c) void {
+            const session = info orelse return;
             // One delivery instant for the whole batch — coalesced events share a
             // callback anyway, and delivery-at-or-after-occurrence is what the
             // annals' `since` filter relies on. A dead clock poisons the ledger

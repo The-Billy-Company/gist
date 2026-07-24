@@ -29,91 +29,90 @@ pub const kFSEventStreamCreateFlagNoDefer: u32 = 0x0000_0002;
 // parent directory — the exact dirty set the scoped reconcile needs.
 pub const kFSEventStreamCreateFlagFileEvents: u32 = 0x0000_0010;
 
-// FSEvents delivers `info` as an opaque pointer (the session, type-erased so the
-// symbol table stays generic-free); `fseventsCallback` casts it back to its
-// concrete `*Session`. The retaining `kCFTypeArrayCallBacks` lets the paths
-// array own the CFString roots, so the loop drops its own references at once and
-// the stream copies the list on create.
-pub const FsCallback = *const fn (Ref, ?*anyopaque, usize, ?[*]const [*:0]const u8, [*]const u32, [*]const u64) callconv(.c) void;
-
-pub const CFContext = extern struct {
-    version: CFIndex = 0,
-    info: ?*anyopaque = null,
-    retain: ?*const anyopaque = null,
-    release: ?*const anyopaque = null,
-    copy_description: ?*const anyopaque = null,
-};
-
 /// The dlopen'd CoreFoundation + CoreServices entry points, bound once when a
-/// macOS session arms its watcher. Session-independent (the callback's `info` is
-/// `?*anyopaque`), so it lives at module scope and off-macOS is simply never
-/// populated — the field type stays valid on every target.
-pub const Syms = struct {
-    cf: std.DynLib,
-    cs: std.DynLib,
-    CFStringCreateWithBytes: *const fn (Ref, [*]const u8, CFIndex, u32, u8) callconv(.c) Ref,
-    CFArrayCreate: *const fn (Ref, [*]const Ref, CFIndex, ?*const anyopaque) callconv(.c) Ref,
-    CFRelease: *const fn (Ref) callconv(.c) void,
-    CFRunLoopGetCurrent: *const fn () callconv(.c) Ref,
-    CFRunLoopRunInMode: *const fn (Ref, f64, u8) callconv(.c) i32,
-    CFRunLoopStop: *const fn (Ref) callconv(.c) void,
-    FSEventStreamCreate: *const fn (Ref, FsCallback, ?*const CFContext, Ref, u64, f64, u32) callconv(.c) Ref,
-    FSEventStreamScheduleWithRunLoop: *const fn (Ref, Ref, Ref) callconv(.c) void,
-    FSEventStreamStart: *const fn (Ref) callconv(.c) u8,
-    FSEventStreamStop: *const fn (Ref) callconv(.c) void,
-    FSEventStreamInvalidate: *const fn (Ref) callconv(.c) void,
-    FSEventStreamRelease: *const fn (Ref) callconv(.c) void,
-    run_loop_default_mode: Ref,
-    array_callbacks: ?*const anyopaque,
+/// macOS session arms its watcher. `Info` keeps the callback context typed
+/// end-to-end while preserving CoreServices' pointer ABI; no cast-away type or
+/// alignment proof is needed at either side of the callback.
+pub fn Bindings(comptime Info: type) type {
+    return struct {
+        pub const FsCallback = *const fn (Ref, ?*Info, usize, ?[*]const [*:0]const u8, [*]const u32, [*]const u64) callconv(.c) void;
 
-    const cf_path = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
-    const cs_path = "/System/Library/Frameworks/CoreServices.framework/CoreServices";
-
-    /// Open both frameworks and bind every symbol, or null on the first miss
-    /// (closing whatever opened). CoreFoundation carries the CF functions + the
-    /// two data symbols; CoreServices carries FSEvents.
-    pub fn load() ?Syms {
-        if (comptime !is_macos) return null;
-        var cf = std.DynLib.open(cf_path) catch return null;
-        var cs = std.DynLib.open(cs_path) catch {
-            cf.close();
-            return null;
+        pub const CFContext = extern struct {
+            version: CFIndex = 0,
+            info: ?*Info = null,
+            retain: ?*const anyopaque = null,
+            release: ?*const anyopaque = null,
+            copy_description: ?*const anyopaque = null,
         };
-        var s: Syms = undefined;
-        s.cf = cf;
-        s.cs = cs;
-        s.CFStringCreateWithBytes = cf.lookup(@TypeOf(s.CFStringCreateWithBytes), "CFStringCreateWithBytes") orelse return s.fail();
-        s.CFArrayCreate = cf.lookup(@TypeOf(s.CFArrayCreate), "CFArrayCreate") orelse return s.fail();
-        s.CFRelease = cf.lookup(@TypeOf(s.CFRelease), "CFRelease") orelse return s.fail();
-        s.CFRunLoopGetCurrent = cf.lookup(@TypeOf(s.CFRunLoopGetCurrent), "CFRunLoopGetCurrent") orelse return s.fail();
-        s.CFRunLoopRunInMode = cf.lookup(@TypeOf(s.CFRunLoopRunInMode), "CFRunLoopRunInMode") orelse return s.fail();
-        s.CFRunLoopStop = cf.lookup(@TypeOf(s.CFRunLoopStop), "CFRunLoopStop") orelse return s.fail();
-        // Data symbols: `lookup` returns the symbol's address. `kCFRunLoopDefaultMode`
-        // is a CFStringRef *variable* → deref to the value; `kCFTypeArrayCallBacks`
-        // is the callbacks struct → its address is what CFArrayCreate wants.
-        s.run_loop_default_mode = (cf.lookup(*Ref, "kCFRunLoopDefaultMode") orelse return s.fail()).*;
-        s.array_callbacks = cf.lookup(*const anyopaque, "kCFTypeArrayCallBacks") orelse return s.fail();
-        s.FSEventStreamCreate = cs.lookup(@TypeOf(s.FSEventStreamCreate), "FSEventStreamCreate") orelse return s.fail();
-        s.FSEventStreamScheduleWithRunLoop = cs.lookup(@TypeOf(s.FSEventStreamScheduleWithRunLoop), "FSEventStreamScheduleWithRunLoop") orelse return s.fail();
-        s.FSEventStreamStart = cs.lookup(@TypeOf(s.FSEventStreamStart), "FSEventStreamStart") orelse return s.fail();
-        s.FSEventStreamStop = cs.lookup(@TypeOf(s.FSEventStreamStop), "FSEventStreamStop") orelse return s.fail();
-        s.FSEventStreamInvalidate = cs.lookup(@TypeOf(s.FSEventStreamInvalidate), "FSEventStreamInvalidate") orelse return s.fail();
-        s.FSEventStreamRelease = cs.lookup(@TypeOf(s.FSEventStreamRelease), "FSEventStreamRelease") orelse return s.fail();
-        return s;
-    }
 
-    /// A partial resolve must never half-arm the watcher: close both handles and
-    /// report the miss as null so the session stays in the reconcile-always base.
-    fn fail(s: *Syms) ?Syms {
-        s.close();
-        return null;
-    }
+        pub const Syms = struct {
+            cf: std.DynLib,
+            cs: std.DynLib,
+            CFStringCreateWithBytes: *const fn (Ref, [*]const u8, CFIndex, u32, u8) callconv(.c) Ref,
+            CFArrayCreate: *const fn (Ref, [*]const Ref, CFIndex, ?*const anyopaque) callconv(.c) Ref,
+            CFRelease: *const fn (Ref) callconv(.c) void,
+            CFRunLoopGetCurrent: *const fn () callconv(.c) Ref,
+            CFRunLoopRunInMode: *const fn (Ref, f64, u8) callconv(.c) i32,
+            CFRunLoopStop: *const fn (Ref) callconv(.c) void,
+            FSEventStreamCreate: *const fn (Ref, FsCallback, ?*const CFContext, Ref, u64, f64, u32) callconv(.c) Ref,
+            FSEventStreamScheduleWithRunLoop: *const fn (Ref, Ref, Ref) callconv(.c) void,
+            FSEventStreamStart: *const fn (Ref) callconv(.c) u8,
+            FSEventStreamStop: *const fn (Ref) callconv(.c) void,
+            FSEventStreamInvalidate: *const fn (Ref) callconv(.c) void,
+            FSEventStreamRelease: *const fn (Ref) callconv(.c) void,
+            run_loop_default_mode: Ref,
+            array_callbacks: ?*const anyopaque,
 
-    pub fn close(s: *Syms) void {
-        s.cf.close();
-        s.cs.close();
-    }
-};
+            const cf_path = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation";
+            const cs_path = "/System/Library/Frameworks/CoreServices.framework/CoreServices";
+
+            /// Open both frameworks and bind every symbol, or null on the first miss
+            /// (closing whatever opened). CoreFoundation carries the CF functions + the
+            /// two data symbols; CoreServices carries FSEvents.
+            pub fn load() ?Syms {
+                if (comptime !is_macos) return null;
+                var cf = std.DynLib.open(cf_path) catch return null;
+                var cs = std.DynLib.open(cs_path) catch {
+                    cf.close();
+                    return null;
+                };
+                var s: Syms = undefined;
+                s.cf = cf;
+                s.cs = cs;
+                s.CFStringCreateWithBytes = cf.lookup(@TypeOf(s.CFStringCreateWithBytes), "CFStringCreateWithBytes") orelse return s.fail();
+                s.CFArrayCreate = cf.lookup(@TypeOf(s.CFArrayCreate), "CFArrayCreate") orelse return s.fail();
+                s.CFRelease = cf.lookup(@TypeOf(s.CFRelease), "CFRelease") orelse return s.fail();
+                s.CFRunLoopGetCurrent = cf.lookup(@TypeOf(s.CFRunLoopGetCurrent), "CFRunLoopGetCurrent") orelse return s.fail();
+                s.CFRunLoopRunInMode = cf.lookup(@TypeOf(s.CFRunLoopRunInMode), "CFRunLoopRunInMode") orelse return s.fail();
+                s.CFRunLoopStop = cf.lookup(@TypeOf(s.CFRunLoopStop), "CFRunLoopStop") orelse return s.fail();
+                // Data symbols: `lookup` returns the symbol's address. `kCFRunLoopDefaultMode`
+                // is a CFStringRef *variable* → deref to the value; `kCFTypeArrayCallBacks`
+                // is the callbacks struct → its address is what CFArrayCreate wants.
+                s.run_loop_default_mode = (cf.lookup(*Ref, "kCFRunLoopDefaultMode") orelse return s.fail()).*;
+                s.array_callbacks = cf.lookup(*const anyopaque, "kCFTypeArrayCallBacks") orelse return s.fail();
+                s.FSEventStreamCreate = cs.lookup(@TypeOf(s.FSEventStreamCreate), "FSEventStreamCreate") orelse return s.fail();
+                s.FSEventStreamScheduleWithRunLoop = cs.lookup(@TypeOf(s.FSEventStreamScheduleWithRunLoop), "FSEventStreamScheduleWithRunLoop") orelse return s.fail();
+                s.FSEventStreamStart = cs.lookup(@TypeOf(s.FSEventStreamStart), "FSEventStreamStart") orelse return s.fail();
+                s.FSEventStreamStop = cs.lookup(@TypeOf(s.FSEventStreamStop), "FSEventStreamStop") orelse return s.fail();
+                s.FSEventStreamInvalidate = cs.lookup(@TypeOf(s.FSEventStreamInvalidate), "FSEventStreamInvalidate") orelse return s.fail();
+                s.FSEventStreamRelease = cs.lookup(@TypeOf(s.FSEventStreamRelease), "FSEventStreamRelease") orelse return s.fail();
+                return s;
+            }
+
+            /// A partial resolve must never half-arm the watcher: close both handles and
+            /// report the miss as null so the session stays in the reconcile-always base.
+            fn fail(s: *Syms) ?Syms {
+                s.close();
+                return null;
+            }
+
+            pub fn close(s: *Syms) void {
+                s.cf.close();
+                s.cs.close();
+            }
+        };
+    };
+}
 
 /// Wall-clock nanoseconds off the raw libc clock — the FSEvents callback thread
 /// has no `std.Io` handle, and the annals compare against `base.ns` instants

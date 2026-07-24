@@ -66,7 +66,7 @@ def _git(*args: str) -> str | None:
         return subprocess.check_output(
             ["git", "-C", str(REPO), *args], text=True, stderr=subprocess.DEVNULL
         ).strip()
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         return None
 
 
@@ -76,7 +76,7 @@ def _read_machine(bundle: Path) -> dict[str, object] | None:
         return None
     try:
         data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
 

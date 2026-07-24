@@ -83,7 +83,10 @@ run_root() { # <abs-bin> [args…] — 0 on success, 1 if skipped/unavailable
 
 # Layer B′ — measured port bound (always run; labels measured/not in JSON)
 # Capture an expected no-sudo skip without letting `set -e` abort the fallback.
-if run_root "${PORTBOUND}"; then root_rc=0; else root_rc=$?; fi
+set +e
+run_root "${PORTBOUND}"
+root_rc=$?
+set -e
 if [[ "${root_rc}" -ne 0 ]]; then
   (cd "${REPO}" && "${PORTBOUND}") || die "gist-portbound failed"
 fi
@@ -95,7 +98,10 @@ llvm_bin="$(brew --prefix llvm 2> /dev/null || true)"
 bash "${HERE}/../portcert/portcert.sh" || note "portcert skipped/degraded (see above)"
 
 # Layer C — STREAM ceiling (+ optional root for measured clock)
-if run_root "${ROOFLINE}"; then root_rc=0; else root_rc=$?; fi
+set +e
+run_root "${ROOFLINE}"
+root_rc=$?
+set -e
 if [[ "${root_rc}" -ne 0 ]]; then
   (cd "${REPO}" && "${ROOFLINE}") || die "gist-roofline failed"
 fi
@@ -121,11 +127,12 @@ note "Layer E — crest sieve production proof (fail-closed)…"
   || die "crest proof failed (soundness violation) — fix the calculus in src/kernel/primitives/crest.zig, never weaken the sieve"
 [[ -s "${OUT}/crest.csv" ]] || die "crest proof did not emit ${OUT}/crest.csv"
 if crest_machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else crest_machine="$(uname -m)"; fi
+zig_version="$(cd "${KERNEL}" && zig version)" || die "zig version unavailable"
 python3 "${HERE}/certify_crest_report.py" \
   --certificate "${CERT}" \
   --csv "${OUT}/crest.csv" \
   --machine "${crest_machine}" \
-  --zig "$(cd "${KERNEL}" && zig version)" \
+  --zig "${zig_version}" \
   || die "certify_crest_report.py failed"
 
 # Layer F — codex self-index (compressed, searchable, decodable). The codex-scale
@@ -143,7 +150,7 @@ python3 "${HERE}/certify_codex_report.py" \
   --compressors "${CODEX_WORK}/compressors.jsonl" \
   --csv "${OUT}/codex.csv" \
   --machine "${crest_machine}" \
-  --zig "$(cd "${KERNEL}" && zig version)" \
+  --zig "${zig_version}" \
   || die "certify_codex_report.py failed (Layer F invariant violated)"
 
 # Completeness gate (layers only — full artifact check stays with certify.sh)

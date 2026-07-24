@@ -205,15 +205,15 @@ const noteIgnoreFile = ignore.noteIgnoreFile;
 /// engine's `walkDirLinked` computes per entry — see `Ignore.shouldSkip`'s doc
 /// comment for the asymmetry (`-g`/`--iglob` bypasses `.git`+ignore, a `-t`
 /// type match only un-hides) this engine must reproduce byte-for-byte.
-fn shouldSkip(cfg: *const Cfg, chain: ?*const IgNode, a: std.mem.Allocator, task: DirTask, rel: []const u8, is_dir: bool, basename: []const u8) bool {
+fn shouldSkip(cfg: *const Cfg, chain: ?*const IgNode, a: std.mem.Allocator, task: DirTask, rel: []const u8, scope_rel: []const u8, is_dir: bool, basename: []const u8) bool {
     const ig = cfg.ig;
     var v: ?bool = null;
     if (cfg.compiled) |c| {
         if (c.matchRank(stripDot(rel), is_dir)) |r| v = !c.rules[r].negated;
     } else v = ig.decideAt(rel, is_dir, task.root_depth);
     applyChain(chain, a, ig.o.ignore_case_insensitive, task.root_depth, rel, is_dir, &v);
-    const wl_ig = cfg.o.filter.whitelists(a, rel);
-    const wl_hid = cfg.o.filter.whitelistsHidden(a, rel);
+    const wl_ig = cfg.o.filter.whitelists(a, scope_rel);
+    const wl_hid = cfg.o.filter.whitelistsHidden(a, scope_rel);
     return ig.skipFromVerdict(v, is_dir, basename, wl_ig, wl_hid);
 }
 
@@ -446,12 +446,14 @@ fn testHasElidableFile(io: std.Io, el: *const Elide) bool {
 // ─────────────────────────── task queue ───────────────────────────
 
 /// One directory awaiting a worker. `rel` is the display/ignore path (prefix-
-/// joined, may carry a root's `./`); `disk` is CWD-openable; `depth` counts
-/// components under the walk root (root = 0); `root_depth` is the explicit
-/// positional root's own component depth (see `Ignore.scopeToRoot`).
+/// joined, may be absolute); `scope` is its CWD-relative glob/index spelling;
+/// `disk` is CWD-openable; `depth` counts components under the walk root
+/// (root = 0); `root_depth` is the explicit positional root's own component
+/// depth (see `Ignore.scopeToRoot`).
 const DirTask = struct {
     disk: []const u8,
     rel: []const u8,
+    scope: []const u8,
     depth: usize,
     root_depth: usize,
     chain: ?*const IgNode,
@@ -1135,14 +1137,15 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     if (!e.is_dir and !e.is_file) return; // symlinks & specials — never followed here
     const depth = task.depth + 1;
     const rel = joinRel(a, task.rel, e.name);
-    if (shouldSkip(cfg, chain, a, task, rel, e.is_dir, e.name)) return;
+    const scope_rel = joinRel(a, task.scope, e.name);
+    if (shouldSkip(cfg, chain, a, task, rel, scope_rel, e.is_dir, e.name)) return;
     if (e.is_dir) {
         if (o.max_depth != 0 and depth >= o.max_depth) return;
-        children.append(a, .{ .disk = joinPath(a, task.disk, e.name), .rel = rel, .depth = depth, .root_depth = task.root_depth, .chain = chain, .snap_ix = e.snap_ix }) catch oom();
+        children.append(a, .{ .disk = joinPath(a, task.disk, e.name), .rel = rel, .scope = scope_rel, .depth = depth, .root_depth = task.root_depth, .chain = chain, .snap_ix = e.snap_ix }) catch oom();
         return;
     }
     if (o.max_depth != 0 and depth > o.max_depth) return;
-    if (o.filter.active() and !o.filter.admits(a, rel)) return;
+    if (o.filter.active() and !o.filter.admits(a, scope_rel)) return;
     // Admitted: every filter that decides "would rg have searched this file"
     // has passed. Flag BEFORE index elision — an elided file still counts as
     // walked for the implicit-path nothing-searched heuristic (see `Queue`).
@@ -1159,7 +1162,7 @@ fn handleEntry(w: *Worker, a: std.mem.Allocator, scratch: []u8, dirfd: std.posix
     };
     if (cfg.lazy) |lz| {
         if (lz.ready.load(.acquire)) {
-            if (lz.val) |*el| if (el.skip(stripDot(rel), mtime, ctime)) {
+            if (lz.val) |*el| if (el.skip(stripDot(scope_rel), mtime, ctime)) {
                 // Index proves no match: `--files-without-match` emits without
                 // reading (invert of `-l`'s elide-and-skip). `--stats` never
                 // arms the oracle (see `want_elision`), so it can't land here.
@@ -1676,10 +1679,11 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         defer seed.deinit(gpa);
         for (roots) |r| {
             const prefix = if (std.mem.eql(u8, r, ".") and parsed.roots.len == 0) "" else std.mem.trimEnd(u8, r, "/");
+            const scope_prefix = paths_mod.cwdRelative(gpa, io, prefix);
             // Each root resolves to its snapshot record by name (dir 0 = the
             // CWD root); an unplaceable root simply walks live.
-            const six = if (snap_view) |*v| treemap.resolve(v, prefix) orelse treemap.not_walked else treemap.not_walked;
-            seed.append(gpa, .{ .disk = r, .rel = prefix, .depth = 0, .root_depth = rootDepth(prefix), .chain = null, .snap_ix = six }) catch oom();
+            const six = if (snap_view) |*v| treemap.resolve(v, scope_prefix) orelse treemap.not_walked else treemap.not_walked;
+            seed.append(gpa, .{ .disk = r, .rel = prefix, .scope = scope_prefix, .depth = 0, .root_depth = rootDepth(prefix), .chain = null, .snap_ix = six }) catch oom();
         }
         q.push(seed.items);
     }

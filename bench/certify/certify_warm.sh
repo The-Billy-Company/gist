@@ -110,18 +110,19 @@ done
   echo "certify_warm: daemon never bound ${WSOCK}" >&2
   exit 1
 }
-echo "  $(tail -1 "${COMPETE_DIR}/warmcert.serve.log")"
+serve_status="$(tail -1 "${COMPETE_DIR}/warmcert.serve.log")"
+echo "  ${serve_status}"
 
 # The env prefix every warm query carries: the private socket + autoserve off (a
 # cold miss must never fork a rootless daemon onto this socket and re-scope it).
-warm_env() { echo "env GIST_SESSION_SOCK='${WSOCK}' GIST_NO_AUTOSERVE=1"; }
+WARM_ENV="env GIST_SESSION_SOCK='${WSOCK}' GIST_NO_AUTOSERVE=1"
 
 # Warm client command for a probe (bare, resident-eligible: no fairness flags).
 warm_cmd() { # <literal|regex> <pat>
   local kind="$1" pat="$2"
   if [[ "${kind}" = literal ]]; then
-    echo "$(warm_env) ${GIST_BIN} '${pat}' -F -l"
-  else echo "$(warm_env) ${GIST_BIN} '${pat}' -l"; fi
+    echo "${WARM_ENV} ${GIST_BIN} '${pat}' -F -l"
+  else echo "${WARM_ENV} ${GIST_BIN} '${pat}' -l"; fi
 }
 
 # The equivalence ORACLE: `gist --no-index` over the same default walk — the
@@ -148,7 +149,8 @@ cold_cmd() { # <literal|regex> <pat>
 echo "warming the resident session…"
 for row in "${PROBES[@]}"; do
   read -r _ kind pat <<< "${row}"
-  bash -c "$(warm_cmd "${kind}" "${pat}")" > /dev/null 2>&1
+  cmd="$(warm_cmd "${kind}" "${pat}")"
+  bash -c "${cmd}" > /dev/null 2>&1
 done
 
 tools_raw="$(compete_tools regex)"
@@ -189,12 +191,15 @@ for row in "${PROBES[@]}"; do
 
   # Warm gist is the subject: it must equal the --no-index ground truth AND time
   # cleanly, or the warm certificate is invalid — abort the mint (fail-closed).
-  bench_cell "${class}" warm "$(warm_cmd "${kind}" "${pat}")" "$(oracle_cmd "${kind}" "${pat}")" || {
+  warm="$(warm_cmd "${kind}" "${pat}")"
+  oracle="$(oracle_cmd "${kind}" "${pat}")"
+  bench_cell "${class}" warm "${warm}" "${oracle}" || {
     echo "certificate aborted: warm gist failed equivalence/timing on ${class}" >&2
     exit 1
   }
   # Index-backed cold gist — the honest vs-cold reference (subject too: abort).
-  bench_cell "${class}" cold "$(cold_cmd "${kind}" "${pat}")" || {
+  cold="$(cold_cmd "${kind}" "${pat}")"
+  bench_cell "${class}" cold "${cold}" || {
     echo "certificate aborted: cold gist reference failed on ${class}" >&2
     exit 1
   }

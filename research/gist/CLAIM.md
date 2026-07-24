@@ -20,9 +20,9 @@ doc_radar:
     - file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
       contains:
         - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
-        - "6.2× geomean end-to-end speedup"
-        - "22.5× faster than csearch"
-        - "78.3× faster than rg"
+        - "6.3× geomean end-to-end speedup"
+        - "8.1× faster than csearch"
+        - "34.9× faster than ripgrep"
 ---
 
 # Gist — exact code search built for agents
@@ -184,7 +184,7 @@ answer with less ceremony.
 compared with a regex-AST-derived lower bound on runs every match must contain.
 It soundly prunes literal-free class repetitions that substring indexes cannot
 express. On the committed narrow-class slate, it turns a trigram blind spot
-into a 6.2× geomean end-to-end speedup. The theorem, calculus, count-cousin
+into a 6.3× geomean end-to-end speedup. The theorem, calculus, count-cousin
 ablation, adversarial prior-art review, and corpus proof live in
 [`../crest/`](../crest/).
 
@@ -201,8 +201,8 @@ putting linear and PCRE2-only expressions behind the same candidate index
 whenever proof permits. Against csearch and Zoekt, it keeps the live local
 tree—not an indexed snapshot—in command; against tgrep, its closest public
 shape, every uncertain resident request can decline to a complete cold path.
-On the certified warm workload that composition is 22.5× faster than csearch
-and 78.3× faster than ripgrep by geomean. It does not claim the hosted scale or
+On the certified warm workload that composition is 8.1× faster than csearch
+and 34.9× faster than ripgrep by geomean. It does not claim the hosted scale or
 semantic and structural breadth of adjacent systems.
 
 ### Hand-tuned craft

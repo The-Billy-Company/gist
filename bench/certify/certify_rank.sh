@@ -78,9 +78,9 @@ GENV="GIST_NO_AUTOSERVE=1"
 
 # Export a full per-run hyperfine sample vector for one cell (status-gated, one retry).
 bench_cell() { # <name> <cell> <cmd> → 0 timed, 1 rejected
-  local name="$1" cell="$2" cmd="$3" attempt
+  local name="$1" cell="$2" cmd="$3" _attempt
   compete_precheck_status "${cmd}" "${name}/${cell}" || return 1
-  for attempt in 1 2; do
+  for _attempt in 1 2; do
     rm -f "${WORK}/${name}__${cell}.json"
     compete_hyperfine --warmup "${WARMUP}" --runs "${RUNS}" \
       --export-json "${WORK}/${name}__${cell}.json" "${cmd}" > /dev/null 2>&1 && return 0
@@ -103,7 +103,7 @@ for row in "${PROBES[@]}"; do
   compete_capture_set "${GENV} ${GIST_BIN} '${pat}' -l --sort none -- ${roots}" \
     "${WORK}/${name}.setl" "${name}/gist-l-set" || exit 1
   # The FULL ranked output (every row) — the set + per-row kind source.
-  if ! env GIST_NO_AUTOSERVE=1 "${GIST_BIN}" "${pat}" --rank=1000000 -- ${roots} > "${WORK}/${name}.rank" 2> /dev/null; then
+  if ! env GIST_NO_AUTOSERVE=1 "${GIST_BIN}" "${pat}" --rank=1000000 -- "${ROOTS[@]}" > "${WORK}/${name}.rank" 2> /dev/null; then
     echo "certify_rank: --rank query failed for ${name}" >&2
     exit 1
   fi
@@ -119,7 +119,8 @@ done
 # Corpus size splits selective (prefilter prunes → beats-rg gated) from saturating
 # needles in the report. Prefer the machine.json the mint already wrote; fall back to
 # the persisted paths.list; 0 = unknown (report then uses an absolute-count threshold).
-corpus_files="$(python3 - "${OUT}/machine.json" "${PATHS_LIST}" << 'PY'
+corpus_files="$(
+  python3 - "${OUT}/machine.json" "${PATHS_LIST}" << 'PY'
 import json, sys
 
 machine_json, paths_list = sys.argv[1], sys.argv[2]

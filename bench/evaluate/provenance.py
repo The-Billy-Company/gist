@@ -57,7 +57,7 @@ def _cmd(*args: str) -> str:
     """Return stripped stdout of a command, or '' on any failure."""
     try:
         return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         return ""
 
 
@@ -91,7 +91,7 @@ def _ram_bytes() -> int:
         return int(darwin)
     try:
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    except (OSError, ValueError):
+    except OSError, ValueError:
         return 0
 
 

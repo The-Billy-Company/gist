@@ -30,7 +30,7 @@ _UNSUPPORTED_MARKERS = (
 
 @functools.cache
 def _resolve(name: str, env_var: str) -> str:
-    """Absolute path to one of the kernel's product binaries. Resolution order: the env override, then `name` on PATH, then the repo's built `zig-out/bin/<name>`. As an *in-repo* last resort — never in a distributed wheel — build the CLIs once from source when the kernel's `build.zig` is present and `zig` is on PATH, so any repo consumer (a lint gate, `gen-verify`, an ad-hoc script) drives the engine without pre-installing it. A missing engine is **fail-closed** (`GistNotFoundError`), never a silent fallback to a second matcher."""
+    """Absolute path to one of the kernel's product binaries. Resolution order: explicit env override, this checkout's built `zig-out/bin/<name>`, then `name` on PATH. Checkout-local wins so a worktree never drives a stale globally installed binary. As an *in-repo* last resort — never in a distributed wheel — build the CLIs once from source when `build.zig` and `zig` are present. A missing engine is **fail-closed** (`GistNotFoundError`), never a silent fallback to a second matcher."""
     env = os.environ.get(env_var)
     if env:
         p = Path(env).expanduser()
@@ -38,14 +38,14 @@ def _resolve(name: str, env_var: str) -> str:
             return str(p)
         msg = f"{env_var}={env!r} is not a file"
         raise GistNotFoundError(msg)
-    on_path = shutil.which(name)
-    if on_path:
-        return on_path
     # pkg/kernels/irregex/bindings/python/irregex/engine.py → kernel root is parents[3]
     kernel = Path(__file__).resolve().parents[3]
     built = kernel / "zig-out" / "bin" / name
     if built.is_file():
         return str(built)
+    on_path = shutil.which(name)
+    if on_path:
+        return on_path
     # In-repo bootstrap: the kernel source (`build.zig`) is only present in the
     # monorepo, so this branch is inert in a shipped wheel (pure locator there).
     if (kernel / "build.zig").is_file() and (zig := shutil.which("zig")):

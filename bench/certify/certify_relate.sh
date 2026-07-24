@@ -100,7 +100,8 @@ for qi in "${!QUERIES[@]}"; do
   q="${QUERIES[${qi}]}"
   want="${EXPECT[${qi}]}"
   top1="$("${RELATE_BIN}" search "${q}" --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
-  ok=no; [[ "${top1}" == *"${want}" ]] && ok=yes
+  ok=no
+  [[ "${top1}" == *"${want}" ]] && ok=yes
   row recall "q$((qi + 1))" "${want}" "${top1:-<none>}" "${ok}"
 
   # boundary: the paraphrase as an exact literal must find nothing.
@@ -115,11 +116,14 @@ done
 packed="$("${RELATE_BIN}" pack "wallet1 ledger200" --top 2 "${WORK}/corpus" 2> /dev/null)"
 pack_ok=no
 [[ "${packed}" == *"f1.zig"* && "${packed}" == *"f200.zig"* ]] && pack_ok=yes
-row pack "wallet1+ledger200" "f1.zig+f200.zig" "$([[ "${pack_ok}" == yes ]] && echo both || echo partial)" "${pack_ok}"
+pack_got=partial
+[[ "${pack_ok}" == yes ]] && pack_got=both
+row pack "wallet1+ledger200" "f1.zig+f200.zig" "${pack_got}" "${pack_ok}"
 
 # G4 short recall — the 3-byte planted needle.
 short="$("${RELATE_BIN}" search dog --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
-short_ok=no; [[ "${short}" == *"f1.zig" ]] && short_ok=yes
+short_ok=no
+[[ "${short}" == *"f1.zig" ]] && short_ok=yes
 row short "dog" "f1.zig" "${short:-<none>}" "${short_ok}"
 
 cat > "${WORK}/meta.json" << EOF

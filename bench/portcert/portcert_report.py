@@ -251,7 +251,7 @@ def main() -> int:
     if portbound.exists():
         try:
             measured = json.loads(portbound.read_text())
-        except (json.JSONDecodeError, OSError):
+        except json.JSONDecodeError, OSError:
             measured = None
     section = render(doc, measured)
 
