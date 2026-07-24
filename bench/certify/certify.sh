@@ -386,6 +386,9 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
     [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
   done
   cp -f "${OUT}/raw/"*.json "${pub}/raw/" || exit 1
+  echo "formatting published certificate…"
+  (cd "${REPO}" && NODE_NO_WARNINGS=1 PRETTIER_EXPERIMENTAL_CLI=1 \
+    pnpm -w exec prettier --write "${pub}/CERTIFICATE.md") || exit 1
   python3 "${HERE}/check_artifacts.py" --artifacts-dir "${pub}" --artifacts --no-require-head || exit 1
   echo "published reproducible certificate → ${pub}"
 fi

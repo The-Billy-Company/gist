@@ -24,6 +24,7 @@ REPO="$(cd "${KERNEL}/../../.." && pwd)"
 OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
 CERT="${OUT}/CERTIFICATE.md"
 CERT_SUDO="${CERT_SUDO:-auto}"
+CREST_RAW="${REPO}/.local/crest-evidence/crest.csv"
 
 die() {
   echo "certify_layers: $*" >&2
@@ -125,7 +126,8 @@ python3 "${HERE}/../lowerbound/lowerbound_report.py" \
 note "Layer E — crest sieve production proof (fail-closed)…"
 (cd "${REPO}" && "${CREST}") \
   || die "crest proof failed (soundness violation) — fix the calculus in src/kernel/primitives/crest.zig, never weaken the sieve"
-[[ -s "${OUT}/crest.csv" ]] || die "crest proof did not emit ${OUT}/crest.csv"
+[[ -s "${CREST_RAW}" ]] || die "crest proof did not emit ${CREST_RAW}"
+cp -f "${CREST_RAW}" "${OUT}/crest.csv"
 if crest_machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else crest_machine="$(uname -m)"; fi
 zig_version="$(cd "${KERNEL}" && zig version)" || die "zig version unavailable"
 python3 "${HERE}/certify_crest_report.py" \

@@ -26,6 +26,7 @@ REPO="$(cd "${KERNEL}/../../.." && pwd)"
 OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
 CERT="${OUT}/CERTIFICATE.md"
 CREST_CSV="${OUT}/crest.csv"
+CREST_RAW="${REPO}/.local/crest-evidence/crest.csv"
 
 die() {
   echo "certify_crest: $*" >&2
@@ -35,12 +36,13 @@ note() { echo "certify_crest: $*"; }
 
 [[ -s "${CERT}" ]] || die "missing ${CERT} — run Layer A first (bench/certify/certify.sh)"
 
-# The crest bench writes crest.csv to corpus default_out_dir (.local/gist-verify,
-# resolved from the repo-root cwd the build step sets); align OUT to it.
+# The standalone proof owns its complete raw evidence package under
+# .local/crest-evidence; copy the aggregate into the certificate bundle.
 note "building + running the crest production proof (fail-closed)…"
 (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast crest) \
   || die "crest proof failed — a soundness violation aborts the certificate; do NOT weaken the sieve, fix the calculus"
-[[ -s "${CREST_CSV}" ]] || die "crest proof did not emit ${CREST_CSV}"
+[[ -s "${CREST_RAW}" ]] || die "crest proof did not emit ${CREST_RAW}"
+cp -f "${CREST_RAW}" "${CREST_CSV}"
 
 # Measured-on-this-machine provenance (same brand string the other layers use).
 if machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else machine="$(uname -m)"; fi
