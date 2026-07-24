@@ -336,7 +336,7 @@ fn runVerify(gpa: std.mem.Allocator, io: std.Io, battery_n: usize, seed: u64) !v
     // ── regex battery: fixed shapes + templates filled with sampled idents ──
     var regexes: std.ArrayList([]const u8) = .empty;
     for (fixed_regex) |r| try regexes.append(a, r);
-    const re_target = @min(battery_n, 80);
+    const re_target: usize = @min(battery_n, 80);
     var rmade: usize = 0;
     var rattempts: usize = 0;
     while (rmade < re_target and rattempts < re_target * 50) : (rattempts += 1) {
