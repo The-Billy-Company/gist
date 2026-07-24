@@ -240,7 +240,7 @@ missing/invalid crest sidecar as sieve-off, never as authority to prune.
 | warm returns stale / empty success                         | decline path must fire — never invent answers                                                                                   |
 | certificate numbers exist while default correctness is red | the artifact is historical/measured evidence, not proof that today's full correctness slate passes                              |
 | matrix reports a declared loss                             | correctness passed; that shape's performance remains explicitly below expectation                                               |
-| crest false negative                                       | fix `src/kernel/primitives/crest.zig` calculus — see crest TESTING                                                                           |
+| crest false negative                                       | fix `src/kernel/primitives/crest.zig` calculus — see crest TESTING                                                              |
 
 Authority is split deliberately: `gist --schema` defines the public CLI
 surface; differential harness outputs define current compatibility; Zig

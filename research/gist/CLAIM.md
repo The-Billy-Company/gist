@@ -20,7 +20,7 @@ doc_radar:
     - file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
       contains:
         - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
-        - "6.3× geomean end-to-end speedup"
+        - "8.2× geomean end-to-end speedup"
         - "8.1× faster than csearch"
         - "34.9× faster than ripgrep"
 ---
@@ -184,7 +184,7 @@ answer with less ceremony.
 compared with a regex-AST-derived lower bound on runs every match must contain.
 It soundly prunes literal-free class repetitions that substring indexes cannot
 express. On the committed narrow-class slate, it turns a trigram blind spot
-into a 6.3× geomean end-to-end speedup. The theorem, calculus, count-cousin
+into an 8.2× geomean end-to-end speedup. The theorem, calculus, count-cousin
 ablation, adversarial prior-art review, and corpus proof live in
 [`../crest/`](../crest/).
 

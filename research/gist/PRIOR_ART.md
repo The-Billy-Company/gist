@@ -20,18 +20,18 @@ annotation in [§ References](#references).
 
 ## 0. Where cited in the tree
 
-| citation                                                                                      | role in gist                                             | code / docs                                                           |
-| --------------------------------------------------------------------------------------------- | -------------------------------------------------------- | --------------------------------------------------------------------- |
+| citation                                                                                      | role in gist                                             | code / docs                                                                  |
+| --------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | [Cox 2012](#r-cox-trigram) / [codesearch](#r-codesearch)                                      | required-trigram candidate filter                        | `src/corpus/index/trigrams/`, `src/kernel/match/regex/analysis/`, CLI README |
-| [ripgrep](#r-ripgrep)                                                                         | CLI face, ignore dialect, rgsuite oracle                 | `src/surface/exec/cold/`, `bench/rgsuite/`, `src/surface/face/gist/`                |
-| [Thompson](#r-thompson) / [Cox re1](#r-cox-re1) / [RE2](#r-re2) / [rust-regex](#r-rust-regex) | linear NFA → DFA / Pike lane + UTF-8 ranges              | `src/kernel/match/regex/`                                             |
-| [PCRE2](#r-pcre2)                                                                             | opt-in backtracking (`-P` / `--engine auto`)             | `src/kernel/match/regex/pcre2/`                                       |
-| [memchr](#r-memchr)                                                                           | first+last-byte SIMD presence for `-F`                   | `src/kernel/match/scan/simd.zig`                                      |
-| [Cormack et al. 2009](#r-rrf)                                                                 | weighted RRF for `--rank`                                | `src/kernel/rank/rank.zig`                                            |
-| [tgrep](#r-tgrep) / [Zoekt](#r-zoekt) / [Blackbird](#r-blackbird)                             | closest indexed / agent shapes we measured against       | CLI README § Prior art, Certificate                                   |
-| [ugrep](#r-ugrep) / [ag](#r-ag) / [GNU grep](#r-gnu-grep) / [git grep](#r-git-grep)           | PCRE-capable _scan_ peers (no index)                     | package README evidence §1                                            |
-| [pg_trgm](#r-pg-trgm) / RE2 `FilteredRE2`                                                     | trigram-family siblings that share the literal-free hole | package README + crest dossier                                        |
-| [qgrep](#r-qgrep) / [Hound](#r-hound) / [livegrep](#r-livegrep)                               | neighboring indexed designs                              | this file §3                                                          |
+| [ripgrep](#r-ripgrep)                                                                         | CLI face, ignore dialect, rgsuite oracle                 | `src/surface/exec/cold/`, `bench/rgsuite/`, `src/surface/face/gist/`         |
+| [Thompson](#r-thompson) / [Cox re1](#r-cox-re1) / [RE2](#r-re2) / [rust-regex](#r-rust-regex) | linear NFA → DFA / Pike lane + UTF-8 ranges              | `src/kernel/match/regex/`                                                    |
+| [PCRE2](#r-pcre2)                                                                             | opt-in backtracking (`-P` / `--engine auto`)             | `src/kernel/match/regex/pcre2/`                                              |
+| [memchr](#r-memchr)                                                                           | first+last-byte SIMD presence for `-F`                   | `src/kernel/match/scan/simd.zig`                                             |
+| [Cormack et al. 2009](#r-rrf)                                                                 | weighted RRF for `--rank`                                | `src/kernel/rank/rank.zig`                                                   |
+| [tgrep](#r-tgrep) / [Zoekt](#r-zoekt) / [Blackbird](#r-blackbird)                             | closest indexed / agent shapes we measured against       | CLI README § Prior art, Certificate                                          |
+| [ugrep](#r-ugrep) / [ag](#r-ag) / [GNU grep](#r-gnu-grep) / [git grep](#r-git-grep)           | PCRE-capable _scan_ peers (no index)                     | package README evidence §1                                                   |
+| [pg_trgm](#r-pg-trgm) / RE2 `FilteredRE2`                                                     | trigram-family siblings that share the literal-free hole | package README + crest dossier                                               |
+| [qgrep](#r-qgrep) / [Hound](#r-hound) / [livegrep](#r-livegrep)                               | neighboring indexed designs                              | this file §3                                                                 |
 
 Codex FM-index math, Hyperscan-vs-`patterns`, and compression kinship are
 **relate** (and the shared `src/corpus/index/codex/` module) — see

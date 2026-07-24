@@ -23,11 +23,11 @@ a binding bottleneck.
 
 ## What it is
 
-| File                 | Role                                                                                                                                                                                                           |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bandwidth.zig`      | a STREAM-style single-thread read-bandwidth microbenchmark at three working-set tiers (L1/L2/DRAM), a matched dual-window/contiguous-production ladder, and gist's real SIMD scan over the corpus |
-| `roofline_report.py` | reads `roofline.json` + Layer A's `certify.csv` (optionally Layer B's `portcert.json` for the compute ceiling), renders the `## Layer C` markdown section, splices it into `.local/gist-verify/CERTIFICATE.md` |
-| `test_roofline_report.py` | adverse tests that reject sub-roof saturation claims and keep legacy certificate refreshes honest |
+| File                      | Role                                                                                                                                                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bandwidth.zig`           | a STREAM-style single-thread read-bandwidth microbenchmark at three working-set tiers (L1/L2/DRAM), a matched dual-window/contiguous-production ladder, and gist's real SIMD scan over the corpus              |
+| `roofline_report.py`      | reads `roofline.json` + Layer A's `certify.csv` (optionally Layer B's `portcert.json` for the compute ceiling), renders the `## Layer C` markdown section, splices it into `.local/gist-verify/CERTIFICATE.md` |
+| `test_roofline_report.py` | adverse tests that reject sub-roof saturation claims and keep legacy certificate refreshes honest                                                                                                              |
 
 Low arithmetic intensity places a theoretical roof; it does not prove an
 implementation has reached it. `roofline_report.py` therefore reports the

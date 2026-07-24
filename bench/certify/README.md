@@ -44,24 +44,24 @@ prunes); **Layer F**
 (`certify_codex.sh` via `../codex/`) proves the codex self-index is compressed,
 searchable, and byte-exact decodable; and **Layer G** (`certify_relate.sh`)
 certifies the relate face's retrieval-quality contract + boundary — explicitly
-*not* a dominance claim. `--include-zero` and composed `irregex` remain outside
+_not_ a dominance claim. `--include-zero` and composed `irregex` remain outside
 this certificate even when their correctness is proved elsewhere.
 
-| File                  | Role                                                                                                                                                         |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `certify.sh`          | full A–G mint: Layer A micro (+ optional sudo PMU) + macroscopic field race + warm tier + `--rank` lane + relate (Layer G), auto-calls `certify_layers.sh`   |
-| `certify_layers.sh`   | Layers B/B′/C/D/E/F — build lab bins, measure, splice; the half that used to be a manual checklist. `make bench-gist-certify` default                        |
-| `certify_stats.py`    | a stdlib mirror of `../harness/stats.zig` — per-class bootstrap-CI median + Mann-Whitney verdict, splices the table into `.local/gist-verify/CERTIFICATE.md` |
-| `certify_warm_report.py` | Layer A warm-tier splicer — per-class Mann-Whitney dominance of the resident daemon over cold gist + rivals                                               |
-| `certify_rank_report.py` | Layer A `--rank` lane splicer — fail-closed no-fabrication/coverage/def-boost/demotion/overhead/selective-beats-rg from `certify_rank.sh`                 |
-| `certify_crest_report.py` | Layer E splicer — renders the fail-closed crest-sieve pruning/speedup table from `crest.csv` (`zig build crest`) into the certificate                    |
-| `certify_codex_report.py` | Layer F splicer — fail-closed decodability/sub-entropy space/n-free count/cheap reload/self-recognition from the `codex-scale` JSONL (`../codex/`)       |
-| `certify_relate_report.py` | Layer G splicer — fail-closed relate boundary + recall@1 + pack + short-recall from `certify_relate.sh`                                                 |
-| `check_artifacts.py`  | reproducibility gate — required files + Layer B–G headers/side-cars + corpus hashes + tool identities + raw-cell matrix                                      |
-| `ratio_regress.py`    | principia-style **ratio** regression — committed `certify_macro.csv` vs `ratio_baseline.json` floors; optional live remasure behind `GIST_BENCH=1`           |
-| `ratio_baseline.json` | min gist/rg cold speedup floors (hardware cancels; refresh after a deliberate republish)                                                                     |
-| `check_release.py`    | **release gate** — refuses a release until a valid, current certificate is attached for **both** the Mac and the Linux machine; run by Town Crier (`changelog build`) |
-| `artifact/`           | committed, reproducible certificate bundle (`CERT_PUBLISH_DIR=… certify.sh` / `CERT_PUBLISH=1 make bench-gist-certify`); per-platform mints live in `artifact/<platform-id>/` |
+| File                       | Role                                                                                                                                                                          |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `certify.sh`               | full A–G mint: Layer A micro (+ optional sudo PMU) + macroscopic field race + warm tier + `--rank` lane + relate (Layer G), auto-calls `certify_layers.sh`                    |
+| `certify_layers.sh`        | Layers B/B′/C/D/E/F — build lab bins, measure, splice; the half that used to be a manual checklist. `make bench-gist-certify` default                                         |
+| `certify_stats.py`         | a stdlib mirror of `../harness/stats.zig` — per-class bootstrap-CI median + Mann-Whitney verdict, splices the table into `.local/gist-verify/CERTIFICATE.md`                  |
+| `certify_warm_report.py`   | Layer A warm-tier splicer — per-class Mann-Whitney dominance of the resident daemon over cold gist + rivals                                                                   |
+| `certify_rank_report.py`   | Layer A `--rank` lane splicer — fail-closed no-fabrication/coverage/def-boost/demotion/overhead/selective-beats-rg from `certify_rank.sh`                                     |
+| `certify_crest_report.py`  | Layer E splicer — renders the fail-closed crest-sieve pruning/speedup table from `crest.csv` (`zig build crest`) into the certificate                                         |
+| `certify_codex_report.py`  | Layer F splicer — fail-closed decodability/sub-entropy space/n-free count/cheap reload/self-recognition from the `codex-scale` JSONL (`../codex/`)                            |
+| `certify_relate_report.py` | Layer G splicer — fail-closed relate boundary + recall@1 + pack + short-recall from `certify_relate.sh`                                                                       |
+| `check_artifacts.py`       | reproducibility gate — required files + Layer B–G headers/side-cars + corpus hashes + tool identities + raw-cell matrix                                                       |
+| `ratio_regress.py`         | principia-style **ratio** regression — committed `certify_macro.csv` vs `ratio_baseline.json` floors; optional live remasure behind `GIST_BENCH=1`                            |
+| `ratio_baseline.json`      | min gist/rg cold speedup floors (hardware cancels; refresh after a deliberate republish)                                                                                      |
+| `check_release.py`         | **release gate** — refuses a release until a valid, current certificate is attached for **both** the Mac and the Linux machine; run by Town Crier (`changelog build`)         |
+| `artifact/`                | committed, reproducible certificate bundle (`CERT_PUBLISH_DIR=… certify.sh` / `CERT_PUBLISH=1 make bench-gist-certify`); per-platform mints live in `artifact/<platform-id>/` |
 
 The 12 classes are byte-identical to `../harness/certify.zig`'s probes, so the
 macroscopic table here and the microscopic table there map 1:1 by class name.

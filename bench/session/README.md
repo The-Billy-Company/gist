@@ -60,14 +60,14 @@ on a quiescent tree and the number approaches the in-process ceiling; re-run
 
 ## Files
 
-| File                    | Role                                                                                                              |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `certify_session.sh`    | build → run the daemon slate → time `rg` cold → write the certificate + `session_macro.csv` + `session_meta.json` |
-| `gate_session.py`       | fail-closed latency gate: committed floor (armed only) + opt-in `--live` remeasure                                |
-| `session_baseline.json` | `armed_geomean_floor` — the armed-path speedup floor (theorem-backed; see the file's comment)                     |
-| `session_macro.csv`     | committed per-needle medians (`needle · d_files · rg_files · warm_ms · rg_ms · speedup`)                          |
-| `session_count_macro.csv` | committed count-lane medians (`needle · d_count · rg_count · warm_ms · rg_ms · speedup`) — reported, not gated   |
-| `session_meta.json`     | provenance the gate reads (`armed`, `watcher`, `platform`, `geomean_speedup`)                                     |
+| File                      | Role                                                                                                              |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `certify_session.sh`      | build → run the daemon slate → time `rg` cold → write the certificate + `session_macro.csv` + `session_meta.json` |
+| `gate_session.py`         | fail-closed latency gate: committed floor (armed only) + opt-in `--live` remeasure                                |
+| `session_baseline.json`   | `armed_geomean_floor` — the armed-path speedup floor (theorem-backed; see the file's comment)                     |
+| `session_macro.csv`       | committed per-needle medians (`needle · d_files · rg_files · warm_ms · rg_ms · speedup`)                          |
+| `session_count_macro.csv` | committed count-lane medians (`needle · d_count · rg_count · warm_ms · rg_ms · speedup`) — reported, not gated    |
+| `session_meta.json`       | provenance the gate reads (`armed`, `watcher`, `platform`, `geomean_speedup`)                                     |
 
 ```bash
 cd pkg/kernels/irregex

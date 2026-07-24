@@ -11,7 +11,8 @@ crest sieve (`src/kernel/primitives/crest.zig`, theorem in
 (`[0-9a-f]{12}`, `[0-9]{6}`) that every trigram-family index concedes — exactly
 the `regex-classcount` row where Layer A measures cand% = 100% (the whole corpus
 admitted). The harness is fail-closed (`matched ⇒ ¬pruned` against the
-production matcher over the whole corpus + randomized adversarial sweeps); this
+production matcher over the whole corpus + four-mode randomized adversarial
+sweeps); this
 section is spliced only when it exits 0, so a spliced Layer E *is* the soundness
 receipt. RUN is the sieve (longest per-class run); CNT is the weaker
 count-cousin at the same forced bound, carried to prove the run — not the
@@ -73,7 +74,7 @@ def render(rows: list[dict], files: str, mib: str, machine: str, zig: str) -> st
             "`zig build crest` links the **real** engine, builds the production crest sidecar, "
             "and walks the real corpus. It is **fail-closed**: for every file "
             "`matched ⇒ ¬pruned` against the production `Regex.docMatch`, over the fixed slate "
-            "plus randomized adversarial `(pattern, file)` pairs in both engine modes — a single "
+            "plus randomized adversarial `(pattern, file)` pairs in all four alphabet × case modes — a single "
             "false negative exits non-zero, so a spliced Layer E is itself the soundness receipt. "
             "These are the literal-free class-repetition patterns the trigram index prunes 0% on "
             "(Layer A `regex-classcount`, cand% = 100%). **RUN** is the sieve (longest per-class "
@@ -126,7 +127,7 @@ def render(rows: list[dict], files: str, mib: str, machine: str, zig: str) -> st
             f"gap that proves the run is the necessary condition.**"
         ),
         (
-            f"The {n_wide} wide classes (`\\w{{3,8}}`, `[A-Za-z]{{5}}`) are kept honest: their forced run "
+            f"The {n_wide} wide rows are kept honest: their forced run "
             "is too short to sieve, so crest correctly prunes ~nothing (≈1× — no manufactured win). In "
             "the shipped integration the win is larger still: a pruned doc's read is elided entirely "
             "(serial `IndexSkip` / parallel `Elide`), not just its match call."
@@ -134,8 +135,8 @@ def render(rows: list[dict], files: str, mib: str, machine: str, zig: str) -> st
         "",
         (
             "> Sound by construction — everything in ĝ rounds **down** (any construct the calculus "
-            "cannot certify contributes nothing; caseless queries and non-ASCII Unicode classes force "
-            "0⃗), so under-pruning is the only failure mode. Theorem, min-of-max calculus over the AST, "
+            "cannot certify contributes nothing; unsafe caseless folds and non-ASCII Unicode classes "
+            "decline to 0⃗), so under-pruning is the only failure mode. Theorem, min-of-max calculus over the AST, "
             "and the refereed priority review live in `research/crest/PROOF.md`; the harness is "
             "`bench/crest/bench.zig`."
         ),
@@ -145,15 +146,27 @@ def render(rows: list[dict], files: str, mib: str, machine: str, zig: str) -> st
 
 
 def splice(cert: Path, section: str) -> None:
-    """Replace the marked crest block if present, else append it at EOF."""
+    """Replace the one marked block and retire pre-marker duplicates."""
     text = cert.read_text() if cert.exists() else "# gist — Certificate of Optimality\n\n"
-    lo, hi = text.find(START), text.find(END)
-    if lo != -1 and hi != -1 and hi > lo:
-        text = text[:lo] + section + text[hi + len(END) :].lstrip("\n")
-        if not text.endswith("\n"):
-            text += "\n"
+    lo = text.find(START)
+    if lo != -1:
+        hi = text.find(END, lo + len(START))
+        if hi == -1:
+            raise ValueError("crest certificate has a start marker without an end marker")
+        prefix = text[:lo]
+        while (orphan_hi := prefix.rfind(END)) != -1 and (
+            orphan_lo := prefix.rfind(HEADER, 0, orphan_hi)
+        ) != -1:
+            prefix = (
+                prefix[:orphan_lo].rstrip()
+                + "\n\n"
+                + prefix[orphan_hi + len(END) :].lstrip("\n")
+            )
+        text = prefix + section + text[hi + len(END) :].lstrip("\n")
     else:
         text = text.rstrip() + "\n\n" + section
+    if not text.endswith("\n"):
+        text += "\n"
     cert.write_text(text)
 
 

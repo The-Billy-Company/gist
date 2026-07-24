@@ -56,12 +56,12 @@ Or via make: `make gist-evaluate`, `make gist-evaluate-verify`,
 Cold/warm query dominance is deliberately **absent** — that is the certificate's
 Layer A. These are the operational lanes it does not measure:
 
-| Regime | What it times | Cross-machine gate |
-|---|---|---|
-| `lifecycle` | full build, first query, incremental add/edit/delete/rename | — |
-| `resource` | peak RSS, index/corpus ratio, scan throughput | index/corpus **ratio** |
-| `scale` | latency + build across foreign corpora (size × shape) | curve **shape** |
-| `concurrency` | aggregate qps + tail latency at bounded workers | — |
+| Regime        | What it times                                               | Cross-machine gate     |
+| ------------- | ----------------------------------------------------------- | ---------------------- |
+| `lifecycle`   | full build, first query, incremental add/edit/delete/rename | —                      |
+| `resource`    | peak RSS, index/corpus ratio, scan throughput               | index/corpus **ratio** |
+| `scale`       | latency + build across foreign corpora (size × shape)       | curve **shape**        |
+| `concurrency` | aggregate qps + tail latency at bounded workers             | —                      |
 
 Every lane is gated on a **byte-exact parity precondition vs rg on BOTH engines**
 (parallel + serial) first — a build-sanity check that this gist produces

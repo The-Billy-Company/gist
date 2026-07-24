@@ -91,10 +91,14 @@ def _invoke(
     cwd: str | os.PathLike[str] | None,
     timeout: float,
 ) -> subprocess.CompletedProcess[str]:
-    """Run `gist rg <flags> <tail> --regexp <pattern> [paths]`. `--regexp` carries the pattern so it can never be mistaken for a flag or a path."""
+    """Run `gist <flags> <tail> --regexp <pattern> [paths]`.
+
+    `--regexp` carries the pattern so it cannot be mistaken for a flag or path.
+    The canonical no-verb face is required: the retired `rg` compatibility
+    token consumes only one positional root and drops hidden-mode flags.
+    """
     argv = [
         binary(),
-        "rg",
         *request.to_argv(),
         *tail,
         "--regexp",
