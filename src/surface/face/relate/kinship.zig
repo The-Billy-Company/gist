@@ -1,29 +1,28 @@
-//! relate — shared kinship plumbing for the sketch-backed verbs.
+//! relate — fingerprinting a corpus, and the file-level view over it.
 //!
-//! One deep seam under `similar` / `dups` / `clusters`: resolve a **view** —
-//! the (paths, sketches) table for the queried roots — from the cheapest
-//! sound source, then hand the verb pure arrays. Three rungs, elide-only
-//! (identical answers, fewer bytes touched):
+//! The floor every kinship answer stands on, in two halves:
 //!
-//!   1. persisted atlas + freshness fold (`corpus/index/atlas/atlas.zig`) — load
-//!      ~1 KiB/file, re-sketch only what changed since the anchor;
-//!   2. live corpus build — read every corpus byte and sketch in parallel
-//!      (the pre-atlas path), taken when the atlas is missing, corrupt,
-//!      `--no-index` was passed, or a root lies outside the indexed corpus;
-//!   3. either way, verbs that answer purely from sketches gate emitted
-//!      rows through `gate` (a per-row stat) so a file deleted after the
-//!      anchor cannot surface — O(results), never O(corpus).
+//!   • **Fingerprints in parallel.** Byte-balanced shards, one thread per ~4 MiB
+//!     of corpus, for both channels (LZJD sketch, structure silhouette). A doc
+//!     that fails to fingerprint degrades to the maximally-far empty record —
+//!     it can hide a result, never invent one — and the failure is counted on
+//!     stderr rather than swallowed.
 //!
-//! Also hosts the pair machinery `dups` and `clusters` share: bottom-16
-//! seed-hash candidate buckets, exact pairwise verification against both
-//! sketches, and the total (distance, path, path) order.
+//!   • **The file view.** Resolve the (paths, sketches, silhouettes) table for
+//!     the queried roots from the cheapest sound source: the persisted kinship
+//!     atlas plus a freshness fold, or a live read. Elide-only — identical
+//!     answers, fewer bytes touched — and rows emitted from the atlas pass a
+//!     deletion gate, so a file deleted since the anchor cannot answer.
+//!
+//! `units.zig` wraps this into the unit view every verb actually queries (files,
+//! functions, or exact-matched regions); the pair machinery `pairs.zig` owns is
+//! re-exported here so the face's call sites stay stable.
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const atlas_mod = @import("../../../corpus/index/atlas/atlas.zig");
 const trigram_persist = @import("../../../corpus/index/trigrams/persist.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
-const scope = @import("../../../corpus/scope/glob.zig");
 const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const pairs = @import("../../../kernel/kinship/cluster/pairs.zig");
@@ -32,116 +31,21 @@ const flags = @import("../../cli/flags.zig");
 const grade = @import("../../cli/grade.zig");
 
 const oom = cli_args.oom;
-const die = cli_args.die;
 pub const Sketch = sketch.Sketch;
 pub const Silhouette = silhouette_mod.Silhouette;
 
-// ── the relate query option surface (Opts + parseOpts) ──
-// Face-agnostic argv/root/emit plumbing lives in `../../cli/{flags,emit}.zig`.
-
-/// Which kinship question a verb answers — the ONE channel vocabulary, shared
-/// with every other face (`surface/cli/grade.zig`). Spelled `--as` and, for
-/// callers who learned the metric names, `--lens`.
+/// The one channel vocabulary, shared with every other face.
 pub const Channel = grade.Channel;
 
-/// The option surface the relate query verbs share; each verb seeds its own
-/// `top` default and reads only the fields its `parseOpts` config admits.
-pub const Opts = struct {
-    top: usize,
-    json: bool = false,
-    no_index: bool = false,
-    /// Distance-channel admission (`copies`/`shapes`/`any`): closer than this.
-    max_dist: f64 = 0.25,
-    min_size: usize = 2,
-    channel: Channel = .copies,
-    /// Gap-channel admission (`twins`): a bytes−structure gap at least this wide.
-    min_echo: f64 = 0.15,
-    /// Withhold rows weaker than this calibrated grade (`--min-grade`).
-    min_grade: ?grade.Grade = null,
-    arg: ?[]const u8 = null, // the one positional (similar's path, search/pack's text)
+// ── parallel fingerprint build (the live rung) ──
 
-    /// The channel-relative admission threshold, so a verb never has to
-    /// remember which polarity its flag carried.
-    pub fn floor(self: Opts) f64 {
-        return if (self.channel.polarity() == .gap) self.min_echo else self.max_dist;
-    }
-
-    /// Is `score` admitted by both the numeric floor and any `--min-grade`?
-    pub fn admits(self: Opts, score: f64) bool {
-        const passes_floor = switch (self.channel.polarity()) {
-            .distance => score <= self.max_dist,
-            .gap => score >= self.min_echo,
-        };
-        if (!passes_floor) return false;
-        return if (self.min_grade) |g| grade.of(self.channel, score).meets(g) else true;
-    }
-};
-
-/// One flag loop for every relate query verb: `--top`/`--json` always, the
-/// rest opt-in per `cfg`. A strict verb dies on an unknown `-flag`; a lax one
-/// keeps the arg as positional/root (the historical shape). With
-/// `cfg.positional` the first bare arg fills `opts.arg`; every other bare arg
-/// is a normalized root.
-pub fn parseOpts(
-    gpa: std.mem.Allocator,
-    argv: []const []const u8,
-    opts: *Opts,
-    roots: *std.ArrayList([]const u8),
-    comptime cfg: struct {
-        max_dist: bool = false,
-        min_size: bool = false,
-        no_index: bool = false,
-        channel: bool = false,
-        min_echo: bool = false,
-        min_grade: bool = false,
-        positional: bool = false,
-        strict: ?[]const u8 = null,
-    },
-) !void {
-    var i: usize = 0;
-    while (i < argv.len) : (i += 1) {
-        const arg = argv[i];
-        if (cfg.max_dist and std.mem.eql(u8, arg, "--max-distance")) {
-            opts.max_dist = flags.unitFloat(flags.need(argv, &i, "--max-distance needs a number in [0,1]\n"), "--max-distance");
-        } else if (cfg.min_size and std.mem.eql(u8, arg, "--min-size")) {
-            opts.min_size = flags.minSize(argv, &i);
-        } else if (cfg.channel and (std.mem.eql(u8, arg, "--as") or std.mem.eql(u8, arg, "--lens"))) {
-            opts.channel = Channel.parse(flags.need(argv, &i, "--as needs copies|twins|shapes|any\n")) orelse
-                die("--as: copies, twins, shapes, or any, not {s}\n", .{argv[i]});
-        } else if (cfg.min_echo and std.mem.eql(u8, arg, "--min-echo")) {
-            opts.min_echo = flags.unitFloat(flags.need(argv, &i, "--min-echo needs a number in [0,1]\n"), "--min-echo");
-        } else if (cfg.min_grade and std.mem.eql(u8, arg, "--min-grade")) {
-            opts.min_grade = grade.Grade.parse(flags.need(argv, &i, "--min-grade needs identical|strong|moderate|weak|none\n")) orelse
-                die("--min-grade: identical, strong, moderate, weak, or none, not {s}\n", .{argv[i]});
-        } else if (std.mem.eql(u8, arg, "--top")) {
-            opts.top = flags.count(argv, &i, "--top");
-        } else if (std.mem.eql(u8, arg, "--json")) {
-            opts.json = true;
-        } else if (cfg.no_index and std.mem.eql(u8, arg, "--no-index")) {
-            opts.no_index = true;
-        } else if (cfg.strict != null and std.mem.startsWith(u8, arg, "-")) {
-            die("relate " ++ (comptime cfg.strict.?) ++ ": unknown flag {s}\n", .{arg});
-        } else if (cfg.positional and opts.arg == null) {
-            opts.arg = arg;
-        } else {
-            try roots.append(gpa, scope.normalizeRoot(arg));
-        }
-    }
-}
-
-// ── parallel sketch/silhouette build (the live rung) ──
-
-/// Sketch every doc in parallel — byte-balanced shards, one thread per
-/// ~4 MiB of corpus (a sketch parse is heavier per byte than SIMD verify).
-/// A doc that fails to sketch (OOM under pressure) records `Sketch.empty`,
-/// which `distance` treats as maximally far — it can surface in no result,
-/// only ever hide one, and the failure is counted on stderr.
+/// Sketch every doc in parallel — the byte channel.
 pub fn buildSketches(gpa: std.mem.Allocator, docs: []const []const u8) []Sketch {
     return buildAll(Sketch, sketch.build, gpa, docs);
 }
 
-/// Silhouette every doc in parallel — the structure channel, same sharding
-/// and degrade posture as `buildSketches`.
+/// Silhouette every doc in parallel — the structure channel, same sharding and
+/// degrade posture as `buildSketches`.
 pub fn buildSilhouettes(gpa: std.mem.Allocator, docs: []const []const u8) []Silhouette {
     return buildAll(Silhouette, silhouette_mod.build, gpa, docs);
 }
@@ -180,28 +84,27 @@ fn buildAll(comptime T: type, comptime buildFn: anytype, gpa: std.mem.Allocator,
     defer gpa.free(shards);
     const threads = gpa.alloc(std.Thread, nthr) catch oom();
     defer gpa.free(threads);
-    for (0..nthr) |t|
-        shards[t] = .{ .docs = docs[bounds[t]..bounds[t + 1]], .out = out[bounds[t]..bounds[t + 1]] };
+    for (0..nthr) |s|
+        shards[s] = .{ .docs = docs[bounds[s]..bounds[s + 1]], .out = out[bounds[s]..bounds[s + 1]] };
     // A shard whose thread never spawned still needs its slice filled.
     parallel.fanOut(Shard, shards, threads, Shard.run);
     var failed: usize = 0;
     for (shards) |sh| failed += sh.failed;
-    if (failed != 0) std.debug.print("relate: {d} file(s) failed to sketch (skipped)\n", .{failed});
+    if (failed != 0) std.debug.print("relate: {d} file(s) failed to fingerprint (skipped)\n", .{failed});
     return out;
 }
 
-// ── the view resolver ──
+// ── the file view ──
 
-/// The (paths, sketches[, silhouettes]) table a kinship verb answers over,
-/// plus the keepalive state that owns it. `from_atlas` tells the verb whether
-/// emitted rows need the deletion gate. `silhouettes` is doc-parallel to
-/// `sketches` when the view was resolved with `.structure`, empty otherwise.
+/// The (paths, sketches[, silhouettes]) table for the queried roots, plus the
+/// keepalive state that owns it. `silhouettes` is doc-parallel to `sketches`
+/// when resolved with `.structure`, empty otherwise.
 pub const View = struct {
     paths: []const []const u8,
     sketches: []const Sketch,
     silhouettes: []const Silhouette = &.{},
     from_atlas: bool,
-    refreshed: usize, // files re-sketched by the freshness fold
+    refreshed: usize, // files re-fingerprinted by the freshness fold
 
     // keepalive (whichever rung answered)
     atl: ?atlas_mod.Atlas = null,
@@ -225,31 +128,11 @@ pub const View = struct {
         if (self.folded) |*f| f.deinit();
         if (self.atl) |*a| a.deinit(self.gpa);
     }
-
-    /// Emit-time deletion gate: true when `paths[idx]` may be surfaced.
-    /// Live-built views are trivially current; atlas-backed rows verify the
-    /// file still exists (a deleted file's sketch must not answer).
-    pub fn gate(self: *const View, idx: usize) bool {
-        if (!self.from_atlas) return true;
-        return atlas_mod.onDisk(self.io, self.paths[idx]);
-    }
-
-    /// Which rung answered, for the verbs' shared stderr diagnostic shape.
-    pub fn provenance(self: *const View) []const u8 {
-        return if (self.from_atlas) "atlas, " else "live, ";
-    }
-
-    /// The bare rung name for a machine-readable diagnostic field (`provenance`
-    /// without the text line's `", "` join).
-    pub fn source(self: *const View) []const u8 {
-        return if (self.from_atlas) "atlas" else "live";
-    }
 };
 
-/// Which channels a verb needs its view to carry: `bytes` = the LZJD
-/// sketches only (dups/clusters); `structure` = silhouettes too (a lensed
-/// similar, echoes). The atlas persists both, so warm answers carry both
-/// either way; the flag only spares the LIVE rung a second per-doc pass.
+/// Which channels a view must carry: `bytes` = the LZJD sketches only;
+/// `structure` = silhouettes too. The atlas persists both, so warm answers
+/// carry both either way; the flag only spares the LIVE rung a second pass.
 pub const Wants = enum { bytes, structure };
 
 /// Which channels `channel` needs resolved. Only `copies` can answer from the
@@ -259,7 +142,7 @@ pub fn wantsOf(channel: Channel) Wants {
 }
 
 /// Loading + validating the global atlas has a fixed whole-artifact cost. For
-/// a narrow explicit scope, rebuilding a few hundred sketches from source is
+/// a narrow explicit scope, rebuilding a few hundred fingerprints from source is
 /// materially cheaper. The mmap-backed trigram path table lets us estimate
 /// scope cardinality without walking or reading the scoped corpus first.
 fn preferScopedLive(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) bool {
@@ -275,11 +158,10 @@ fn preferScopedLive(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u
     return true;
 }
 
-/// Resolve the cheapest sound view for `roots` (normalized explicit roots;
+/// Resolve the cheapest sound file view for `roots` (normalized explicit roots;
 /// empty = default). The atlas rung requires every root inside the indexed
-/// corpus — an out-of-corpus root has no sketches to elide and needs the
-/// live read (the same admission rule `patterns` applies to the trigram
-/// index).
+/// corpus — an out-of-corpus root has no fingerprints to elide and needs the
+/// live read (the same admission rule `patterns` applies to the trigram index).
 pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no_index: bool, wants: Wants) !View {
     atlas: {
         if (no_index) break :atlas;
@@ -287,7 +169,7 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
         var atl = atlas_mod.loadQuiet(gpa, io) orelse break :atlas;
         // Every queried root must sit inside the roots the atlas was BUILT
         // over (persisted in the blob) — an out-of-corpus root has no
-        // sketches to elide and needs the live read below.
+        // fingerprints to elide and needs the live read below.
         for (roots) |r| {
             if (!flags.underAnyRoot(r, atl.roots)) {
                 atl.deinit(gpa);
@@ -297,8 +179,8 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
         errdefer atl.deinit(gpa);
         // An explicitly scoped query only needs freshness inside that scope.
         // Folding every changed file in a 55k-file atlas before discarding
-        // out-of-scope rows made a one-package `similar` query pay whole-tree
-        // coworker churn.
+        // out-of-scope rows made a one-package query pay whole-tree coworker
+        // churn.
         var folded = atlas_mod.fold(gpa, io, &atl, if (roots.len > 0) roots else atl.roots) catch {
             atl.deinit(gpa);
             break :atlas;
@@ -344,8 +226,8 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
         return view;
     }
 
-    // Live rung: read the scoped corpus and sketch it in parallel (both
-    // channels when the verb asked for structure).
+    // Live rung: read the scoped corpus and fingerprint it in parallel (both
+    // channels when the caller asked for structure).
     const rr = try flags.rootsOf(gpa, roots);
     defer rr.deinit(gpa);
     var corpus = try corpus_mod.load(gpa, io, rr.items);
@@ -366,7 +248,7 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
     };
 }
 
-// ── the pair machinery (`dups` + `clusters` + `echoes`) ──
+// ── the pair machinery ──
 // The pure candidate-bucket + exact-verify kernel lives in `pairs.zig`; the
 // relate verbs reach it through this hub so their call sites stay stable.
 
@@ -375,3 +257,28 @@ pub const seed_hashes = pairs.seed_hashes;
 pub const bucket_cap = pairs.bucket_cap;
 pub const forEachCandidatePair = pairs.forEachCandidatePair;
 pub const verifiedPairs = pairs.verifiedPairs;
+
+// ── tests ────────────────────────────────────────────────────────────────
+
+const t = std.testing;
+
+test "only the byte channel can answer from sketches alone" {
+    try t.expectEqual(Wants.bytes, wantsOf(.copies));
+    try t.expectEqual(Wants.structure, wantsOf(.shapes));
+    try t.expectEqual(Wants.structure, wantsOf(.twins));
+    try t.expectEqual(Wants.structure, wantsOf(.any));
+}
+
+test "an empty record is maximally far from real content — and why the mass floor exists" {
+    const gpa = t.allocator;
+    var real = try sketch.build(gpa, "fn alpha(items: []Item) usize {\n  return items.len;\n}\n");
+    // Against real content the empty record is 1.0: a fingerprint failure can
+    // hide a result under a `--max-distance`, never invent one.
+    try t.expectEqual(@as(f64, 1.0), sketch.distance(&Sketch.empty, &real));
+    // But two empty records share every (absent) fingerprint, which reads as
+    // 0.0 — identical. That is exactly why the mass floors withhold sub-mass
+    // units from the population instead of trusting the distance.
+    try t.expectEqual(@as(f64, 0.0), sketch.distance(&Sketch.empty, &Sketch.empty));
+    try t.expectEqual(@as(f64, 0.0), silhouette_mod.distance(&Silhouette.empty, &Silhouette.empty));
+    try t.expectEqual(@as(u16, 0), Sketch.empty.len);
+}

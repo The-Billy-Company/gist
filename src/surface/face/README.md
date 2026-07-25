@@ -6,10 +6,10 @@ doc_radar:
       unit: dirs
       equals: 3
   occurrences:
-    - description: "relate's eleven verbs are declared once, and the unknown-verb line is rendered from them"
+    - description: "relate's seven verbs are declared once, and the unknown-verb line is rendered from them"
       file: pkg/kernels/irregex/src/surface/face/relate/repertoire.zig
       pattern: '\.run = '
-      equals: 11
+      equals: 7
   sentinels:
     - description: "every face's unknown verb reports the whole repertoire, from that one table"
       file: pkg/kernels/irregex/src/surface/cli/manifest.zig

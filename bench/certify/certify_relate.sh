@@ -11,12 +11,14 @@
 #   G1 BOUNDARY      — every paraphrase query finds 0 hits under exact `gist -F`.
 #                      The class is provably outside exact search (proven, not
 #                      asserted): this is *why* relate exists.
-#   G2 RECALL@1      — relate `search` ranks the planted source file top-1 for
-#                      every paraphrase (recall@1 = 100%).
+#   G2 RECALL@1      — `relate similar <text>` ranks the planted source file
+#                      top-1 for every paraphrase (recall@1 = 100%). A text probe
+#                      with no channel IS the retrieval question; the verb that
+#                      used to spell it `search` folded into `similar`.
 #   G3 PACK          — `relate pack` over a two-topic query returns BOTH planted
 #                      sources (anti-redundant multi-source retrieval).
-#   G4 SHORT RECALL  — `relate search` recalls the single 3-byte planted needle
-#                      (sub-trigram recall the persisted codebook handles).
+#   G4 SHORT RECALL  — `relate similar dog` recalls the single 3-byte planted
+#                      needle (sub-trigram recall the persisted codebook handles).
 #
 # Corpus is synthetic + deterministic (never the coworker-mutated live tree):
 # COUNT files sharing heavy boilerplate, each with its own topical vocabulary;
@@ -99,7 +101,7 @@ echo "running relate quality contract…"
 for qi in "${!QUERIES[@]}"; do
   q="${QUERIES[${qi}]}"
   want="${EXPECT[${qi}]}"
-  top1="$("${RELATE_BIN}" search "${q}" --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
+  top1="$("${RELATE_BIN}" similar "${q}" --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
   ok=no
   [[ "${top1}" == *"${want}" ]] && ok=yes
   row recall "q$((qi + 1))" "${want}" "${top1:-<none>}" "${ok}"
@@ -121,7 +123,7 @@ pack_got=partial
 row pack "wallet1+ledger200" "f1.zig+f200.zig" "${pack_got}" "${pack_ok}"
 
 # G4 short recall — the 3-byte planted needle.
-short="$("${RELATE_BIN}" search dog --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
+short="$("${RELATE_BIN}" similar dog --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
 short_ok=no
 [[ "${short}" == *"f1.zig" ]] && short_ok=yes
 row short "dog" "f1.zig" "${short:-<none>}" "${short_ok}"

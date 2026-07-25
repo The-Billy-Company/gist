@@ -9,8 +9,8 @@
 # tokens, run one gist per token, and rank files by aggregate hit count. The
 # race is therefore three-lane:
 #
-#   relate search  one pass — persisted trigram codebook nominates, then a
-#                  bounded suffix-automaton cross-parse decides
+#   relate similar one pass over a TEXT probe — persisted trigram codebook
+#                  nominates, then a bounded suffix-automaton cross-parse decides
 #                  (src/surface/exec/cold/engine/retrieval.zig)
 #   gist exact     the paraphrase as a literal — must find NOTHING (capability
 #                  line, not a timing lane)
@@ -105,7 +105,7 @@ echo "query,tool,ms,top1,expected,ok" > "${csv}"
 echo
 echo "── quality gate: relate top-1 must be the planted source ──"
 fail=0
-short="$("${RELATE_BIN}" search dog --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
+short="$("${RELATE_BIN}" similar dog --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
 [[ "${short}" == *"f1.zig" ]] || {
   echo "  three-byte recall failed: got ${short:-<none>}, want f1.zig" >&2
   fail=1
@@ -118,7 +118,7 @@ packed="$("${RELATE_BIN}" pack "wallet1 ledger200" --top 2 "${WORK}/corpus" 2> /
 for qi in "${!QUERIES[@]}"; do
   q="${QUERIES[${qi}]}"
   want="${EXPECT[${qi}]}"
-  top1="$("${RELATE_BIN}" search "${q}" --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
+  top1="$("${RELATE_BIN}" similar "${q}" --top 1 "${WORK}/corpus" 2> /dev/null | awk '{print $2}')"
   ok=no
   [[ "${top1}" == *"${want}" ]] && ok=yes
   printf "  q%d  relate → %-40s (want %s)  %s\n" "$((qi + 1))" "${top1:-<none>}" "${want}" "${ok}"
@@ -156,7 +156,7 @@ echo
 for qi in "${!QUERIES[@]}"; do
   q="${QUERIES[${qi}]}"
   want="${EXPECT[${qi}]}"
-  relate_ms="$(hf_mean 3 "${RUNS}" "${RELATE_BIN} search '${q}' --top 5 '${WORK}/corpus'")" || {
+  relate_ms="$(hf_mean 3 "${RUNS}" "${RELATE_BIN} similar '${q}' --top 5 '${WORK}/corpus'")" || {
     echo "aborting: relate failed while timing q$((qi + 1))" >&2
     exit 1
   }

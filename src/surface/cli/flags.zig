@@ -29,7 +29,7 @@ pub fn count(argv: []const []const u8, i: *usize, comptime flag: []const u8) usi
 }
 
 /// Parse `--min-size`: an integer ≥ 2, since a family needs at least two
-/// members. Shared by `relate concepts` and the composed `irregex family`.
+/// members. Read wherever `--shape families` is.
 pub fn minSize(argv: []const []const u8, i: *usize) usize {
     const n = count(argv, i, "--min-size");
     if (n < 2) die("--min-size: a family needs at least 2 members\n", .{});

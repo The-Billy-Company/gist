@@ -105,6 +105,31 @@ pub const Verb = struct {
     run: *const fn (std.mem.Allocator, std.Io, []const []const u8) anyerror!void,
 };
 
+/// A name that used to be a verb and is now a shape of another one.
+///
+/// A fold that only deletes the old name teaches nothing: the next invocation
+/// of muscle memory (or of an agent's stale transcript) gets `unknown verb` and
+/// a bare list, when the tool knows exactly what the caller meant. A retired
+/// row keeps the name reachable as a *diagnostic* — never as a silent alias, so
+/// a script pinned to the old spelling fails loudly with the new invocation in
+/// hand instead of drifting on semantics that moved underneath it.
+pub const Retired = struct {
+    name: []const u8,
+    /// The invocation that does this job now, verbatim and runnable.
+    now: []const u8,
+    /// What the fold bought, in one clause — the reason the name is gone.
+    because: []const u8,
+    /// The binary that owns `now`, when the job moved to a SIBLING face — the
+    /// composed verbs folded into `relate`, so `irregex family` has to point out
+    /// of its own tool. Null means this face.
+    tool: ?[]const u8 = null,
+
+    /// The full replacement invocation as a caller would type it.
+    pub fn invocation(self: Retired, face: []const u8) [2][]const u8 {
+        return .{ self.tool orelse face, self.now };
+    }
+};
+
 /// A top-level manifest field beyond the verbs — the tool-specific policy
 /// prose (`corpus_policy`, `scoring`, …) each face needs to state once.
 pub const Note = struct { key: []const u8, text: []const u8 };
@@ -120,6 +145,9 @@ pub const Face = struct {
     /// The manifest's `summary` — the whole face in one machine-read sentence.
     summary: []const u8,
     verbs: []const Verb,
+    /// Names that were folded into a verb above. Reachable as coaching, not as
+    /// aliases (see `Retired`).
+    retired: []const Retired = &.{},
     notes: []const Note = &.{},
     exits: []const Exit,
     /// Help prose that is genuinely prose: the channel/grade vocabulary, the
@@ -129,6 +157,12 @@ pub const Face = struct {
     /// Look up a verb by name.
     pub fn find(self: Face, name: []const u8) ?Verb {
         for (self.verbs) |v| if (std.mem.eql(u8, v.name, name)) return v;
+        return null;
+    }
+
+    /// Look up a folded name.
+    pub fn folded(self: Face, name: []const u8) ?Retired {
+        for (self.retired) |r| if (std.mem.eql(u8, r.name, name)) return r;
         return null;
     }
 };
@@ -158,10 +192,21 @@ pub fn names(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, face: Face) void {
 }
 
 /// Print the unknown-verb diagnostic and exit 2 — the shape both faces used.
+///
+/// A name this face used to carry is answered with the invocation that replaced
+/// it, in gist's hint grammar (`try:` / `note:`), because the caller's intent is
+/// known and only the spelling moved. Exit stays 2: coaching, never an alias.
 pub fn unknown(face: Face, mode: []const u8) noreturn {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const gpa = arena.allocator();
+    if (face.folded(mode)) |r| {
+        const at = r.invocation(face.tool);
+        assay.diag("{s}: '{s}' folded into {s} {s}\n", .{ face.tool, mode, at[0], at[1] });
+        assay.diag("{s}: try: {s} {s}\n", .{ face.tool, at[0], at[1] });
+        assay.diag("{s}: note: {s}\n", .{ face.tool, r.because });
+        std.process.exit(2);
+    }
     var buf: std.ArrayList(u8) = .empty;
     names(&buf, gpa, face);
     assay.diag("{s}: unknown verb '{s}' ({s}; --help)\n", .{ face.tool, mode, buf.items });
@@ -202,6 +247,18 @@ pub fn usage(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, face: Face) void {
         }
     }
 
+    if (face.retired.len > 0) {
+        buf.appendSlice(gpa, "\nfolded — the name is gone, the question is not:\n") catch oom();
+        var widest: usize = 0;
+        for (face.retired) |r| widest = @max(widest, r.name.len);
+        for (face.retired) |r| {
+            const at = r.invocation(face.tool);
+            buf.print(gpa, "  {s}", .{r.name}) catch oom();
+            buf.appendNTimes(gpa, ' ', widest - r.name.len + 4) catch oom();
+            buf.print(gpa, "{s} {s}\n", .{ at[0], at[1] }) catch oom();
+        }
+    }
+
     if (face.epilogue.len > 0) buf.print(gpa, "\n{s}", .{face.epilogue}) catch oom();
 }
 
@@ -226,7 +283,7 @@ fn form(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, tool: []const u8, v: Ve
 /// The envelope both faces were maintaining as separate copies. Anything true
 /// of every irregex-family binary belongs here, not in a face.
 const trace_note =
-    \\"trace":{"summary":"phase-trace diagnostics on stderr, off by default; on a --json run the stderr diagnostic is one NDJSON record, so timing is machine-parseable alongside stdout results","channel":"stderr","env":{"GIST_TRACE":"comma-separated lenses (amend,journal,reconcile,warm,rank,index,query,session) or 'all'; off when unset","GIST_TRACE_FORMAT":"text|json; defaults to the run's --json format"}}
+    \\"trace":{"summary":"phase-trace diagnostics on stderr, off by default; on a --json run the stderr diagnostic is one NDJSON record, so timing is machine-parseable alongside stdout results","channel":"stderr","env":{"GIST_TRACE":"comma-separated lenses (amend,journal,reconcile,warm,rank,index,query,session,fault) or 'all'; off when unset","GIST_TRACE_FORMAT":"text|json; defaults to the run's --json format"}}
 ;
 
 /// Render the JSON capability manifest.
@@ -272,6 +329,24 @@ pub fn schema(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, face: Face, versi
         buf.appendSlice(gpa, "]}") catch oom();
     }
     buf.append(gpa, '}') catch oom();
+
+    if (face.retired.len > 0) {
+        buf.appendSlice(gpa, ",\"retired\":{") catch oom();
+        for (face.retired, 0..) |r, i| {
+            if (i > 0) buf.append(gpa, ',') catch oom();
+            const at = r.invocation(face.tool);
+            emit.jsonStr(buf, gpa, r.name);
+            // The whole invocation, tool included: an agent reading only this
+            // manifest cannot know which binary owns the replacement, and for
+            // the composed verbs it is not the one it just called.
+            buf.appendSlice(gpa, ":{\"now\":") catch oom();
+            emit.jsonStr(buf, gpa, std.fmt.allocPrint(gpa, "{s} {s}", .{ at[0], at[1] }) catch oom());
+            buf.appendSlice(gpa, ",\"because\":") catch oom();
+            emit.jsonStr(buf, gpa, r.because);
+            buf.append(gpa, '}') catch oom();
+        }
+        buf.append(gpa, '}') catch oom();
+    }
 
     for (face.notes) |n| {
         buf.append(gpa, ',') catch oom();
@@ -377,6 +452,10 @@ const sample = Face{
         },
         .{ .name = "index", .form = "[--shelf]", .blurb = "build the atlas", .summary = "build + persist", .section = .lifecycle, .run = noop },
     },
+    .retired = &.{
+        .{ .name = "dups", .now = "similar --as copies", .because = "a channel flag is not a verb" },
+        .{ .name = "context", .now = "pack --matching PAT", .because = "the job moved to a sibling face", .tool = "other" },
+    },
     .notes = &.{.{ .key = "corpus_policy", .text = "the shared corpus" }},
     .exits = &.{ .{ .code = 0, .means = "verb ran" }, .{ .code = 2, .means = "usage error" } },
 };
@@ -408,6 +487,14 @@ test "the manifest renders as valid JSON carrying every verb and typed defaults"
     try t.expectEqualStrings("stderr", root.get("output_stream").?.object.get("diagnostics").?.string);
     try t.expect(root.get("trace").?.object.get("env").?.object.contains("GIST_TRACE"));
     try t.expectEqualStrings("usage error", root.get("exit_codes").?.object.get("2").?.string);
+    // A folded name is in the manifest but NOT in the verb table, so an agent
+    // reading the schema learns the new invocation instead of retrying the old.
+    try t.expect(!verbs.contains("dups"));
+    const folded = root.get("retired").?.object;
+    try t.expectEqualStrings("demo similar --as copies", folded.get("dups").?.object.get("now").?.string);
+    // A job that moved to a sibling binary names that binary, so the coaching
+    // line an agent copies is runnable rather than `demo other …`.
+    try t.expectEqualStrings("other pack --matching PAT", folded.get("context").?.object.get("now").?.string);
 }
 
 test "the help derives its index, its forms, and its continuation alignment" {
@@ -431,7 +518,20 @@ test "the help derives its index, its forms, and its continuation alignment" {
         \\  demo index [--shelf]
         \\      build the atlas
         \\
+        \\folded — the name is gone, the question is not:
+        \\  dups       demo similar --as copies
+        \\  context    other pack --matching PAT
+        \\
     , buf.items);
+}
+
+test "a folded name is documented, not dispatchable" {
+    // The whole point of the row: `find` still says no (so dispatch cannot
+    // silently answer a moved question), while `folded` knows what to teach.
+    try t.expect(sample.find("dups") == null);
+    const r = sample.folded("dups").?;
+    try t.expectEqualStrings("similar --as copies", r.now);
+    try t.expect(sample.folded("similar") == null);
 }
 
 test "names renders the unknown-verb line's verb list" {

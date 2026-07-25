@@ -1,12 +1,4 @@
-//! relate — the `dups` and `patterns` verbs over irregex primitives.
-//!
-//! The CLI surface over `src/kernel/{similarity,batch}/`: native shapes no rg
-//! flag can express (like `--rank`, they are irregex vocabulary, not rg's).
-//! The probe query `similar` lives beside this file in `similar.zig`.
-//!
-//!   relate dups [--max-distance T] [--top N] [--json] [--no-index] [ROOT...]
-//!       near-duplicate pairs across the corpus, closest first — copy-paste
-//!       drift, forked fixtures, mirrored modules.
+//! relate — the `patterns` verb: one walk, N patterns, exact attribution.
 //!
 //!   relate patterns -e P [-e P…] [-f FILE] [-F] [-i] [--by pattern|file]
 //!                 [--under GLOB] [--top N] [--json] [ROOT...]
@@ -14,13 +6,18 @@
 //!       shape relocator/lints re-derive today with N runs + Python. `--by`
 //!       groups into counts; `--under`/`--top` shape engine-side (loom).
 //!
-//! Corpus policy: these verbs answer over the shared index corpus (every
-//! non-binary, non-gitignored file under the roots, plus corpus-only VCS/build
-//! pruning). The ignore parser and precedence are exactly gist's.
-//! The sketch-backed verbs resolve their (paths, sketches) view through
-//! `kinship.resolve` — persisted atlas + freshness fold when one is ready,
-//! live corpus build otherwise, identical answers either way.
-//! Diagnostics (timing) go to stderr; results to stdout, rg-style.
+//! The exact half of relate, and the only verb here that answers with hits
+//! rather than with a compression score: the kinship verbs use the same engine
+//! as a FILTER (`--matching`), while this one reports the matches themselves.
+//! When N patterns are the question, N `gist -l` runs re-walk the tree N times
+//! and lose which pattern found what; here the PatternSet nominates once, the
+//! read is index-elided when every pattern has a sound trigram prefilter, and
+//! each row keeps its pattern id.
+//!
+//! Corpus policy: the shared index corpus (every non-binary, non-gitignored file
+//! under the roots, plus corpus-only VCS/build pruning), with exactly gist's
+//! ignore parser and precedence. Diagnostics (timing) go to stderr; results to
+//! stdout, rg-style.
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
@@ -31,72 +28,14 @@ const assay = @import("../../../assay/assay.zig");
 const scope = @import("../../../corpus/scope/glob.zig");
 const patterns_mod = @import("../../../kernel/batch/patterns.zig");
 const loom = @import("../../../kernel/batch/loom.zig");
-const query = @import("../../../kernel/match/query.zig");
+const query = @import("../../../kernel/match/query/query.zig");
 const parallel = @import("../../../kernel/primitives/parallel.zig");
-const kinship = @import("kinship.zig");
 const flags = @import("../../cli/flags.zig");
-const grade = @import("../../cli/grade.zig");
 const emit = @import("../../cli/emit.zig");
 const grepfile = @import("../../exec/cold/read/grepfile.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
-
-// ── `relate dups` ──
-
-pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
-    var o: kinship.Opts = .{ .top = 100 };
-    var roots: std.ArrayList([]const u8) = .empty;
-    defer roots.deinit(gpa);
-    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .max_dist = true, .no_index = true, .min_grade = true });
-
-    const run = assay.Run.open(gpa, io, o.json);
-    var view = try kinship.resolve(gpa, io, roots.items, o.no_index, .bytes);
-    defer view.deinit();
-    const pairs = try kinship.verifiedPairs(gpa, view.paths, view.sketches, o.max_dist);
-    defer gpa.free(pairs);
-
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
-    var verdict = grade.Verdict{
-        .channel = .copies,
-        .scored = view.paths.len,
-        .floor = o.min_grade,
-        .scoped = roots.items.len > 0,
-    };
-    for (pairs) |p| {
-        if (verdict.shown >= o.top) break;
-        if (!view.gate(p.i) or !view.gate(p.j)) continue; // deleted since the anchor
-        if (verdict.best == null) verdict.best = p.dist;
-        const g = grade.of(.copies, p.dist);
-        if (o.min_grade) |floor| if (!g.meets(floor)) {
-            verdict.withheld += 1;
-            continue;
-        };
-        verdict.shown += 1;
-        emit.emitRow(&buf, gpa, o.json, .{
-            .{ "a", "s", view.paths[p.i] },
-            .{ "b", "s", view.paths[p.j] },
-            .{ "distance", "d:.4", p.dist },
-            .{ "grade", "s", g.label() },
-        }, "{d:.4}  {s}  {s}\n", .{ p.dist, view.paths[p.i], view.paths[p.j] });
-    }
-    corpus_mod.emitStdout(buf.items);
-    grade.report("relate", "this corpus", verdict);
-    const dur = run.elapsed().ms();
-    run.emit("dups: {d} files ({s}{d} refreshed) · {d} pair(s) ≤ {d:.2} · {d:.0} ms\n", .{ view.paths.len, view.provenance(), view.refreshed, pairs.len, o.max_dist, dur }, .{
-        .{ "verb", "s", "dups" },
-        .{ "files", "d", view.paths.len },
-        .{ "source", "s", view.source() },
-        .{ "refreshed", "d", view.refreshed },
-        .{ "pairs", "d", pairs.len },
-        .{ "max_distance", "d:.2", o.max_dist },
-        .{ "ms", "d:.0", dur },
-    });
-    grade.settle(verdict);
-}
-
-// ── `relate patterns` attribution ──
 
 /// Attribute one document's bytes: the gate rejects all-miss docs in a single
 /// pass; survivors get exact per-pattern, per-line attribution as loom rows.

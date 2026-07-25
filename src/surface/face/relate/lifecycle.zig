@@ -69,7 +69,7 @@ pub fn runIndex(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     });
 
     // The fragment tier rides the same corpus read + anchor: one silhouette per
-    // extracted function, so `relate concepts` answers warm.
+    // extracted function, so `--unit function` answers warm.
     const frag_span = assay.Span.open(io);
     var fbuild = try frag_mod.buildAll(gpa, &corpus);
     defer fbuild.deinit();
@@ -180,7 +180,7 @@ pub fn runStatus(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
         defer gpa.free(body);
         try out.print(gpa, "{s}\n", .{body});
     } else if (st.atlas.state == .ready) {
-        const frag_line = if (st.frag.state == .ready) "ready (concepts answers)" else "missing — `relate index` builds it";
+        const frag_line = if (st.frag.state == .ready) "ready (--unit function answers warm)" else "missing — `relate index` builds it";
         try out.print(gpa,
             \\relate — kinship atlas {s}
             \\  files sketched  {d}

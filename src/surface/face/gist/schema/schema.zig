@@ -10,10 +10,19 @@ const args = @import("../../../exec/cold/argv/args.zig");
 const jsonstr = @import("../../../exec/cold/emit/jsonstr.zig");
 const assay = @import("../../../../assay/assay.zig");
 
-const manifest_prefix =
+// Split at the version so the one number is interpolated from the engine's
+// single source rather than hand-copied here — the drift `relate echoes` caught
+// was exactly this literal claiming 0.1.0 against an engine at 0.2.0.
+// The trailing separator is concatenated rather than typed so this manifest's
+// `"key": value` spacing survives a formatter that eats trailing whitespace.
+const manifest_head =
     \\{
     \\  "tool": "gist",
-    \\  "version": "0.1.0",
+    \\  "version":
+++ " ";
+
+const manifest_prefix =
+    \\,
     \\  "summary": "persistent trigram-indexed code locator for an agent's repeated exact-search loop",
     \\  "verbs": {
     \\    "index": {
@@ -39,7 +48,7 @@ const manifest_prefix =
     \\      "flags": [{"name": "--json", "type": "bool", "default": false, "description": "versioned machine output"}, {"name": "--top", "type": "int", "default": 20, "description": "tally rows surfaced"}]
     \\    },
     \\    "similar": {"moved": "the relate binary owns this verb — see `relate --schema`"},
-    \\    "dups": {"moved": "the relate binary owns this verb — see `relate --schema`"},
+    \\    "echoes": {"moved": "the relate binary owns this verb — see `relate --schema`"},
     \\    "patterns": {"moved": "the relate binary owns this verb — see `relate --schema`"}
     \\  },
     \\  "search": {
@@ -70,7 +79,7 @@ const manifest_suffix =
     \\  "trace": {
     \\    "summary": "phase-trace diagnostics on stderr, off by default; on a --json run the stderr diagnostic is one NDJSON record, so timing is machine-parseable alongside stdout results",
     \\    "channel": "stderr",
-    \\    "env": {"GIST_TRACE": "comma-separated lenses (amend,journal,reconcile,warm,rank,index,query,session) or 'all'; off when unset", "GIST_TRACE_FORMAT": "text|json; defaults to the run's --json format"}
+    \\    "env": {"GIST_TRACE": "comma-separated lenses (amend,journal,reconcile,warm,rank,index,query,session,fault) or 'all'; off when unset", "GIST_TRACE_FORMAT": "text|json; defaults to the run's --json format"}
     \\  },
     \\  "hints": {
     \\    "summary": "structured stderr guidance on notable outcomes: a no-match run gets a 'gist: no matches for ...' summary plus up to three ranked suggestion lines derived from the query's own shape (-i / -U / -F / -uu / scope); a truncated run gets the output-budget notice. Results on stdout are never touched.",
@@ -117,9 +126,11 @@ fn appendSpec(a: std.mem.Allocator, out: *std.ArrayList(u8), spec: args.FlagSpec
     try out.append(a, '}');
 }
 
-fn render(a: std.mem.Allocator) ![]u8 {
+fn render(a: std.mem.Allocator, version: []const u8) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     errdefer out.deinit(a);
+    try out.appendSlice(a, manifest_head);
+    jsonstr.write(&out, a, version);
     try out.appendSlice(a, manifest_prefix);
     for (buckets, 0..) |bucket, bucket_i| {
         if (bucket_i > 0) try out.appendSlice(a, ",\n");
@@ -140,10 +151,11 @@ fn render(a: std.mem.Allocator) ![]u8 {
     return out.toOwnedSlice(a);
 }
 
-/// Emit the JSON capability manifest to stdout.
-pub fn emit() void {
+/// Emit the JSON capability manifest to stdout, stamped with `version` — the
+/// same string `--version` prints, so the two can never disagree.
+pub fn emit(version: []const u8) void {
     const a = std.heap.page_allocator;
-    const manifest = render(a) catch {
+    const manifest = render(a, version) catch {
         assay.diag("gist: could not render --schema\n", .{});
         std.process.exit(2);
     };
@@ -153,8 +165,10 @@ pub fn emit() void {
 
 test "--schema is valid JSON derived from the parser catalog" {
     const t = std.testing;
-    const manifest = try render(t.allocator);
+    const manifest = try render(t.allocator, "9.9.9");
     defer t.allocator.free(manifest);
+    // The stamp is the caller's, not a literal in this file.
+    try t.expect(std.mem.indexOf(u8, manifest, "\"version\": \"9.9.9\"") != null);
 
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, manifest, .{});
     defer parsed.deinit();

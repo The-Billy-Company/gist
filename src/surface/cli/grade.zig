@@ -1,159 +1,106 @@
-//! Kinship channels, their calibrated grades, and the weak-result verdict.
+//! The weak-result verdict: what an answer amounted to, said out loud.
 //!
-//! A distance is not an answer. `relate similar fresh.zig` returning 0.7813
-//! looks like a result and reads like a result, but every row is past the 0.50
-//! line where kinship stops meaning "related" and starts meaning "both are
-//! Zig" — and nothing in the output said so. The calibration lived only in
-//! prose (`.cursor/rules/irregex.mdc`), which the binary's caller does not
-//! have. This module moves it into the engine.
+//! `relate similar fresh.zig` returning 0.7813 looks like a result and reads
+//! like a result, but every row is past the 0.50 line where kinship stops
+//! meaning "related" and starts meaning "both are Zig" — and nothing in the
+//! output said so. The calibration lived only in prose
+//! (`.cursor/rules/irregex.mdc`), which the binary's caller does not have.
 //!
-//! Two things live here because they are one idea:
+//! The vocabulary and its bands are kernel facts and live there
+//! (`kernel/kinship/metric/channel.zig`); this module re-exports them so every
+//! face keeps one import, and owns the two surface halves:
 //!
-//!   • **Channel** — which kinship question is being asked, named for what it
-//!     finds rather than the metric it runs. `copies` (verbatim/drifted
-//!     duplication), `twins` (same skeleton, renamed vocabulary), `shapes`
-//!     (shared skeleton regardless of vocabulary), `any` (closest in either).
-//!     One enum for every verb and every face: before this, `--lens` named two
-//!     incompatible enums, so `similar --lens echo` and `concepts --lens fused`
-//!     both failed for no principled reason.
-//!
-//!   • **Grade** — where a score falls on that channel's calibrated bands, so
-//!     a caller can tell a real twin from statistical background. Cut points
-//!     are the ones the tool already documented and defaulted to (0.05 / 0.25 /
-//!     0.50 for distances; the 0.15 `--min-echo` floor for gaps), promoted from
-//!     prose to a typed value that rides `--json` rows, drives `--min-grade`,
-//!     and fires a stderr verdict when the whole answer is background.
-//!
-//! Polarity differs by channel and that is load-bearing: `copies`/`shapes`/
-//! `any` score a DISTANCE (lower is closer), `twins` scores a GAP (higher is
-//! stronger). One flag spelling for both would silently invert a threshold, so
-//! the CLI keeps `--max-distance` and `--min-echo` distinct and this module
-//! makes the polarity explicit rather than remembered.
+//!   • **Sift** — the emit ledger every ranking verb runs: cap at `--top`, gate
+//!     rows whose file vanished since the index anchor, remember the strongest
+//!     score BEFORE withholding, withhold anything under `--min-grade`. Four
+//!     verbs each hand-rolled this loop and drifted; now they share it.
+//!   • **Verdict** — what the answer amounted to, rendered on stderr in gist's
+//!     hint grammar, plus the rg-shaped exit code that goes with it.
 
 const std = @import("std");
 const corpus_mod = @import("../../corpus/tree/corpus.zig");
+const channel_mod = @import("../../kernel/kinship/metric/channel.zig");
 const guide = @import("guide.zig");
 
-/// Which kinship question a verb is answering. Tags are the user-facing
-/// vocabulary; `metric` names the underlying channel for diagnostics.
-pub const Channel = enum {
-    /// LZJD distance over raw bytes — copy-paste and its drift.
-    copies,
-    /// byte distance − structure distance — the same skeleton wearing
-    /// different vocabulary (Type-2 clones), the abstraction candidate.
-    twins,
-    /// Normalized-structure silhouette distance — shared skeleton, whether or
-    /// not the vocabulary also matches.
-    shapes,
-    /// min(copies, shapes) — close in EITHER channel counts.
-    any,
+/// The one channel vocabulary + its calibrated bands (kernel-owned).
+pub const Channel = channel_mod.Channel;
+pub const Grade = channel_mod.Grade;
+pub const of = channel_mod.of;
 
-    /// Whether a higher or lower score is the stronger relation.
-    pub const Polarity = enum { distance, gap };
+// ── the emit ledger ──
 
-    pub fn polarity(self: Channel) Polarity {
-        return if (self == .twins) .gap else .distance;
-    }
-
-    /// The underlying metric's name, for stderr diagnostics and prior-art
-    /// cross-reference (the literature calls these LZJD / winnowed silhouette).
-    pub fn metric(self: Channel) []const u8 {
-        return switch (self) {
-            .copies => "bytes",
-            .twins => "echo",
-            .shapes => "structure",
-            .any => "fused",
-        };
-    }
-
-    /// Combine a pair's two measured distances into this channel's score — the
-    /// ONE definition of what each channel means in terms of the metrics.
-    /// `copies` ignores `structure`, so a caller that never built silhouettes
-    /// may pass anything for it.
-    pub fn score(self: Channel, bytes: f64, structure: f64) f64 {
-        return switch (self) {
-            .copies => bytes,
-            .shapes => structure,
-            .twins => bytes - structure,
-            .any => @min(bytes, structure),
-        };
-    }
-
-    /// Accept the user-facing vocabulary and the metric names it replaced, so
-    /// a caller who learned `--lens bytes` is not stranded. One enum either
-    /// way — the aliases are spellings, not a second code path.
-    pub fn parse(s: []const u8) ?Channel {
-        const table = .{
-            .{ "copies", Channel.copies }, .{ "bytes", Channel.copies },
-            .{ "twins", Channel.twins },   .{ "echo", Channel.twins },
-            .{ "shapes", Channel.shapes }, .{ "structure", Channel.shapes },
-            .{ "any", Channel.any },       .{ "fused", Channel.any },
-        };
-        inline for (table) |row| if (std.mem.eql(u8, s, row[0])) return row[1];
-        return null;
-    }
-};
-
-/// Where a score falls on its channel's calibrated bands. Ordered strongest
-/// first, so `@intFromEnum` ascending is confidence descending.
-pub const Grade = enum {
-    /// Distance channels only: the same bytes or the same skeleton.
-    identical,
-    /// A real relation — the `--max-distance 0.25` band `dups` ships with.
-    strong,
-    /// Related, worth a look, not a fork.
-    moderate,
-    /// Past the line where kinship means "same language, same house style".
-    weak,
-    /// Background. Reporting this as a result is reporting noise.
-    none,
-
-    pub fn label(self: Grade) []const u8 {
-        return @tagName(self);
-    }
-
-    pub fn parse(s: []const u8) ?Grade {
-        return std.meta.stringToEnum(Grade, s);
-    }
-
-    /// Is `self` at least as strong as `floor`? The `--min-grade` predicate.
-    pub fn meets(self: Grade, floor: Grade) bool {
-        return @intFromEnum(self) <= @intFromEnum(floor);
-    }
-};
-
-/// Grade `score` on `channel`'s bands.
+/// The shared shape of "emit at most `top` rows, honestly".
 ///
-/// Distance cut points are the ones already documented and defaulted to:
-/// 0.05 "near-exact copy", 0.25 "same thing, drifted" (the `dups`/`clusters`
-/// admission default), 0.50 "shares style, not substance". Gap cut points
-/// scale from the 0.15 `--min-echo` floor, below which a structure-close pair
-/// is small-sample noise rather than a shared skeleton.
-pub fn of(channel: Channel, score: f64) Grade {
-    if (std.math.isNan(score)) return .none;
-    return switch (channel.polarity()) {
-        .distance => if (score <= 0.05)
-            .identical
-        else if (score <= 0.25)
-            .strong
-        else if (score <= 0.50)
-            .moderate
-        else if (score <= 0.75)
-            .weak
-        else
-            .none,
-        // A gap can never mean "identical": two files with identical bytes
-        // have a zero gap, which is the weakest twin signal there is.
-        .gap => if (score >= 0.45)
-            .strong
-        else if (score >= 0.30)
-            .moderate
-        else if (score >= 0.15)
-            .weak
-        else
-            .none,
-    };
-}
+/// Every ranking verb needs the same five decisions per row, in the same
+/// order, and getting the order wrong is a silent lie: record the best score
+/// before a floor withholds it, or the verdict claims there was nothing there.
+/// `Sift` is that order, once.
+pub const Sift = struct {
+    verdict: Verdict,
+    top: usize,
+
+    pub fn init(chan: Channel, top: usize, floor: ?Grade, scored: usize, scoped: bool) Sift {
+        return .{
+            .verdict = .{ .channel = chan, .scored = scored, .floor = floor, .scoped = scoped },
+            .top = top,
+        };
+    }
+
+    /// Has the answer filled its `--top` budget? The loop's break condition.
+    pub fn full(self: *const Sift) bool {
+        return self.verdict.shown >= self.top;
+    }
+
+    /// Judge one row, strongest-first order assumed. Returns its grade when the
+    /// row may be emitted, `null` when a `--min-grade` floor withheld it —
+    /// either way the row is now accounted for in the verdict.
+    pub fn judge(self: *Sift, score: f64) ?Grade {
+        const g = of(self.verdict.channel, score);
+        if (self.verdict.best == null) self.verdict.best = score;
+        if (self.verdict.floor) |floor| if (!g.meets(floor)) {
+            self.verdict.withheld += 1;
+            return null;
+        };
+        self.verdict.shown += 1;
+        return g;
+    }
+
+    /// Account for a row this channel's bands cannot judge — the complement
+    /// shapes, where the score means the OPPOSITE of confidence. `distinct`
+    /// ranks by how far the nearest miss is, so grading it on kinship bands
+    /// would call the strongest answer "weak" precisely when it was strongest.
+    /// The row still counts toward `--top` and the exit code; it just carries no
+    /// grade, and `best` stays null so the verdict coaches nothing.
+    pub fn count(self: *Sift) void {
+        self.verdict.shown += 1;
+    }
+
+    /// Judge a row whose score is NOT in the answer's sort order — a family
+    /// graded by its loosest edge, say, where the tightest family may land
+    /// anywhere in a size-ranked list. `best` becomes the strongest seen.
+    pub fn judgeUnordered(self: *Sift, score: f64) ?Grade {
+        const stronger = switch (self.verdict.channel.polarity()) {
+            .distance => self.verdict.best == null or score < self.verdict.best.?,
+            .stronger => self.verdict.best == null or score > self.verdict.best.?,
+        };
+        if (stronger) self.verdict.best = score;
+        const g = of(self.verdict.channel, score);
+        if (self.verdict.floor) |floor| if (!g.meets(floor)) {
+            self.verdict.withheld += 1;
+            return null;
+        };
+        self.verdict.shown += 1;
+        return g;
+    }
+
+    /// Render the verdict to stderr and exit with its rg-shaped code — the last
+    /// two things a ranking verb does, in the order that keeps the run's trace
+    /// line before its judgment.
+    pub fn settle(self: *const Sift, tool: []const u8, subject: []const u8) void {
+        report(tool, subject, self.verdict);
+        if (self.verdict.code() != 0) std.process.exit(self.verdict.code());
+    }
+};
 
 // ── the verdict ──
 
@@ -175,11 +122,25 @@ pub const Verdict = struct {
     floor: ?Grade = null,
     /// Explicit ROOT args were given (a widen hint applies).
     scoped: bool = false,
+    /// An exact `--matching` filter narrowed the population first, so a thin
+    /// answer means "few matches", not "little kinship" — and widening the
+    /// pattern is the fix, not switching channels.
+    narrowed: bool = false,
+    /// What this answer's rows ARE, when they are not kinship rows: the
+    /// complement shapes find `"distinct units"`, and "no kin" would be the
+    /// opposite of what happened. Null takes the channel's own noun.
+    noun: ?[]const u8 = null,
 
     /// What the answer amounted to. The distinction is load-bearing: an answer
     /// trimmed by an explicit floor is a GOOD answer that owes the caller an
     /// accounting, not a failure that should be talked out of its channel.
     pub const Outcome = enum { empty, weak, trimmed };
+
+    /// What this answer was looking for, in one word.
+    pub fn found(self: Verdict) []const u8 {
+        if (self.noun) |n| return n;
+        return if (self.channel == .recall) "source" else "kin";
+    }
 
     /// The grade of the best score, or `.none` when nothing scored.
     pub fn grade(self: Verdict) Grade {
@@ -188,6 +149,10 @@ pub const Verdict = struct {
 
     pub fn outcome(self: Verdict) Outcome {
         if (self.shown == 0) return .empty;
+        // Being "weak" requires a measured score to be weak about. A shape whose
+        // rows this channel cannot grade (the complement) has rows, and they
+        // are the answer — not a disappointing version of one.
+        if (self.best == null) return .trimmed;
         return if (self.grade().meets(.moderate)) .trimmed else .weak;
     }
 
@@ -209,18 +174,23 @@ pub const Verdict = struct {
 pub fn render(a: std.mem.Allocator, out: *std.ArrayList(u8), tool: []const u8, subject: []const u8, v: Verdict) !void {
     const g = v.grade();
     const outcome = v.outcome();
+    const found = v.found();
 
     // ── the outcome, one line ────────────────────────────────────────────
     const max_display = 64;
     const shown_subject = subject[0..@min(subject.len, max_display)];
     try out.print(a, "{s}: ", .{tool});
     switch (outcome) {
-        .empty => try out.print(a, "no kin", .{}),
-        .weak => try out.print(a, "no strong kin", .{}),
-        .trimmed => try out.print(a, "{d} kin", .{v.shown}),
+        .empty => try out.print(a, "no {s}", .{found}),
+        .weak => try out.print(a, "no strong {s}", .{found}),
+        .trimmed => try out.print(a, "{d} {s}", .{ v.shown, found }),
     }
     try out.print(a, " for '{s}{s}'", .{ shown_subject, if (subject.len > max_display) "…" else "" });
-    if (v.best) |b| try out.print(a, " · nearest {d:.4} ({s})", .{ b, g.label() });
+    if (v.best) |b| try out.print(a, " · {s} {d:.4} ({s})", .{
+        if (v.channel.polarity() == .distance) "nearest" else "best",
+        b,
+        g.label(),
+    });
     if (v.scored > 0) try out.print(a, " · {d} scored", .{v.scored});
     if (v.withheld > 0) try out.print(a, " · {d} withheld", .{v.withheld});
     try out.append(a, '\n');
@@ -235,25 +205,54 @@ pub fn render(a: std.mem.Allocator, out: *std.ArrayList(u8), tool: []const u8, s
     // channel would talk the caller out of a real finding.
     if (outcome == .trimmed) return;
 
-    switch (v.channel.polarity()) {
-        .distance => if (v.best) |b| {
-            if (b > 0.50)
-                try guide.linef(a, out, &left, tool, .note, "every row is past 0.50 — shares style, not substance", .{});
-        },
-        .gap => if (v.best) |b| {
-            if (b < 0.15)
-                try guide.linef(a, out, &left, tool, .note, "the widest gap was {d:.4}, under the 0.15 floor where a shared skeleton stops being sample noise", .{b});
-        },
+    // An exact filter ran first, so the population — not the channel — is what
+    // a thin answer is about. Coaching channels here sends the caller the wrong
+    // way: there may be nothing to compare yet.
+    if (v.narrowed) {
+        try guide.line(a, out, &left, tool, .act, "a wider --matching pattern — kinship was scored only inside the exact match");
+        try guide.line(a, out, &left, tool, .note, "drop --matching to ask the same question of the whole scope");
+        return;
     }
-    // The channel that most often holds the answer this one missed.
+
+    // A shape whose rows are not kinship rows has no channel to be coached
+    // toward: reaching here means the COMPLEMENT came back empty, and another
+    // `--as` would not change that every unit in scope has a relative.
+    if (v.noun != null) {
+        try guide.line(a, out, &left, tool, .note, "every unit in scope has a relative at this threshold");
+        try guide.line(a, out, &left, tool, .act, "a tighter threshold — raise the bar for what counts as kin, then ask again");
+        return;
+    }
+
     switch (v.channel) {
-        .copies => {
-            try guide.line(a, out, &left, tool, .act, "--as twins — byte kinship cannot see a shared skeleton that renamed its vocabulary");
-            try guide.line(a, out, &left, tool, .act, "--as any — score the closest of either channel instead of bytes alone");
+        .recall => {
+            if (v.best) |b| if (b < 0.30)
+                try guide.linef(a, out, &left, tool, .note, "the best gain was {d:.4} — this corpus has no cheaper way to say it than from scratch", .{b});
+            try guide.line(a, out, &left, tool, .act, "fewer, more specific words — a short query is cheap to explain anywhere, which reads as weak everywhere");
+            try guide.line(a, out, &left, tool, .act, "gist '<a literal you expect>' — an exact miss is a faster answer than a weak gain");
         },
-        .shapes => try guide.line(a, out, &left, tool, .act, "--as twins — rank by how much MORE shape than vocabulary a pair shares"),
-        .twins => try guide.line(a, out, &left, tool, .act, "--as copies — no shared skeleton here; verbatim duplication may still exist"),
-        .any => try guide.line(a, out, &left, tool, .act, "--as twins — score how much MORE shape than vocabulary a pair shares"),
+        else => {
+            switch (v.channel.polarity()) {
+                .distance => if (v.best) |b| {
+                    if (b > 0.50)
+                        try guide.line(a, out, &left, tool, .note, "every row is past 0.50 — shares style, not substance");
+                },
+                .stronger => if (v.best) |b| {
+                    if (b < 0.15)
+                        try guide.linef(a, out, &left, tool, .note, "the widest gap was {d:.4}, under the 0.15 floor where a shared skeleton stops being sample noise", .{b});
+                },
+            }
+            // The channel that most often holds the answer this one missed.
+            switch (v.channel) {
+                .copies => {
+                    try guide.line(a, out, &left, tool, .act, "--as twins — byte kinship cannot see a shared skeleton that renamed its vocabulary");
+                    try guide.line(a, out, &left, tool, .act, "--as any — score the closest of either channel instead of bytes alone");
+                },
+                .shapes => try guide.line(a, out, &left, tool, .act, "--as twins — rank by how much MORE shape than vocabulary a pair shares"),
+                .twins => try guide.line(a, out, &left, tool, .act, "--as copies — no shared skeleton here; verbatim duplication may still exist"),
+                .any => try guide.line(a, out, &left, tool, .act, "--as twins — score how much MORE shape than vocabulary a pair shares"),
+                .recall => unreachable,
+            }
+        },
     }
     if (v.scoped)
         try guide.line(a, out, &left, tool, .act, "a wider scope — drop the ROOT args to score the whole corpus");
@@ -289,45 +288,6 @@ pub fn settle(v: Verdict) void {
 
 const t = std.testing;
 
-test "one Lens: both vocabularies parse into the same channel" {
-    try t.expectEqual(Channel.copies, Channel.parse("copies").?);
-    try t.expectEqual(Channel.copies, Channel.parse("bytes").?);
-    try t.expectEqual(Channel.twins, Channel.parse("twins").?);
-    try t.expectEqual(Channel.twins, Channel.parse("echo").?);
-    try t.expectEqual(Channel.shapes, Channel.parse("structure").?);
-    try t.expectEqual(Channel.any, Channel.parse("fused").?);
-    try t.expectEqual(@as(?Channel, null), Channel.parse("sideways"));
-}
-
-test "distance bands match the documented cut points" {
-    try t.expectEqual(Grade.identical, of(.copies, 0.00));
-    try t.expectEqual(Grade.identical, of(.copies, 0.05));
-    try t.expectEqual(Grade.strong, of(.copies, 0.25)); // the dups default
-    try t.expectEqual(Grade.moderate, of(.shapes, 0.50));
-    try t.expectEqual(Grade.weak, of(.copies, 0.60)); // past "shares style, not substance"
-    try t.expectEqual(Grade.weak, of(.copies, 0.75));
-    // The measured `similar fresh.zig` nearest neighbour over 21091 files: far
-    // enough out that calling it a neighbour at all is reporting background.
-    try t.expectEqual(Grade.none, of(.copies, 0.7813));
-}
-
-test "gap bands invert, and a gap is never identical" {
-    try t.expectEqual(Grade.strong, of(.twins, 0.6261)); // the schema.zig pair
-    try t.expectEqual(Grade.moderate, of(.twins, 0.3655));
-    try t.expectEqual(Grade.weak, of(.twins, 0.15)); // the --min-echo floor
-    try t.expectEqual(Grade.none, of(.twins, 0.14));
-    // Byte-identical files share every fingerprint, so their gap is zero —
-    // the weakest twin evidence, not the strongest.
-    try t.expectEqual(Grade.none, of(.twins, 0.0));
-}
-
-test "meets orders strongest-first for the --min-grade floor" {
-    try t.expect(Grade.identical.meets(.strong));
-    try t.expect(Grade.strong.meets(.strong));
-    try t.expect(!Grade.moderate.meets(.strong));
-    try t.expect(Grade.none.meets(.none));
-}
-
 test "a strong answer stays silent; a weak one explains itself" {
     try t.expect(!(Verdict{ .channel = .copies, .best = 0.12, .shown = 5 }).notable());
     try t.expect((Verdict{ .channel = .copies, .best = 0.7813, .shown = 5 }).notable());
@@ -352,7 +312,7 @@ test "a floor that trims a real answer accounts for it without recanting" {
         .scoped = true,
     });
     try t.expectEqualStrings(
-        \\relate: 1 kin for 'this corpus' · nearest 0.6261 (strong) · 263 scored · 76 withheld
+        \\relate: 1 kin for 'this corpus' · best 0.6261 (strong) · 263 scored · 76 withheld
         \\relate: note: 76 row(s) scored below --min-grade strong; the best was strong
         \\
     , out.items);
@@ -378,19 +338,48 @@ test "the fresh.zig verdict names the band and the channel that would help" {
     , out.items);
 }
 
-test "an answer with no rows speaks rg's no-match code, whatever emptied it" {
-    // The ranking verbs used to exit 0 either way, so `relate similar X && …`
-    // could not tell a corpus with no twins from one full of them.
-    try t.expectEqual(@as(u8, 0), (Verdict{ .channel = .copies, .best = 0.12, .shown = 5 }).code());
-    try t.expectEqual(@as(u8, 1), (Verdict{ .channel = .copies, .scored = 21091 }).code());
-    // Withheld-to-empty is still a clean no-match: kin at that grade, none.
-    try t.expectEqual(@as(u8, 1), (Verdict{
-        .channel = .copies,
-        .best = 0.7734,
-        .scored = 752,
-        .withheld = 752,
-        .floor = .strong,
-    }).code());
+test "a weak text probe is coached on the query, not on kinship channels" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var out: std.ArrayList(u8) = .empty;
+    // The measured nonsense query: nothing in the corpus explains it cheaply,
+    // and no `--as` flag can change that.
+    try render(a, &out, "relate", "purple monkey dishwasher", .{
+        .channel = .recall,
+        .best = 0.2316,
+        .shown = 3,
+        .scored = 16,
+    });
+    try t.expectEqualStrings(
+        \\relate: no strong source for 'purple monkey dishwasher' · best 0.2316 (none) · 16 scored
+        \\relate: note: the best gain was 0.2316 — this corpus has no cheaper way to say it than from scratch
+        \\relate: try fewer, more specific words — a short query is cheap to explain anywhere, which reads as weak everywhere
+        \\relate: try gist '<a literal you expect>' — an exact miss is a faster answer than a weak gain
+        \\
+    , out.items);
+}
+
+test "a narrowed answer is coached on the pattern, not on the channel" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var out: std.ArrayList(u8) = .empty;
+    // Three files matched the pattern and none are kin: telling the caller to
+    // try another channel would be answering a question they did not ask.
+    try render(a, &out, "relate", "handler.zig", .{
+        .channel = .shapes,
+        .best = 0.81,
+        .shown = 2,
+        .scored = 3,
+        .narrowed = true,
+    });
+    try t.expectEqualStrings(
+        \\relate: no strong kin for 'handler.zig' · nearest 0.8100 (none) · 3 scored
+        \\relate: try a wider --matching pattern — kinship was scored only inside the exact match
+        \\relate: note: drop --matching to ask the same question of the whole scope
+        \\
+    , out.items);
 }
 
 test "an empty answer under a floor reports what it withheld" {
@@ -408,10 +397,86 @@ test "an empty answer under a floor reports what it withheld" {
         .scoped = true,
     });
     try t.expectEqualStrings(
-        \\relate: no kin for 'corpus.zig' · nearest 0.0900 (none) · 412 scored · 7 withheld
+        \\relate: no kin for 'corpus.zig' · best 0.0900 (none) · 412 scored · 7 withheld
         \\relate: note: 7 row(s) scored below --min-grade moderate; the best was none
         \\relate: note: the widest gap was 0.0900, under the 0.15 floor where a shared skeleton stops being sample noise
         \\relate: try --as copies — no shared skeleton here; verbatim duplication may still exist
         \\
     , out.items);
+}
+
+test "an answer with no rows speaks rg's no-match code, whatever emptied it" {
+    // The ranking verbs used to exit 0 either way, so `relate similar X && …`
+    // could not tell a corpus with no twins from one full of them.
+    try t.expectEqual(@as(u8, 0), (Verdict{ .channel = .copies, .best = 0.12, .shown = 5 }).code());
+    try t.expectEqual(@as(u8, 1), (Verdict{ .channel = .copies, .scored = 21091 }).code());
+    // Withheld-to-empty is still a clean no-match: kin at that grade, none.
+    try t.expectEqual(@as(u8, 1), (Verdict{
+        .channel = .copies,
+        .best = 0.7734,
+        .scored = 752,
+        .withheld = 752,
+        .floor = .strong,
+    }).code());
+}
+
+test "the complement's rows are the answer, not a weak version of one" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // `--shape distinct` ranks by how FAR the nearest miss is, so grading it on
+    // kinship bands would have called its best answer "weak". Unscored rows are
+    // simply an answer: nothing to explain, so nothing is printed.
+    var counted = Sift.init(.shapes, 10, null, 14, false);
+    counted.verdict.noun = "distinct units";
+    counted.count();
+    counted.count();
+    try t.expectEqual(Verdict.Outcome.trimmed, counted.verdict.outcome());
+    try t.expect(!counted.verdict.notable());
+    try t.expectEqual(@as(u8, 0), counted.verdict.code());
+
+    // Empty is the interesting case, and it must not read "no kin": every unit
+    // in scope having a relative is the strong finding here.
+    var out: std.ArrayList(u8) = .empty;
+    try render(a, &out, "relate", "this corpus", .{
+        .channel = .shapes,
+        .shown = 0,
+        .scored = 14,
+        .noun = "distinct units",
+    });
+    try t.expect(std.mem.startsWith(u8, out.items, "relate: no distinct units for 'this corpus'"));
+}
+
+test "Sift records the best score before a floor withholds it" {
+    var sift = Sift.init(.copies, 3, .strong, 100, false);
+    // A weak first row is still the best the answer had — a verdict that
+    // reported `null` here would claim the corpus was empty.
+    try t.expectEqual(@as(?Grade, null), sift.judge(0.62));
+    try t.expectEqual(@as(?f64, 0.62), sift.verdict.best);
+    try t.expectEqual(@as(usize, 1), sift.verdict.withheld);
+    try t.expectEqual(@as(usize, 0), sift.verdict.shown);
+    try t.expect(!sift.full());
+}
+
+test "Sift caps at --top and judgeUnordered tracks the strongest either polarity" {
+    var sift = Sift.init(.copies, 2, null, 10, false);
+    try t.expectEqual(Grade.identical, sift.judge(0.01).?);
+    try t.expectEqual(Grade.strong, sift.judge(0.20).?);
+    try t.expect(sift.full()); // two shown, budget spent
+    try t.expectEqual(@as(?f64, 0.01), sift.verdict.best);
+
+    // Families arrive size-ranked, not score-ranked: the tightest one may be
+    // third. `best` must still end up the tightest, not the first seen.
+    var fams = Sift.init(.copies, 10, null, 10, false);
+    _ = fams.judgeUnordered(0.30);
+    _ = fams.judgeUnordered(0.10);
+    _ = fams.judgeUnordered(0.50);
+    try t.expectEqual(@as(?f64, 0.10), fams.verdict.best);
+    // On a `stronger` channel the strongest is the largest.
+    var gaps = Sift.init(.twins, 10, null, 10, false);
+    _ = gaps.judgeUnordered(0.20);
+    _ = gaps.judgeUnordered(0.55);
+    _ = gaps.judgeUnordered(0.31);
+    try t.expectEqual(@as(?f64, 0.55), gaps.verdict.best);
 }

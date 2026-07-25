@@ -217,7 +217,7 @@ fn run(init: std.process.Init) !void {
         return;
     }
     if (std.mem.eql(u8, mode, "--schema")) {
-        schema.emit();
+        schema.emit(gist.version_string);
         return;
     }
 
