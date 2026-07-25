@@ -32,7 +32,14 @@ const shm = @import("shm.zig");
 /// An old daemon receiving `changed` would BadOpcode-drop the whole connection
 /// mid-session; the bump lets a v6 client see the stale daemon in READY and
 /// skip the consult entirely (fallback: journal replay → stat walk).
-pub const protocol_version: u8 = 6;
+///
+/// v7 grew the `diag` frame (S→C): a warm query ships the timing/trace
+/// diagnostics it produced (captured off the worker's `assay` buffer sink) back
+/// to the client, which relays them to its own stderr — so a warm `--rank`/query
+/// is as measurable as cold. It rides ahead of the answer frames; the bump makes
+/// a stale peer fail open cold in the READY check rather than meet the new
+/// opcode, exactly like the v5/v6 additions.
+pub const protocol_version: u8 = 7;
 
 /// Session/transport capabilities the peers agree on in the HELLO frame. NOT
 /// query flags — the flags byte is fully assigned; this is a separate handshake
@@ -93,6 +100,13 @@ pub const Opcode = enum(u8) {
     // REPO-RELATIVE path noted at/after S (a sound superset; the client's stat
     // confirm prunes the extras).
     annals = 15, // S→C: [u8 ok][if ok: [u32 plen][prefix][u32 n]{[u32 len][path]}]
+    // A warm query's diagnostics (timing summary / lens traces the worker
+    // captured off its `assay` buffer sink), relayed to the client's stderr
+    // verbatim. Payload is the already-rendered diagnostic bytes (text or
+    // NDJSON, newline-terminated). Sent AHEAD of the answer frames, zero or more
+    // times; a query with nothing to report sends none. Additive (v7): a stale
+    // peer never reaches it — the READY version check sends it cold first.
+    diag = 16, // S→C: [raw diagnostic bytes]
 };
 
 // Query flags byte. Reserved bits join `known_flags` only with their engine semantics.

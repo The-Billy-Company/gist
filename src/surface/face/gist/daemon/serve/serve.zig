@@ -71,6 +71,7 @@ const watch = @import("../../../../exec/session/watch.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../../../corpus/index/trigrams/fresh.zig");
 const journal = @import("../../../../../corpus/tree/journal.zig");
+const assay = @import("../../../../../assay/assay.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
@@ -633,6 +634,15 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
     // Test-only in-flight gate (see `query_gate_for_test`): pins this handler on
     // its worker so a test can prove the poll thread still serves other clients.
     if (query_gate_for_test.load(.acquire)) |gate| gate.waitUncancelable(session.io);
+    // Capture every diagnostic this query produces (reconcile lens traces, a
+    // `--rank` timing summary) off this worker's thread-local sink so it can ride
+    // a `diag` frame back to the client's stderr — a warm query is otherwise
+    // unmeasurable from the client. The scope is worker-thread-local; a decline
+    // path just drops the buffer (the client re-runs cold and re-emits its own).
+    var dbuf: std.ArrayList(u8) = .empty;
+    defer dbuf.deinit(gpa);
+    const sc = assay.scope(.{ .buffer = .{ .list = &dbuf, .gpa = gpa } });
+    defer sc.end();
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     // `query_ext` carries a roots trailer whose slice headers live in the arena;
@@ -683,11 +693,13 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
                     var buffer = shl.buffer;
                     defer buffer.close();
                     buffer.freeze(); // drop the daemon's writable view, seal (Linux)
+                    sendDiag(gpa, fd, dbuf.items);
                     if (!protocol.sendChunkFd(fd, shl.len, shl.matched, buffer.fd)) return error.ConnClosed;
                     return;
                 },
                 .chunk => |chnk| {
                     try protocol.encodeLines(&buf, gpa, chnk.bytes, chnk.matched);
+                    sendDiag(gpa, fd, dbuf.items);
                     if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
                     return;
                 },
@@ -705,7 +717,17 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
             .lines => unreachable, // routed above
         }
     }
+    sendDiag(gpa, fd, dbuf.items);
     if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+}
+
+/// Ship a warm query's captured diagnostics ahead of its answer as a `diag`
+/// frame, so the client can relay them to its stderr. Best-effort: a lost diag
+/// (dead peer, oversized) never fails the answer — the client's exit code and
+/// stdout are the contract, the timing line is advisory. Empty → nothing sent.
+fn sendDiag(gpa: std.mem.Allocator, fd: std.posix.fd_t, bytes: []const u8) void {
+    if (bytes.len == 0 or bytes.len > protocol.max_frame) return;
+    protocol.sendFrame(gpa, fd, .diag, bytes) catch {};
 }
 
 /// The socket path a daemon binds / a client dials: `$GIST_SESSION_SOCK` when

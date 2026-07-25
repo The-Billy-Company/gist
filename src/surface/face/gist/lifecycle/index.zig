@@ -39,8 +39,7 @@ const crest_sidecar = @import("../../../../corpus/index/crest/sidecar.zig");
 const treemap = @import("../../../../corpus/index/phantom/treemap.zig");
 const shard = @import("../../../../corpus/index/content/shard.zig");
 const Index = @import("../../../../corpus/index/trigrams/trigram.zig").Index;
-const nowNs = @import("../../../exec/cold/argv/args.zig").nowNs;
-const ms = @import("../../../exec/cold/argv/args.zig").ms;
+const assay = @import("../../../../assay/assay.zig");
 
 /// Refresh the persisted index: amend incrementally when the base admits it,
 /// else build + persist the full pair.
@@ -50,7 +49,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void 
 }
 
 fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
-    const t0 = nowNs(io);
+    const span = assay.Span.open(io);
     // Filesystem-journal since-token, minted BEFORE the anchor so a replay
     // from it strictly over-covers (built_ns, now) — the token is what lets
     // later freshness questions (amends, T3 query overlays) skip the stat
@@ -58,7 +57,9 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     const jtok = journal.capture(io);
     // Wall-clock anchor captured BEFORE the read, so a file touched during the
     // build has mtime or status-ctime ≥ anchor and is re-verified next query.
-    const built_ns = std.Io.Clock.now(.real, io).nanoseconds;
+    // Typed `Anchor` (assay): only this producer can mint one, so a monotonic
+    // stamp can never reach `writeAnchor`/the persisted generation.
+    const built = assay.anchor(io);
     var corpus = try corpus_mod.load(gpa, io, roots);
     defer corpus.deinit();
     var idx = try Index.build(gpa, corpus.docs);
@@ -72,8 +73,8 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
 
     // Generation-atomic publish: all blobs stage under gens/<id>/, then
     // pair.gen flips — concurrent loaders never see a mixed old/new set.
-    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths, roots, crest_vectors, built_ns);
-    try fresh.writeAnchor(io, built_ns); // T3 freshness anchor
+    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths, roots, crest_vectors, built.ns());
+    try fresh.writeAnchor(io, built); // T3 freshness anchor
     if (jtok) |t| fresh.writeJournalToken(io, t); // journal since-token (best-effort)
     // Phantom tree.map (self-anchored, whole-CWD corpora only): best-effort —
     // a failure costs the phantom walk tier, never the index build.
@@ -81,14 +82,23 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // Content shard (self-anchored on the SAME `built_ns`, sharing this exact
     // corpus snapshot): best-effort — a failure costs the shard read tier, so a
     // full-scan query falls back to opening every file, never the index build.
-    shard.build(gpa, io, corpus.docs, corpus.paths, built_ns) catch {};
+    shard.build(gpa, io, corpus.docs, corpus.paths, built.ns()) catch {};
 
-    std.debug.print("indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{
+    const dur = span.read(io).ms();
+    assay.summary(gpa, false, "indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{
         corpus.docs.len,
         @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20),
         @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
-        ms(nowNs(io) - t0),
+        dur,
         corpus_mod.outDir(),
+    }, .{
+        .{ "artifact", "s", "index" },
+        .{ "mode", "s", "full" },
+        .{ "files", "d", corpus.docs.len },
+        .{ "corpus_mib", "d:.1", @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20) },
+        .{ "index_mib", "d:.1", @as(f64, @floatFromInt(index_bytes)) / (1 << 20) },
+        .{ "ms", "d:.0", dur },
+        .{ "path", "s", corpus_mod.outDir() },
     });
 }
 
@@ -103,8 +113,8 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
 /// itself — the mmap + doc path-table parse — is loaded ONLY once changes
 /// provably exist and a codicil must be built.
 fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
-    const t0 = nowNs(io);
-    const trace = std.c.getenv("GIST_AMEND_TRACE") != null;
+    const span = assay.Span.open(io);
+    const trace = assay.lit(.amend);
     const out_dir = corpus_mod.outDir();
     // Re-mint the journal since-token on EVERY amend (same before-the-anchor
     // discipline as the full build, so a replay from it strictly over-covers
@@ -118,7 +128,7 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
     // next query. The daemon consult stays sound against it because the
     // FlushSync barrier runs AFTER this instant — every event that occurred
     // before it has been noted by the time the annals answer.
-    const built_ns = std.Io.Clock.now(.real, io).nanoseconds;
+    const built = assay.anchor(io);
 
     // Cheap header reads only — no mmap, no path table.
     const gen = persist.readPublishedGeneration(gpa, io) catch return false;
@@ -137,29 +147,37 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
     // annals only cover from daemon boot, so "since base" (hours ago) would
     // decline forever, while "since the last amend" is answerable one round
     // after boot. Anchor missing/behind-base ⇒ the base instant itself.
-    const since_ns = @max(fresh.readAnchor(gpa, io) orelse base_ns, base_ns);
-    if (trace) std.debug.print("amend: probe {d:.1} ms\n", .{ms(nowNs(io) - t0)});
+    const since_ns = @max(if (fresh.readAnchor(gpa, io)) |a| a.ns() else base_ns, base_ns);
+    if (trace) assay.diag("amend: probe {d:.1} ms\n", .{span.read(io).ms()});
 
     // Three tiers, each the next one's fallback: daemon annals → journal
     // replay → the T3 stat walk (the latter two live in `fresh.changedSince`).
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     var changed: std.ArrayList([]const u8) = .empty;
-    const t_walk = nowNs(io);
+    const walk_span = assay.Span.open(io);
     if (!annalsChanged(gpa, io, disk_roots.roots.items, since_ns, arena.allocator(), &changed)) {
         // No daemon answer this time — fire a detached spawn so the NEXT
         // amend lands warm (flock-singleton, so racers are free), then run
         // the proven fallback.
         spawnForNextAmend(gpa, io);
         fresh.changedSince(gpa, io, disk_roots.roots.items, since_ns, arena.allocator(), &changed) catch return false;
-    } else if (trace) std.debug.print("amend: annals answered\n", .{});
-    if (trace) std.debug.print("amend: changed-set {d:.1} ms ({d} changed)\n", .{ ms(nowNs(io) - t_walk), changed.items.len });
+    } else if (trace) assay.diag("amend: annals answered\n", .{});
+    if (trace) assay.diag("amend: changed-set {d:.1} ms ({d} changed)\n", .{ walk_span.read(io).ms(), changed.items.len });
 
     if (changed.items.len == 0) {
         // Nothing moved: advance the anchor and stop — the pair never loads.
-        fresh.writeAnchor(io, built_ns) catch return false;
+        fresh.writeAnchor(io, built) catch return false;
         if (jtok) |t| fresh.writeJournalToken(io, t); // re-arm the journal fast path
-        std.debug.print("amended 0 docs (fresh) · {d:.1} ms → {s}\n", .{ ms(nowNs(io) - t0), out_dir });
+        const dur = span.read(io).ms();
+        assay.summary(gpa, false, "amended 0 docs (fresh) · {d:.1} ms → {s}\n", .{ dur, out_dir }, .{
+            .{ "artifact", "s", "index" },
+            .{ "mode", "s", "amend" },
+            .{ "docs", "d", @as(usize, 0) },
+            .{ "fresh", "s", "true" },
+            .{ "ms", "d:.1", dur },
+            .{ "path", "s", out_dir },
+        });
         return true;
     }
 
@@ -168,7 +186,7 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
     // between probe and load means our changed set describes a stale base.
     var p = (persist.loadQuiet(gpa, io) catch return false) orelse return false;
     defer p.deinit();
-    if (trace) std.debug.print("amend: load {d:.1} ms\n", .{ms(nowNs(io) - t0)});
+    if (trace) assay.diag("amend: load {d:.1} ms\n", .{span.read(io).ms()});
     const pgen = p.gen orelse return false;
     if (!std.mem.eql(u8, pgen, gen)) return false;
 
@@ -188,7 +206,7 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
 
     var stats: codicil.BuildStats = .{};
     {
-        const t_build = nowNs(io);
+        const build_span = assay.Span.open(io);
         // Mint the NEW generation id up front: the blob embeds the id it will
         // be published as, binding it to its own gens/<id>/ directory.
         var gen_buf: [32]u8 = undefined;
@@ -196,26 +214,36 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
         // Classify against the BASE doc space only (paths beyond doc_count
         // were appended by the previous codicil; the new one re-derives them).
         const blob = (codicil.build(gpa, io, new_gen, base_ns, p.paths.items[0..base_docs], changed.items, &stats) catch return false) orelse null;
-        if (trace) std.debug.print("amend: codicil build {d:.1} ms\n", .{ms(nowNs(io) - t_build)});
+        if (trace) assay.diag("amend: codicil build {d:.1} ms\n", .{build_span.read(io).ms()});
         if (blob) |b| {
             defer gpa.free(b);
-            const t_pub = nowNs(io);
+            const pub_span = assay.Span.open(io);
             persist.publishCodicil(io, out_dir, gen, new_gen, b) catch return false;
-            if (trace) std.debug.print("amend: publish {d:.1} ms\n", .{ms(nowNs(io) - t_pub)});
+            if (trace) assay.diag("amend: publish {d:.1} ms\n", .{pub_span.read(io).ms()});
         }
         // else: every changed path is a non-member (binary/oversize) — the
         // corpus is untouched, so advancing the anchor alone is sound.
     }
-    fresh.writeAnchor(io, built_ns) catch return false;
+    fresh.writeAnchor(io, built) catch return false;
     if (jtok) |t| fresh.writeJournalToken(io, t); // re-arm the journal fast path
 
-    std.debug.print("amended {d} docs (+{d} new, {d} gone) of {d} · {d:.1} ms → {s}\n", .{
+    const dur = span.read(io).ms();
+    assay.summary(gpa, false, "amended {d} docs (+{d} new, {d} gone) of {d} · {d:.1} ms → {s}\n", .{
         stats.docs,
         stats.new,
         stats.tombs,
         base_docs,
-        ms(nowNs(io) - t0),
+        dur,
         out_dir,
+    }, .{
+        .{ "artifact", "s", "index" },
+        .{ "mode", "s", "amend" },
+        .{ "docs", "d", stats.docs },
+        .{ "new", "d", stats.new },
+        .{ "gone", "d", stats.tombs },
+        .{ "base_docs", "d", base_docs },
+        .{ "ms", "d:.1", dur },
+        .{ "path", "s", out_dir },
     });
     return true;
 }

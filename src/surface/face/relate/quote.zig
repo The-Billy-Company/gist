@@ -25,13 +25,12 @@ const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const codex_face = @import("../gist/lifecycle/codex.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
+const assay = @import("../../../assay/assay.zig");
 const cento = @import("../../../corpus/index/codex/cento.zig");
 const emit = @import("../../cli/emit.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
-const nowNs = cli_args.nowNs;
-const ms = cli_args.ms;
 
 const jsonStr = emit.jsonStr;
 
@@ -48,10 +47,10 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     const query = query_text orelse die("usage: relate quote <text> [--json]\n", .{});
     if (query.len == 0) die("relate quote: empty query\n", .{});
 
-    const t0 = nowNs(io);
+    var run = assay.Run.open(gpa, io, json);
     var shelf = codex_face.loadShelf(gpa, io, "`relate index --shelf` (or `gist codex build`)");
     defer shelf.deinit(gpa);
-    const loaded_ns = nowNs(io);
+    const load_dur = run.lap();
 
     var parsed = try cento.parse(&shelf.cx, gpa, query);
     defer parsed.deinit(gpa);
@@ -95,13 +94,18 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
             out.print(gpa, "  {s}\n", .{source orelse "(not in corpus)"}) catch oom();
         }
     }
-    const parsed_ns = nowNs(io); // parse + attribution, before the freshness walk
+    const parse_dur = run.elapsed(); // parse + attribution, before the freshness walk
     corpus_mod.emitStdout(out.items);
 
     const stale = codex_face.shelfStaleCount(gpa, io, shelf.built_ns);
     if (stale > 0)
-        std.debug.print("quote: {d} file(s) changed since the shelf was built — `relate index --shelf` refreshes\n", .{stale});
-    std.debug.print("quote: {d} files in shelf · load {d:.0} ms · parse {d:.2} ms\n", .{
-        shelf.paths.len, ms(loaded_ns - t0), ms(parsed_ns - loaded_ns),
+        assay.diag("quote: {d} file(s) changed since the shelf was built — `relate index --shelf` refreshes\n", .{stale});
+    run.emit("quote: {d} files in shelf · load {d:.0} ms · parse {d:.2} ms\n", .{
+        shelf.paths.len, load_dur.ms(), parse_dur.ms(),
+    }, .{
+        .{ "verb", "s", "quote" },
+        .{ "shelf_files", "d", shelf.paths.len },
+        .{ "load_ms", "d:.0", load_dur.ms() },
+        .{ "parse_ms", "d:.2", parse_dur.ms() },
     });
 }

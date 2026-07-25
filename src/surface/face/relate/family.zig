@@ -24,13 +24,12 @@
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
+const assay = @import("../../../assay/assay.zig");
 const families = @import("../../../kernel/kinship/cluster/families.zig");
 const kinship = @import("kinship.zig");
 const emit = @import("../../cli/emit.zig");
 
 const oom = cli_args.oom;
-const nowNs = cli_args.nowNs;
-const ms = cli_args.ms;
 
 const Forest = families.Forest;
 
@@ -52,7 +51,7 @@ pub fn runClusters(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
     defer roots.deinit(gpa);
     try kinship.parseOpts(gpa, argv, &o, &roots, .{ .max_dist = true, .min_size = true, .no_index = true, .strict = "clusters" });
 
-    const t0 = nowNs(io);
+    const run = assay.Run.open(gpa, io, o.json);
     var view = try kinship.resolve(gpa, io, roots.items, o.no_index, .bytes);
     defer view.deinit();
     const pairs = try kinship.verifiedPairs(gpa, view.paths, view.sketches, o.max_dist);
@@ -118,7 +117,8 @@ pub fn runClusters(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         }
     }
     corpus_mod.emitStdout(buf.items);
-    std.debug.print("clusters: {d} files ({s}{d} refreshed) · {d} famil{s} ≥ {d} member(s) at ≤ {d:.2} · {d:.0} ms\n", .{
+    const dur = run.elapsed().ms();
+    run.emit("clusters: {d} files ({s}{d} refreshed) · {d} famil{s} ≥ {d} member(s) at ≤ {d:.2} · {d:.0} ms\n", .{
         view.paths.len,
         view.provenance(),
         view.refreshed,
@@ -126,7 +126,16 @@ pub fn runClusters(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         if (fams.items.len == 1) "y" else "ies",
         o.min_size,
         o.max_dist,
-        ms(nowNs(io) - t0),
+        dur,
+    }, .{
+        .{ "verb", "s", "clusters" },
+        .{ "files", "d", view.paths.len },
+        .{ "source", "s", view.source() },
+        .{ "refreshed", "d", view.refreshed },
+        .{ "families", "d", fams.items.len },
+        .{ "min_size", "d", o.min_size },
+        .{ "max_distance", "d:.2", o.max_dist },
+        .{ "ms", "d:.0", dur },
     });
 }
 

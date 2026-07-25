@@ -74,15 +74,15 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
         if (req.mode == .files or req.mode == .count) gist.corpus.exemptSoftCap();
         break :blk true;
     } else |_| false;
-    const debug = env.get("GIST_DEBUG_WARM") != null; // observe the routing decision
+    const debug = gist.assay.lit(.warm); // observe the routing decision
     // Surface the CLASSIFY verdict independently of daemon availability, so a
     // cold outcome from "ineligible argv" is distinguishable from "eligible but
     // no daemon up" — the oracle the cross-binding parity test reads to prove
     // Python `warm_eligible` tracks this classifier exactly.
-    if (debug) std.debug.print("gist: [{s}]\n", .{if (eligible) "eligible" else "ineligible"});
+    if (debug) gist.assay.diag("gist: [{s}]\n", .{if (eligible) "eligible" else "ineligible"});
     switch (client.attempt(gpa, io, argv, sock)) {
         .served => |code| {
-            if (debug) std.debug.print("gist: [warm]\n", .{});
+            if (debug) gist.assay.diag("gist: [warm]\n", .{});
             gist.corpus.finishOutput(); // announce a budget cut on the warm flush (idempotent, stderr-only)
             // A warm-served no-match (exit 1) gets the same stderr guidance the
             // cold engines emit. The classifier already parsed this argv to
@@ -102,7 +102,7 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
         // Cold miss on an eligible shape with no daemon up: fork one detached so
         // the next such query lands warm. This query still runs cold below.
         .cold => {
-            if (debug) std.debug.print("gist: [cold]\n", .{});
+            if (debug) gist.assay.diag("gist: [cold]\n", .{});
             client.spawn.maybeSpawn(gpa, io, env, argv, sock);
         },
     }
@@ -188,6 +188,11 @@ fn usage() void {
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
+
+    // Diagnostic policy for this process: cold CLI writes straight to stderr,
+    // and `GIST_TRACE`/`GIST_TRACE_FORMAT` are read once here into the lens mask
+    // and render format every summary/trace call site consults.
+    gist.assay.install(.{});
 
     var it = std.process.Args.Iterator.init(init.minimal.args);
     _ = it.skip(); // argv[0]

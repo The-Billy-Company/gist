@@ -20,6 +20,7 @@ const builtin = @import("builtin");
 const gist = @import("irregex");
 const corpus_mod = gist.corpus;
 const simd = gist.simd;
+const Span = gist.assay.Span; // package instrumentation floor: monotonic Span
 const pmu = @import("pmu.zig");
 const stats = @import("stats.zig");
 
@@ -99,10 +100,6 @@ fn verifyRegex(re: *const Regex, sim: *Regex.Sim, corpus: *const corpus_mod.Corp
 
 var sink: usize = 0; // defeat dead-code elimination of the measured kernel
 
-fn nowNs(io: std.Io) i128 {
-    return std.Io.Clock.now(.awake, io).nanoseconds;
-}
-
 fn measure(
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -143,12 +140,12 @@ fn measure(
 
     for (0..warmup + reps) |it| {
         const c0 = meter.counters();
-        const t0 = nowNs(io);
+        const sp = Span.open(io);
         const hits = switch (probe.kind) {
             .literal => verifyLiteral(corpus, cand, probe.pattern),
             .regex => verifyRegex(&re.?, &sim.?, corpus, cand),
         };
-        const elapsed: u64 = @intCast(@max(nowNs(io) - t0, 0));
+        const elapsed: u64 = @intCast(@max(sp.read(io).ns(), 0));
         const c1 = meter.counters();
         sink +%= hits;
         if (it < warmup) continue;

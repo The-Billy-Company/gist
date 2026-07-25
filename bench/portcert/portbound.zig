@@ -48,6 +48,7 @@ const dfa_probe = @import("probes/dfa_step.zig");
 
 const Regex = gist.regex.Regex;
 const out_dir = gist.corpus.default_out_dir;
+const Span = gist.assay.Span; // package instrumentation floor: monotonic Span
 
 // Best-of-N: interference from coworking agents on this shared box only ever
 // *slows* a trial, so the min cycles (and min ns) across trials is the cleanest
@@ -75,10 +76,6 @@ const dfa_sweeps = 64; // ~16 M recurrence steps per trial
 
 var sink: usize = 0; // defeat dead-code elimination of the measured kernels
 
-fn nowNs(io: std.Io) i128 {
-    return std.Io.Clock.now(.awake, io).nanoseconds;
-}
-
 /// One measured result. `cyc_per_unit`/`ipc`/`ghz` are zero unless `has_pmu` —
 /// never derived from wall-clock (that would be fabricated precision).
 const Sample = struct {
@@ -102,9 +99,9 @@ fn measure(io: std.Io, meter: *pmu.Meter, units_per_trial: f64, ctx: anytype, co
 
     for (0..trials) |_| {
         const c0 = meter.counters();
-        const t0 = nowNs(io);
+        const sp = Span.open(io);
         body(ctx);
-        const ns: f64 = @floatFromInt(@max(nowNs(io) - t0, 1));
+        const ns: f64 = @floatFromInt(@max(sp.read(io).ns(), 1));
         const c1 = meter.counters();
 
         best_ns = @min(best_ns, ns);

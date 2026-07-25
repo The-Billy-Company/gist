@@ -28,6 +28,7 @@ const pmu = @import("pmu"); // bench/harness/pmu.zig, wired as a module in build
 const corpus_mod = gist.corpus;
 const simd = gist.simd;
 const out_dir = corpus_mod.default_out_dir;
+const Span = gist.assay.Span; // package instrumentation floor: monotonic Span
 
 // 8×u64 = 64-byte logical vector (lowered to NEON 128-bit loads on aarch64);
 // NACC independent accumulators hide load-use latency so the loop is bound by
@@ -52,10 +53,6 @@ const traffic_budget = 2 << 30; // ~2 GiB of reads per trial, per tier
 const assumed_ghz = 4.4;
 
 var sink: u64 = 0; // defeat DCE of the measured reduction
-
-fn nowNs(io: std.Io) i128 {
-    return std.Io.Clock.now(.awake, io).nanoseconds;
-}
 
 /// The measured kernel: a pure streaming read reduction over `buf`. Returns the
 /// checksum (kept live via `sink`) so the optimizer can't elide the loads.
@@ -102,10 +99,10 @@ fn measureTier(io: std.Io, name: []const u8, buf: []u64) Tier {
     for (0..trials) |t| {
         // Warm the buffer into its target cache level before timing.
         sink +%= streamSum(buf);
-        const t0 = nowNs(io);
+        const sp = Span.open(io);
         var acc: u64 = 0;
         for (0..sweeps) |_| acc +%= streamSum(buf);
-        const ns: f64 = @floatFromInt(@max(nowNs(io) - t0, 1));
+        const ns: f64 = @floatFromInt(@max(sp.read(io).ns(), 1));
         sink +%= acc;
         samples[t] = moved / ns; // bytes/ns == GB/s
     }
@@ -143,7 +140,7 @@ fn measureContiguous(io: std.Io, name: []const u8, buf: []const u8, needle: []co
     var samples: [trials]f64 = undefined;
     for (0..trials) |t| {
         var result: usize = 0;
-        const t0 = nowNs(io);
+        const sp = Span.open(io);
         for (0..sweeps) |_| {
             if (matched) {
                 result +%= dualWindowCandidates(buf, needle);
@@ -151,7 +148,7 @@ fn measureContiguous(io: std.Io, name: []const u8, buf: []const u8, needle: []co
                 result +%= @intFromBool(simd.contains(buf, needle));
             }
         }
-        const ns: f64 = @floatFromInt(@max(nowNs(io) - t0, 1));
+        const ns: f64 = @floatFromInt(@max(sp.read(io).ns(), 1));
         sink +%= result;
         samples[t] = moved / ns;
     }
@@ -166,10 +163,10 @@ fn measureContiguous(io: std.Io, name: []const u8, buf: []const u8, needle: []co
 fn measureGhz(io: std.Io, meter: *pmu.Meter, buf: []u64) struct { ghz: f64, source: []const u8 } {
     if (!meter.has_pmu) return .{ .ghz = assumed_ghz, .source = "assumed (no PMU — run `sudo` for a measured clock)" };
     const c0 = meter.counters();
-    const t0 = nowNs(io);
+    const sp = Span.open(io);
     var acc: u64 = 0;
     for (0..64) |_| acc +%= streamSum(buf);
-    const ns: f64 = @floatFromInt(@max(nowNs(io) - t0, 1));
+    const ns: f64 = @floatFromInt(@max(sp.read(io).ns(), 1));
     const c1 = meter.counters();
     sink +%= acc;
     const cycles: f64 = @floatFromInt(c1.cycles -% c0.cycles);
@@ -198,11 +195,11 @@ fn measureGistScan(io: std.Io, corpus: *const corpus_mod.Corpus, needle: []const
     var best: f64 = 0;
     for (0..trials) |_| {
         var hits: usize = 0;
-        const t0 = nowNs(io);
+        const sp = Span.open(io);
         for (corpus.docs) |d| if (simd.contains(d, needle)) {
             hits += 1;
         };
-        const ns: f64 = @floatFromInt(@max(nowNs(io) - t0, 1));
+        const ns: f64 = @floatFromInt(@max(sp.read(io).ns(), 1));
         sink +%= hits;
         best = @max(best, bytes / ns);
     }

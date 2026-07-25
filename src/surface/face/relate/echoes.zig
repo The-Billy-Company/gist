@@ -41,15 +41,12 @@
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const cli_args = @import("../../exec/cold/argv/args.zig");
+const assay = @import("../../../assay/assay.zig");
 const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const signals = @import("../../../kernel/rank/signals.zig");
 const kinship = @import("kinship.zig");
 const emit = @import("../../cli/emit.zig");
-
-const nowNs = cli_args.nowNs;
-const ms = cli_args.ms;
 
 /// A file needs at least this many structural fingerprints for a
 /// structure-kinship claim to rest on a real KMV sample (not a coincidence of
@@ -79,7 +76,7 @@ pub fn runEchoes(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
     defer roots.deinit(gpa);
     try kinship.parseOpts(gpa, argv, &o, &roots, .{ .min_echo = true, .no_index = true, .strict = "echoes" });
 
-    const t0 = nowNs(io);
+    const run = assay.Run.open(gpa, io, o.json);
     var view = try kinship.resolve(gpa, io, roots.items, o.no_index, .structure);
     defer view.deinit();
 
@@ -133,12 +130,21 @@ pub fn runEchoes(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
         });
     }
     corpus_mod.emitStdout(buf.items);
-    std.debug.print("echoes: {d} files ({s}{d} refreshed) · {d} pair(s) ≥ {d:.2} · {d:.0} ms\n", .{
+    const dur = run.elapsed().ms();
+    run.emit("echoes: {d} files ({s}{d} refreshed) · {d} pair(s) ≥ {d:.2} · {d:.0} ms\n", .{
         view.paths.len,
         if (view.from_atlas) "atlas, " else "live, ",
         view.refreshed,
         ctx.pairs.items.len,
         o.min_echo,
-        ms(nowNs(io) - t0),
+        dur,
+    }, .{
+        .{ "verb", "s", "echoes" },
+        .{ "files", "d", view.paths.len },
+        .{ "source", "s", view.source() },
+        .{ "refreshed", "d", view.refreshed },
+        .{ "pairs", "d", ctx.pairs.items.len },
+        .{ "min_echo", "d:.2", o.min_echo },
+        .{ "ms", "d:.0", dur },
     });
 }

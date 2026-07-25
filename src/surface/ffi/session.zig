@@ -32,6 +32,7 @@ const contract = @import("contract.zig");
 const Relay = @import("relay.zig").Relay;
 const resident = @import("../exec/session/resident.zig");
 const request = @import("../exec/session/request.zig");
+const assay = @import("../../assay/assay.zig");
 
 /// The FFI allocates through the C allocator so a host that already owns the C
 /// heap (the Python process) shares one arena, and teardown needs no Zig GPA.
@@ -62,6 +63,11 @@ pub const Session = struct {
 /// `out` untouched and returns a negative status (`.invalid` for a null `out`,
 /// or a null `roots_ptr` with `nroots > 0`).
 pub fn open(roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**Session) Status {
+    // ADR-352's never-write contract, by construction: route every diagnostic
+    // this process might emit (reconcile traces, degradation notices, summary
+    // lines) to the dark sink, so no warm-path `assay.diag` can reach the
+    // embedding host's stderr. Installed on first `open`; idempotent.
+    assay.install(.{ .sink = .dark });
     const out_slot = out orelse return .invalid;
     const roots = gpa.alloc([]const u8, nroots) catch return .out_of_memory;
     defer gpa.free(roots);

@@ -50,6 +50,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const args = @import("../argv/args.zig");
+const assay = @import("../../../../assay/assay.zig");
 const output = @import("../emit/output.zig");
 const json = @import("../emit/json.zig");
 const ignore = @import("../../../../corpus/tree/ignore.zig");
@@ -92,7 +93,7 @@ const Dir = std.Io.Dir;
 /// same whitelist-override pair `shouldSkip` does). No production caller sets
 /// this; it is never exposed as a CLI flag.
 pub fn eligible(io: std.Io, parsed: args.Parsed, o: Opts) bool {
-    if (args.envSpan("GIST_NO_PARALLEL") != null) return false;
+    if (assay.envSpan("GIST_NO_PARALLEL") != null) return false;
     // `-U`/--multiline rides the pipeline: each worker's per-file render goes
     // through the same `Emitter.buffer` whole-buffer model the serial engine
     // uses (multiline.zig owns the span/line semantics), so the walk + literal
@@ -428,7 +429,7 @@ fn assembleElide(gpa: std.mem.Allocator, io: std.Io, filters: []const []const u8
     }
     if (!indexSavingsWorthTable(p.paths.items.len, candidates.count())) return error.NotWorthwhile;
     const indexed = try IndexedPaths.init(gpa, p.paths.items);
-    return .{ .p = p, .indexed = indexed, .candidates = candidates, .anchor = anchor };
+    return .{ .p = p, .indexed = indexed, .candidates = candidates, .anchor = anchor.ns() };
 }
 
 /// Gate-only proof that the admitted oracle can actually elide a real indexed
@@ -1408,7 +1409,10 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
                 var blines: std.ArrayList([]const u8) = .empty;
                 if (!o.multiline) grepfile.collectLines(a, searched, o.term(), &blines);
                 const fs = grepfile.fileMatchStats(re, a, o, searched, blines.items, cfg.line_needle);
-                w.stats.add(.{ .files_searched = 1, .matches = fs.matches, .matched_lines = fs.lines, .bytes_searched = fs.bytes });
+                w.stats.bump(.files_searched);
+                w.stats.add(.matches, fs.matches);
+                w.stats.add(.matched_lines, fs.lines);
+                w.stats.add(.bytes_searched, fs.bytes);
             }
             const matched = grepfile.handleBinary(a, re, o, &buf, &em, dpath, false, body, nul, cfg.show_name);
             if (matched or buf.items.len > 0)
@@ -1456,7 +1460,10 @@ fn emitBody(w: *Worker, a: std.mem.Allocator, dpath: []const u8, body: []const u
     if (!o.multiline and !fast and !fused) grepfile.collectLines(a, body, o.term(), &lines);
     if (o.stats) {
         const fs = grepfile.fileMatchStats(re, a, o, body, lines.items, cfg.line_needle);
-        w.stats.add(.{ .files_searched = 1, .matches = fs.matches, .matched_lines = fs.lines, .bytes_searched = fs.bytes });
+        w.stats.bump(.files_searched);
+        w.stats.add(.matches, fs.matches);
+        w.stats.add(.matched_lines, fs.lines);
+        w.stats.add(.bytes_searched, fs.bytes);
     }
     if (cfg.heading) buf.print(a, "{s}{s}", .{ dpath, o.outTerm() }) catch oom();
     const before_body = buf.items.len;
@@ -1479,7 +1486,8 @@ fn gateMiss(w: *Worker, dpath: []const u8, body: []const u8) void {
         if (w.cfg.binary_detect) if (std.mem.indexOfScalar(u8, body, 0)) |nul| {
             bytes = grepfile.committedPrefix(body, nul);
         };
-        w.stats.add(.{ .files_searched = 1, .bytes_searched = bytes });
+        w.stats.bump(.files_searched);
+        w.stats.add(.bytes_searched, bytes);
     }
 }
 
@@ -1577,6 +1585,10 @@ fn emitSorted(gpa: std.mem.Allocator, sink: *Sink, workers: []Worker, o: Opts) v
 /// `file_needle` may reject a whole body, while `line_needle` only avoids regex
 /// execution and remains valid for passthru. Never returns.
 pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re: ?*const Matcher, use_color: bool, filters: []const []const u8, sieve: crest.Vector, file_needle: ?simd.Gate, line_needle: ?simd.Gate, icfg: *const ingest.Config) noreturn {
+    // Run-scoped monotonic stopwatch for the fused walk — feeds the real
+    // `elapsed`/`elapsed_total` in the `--stats`/`--json` summary (was hardcoded
+    // `0.000000`) and the `.query`-lens stderr diagnostic, the serial engine's twin.
+    const search_span = assay.Span.open(io);
     // Heading needs a printable path: `--no-filename` suppresses the header
     // like rg (the walk is recursive, so `.auto` filenames are always on here).
     const heading = o.heading and o.filename != .never and !o.count_only and !o.count_matches and !o.files_only and !o.files_without and !o.vimgrep;
@@ -1589,7 +1601,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // the real elision oracle is admitted. This makes freshness_fs.sh prove the
     // accelerated path instead of accidentally passing via an async/full-read
     // fallback. It is intentionally not a CLI flag.
-    const require_elision = args.envSpan("GIST_TEST_REQUIRE_ELISION") != null;
+    const require_elision = assay.envSpan("GIST_TEST_REQUIRE_ELISION") != null;
     if (require_elision and !want_elision) die("gist: test-required index elision was not eligible\n", .{});
     // The elide oracle loads on its own thread while the walk runs, keeping
     // mmap validation, sparse posting decode, and path-table setup off the
@@ -1622,7 +1634,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // snapshot can't place just walks live). `GIST_NO_PHANTOM` (internal,
     // undocumented — the `GIST_NO_PARALLEL` idiom) forces the live walk for
     // parity gates.
-    var snap_view: ?treemap.View = if (args.envSpan("GIST_NO_PHANTOM") == null) treemap.load(io) else null;
+    var snap_view: ?treemap.View = if (assay.envSpan("GIST_NO_PHANTOM") == null) treemap.load(io) else null;
 
     // Content shard. Loaded for a body-reading walk broad enough to amortize the
     // one-time map + doc-table build (`broadIndexedRoots`, same rung the elide
@@ -1632,7 +1644,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // and the shard never holds compressed inputs anyway). `GIST_NO_SHARD`
     // (internal, undocumented — the `GIST_NO_PHANTOM` idiom) forces live reads
     // for the parity gate. Membership + freshness only, so it is fail-open.
-    const want_shard = args.envSpan("GIST_NO_SHARD") == null and !o.no_index and !o.files_list and !icfg.active() and broadIndexedRoots(parsed.roots);
+    const want_shard = assay.envSpan("GIST_NO_SHARD") == null and !o.no_index and !o.files_list and !icfg.active() and broadIndexedRoots(parsed.roots);
     var shard_view: ?shard_mod.View = if (want_shard) shard_mod.load(gpa, io) else null;
 
     var ig = ignore.Ignore.init(gpa, io, ignore.Options.from(o), parsed.roots);
@@ -1718,7 +1730,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // -j/--threads caps the pool explicitly (rg's `--threads`); 0 keeps gist's
     // adaptive topology. `GIST_WORKERS` still overrides everything (parity gates).
     if (o.threads != 0) nworkers = @max(1, o.threads);
-    if (args.envSpan("GIST_WORKERS")) |s| if (std.fmt.parseInt(usize, s, 10)) |n| {
+    if (assay.envSpan("GIST_WORKERS")) |s| if (std.fmt.parseInt(usize, s, 10)) |n| {
         nworkers = @max(1, n);
     } else |_| {};
     const workers = gpa.alloc(Worker, nworkers) catch oom();
@@ -1780,11 +1792,12 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // path emits none either — it would only pollute a machine-consumed stream).
     if (o.json) {
         var st: json.Stats = .{};
-        for (workers) |*wk| st.add(wk.jstats);
+        for (workers) |*wk| st.fold(wk.jstats);
         var sbuf: std.ArrayList(u8) = .empty;
-        json.summary(gpa, &sbuf, st);
+        json.summary(gpa, &sbuf, st, search_span.read(io));
         _ = corpus_mod.writeStdout(sbuf.items);
-        std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (st.with_match > 0) 0 else 1);
+        grepfile.diagSearch(gpa, o.json, st, search_span.read(io));
+        std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (st.get(.files_with_match) > 0) 0 else 1);
     }
     // `--stats`: every worker streamed its match fragments; fold their per-
     // worker tallies, stamp `files_with_match` / `bytes_printed` from the sink
@@ -1793,12 +1806,13 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
     // ran and `bytes_printed` is the live write count.
     if (o.stats) {
         var st: grepfile.Stats = .{};
-        for (workers) |*wk| st.add(wk.stats);
-        st.files_with_match = sink.matched_files;
-        st.bytes_printed = sink.bytes_printed;
+        for (workers) |*wk| st.foldExcept(wk.stats, &.{.bytes_printed});
+        st.set(.files_with_match, sink.matched_files);
+        st.set(.bytes_printed, sink.bytes_printed);
         var sbuf: std.ArrayList(u8) = .empty;
-        grepfile.emitStats(gpa, &sbuf, st);
+        grepfile.emitStats(gpa, &sbuf, st, search_span.read(io));
         _ = corpus_mod.writeStdout(sbuf.items);
+        grepfile.diagSearch(gpa, o.json, st, search_span.read(io));
         std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);
     }
     // `--files-without-match`: `matched_files` counts files that LACKED the
@@ -1899,7 +1913,7 @@ pub fn collectFileSet(gpa: std.mem.Allocator, io: std.Io, roots: []const []const
     }
     const ncpu = std.Thread.getCpuCount() catch 6;
     var nworkers = defaultWorkerCount(ncpu, true);
-    if (args.envSpan("GIST_WORKERS")) |s| if (std.fmt.parseInt(usize, s, 10)) |n| {
+    if (assay.envSpan("GIST_WORKERS")) |s| if (std.fmt.parseInt(usize, s, 10)) |n| {
         nworkers = @max(1, n);
     } else |_| {};
     const workers = gpa.alloc(Worker, nworkers) catch oom();

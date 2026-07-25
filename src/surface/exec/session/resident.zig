@@ -68,6 +68,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const assay = @import("../../../assay/assay.zig");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const bulkstat = @import("../../../corpus/tree/bulkstat.zig");
 const corpus = @import("corpus.zig");
@@ -819,8 +820,8 @@ pub const ResidentSession = struct {
     /// The O(tree) barrier: re-derive the whole authoritative set and diff it
     /// against base + overlay. Always sound; the scoped path's fallback.
     fn reconcileFull(self: *ResidentSession, ceil: Ceiling) QueryError!void {
-        const trace = std.c.getenv("GIST_RECONCILE_TRACE") != null;
-        const t0 = if (trace) std.Io.Clock.now(.awake, self.io).nanoseconds else 0;
+        const trace = assay.lit(.reconcile);
+        var span: assay.Span = if (trace) assay.Span.open(self.io) else undefined;
         var walk_arena = std.heap.ArenaAllocator.init(self.gpa);
         defer walk_arena.deinit();
         // Re-derive the whole authoritative set through the parallel fused walk
@@ -837,7 +838,7 @@ pub const ResidentSession = struct {
         // clean) until a walk completes without error.
         if (fs.walk_error) return QueryError.Stale;
         const cur = fs.entries;
-        const t1 = if (trace) std.Io.Clock.now(.awake, self.io).nanoseconds else 0;
+        const walk_dur: assay.Duration = if (trace) span.lap(self.io) else undefined;
 
         var cur_set = std.StringHashMap(void).init(self.gpa);
         defer cur_set.deinit();
@@ -849,9 +850,8 @@ pub const ResidentSession = struct {
             try self.reconcileOne(e.path, e.mtime_ns, e.ctime_ns);
         }
         if (trace) {
-            const t2 = std.Io.Clock.now(.awake, self.io).nanoseconds;
-            std.debug.print("reconcileFull: walk {d:.1} ms ({d} files) · reread {d:.1} ms\n", .{
-                @as(f64, @floatFromInt(t1 - t0)) / 1e6, cur.len, @as(f64, @floatFromInt(t2 - t1)) / 1e6,
+            assay.diag("reconcileFull: walk {d:.1} ms ({d} files) · reread {d:.1} ms\n", .{
+                walk_dur.ms(), cur.len, span.read(self.io).ms(),
             });
         }
         try self.tombstoneVanished(&cur_set);

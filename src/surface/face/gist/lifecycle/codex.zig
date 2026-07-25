@@ -29,8 +29,7 @@ const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
 const persist = @import("../../../../corpus/index/trigrams/persist.zig");
 const shelf_mod = @import("../../../../corpus/index/codex/shelf.zig");
-const nowNs = @import("../../../exec/cold/argv/args.zig").nowNs;
-const ms = @import("../../../exec/cold/argv/args.zig").ms;
+const assay = @import("../../../../assay/assay.zig");
 const Dir = std.Io.Dir;
 
 const shelf_path = corpus_mod.ArtifactPath("codex.shelf");
@@ -70,21 +69,30 @@ pub fn persistShelf(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mo
 /// atomically. The anchor is captured BEFORE the corpus read (T3 convention)
 /// so a file touched mid-build reports as changed on the next query.
 fn runBuild(gpa: std.mem.Allocator, io: std.Io) !void {
-    const t0 = nowNs(io);
-    const built_ns: i64 = @intCast(std.Io.Clock.now(.real, io).nanoseconds);
+    const build_run = assay.Run.open(gpa, io, false);
+    const built_ns: i64 = @intCast(assay.anchor(io).ns());
     const roots = try corpus_mod.resolveRoots(gpa);
     defer corpus_mod.freeRoots(gpa, roots);
     var corpus = try corpus_mod.load(gpa, io, roots);
     defer corpus.deinit();
 
     const shelf = try persistShelf(gpa, io, &corpus, built_ns);
-    std.debug.print("codex: {d} files · {d:.1} MiB corpus → {d:.1} MiB shelf ({d:.2} bits/char) · {d:.0} ms → {s}\n", .{
+    const dur = build_run.elapsed().ms();
+    build_run.emit("codex: {d} files · {d:.1} MiB corpus → {d:.1} MiB shelf ({d:.2} bits/char) · {d:.0} ms → {s}\n", .{
         corpus.docs.len,
         @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20),
         @as(f64, @floatFromInt(shelf.bytes)) / (1 << 20),
         shelf.bits_per_char,
-        ms(nowNs(io) - t0),
+        dur,
         shelfFile(),
+    }, .{
+        .{ "artifact", "s", "codex" },
+        .{ "files", "d", corpus.docs.len },
+        .{ "corpus_mib", "d:.1", @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20) },
+        .{ "shelf_mib", "d:.1", @as(f64, @floatFromInt(shelf.bytes)) / (1 << 20) },
+        .{ "bits_per_char", "d:.2", shelf.bits_per_char },
+        .{ "ms", "d:.0", dur },
+        .{ "path", "s", shelfFile() },
     });
 }
 

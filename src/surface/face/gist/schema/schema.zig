@@ -66,6 +66,11 @@ const manifest_suffix =
     \\    "alias": "gist rg [flags] <pattern> [PATH...] and gist search <pattern> [PATH...] address the same engine"
     \\  },
     \\  "output_stream": {"results": "stdout", "diagnostics": "stderr"},
+    \\  "trace": {
+    \\    "summary": "phase-trace diagnostics on stderr, off by default; on a --json run the stderr diagnostic is one NDJSON record, so timing is machine-parseable alongside stdout results",
+    \\    "channel": "stderr",
+    \\    "env": {"GIST_TRACE": "comma-separated lenses (amend,journal,reconcile,warm,rank,index,query,session) or 'all'; off when unset", "GIST_TRACE_FORMAT": "text|json; defaults to the run's --json format"}
+    \\  },
     \\  "hints": {
     \\    "summary": "structured stderr guidance on notable outcomes: a no-match run gets a 'gist: no matches for ...' summary plus up to three ranked suggestion lines derived from the query's own shape (-i / -U / -F / -uu / scope); a truncated run gets the output-budget notice. Results on stdout are never touched.",
     \\    "channel": "stderr",

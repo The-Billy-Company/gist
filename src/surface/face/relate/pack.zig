@@ -30,6 +30,7 @@
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
+const assay = @import("../../../assay/assay.zig");
 const lexicon = @import("../../../kernel/kinship/recall/lexicon.zig");
 const coverage = @import("../../../kernel/kinship/recall/coverage.zig");
 const retrieval = @import("../../exec/cold/engine/retrieval.zig");
@@ -38,8 +39,6 @@ const flags = @import("../../cli/flags.zig");
 const emit = @import("../../cli/emit.zig");
 
 const die = cli_args.die;
-const nowNs = cli_args.nowNs;
-const ms = cli_args.ms;
 
 pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
     var o: kinship.Opts = .{ .top = 8 };
@@ -49,7 +48,7 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
     const query = o.arg orelse die("usage: relate pack <text> [--top N] [--json] [ROOT...]\n", .{});
     if (query.len == 0) die("relate pack: empty query\n", .{});
 
-    const t0 = nowNs(io);
+    var run = assay.Run.open(gpa, io, o.json);
     if (try retrieval.pack(gpa, io, query, roots.items, o.top, .load)) |indexed_value| {
         var indexed = indexed_value;
         defer indexed.deinit();
@@ -69,7 +68,8 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
             indexed.picks[indexed.picks.len - 1].covered_bits / indexed.total_bits * 100.0
         else
             0.0;
-        std.debug.print("pack: {d} files indexed · {d} candidate(s) · {d} refreshed · {d} pick(s) cover {d:.1}% of {d:.1} priced bits · {d} foreign chunk(s) · {d:.0} ms\n", .{
+        const dur = run.elapsed().ms();
+        run.emit("pack: {d} files indexed · {d} candidate(s) · {d} refreshed · {d} pick(s) cover {d:.1}% of {d:.1} priced bits · {d} foreign chunk(s) · {d:.0} ms\n", .{
             indexed.indexed_files,
             indexed.candidates,
             indexed.refreshed,
@@ -77,7 +77,17 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
             covered_pct,
             indexed.total_bits,
             indexed.foreign,
-            ms(nowNs(io) - t0),
+            dur,
+        }, .{
+            .{ "verb", "s", "pack" },
+            .{ "indexed_files", "d", indexed.indexed_files },
+            .{ "candidates", "d", indexed.candidates },
+            .{ "refreshed", "d", indexed.refreshed },
+            .{ "picks", "d", indexed.picks.len },
+            .{ "coverage_pct", "d:.1", covered_pct },
+            .{ "priced_bits", "d:.1", indexed.total_bits },
+            .{ "foreign", "d", indexed.foreign },
+            .{ "ms", "d:.0", dur },
         });
         return;
     }
@@ -90,7 +100,7 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
     defer corpus.deinit();
     var lex = try lexicon.Lexicon.build(gpa, corpus.docs);
     defer lex.deinit();
-    const built_ns = nowNs(io);
+    const index_dur = run.lap();
 
     const qfps = try lexicon.fingerprints(gpa, query);
     defer gpa.free(qfps);
@@ -120,7 +130,17 @@ pub fn runPack(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
     }
     corpus_mod.emitStdout(buf.items);
     const covered_pct = if (picks.len > 0 and total_bits > 0.0) picks[picks.len - 1].covered_bits / total_bits * 100.0 else 0.0;
-    std.debug.print("pack: {d} files indexed · {d} pick(s) cover {d:.1}% of {d:.1} priced bits · {d} foreign fingerprint(s) · index {d:.0} ms · pack {d:.0} ms\n", .{
-        corpus.docs.len, picks.len, covered_pct, total_bits, foreign, ms(built_ns - t0), ms(nowNs(io) - built_ns),
+    const pack_dur = run.elapsed().ms();
+    run.emit("pack: {d} files indexed · {d} pick(s) cover {d:.1}% of {d:.1} priced bits · {d} foreign fingerprint(s) · index {d:.0} ms · pack {d:.0} ms\n", .{
+        corpus.docs.len, picks.len, covered_pct, total_bits, foreign, index_dur.ms(), pack_dur,
+    }, .{
+        .{ "verb", "s", "pack" },
+        .{ "indexed_files", "d", corpus.docs.len },
+        .{ "picks", "d", picks.len },
+        .{ "coverage_pct", "d:.1", covered_pct },
+        .{ "priced_bits", "d:.1", total_bits },
+        .{ "foreign", "d", foreign },
+        .{ "index_ms", "d:.0", index_dur.ms() },
+        .{ "pack_ms", "d:.0", pack_dur },
     });
 }

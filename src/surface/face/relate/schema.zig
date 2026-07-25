@@ -74,6 +74,11 @@ const manifest =
     \\  "corpus_policy": "the shared corpus — every non-binary, non-gitignored file under the roots, with the same gitignore precedence as gist plus corpus-only VCS/build pruning",
     \\  "warm_tier": "search/pack nominate from Gist's mmap-backed trigram codebook and fold changed files; broad kinship queries use the atlas while narrow explicit scopes automatically sketch live when cheaper; quote uses the codex shelf",
     \\  "output_stream": {"results": "stdout", "diagnostics": "stderr"},
+    \\  "trace": {
+    \\    "summary": "phase-trace diagnostics on stderr, off by default; on a --json run the stderr diagnostic is one NDJSON record, so timing is machine-parseable alongside stdout results",
+    \\    "channel": "stderr",
+    \\    "env": {"GIST_TRACE": "comma-separated lenses (amend,journal,reconcile,warm,rank,index,query,session) or 'all'; off when unset", "GIST_TRACE_FORMAT": "text|json; defaults to the run's --json format"}
+    \\  },
     \\  "exit_codes": {"0": "verb ran (rows may be empty)", "1": "status: atlas unavailable", "2": "usage, parse, path, or pattern error"}
     \\}
     \\

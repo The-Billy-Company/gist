@@ -109,8 +109,8 @@ pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
             .paths_bytes = fileSize(io, persist.pathsFile()),
         },
         .freshness = .{
-            .anchor_unix_ns = if (built_ns) |ns| @intCast(ns) else null,
-            .age_seconds = if (built_ns) |ns| @as(f64, @floatFromInt(now_ns - ns)) / std.time.ns_per_s else null,
+            .anchor_unix_ns = if (built_ns) |a| @intCast(a.ns()) else null,
+            .age_seconds = if (built_ns) |a| @as(f64, @floatFromInt(now_ns - a.ns())) / std.time.ns_per_s else null,
         },
         .roots = roots,
     };

@@ -34,6 +34,7 @@ const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../corpus/index/trigrams/fresh.zig");
 const persist = @import("../../../corpus/index/trigrams/persist.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
+const assay = @import("../../../assay/assay.zig");
 const scope = @import("../../../corpus/scope/glob.zig");
 const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
@@ -48,8 +49,6 @@ const grepfile = @import("../../exec/cold/read/grepfile.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
-const nowNs = cli_args.nowNs;
-const ms = cli_args.ms;
 
 // ── `relate similar` ──
 
@@ -71,7 +70,7 @@ pub fn runSimilar(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) 
     try kinship.parseOpts(gpa, argv, &o, &roots, .{ .no_index = true, .lens = true, .positional = true });
     const target = o.arg orelse die("usage: relate similar <path> [--lens bytes|structure|fused] [--top N] [--json] [--no-index] [ROOT...]\n", .{});
 
-    const t0 = nowNs(io);
+    const run = assay.Run.open(gpa, io, o.json);
     const body = std.Io.Dir.cwd().readFileAlloc(io, target, gpa, .limited(corpus_mod.per_file_cap)) catch |e|
         die("cannot read {s}: {s}\n", .{ target, @errorName(e) });
     defer gpa.free(body);
@@ -111,7 +110,15 @@ pub fn runSimilar(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) 
         emit.emitRow(&buf, gpa, o.json, .{ .{ "path", "s", view.paths[sc.idx] }, .{ "distance", "d:.4", sc.dist } }, "{d:.4}  {s}\n", .{ sc.dist, view.paths[sc.idx] });
     }
     corpus_mod.emitStdout(buf.items);
-    std.debug.print("similar: {d} sketches ({s}{d} refreshed) · lens {s} · {d:.0} ms\n", .{ view.sketches.len, view.provenance(), view.refreshed, @tagName(o.lens), ms(nowNs(io) - t0) });
+    const dur = run.elapsed().ms();
+    run.emit("similar: {d} sketches ({s}{d} refreshed) · lens {s} · {d:.0} ms\n", .{ view.sketches.len, view.provenance(), view.refreshed, @tagName(o.lens), dur }, .{
+        .{ "verb", "s", "similar" },
+        .{ "sketches", "d", view.sketches.len },
+        .{ "source", "s", view.source() },
+        .{ "refreshed", "d", view.refreshed },
+        .{ "lens", "s", @tagName(o.lens) },
+        .{ "ms", "d:.0", dur },
+    });
 }
 
 // ── `relate dups` ──
@@ -122,7 +129,7 @@ pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
     defer roots.deinit(gpa);
     try kinship.parseOpts(gpa, argv, &o, &roots, .{ .max_dist = true, .no_index = true });
 
-    const t0 = nowNs(io);
+    const run = assay.Run.open(gpa, io, o.json);
     var view = try kinship.resolve(gpa, io, roots.items, o.no_index, .bytes);
     defer view.deinit();
     const pairs = try kinship.verifiedPairs(gpa, view.paths, view.sketches, o.max_dist);
@@ -138,7 +145,16 @@ pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
         emit.emitRow(&buf, gpa, o.json, .{ .{ "a", "s", view.paths[p.i] }, .{ "b", "s", view.paths[p.j] }, .{ "distance", "d:.4", p.dist } }, "{d:.4}  {s}  {s}\n", .{ p.dist, view.paths[p.i], view.paths[p.j] });
     }
     corpus_mod.emitStdout(buf.items);
-    std.debug.print("dups: {d} files ({s}{d} refreshed) · {d} pair(s) ≤ {d:.2} · {d:.0} ms\n", .{ view.paths.len, view.provenance(), view.refreshed, pairs.len, o.max_dist, ms(nowNs(io) - t0) });
+    const dur = run.elapsed().ms();
+    run.emit("dups: {d} files ({s}{d} refreshed) · {d} pair(s) ≤ {d:.2} · {d:.0} ms\n", .{ view.paths.len, view.provenance(), view.refreshed, pairs.len, o.max_dist, dur }, .{
+        .{ "verb", "s", "dups" },
+        .{ "files", "d", view.paths.len },
+        .{ "source", "s", view.source() },
+        .{ "refreshed", "d", view.refreshed },
+        .{ "pairs", "d", pairs.len },
+        .{ "max_distance", "d:.2", o.max_dist },
+        .{ "ms", "d:.0", dur },
+    });
 }
 
 // ── `relate patterns` attribution ──
@@ -280,7 +296,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
     if (pats.items.len == 0)
         die("usage: relate patterns -e P [-e P…] [-f FILE] [-F] [-i] [--by pattern|file] [--under GLOB] [--top N] [--json] [ROOT...]\n", .{});
 
-    const t0 = nowNs(io);
+    const run = assay.Run.open(gpa, io, json);
     const specs = gpa.alloc(query.Spec, pats.items.len) catch oom();
     defer gpa.free(specs);
     for (pats.items, specs) |p, *s| s.* = .{ .pattern = p, .fixed = fixed, .ignore_case = icase };
@@ -404,5 +420,13 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         },
     }
     corpus_mod.emitStdout(buf.items);
-    std.debug.print("patterns: {d} pattern(s) · {d}/{d} files · {d} row(s) · {d:.0} ms\n", .{ pats.items.len, read_files, total_files, rows.items.len, ms(nowNs(io) - t0) });
+    const dur = run.elapsed().ms();
+    run.emit("patterns: {d} pattern(s) · {d}/{d} files · {d} row(s) · {d:.0} ms\n", .{ pats.items.len, read_files, total_files, rows.items.len, dur }, .{
+        .{ "verb", "s", "patterns" },
+        .{ "patterns", "d", pats.items.len },
+        .{ "read_files", "d", read_files },
+        .{ "total_files", "d", total_files },
+        .{ "rows", "d", rows.items.len },
+        .{ "ms", "d:.0", dur },
+    });
 }

@@ -212,6 +212,12 @@ pub const View = struct {
     pub fn provenance(self: *const View) []const u8 {
         return if (self.from_atlas) "atlas, " else "live, ";
     }
+
+    /// The bare rung name for a machine-readable diagnostic field (`provenance`
+    /// without the text line's `", "` join).
+    pub fn source(self: *const View) []const u8 {
+        return if (self.from_atlas) "atlas" else "live";
+    }
 };
 
 /// Which channels a verb needs its view to carry: `bytes` = the LZJD

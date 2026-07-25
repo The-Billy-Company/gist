@@ -43,7 +43,7 @@ const protocol = @import("../../../../exec/session/protocol.zig");
 const shm = @import("../../../../exec/session/shm.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
 const run = @import("../../../../exec/cold/engine/serial.zig");
-const args = @import("../../../../exec/cold/argv/args.zig");
+const assay = @import("../../../../../assay/assay.zig");
 const net = std.Io.net;
 
 /// Transport capabilities this client advertises in HELLO — `caps_supported`
@@ -53,7 +53,7 @@ const net = std.Io.net;
 /// and how the byte-parity gate A/Bs warm-fd against warm-chunk on one binary;
 /// it follows the `GIST_NO_PARALLEL` idiom and is never a CLI flag.
 fn advertisedCaps() u8 {
-    return if (args.envSpan("GIST_NO_FD_TRANSPORT") != null) 0 else protocol.caps_supported;
+    return if (assay.envSpan("GIST_NO_FD_TRANSPORT") != null) 0 else protocol.caps_supported;
 }
 
 /// Best-effort detached daemon auto-spawn: when an eligible query finds no
@@ -202,6 +202,14 @@ fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request, ti
             _ = std.c.close(p);
         };
         switch (resp.op) {
+            // The daemon's per-query diagnostics (timing summary / lens traces),
+            // captured warm and relayed to this client's stderr verbatim — so a
+            // warm query reports the same timing a cold one prints. Arrives ahead
+            // of the answer frames; keep reading for the result.
+            .diag => {
+                if (got.passed_fd) |p| _ = std.c.close(p);
+                std.debug.print("{s}", .{resp.payload()});
+            },
             // A `lines` answer streams as chunks; accumulate until the terminal
             // result frame. (An old v1 daemon never emits `chunk` — it declines
             // the unknown mode byte first — so this arm is dead against it.)

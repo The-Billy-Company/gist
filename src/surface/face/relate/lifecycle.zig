@@ -23,12 +23,10 @@ const persist = @import("../../../corpus/index/trigrams/persist.zig");
 const atlas_mod = @import("../../../corpus/index/atlas/atlas.zig");
 const frag_mod = @import("../../../corpus/index/frag/frag.zig");
 const codex_face = @import("../gist/lifecycle/codex.zig");
-const cli_args = @import("../../exec/cold/argv/args.zig");
+const assay = @import("../../../assay/assay.zig");
 const kinship = @import("kinship.zig");
 const flags = @import("../../cli/flags.zig");
 
-const nowNs = cli_args.nowNs;
-const ms = cli_args.ms;
 const Dir = std.Io.Dir;
 
 /// Version of the `status --json` machine contract; bump on breaking change.
@@ -39,8 +37,8 @@ pub const schema_version = 1;
 pub fn runIndex(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
     const with_shelf = flags.onlyFlag(argv, "--shelf", "usage: relate index [--shelf]\n");
 
-    const t0 = nowNs(io);
-    const built_ns: i64 = @intCast(std.Io.Clock.now(.real, io).nanoseconds);
+    const run = assay.Run.open(gpa, io, false);
+    const built_ns: i64 = @intCast(assay.anchor(io).ns());
     const roots = try corpus_mod.resolveRoots(gpa);
     defer corpus_mod.freeRoots(gpa, roots);
     var corpus = try corpus_mod.load(gpa, io, roots);
@@ -53,37 +51,59 @@ pub fn runIndex(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     const blob = try atlas_mod.save(gpa, corpus.paths, sketches, silhouettes, built_ns, roots);
     defer gpa.free(blob);
     try persist.writeAtomic(io, atlas_mod.atlasFile(), blob);
-    std.debug.print("atlas: {d} files · {d:.1} MiB corpus → {d:.1} MiB atlas · {d:.0} ms → {s}\n", .{
+    const atlas_dur = run.elapsed().ms();
+    run.emit("atlas: {d} files · {d:.1} MiB corpus → {d:.1} MiB atlas · {d:.0} ms → {s}\n", .{
         corpus.docs.len,
         @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20),
         @as(f64, @floatFromInt(blob.len)) / (1 << 20),
-        ms(nowNs(io) - t0),
+        atlas_dur,
         atlas_mod.atlasFile(),
+    }, .{
+        .{ "artifact", "s", "atlas" },
+        .{ "files", "d", corpus.docs.len },
+        .{ "corpus_mib", "d:.1", @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20) },
+        .{ "atlas_mib", "d:.1", @as(f64, @floatFromInt(blob.len)) / (1 << 20) },
+        .{ "ms", "d:.0", atlas_dur },
+        .{ "path", "s", atlas_mod.atlasFile() },
     });
 
     // The fragment tier rides the same corpus read + anchor: one silhouette per
     // extracted function, so `relate concepts` answers warm.
-    const f0 = nowNs(io);
+    const frag_span = assay.Span.open(io);
     var fbuild = try frag_mod.buildAll(gpa, &corpus);
     defer fbuild.deinit();
     const fblob = try frag_mod.save(gpa, &fbuild, built_ns, roots);
     defer gpa.free(fblob);
     try persist.writeAtomic(io, frag_mod.fragFile(), fblob);
-    std.debug.print("frag:  {d} fragment(s) → {d:.1} MiB · {d:.0} ms → {s}\n", .{
+    const frag_dur = frag_span.read(io).ms();
+    run.emit("frag:  {d} fragment(s) → {d:.1} MiB · {d:.0} ms → {s}\n", .{
         fbuild.count(),
         @as(f64, @floatFromInt(fblob.len)) / (1 << 20),
-        ms(nowNs(io) - f0),
+        frag_dur,
         frag_mod.fragFile(),
+    }, .{
+        .{ "artifact", "s", "frag" },
+        .{ "fragments", "d", fbuild.count() },
+        .{ "frag_mib", "d:.1", @as(f64, @floatFromInt(fblob.len)) / (1 << 20) },
+        .{ "ms", "d:.0", frag_dur },
+        .{ "path", "s", frag_mod.fragFile() },
     });
 
     if (with_shelf) {
-        const s0 = nowNs(io);
+        const shelf_span = assay.Span.open(io);
         const shelf = try codex_face.persistShelf(gpa, io, &corpus, built_ns);
-        std.debug.print("shelf: {d:.1} MiB ({d:.2} bits/char) · {d:.0} ms → {s}\n", .{
+        const shelf_dur = shelf_span.read(io).ms();
+        run.emit("shelf: {d:.1} MiB ({d:.2} bits/char) · {d:.0} ms → {s}\n", .{
             @as(f64, @floatFromInt(shelf.bytes)) / (1 << 20),
             shelf.bits_per_char,
-            ms(nowNs(io) - s0),
+            shelf_dur,
             codex_face.shelfFile(),
+        }, .{
+            .{ "artifact", "s", "shelf" },
+            .{ "shelf_mib", "d:.1", @as(f64, @floatFromInt(shelf.bytes)) / (1 << 20) },
+            .{ "bits_per_char", "d:.2", shelf.bits_per_char },
+            .{ "ms", "d:.0", shelf_dur },
+            .{ "path", "s", codex_face.shelfFile() },
         });
     }
 }

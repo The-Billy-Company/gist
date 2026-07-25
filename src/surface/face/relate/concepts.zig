@@ -30,6 +30,7 @@
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
+const assay = @import("../../../assay/assay.zig");
 const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const concepts = @import("../../../kernel/kinship/cluster/concepts.zig");
@@ -41,8 +42,6 @@ const glob = @import("../../../corpus/scope/glob.zig");
 const Sketch = sketch.Sketch;
 const Silhouette = silhouette_mod.Silhouette;
 const Dir = std.Io.Dir;
-const nowNs = cli_args.nowNs;
-const ms = cli_args.ms;
 const die = cli_args.die;
 const oom = cli_args.oom;
 
@@ -104,7 +103,7 @@ pub fn runConcepts(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
     defer roots.deinit(gpa);
     const a = parse(gpa, io, argv, &roots);
 
-    const t0 = nowNs(io);
+    const run = assay.Run.open(gpa, io, a.json);
     var view = try resolveFragments(gpa, io, roots.items, a.no_index);
     defer view.deinit();
 
@@ -131,8 +130,16 @@ pub fn runConcepts(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
             emitHit(&buf, gpa, a.json, view.paths[h.frag], view.spans[h.frag], h.distance);
         }
         corpus_mod.emitStdout(buf.items);
-        std.debug.print("concepts: {d} fragment(s) ({s}{d} refreshed) · {d} match(es) · {d:.0} ms\n", .{
-            view.sils.len, view.provenance(), view.refreshed, ranked.hits.len, ms(nowNs(io) - t0),
+        const dur = run.elapsed().ms();
+        run.emit("concepts: {d} fragment(s) ({s}{d} refreshed) · {d} match(es) · {d:.0} ms\n", .{
+            view.sils.len, view.provenance(), view.refreshed, ranked.hits.len, dur,
+        }, .{
+            .{ "verb", "s", "concepts" },
+            .{ "fragments", "d", view.sils.len },
+            .{ "source", "s", if (view.from_index) "index" else "live" },
+            .{ "refreshed", "d", view.refreshed },
+            .{ "matches", "d", ranked.hits.len },
+            .{ "ms", "d:.0", dur },
         });
         return;
     }
@@ -159,9 +166,19 @@ pub fn runConcepts(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         emitFamily(&buf, gpa, a, view.paths, view.spans, f);
     }
     corpus_mod.emitStdout(buf.items);
-    std.debug.print("concepts: {d} fragment(s) ({s}{d} refreshed) · {d} candidate(s) · {d} edge(s) · {d} famil{s} · {d:.0} ms\n", .{
+    const dur = run.elapsed().ms();
+    run.emit("concepts: {d} fragment(s) ({s}{d} refreshed) · {d} candidate(s) · {d} edge(s) · {d} famil{s} · {d:.0} ms\n", .{
         view.sils.len, view.provenance(), view.refreshed,                          found.candidates,
-        found.edges,   found.list.len,    if (found.list.len == 1) "y" else "ies", ms(nowNs(io) - t0),
+        found.edges,   found.list.len,    if (found.list.len == 1) "y" else "ies", dur,
+    }, .{
+        .{ "verb", "s", "concepts" },
+        .{ "fragments", "d", view.sils.len },
+        .{ "source", "s", if (view.from_index) "index" else "live" },
+        .{ "refreshed", "d", view.refreshed },
+        .{ "candidates", "d", found.candidates },
+        .{ "edges", "d", found.edges },
+        .{ "families", "d", found.list.len },
+        .{ "ms", "d:.0", dur },
     });
 }
 

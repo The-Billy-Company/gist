@@ -18,6 +18,7 @@
 
 const std = @import("std");
 const gist = @import("irregex");
+const Span = gist.assay.Span; // the package instrumentation floor: monotonic Span
 const verify = gist.verify; // data-parallel candidate verify (scan/verify.zig)
 const simd = gist.simd; // SIMD substring `contains` (scan/simd.zig)
 const certify = @import("certify.zig");
@@ -141,10 +142,6 @@ fn sampleIdent(rng: std.Random, corpus: *const Corpus) ?[]const u8 {
     return null;
 }
 
-fn nowNs(io: std.Io) i128 {
-    return std.Io.Clock.now(.awake, io).nanoseconds;
-}
-
 fn ms(ns: u64) f64 {
     return @as(f64, @floatFromInt(ns)) / 1e6;
 }
@@ -179,15 +176,15 @@ fn runBench(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void
     for (roots) |r| std.debug.print(" {s}", .{r});
     std.debug.print("\n\n", .{});
 
-    const load_t0 = nowNs(io);
+    const load_sp = Span.open(io);
     var corpus = try load(gpa, io, roots);
     defer corpus.deinit();
-    const load_ns: u64 = @intCast(nowNs(io) - load_t0);
+    const load_ns: u64 = @intCast(load_sp.read(io).ns());
 
-    const build_t0 = nowNs(io);
+    const build_sp = Span.open(io);
     var idx = try Index.build(gpa, corpus.docs);
     defer idx.deinit();
-    const build_ns: u64 = @intCast(nowNs(io) - build_t0);
+    const build_ns: u64 = @intCast(build_sp.read(io).ns());
     printCorpusHeader(&corpus, load_ns, &idx, build_ns);
 
     // ── persistence: a session pays build ONCE, then warm-starts from disk ──
@@ -195,15 +192,15 @@ fn runBench(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void
     const blob = try gpa.alloc(u8, idx.serializedSize());
     defer gpa.free(blob);
     _ = idx.writeInto(blob);
-    const w0 = nowNs(io);
+    const write_sp = Span.open(io);
     try Dir.cwd().writeFile(io, .{ .sub_path = out_dir ++ "/index.gist", .data = blob });
-    const write_ns: u64 = @intCast(nowNs(io) - w0);
-    const r0 = nowNs(io);
+    const write_ns: u64 = @intCast(write_sp.read(io).ns());
+    const read_sp = Span.open(io);
     const read_bytes = try Dir.cwd().readFileAlloc(io, out_dir ++ "/index.gist", gpa, .unlimited);
     defer gpa.free(read_bytes);
     var loaded = try Index.fromBytes(gpa, read_bytes);
     defer loaded.deinit();
-    const load2_ns: u64 = @intCast(nowNs(io) - r0);
+    const load2_ns: u64 = @intCast(read_sp.read(io).ns());
     std.debug.print("persist: {d:.1} MiB · write {d:.0} ms · cold-load {d:.0} ms — warm start is {d:.0}x faster than rebuild ({d:.0} ms)\n\n", .{
         @as(f64, @floatFromInt(blob.len)) / (1 << 20),
         ms(write_ns),
@@ -226,9 +223,9 @@ fn runBench(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void
     for (fixed_slate) |needle| {
         var files: usize = 0;
         for (0..runs) |i| {
-            const q0 = nowNs(io);
+            const q = Span.open(io);
             try gistMatches(&idx, &corpus, gpa, needle, &matchbuf);
-            samples[i] = @intCast(nowNs(io) - q0);
+            samples[i] = @intCast(q.read(io).ns());
             files = matchbuf.items.len;
         }
         std.mem.sort(u64, &samples, {}, comptime std.sort.asc(u64));
@@ -476,9 +473,9 @@ fn runSession(gpa: std.mem.Allocator, io: std.Io) !void {
         var files: usize = 0;
         for (0..warmup) |_| files = try sessionQuery(gpa, fd, qbuf.items);
         for (0..runs) |i| {
-            const q0 = nowNs(io);
+            const q = Span.open(io);
             files = try sessionQuery(gpa, fd, qbuf.items);
-            samples[i] = @intCast(nowNs(io) - q0);
+            samples[i] = @intCast(q.read(io).ns());
         }
         std.mem.sort(u64, &samples, {}, comptime std.sort.asc(u64));
         const p50 = percentile(&samples, 0.50);
@@ -516,9 +513,9 @@ fn runSession(gpa: std.mem.Allocator, io: std.Io) !void {
         var total: usize = 0;
         for (0..warmup) |_| total = try sessionQuery(gpa, fd, qbuf.items);
         for (0..runs) |i| {
-            const q0 = nowNs(io);
+            const q = Span.open(io);
             total = try sessionQuery(gpa, fd, qbuf.items);
-            samples[i] = @intCast(nowNs(io) - q0);
+            samples[i] = @intCast(q.read(io).ns());
         }
         std.mem.sort(u64, &samples, {}, comptime std.sort.asc(u64));
         const p50 = percentile(&samples, 0.50);
@@ -554,18 +551,18 @@ fn runScanBench(gpa: std.mem.Allocator, io: std.Io) !void {
     const needles = [_][]const u8{ "})", "ctx", "func", "=> ", "import", "context.Context" };
     for (needles) |ndl| {
         var hits_std: usize = 0;
-        var t0 = nowNs(io);
+        var sp = Span.open(io);
         for (corpus.docs) |d| {
             if (std.mem.indexOf(u8, d, ndl) != null) hits_std += 1;
         }
-        const std_ns: u64 = @intCast(nowNs(io) - t0);
+        const std_ns: u64 = @intCast(sp.read(io).ns());
 
         var hits_simd: usize = 0;
-        t0 = nowNs(io);
+        sp = Span.open(io);
         for (corpus.docs) |d| {
             if (simd.contains(d, ndl)) hits_simd += 1;
         }
-        const simd_ns: u64 = @intCast(nowNs(io) - t0);
+        const simd_ns: u64 = @intCast(sp.read(io).ns());
         if (hits_std != hits_simd) std.debug.print("  !! disagree on '{s}': std={d} simd={d}\n", .{ ndl, hits_std, hits_simd });
 
         const std_tp = mib / (ms(std_ns) / 1e3);

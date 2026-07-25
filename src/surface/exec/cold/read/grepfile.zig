@@ -14,6 +14,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const args = @import("../argv/args.zig");
+const assay = @import("../../../../assay/assay.zig");
 const output = @import("../emit/output.zig");
 const Opts = args.Opts;
 const die = args.die;
@@ -269,26 +270,25 @@ pub fn anyLinesMatch(a: std.mem.Allocator, re: *const Matcher, o: Opts, lines: [
     return false;
 }
 
-/// `--stats` tally (ripgrep's summary). Timing fields are intentionally omitted:
-/// they are non-deterministic and the differential harness normalizes the two
-/// `seconds` lines away (ripgrep's own tests only `contains`-check them).
-pub const Stats = struct {
-    matches: usize = 0,
-    matched_lines: usize = 0,
-    files_with_match: usize = 0,
-    files_searched: usize = 0,
-    bytes_printed: usize = 0,
-    bytes_searched: usize = 0,
-
-    /// Fold another tally into this one (the parallel engine sums its per-worker
-    /// tallies; the count fields are all additive, `bytes_printed` is set last
-    /// by whoever owns the final output buffer).
-    pub fn add(self: *Stats, other: Stats) void {
-        inline for (@typeInfo(Stats).@"struct".fields) |f| if (comptime !std.mem.eql(u8, f.name, "bytes_printed")) {
-            @field(self, f.name) += @field(other, f.name);
-        };
-    }
+/// Unified search-stats counter set — one `assay.Tally` schema shared by rg's
+/// `--stats` block (below) and the `--json` summary record (`emit/json.zig`),
+/// collapsing what were two near-identical hand-rolled structs. Timing fields
+/// are intentionally omitted: they are non-deterministic and the differential
+/// harness normalizes the two `seconds` lines away (ripgrep's own tests only
+/// `contains`-check them). Named by rg's `--stats` vocabulary; the JSON emitter
+/// renders `files_searched`→`searches` and `files_with_match`→`searches_with_match`.
+/// `bytes_printed` is set once by whoever owns the final output buffer — a worker
+/// never accumulates it, so per-worker folds use `foldExcept(.., &.{.bytes_printed})`;
+/// the JSON summary always reports it as 0.
+pub const StatField = enum {
+    matches,
+    matched_lines,
+    files_with_match,
+    files_searched,
+    bytes_printed,
+    bytes_searched,
 };
+pub const Stats = assay.Tally(StatField);
 
 pub const FileStat = struct { matches: usize, lines: usize, bytes: usize };
 
@@ -346,8 +346,11 @@ pub fn fileMatchStats(re: *const Matcher, a: std.mem.Allocator, o: Opts, body: [
 }
 
 /// Emit ripgrep's `--stats` block (leading blank line, one field per line). The
-/// two `seconds` lines carry zeros — the harness normalizes them (see `Stats`).
-pub fn emitStats(a: std.mem.Allocator, out: *std.ArrayList(u8), s: Stats) void {
+/// two `seconds` lines now carry the run's real monotonic `elapsed` (formatted
+/// `{d:.6}`, ripgrep's precision); the differential harness still normalizes
+/// both wall-clock lines away, so this is byte-parity-safe and rg-faithful.
+pub fn emitStats(a: std.mem.Allocator, out: *std.ArrayList(u8), s: Stats, elapsed: assay.Duration) void {
+    const secs = @as(f64, @floatFromInt(elapsed.ns())) / 1e9;
     out.print(a,
         \\
         \\{d} matches
@@ -356,10 +359,30 @@ pub fn emitStats(a: std.mem.Allocator, out: *std.ArrayList(u8), s: Stats) void {
         \\{d} files searched
         \\{d} bytes printed
         \\{d} bytes searched
-        \\0.000000 seconds spent searching
-        \\0.000000 seconds total
+        \\{d:.6} seconds spent searching
+        \\{d:.6} seconds total
         \\
-    , .{ s.matches, s.matched_lines, s.files_with_match, s.files_searched, s.bytes_printed, s.bytes_searched }) catch oom();
+    , .{ s.get(.matches), s.get(.matched_lines), s.get(.files_with_match), s.get(.files_searched), s.get(.bytes_printed), s.get(.bytes_searched), secs, secs }) catch oom();
+}
+
+/// Lens-gated machine-readable diagnostic for a completed search — the stderr
+/// peer of the stdout `--stats`/`--json` summary, emitted ONLY under
+/// `GIST_TRACE=query` (default runs emit nothing here, preserving byte parity).
+/// It renders as one NDJSON record on a `--json` run (or `GIST_TRACE_FORMAT=
+/// json`) and as one text line otherwise, routed through the assay sink — so a
+/// warm daemon query carries it back to the client's stderr like every other
+/// diagnostic. Shared by both walk engines so their reported counts can't drift.
+pub fn diagSearch(gpa: std.mem.Allocator, json: bool, s: Stats, elapsed: assay.Duration) void {
+    if (!assay.lit(.query)) return;
+    assay.summary(gpa, json, "gist: {d} files searched · {d} with match · {d} matches · {d} matched lines · {d} bytes searched · {d:.1} ms\n", .{ s.get(.files_searched), s.get(.files_with_match), s.get(.matches), s.get(.matched_lines), s.get(.bytes_searched), elapsed.ms() }, .{
+        .{ "verb", "s", "search" },
+        .{ "files_searched", "d", s.get(.files_searched) },
+        .{ "files_with_match", "d", s.get(.files_with_match) },
+        .{ "matches", "d", s.get(.matches) },
+        .{ "matched_lines", "d", s.get(.matched_lines) },
+        .{ "bytes_searched", "d", s.get(.bytes_searched) },
+        .{ "ms", "d:.1", elapsed.ms() },
+    });
 }
 
 /// ripgrep's `<bin>: <path>: <errno phrase>` note for a path that can't be
