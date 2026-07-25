@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const fault = @import("../../../../fault.zig");
 
 /// Only these targets have the fork+exec (+ `flock`/kqueue/inotify) machinery
 /// the daemons rely on; everywhere else the query just runs its fallback (no-op).
@@ -43,11 +44,12 @@ pub fn detach(gpa: std.mem.Allocator, io: std.Io, verb: [:0]const u8) !void {
 
     // ── child ──: detach from the CLI's session + stdio, then become the daemon.
     _ = std.c.setsid();
-    if (std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDWR }, 0)) |nul| {
+    // No `/dev/null` → the child keeps the CLI's stdio rather than not starting.
+    if (std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDWR }, 0) catch null) |nul| {
         _ = std.c.dup2(nul, 0);
         _ = std.c.dup2(nul, 1);
         _ = std.c.dup2(nul, 2);
-    } else |_| {}
+    }
     _ = execv(exe_z.ptr, &child_argv);
     _exit(127); // only reached if execv failed
 }

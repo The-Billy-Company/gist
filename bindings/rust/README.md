@@ -1,3 +1,18 @@
+---
+doc_radar:
+  counts:
+    - description: "one README per module directory under src/"
+      glob: "pkg/kernels/irregex/bindings/rust/src/*/README.md"
+      equals: 6
+  sentinels:
+    - description: "the analytic verb families are exported from the facade"
+      file: pkg/kernels/irregex/bindings/rust/src/lib.rs
+      contains: ["pub mod relate", "pub mod compose", "pub mod index"]
+    - description: "the native feature is opt-in, not assumed"
+      file: pkg/kernels/irregex/bindings/rust/Cargo.toml
+      contains: ["[features]", "native"]
+---
+
 # gist — the importable Rust search API
 
 ## What it is
@@ -80,7 +95,7 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 (`gist::warm_eligible(&req)` is `false` for scoped roots, globs/types, context,
 or any rich flag), or a wire hiccup transparently falls back to the
 byte-identical cold subprocess. The wire protocol is the same one
-`src/surface/exec/session/protocol.zig` defines and the Zig CLI + Python clients speak, so all
+`src/surface/exec/session/conduit/protocol.zig` defines and the Zig CLI + Python clients speak, so all
 three frame-match against the one daemon.
 
 ## Find, then aggregate
@@ -136,6 +151,45 @@ Each `Ranked` row carries the engine's own `def`/`use`/`gen` classification
 reads the persisted index, so it needs one built (`make install-gist`); with no
 index there is nothing to rank and the result is empty. The `limit` caps the rows
 (`0` = the engine default of 20).
+
+## Beyond pattern — the analytic verbs
+
+Exact search needs you to know how the thing is spelled. The seventeen analytic
+verbs (ADR-377) do not: they price texts against each other by how cheaply one
+compresses the other, and answer _what resembles this_, _which files explain
+this_, _where did this come from_, _what moves if I change this_.
+
+```rust
+// what resembles this file — graded, so background can't pass as kinship
+for row in gist::relate::similar("src/lib.rs").min_grade(gist::Grade::Strong).rows()?.iter() {
+    let row = row?;
+    println!("{:?} {:?}", row.text("path"), row.real("distance"));
+}
+
+// the non-redundant reading set for a task, each pick priced by marginal bits
+let picks = gist::relate::pack("how does the resident session reconcile freshness").rows()?;
+println!("{} foreign fingerprints", picks.stats().foreign);   // "not in this repo" ≠ "no results"
+
+// both engines at once: forks among only the files that match this symbol
+let fam = gist::compose::family("SearchRequest").root("libs").min_echo(0.15).rows()?;
+```
+
+All seventeen return **the same self-describing row**, so there is one decoder
+and one cursor rather than seventeen result types. A `Row` borrows the cursor's
+arena — the borrow checker, not a doc comment, is what stops one outliving the
+next pull — and `to_owned()` is the explicit exit. `rows.batches(64)` amortizes
+the FFI crossing, and several batches from one cursor may be alive at once.
+
+Absence is real: a field the engine did not set is `None`, never `0.0`, because
+`distance = 0.0` means _identical_. `Stats` carries `tier` (live · atlas ·
+shelf · subprocess), `foreign`, and `omitted` (a budget truncated the tail).
+
+**Transport is invisible.** With `--features native` and a `libirregex` that
+exports the analytic plane, everything above runs in-process; otherwise it runs
+through the certified CLI and lowers the same NDJSON into the same rows. An
+engine answering `IRREGEX_STALE` is _declining_, not failing, so the next tier
+answers and no caller sees it. The one loud refusal is a schema-digest mismatch,
+which names the schema that drifted rather than mis-decoding a row.
 
 ## Standalone by design
 

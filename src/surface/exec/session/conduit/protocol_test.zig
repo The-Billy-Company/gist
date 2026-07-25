@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const protocol = @import("protocol.zig");
-const request = @import("request.zig");
+const request = @import("../answer/request.zig");
 
 const gpa = std.testing.allocator;
 

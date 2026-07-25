@@ -14,7 +14,7 @@ doc_radar:
 
 # surface/face/gist/daemon/serve — `gist serve`
 
-Keeps one [`ResidentSession`](../../../../exec/session/resident.zig) warm behind a
+Keeps one [`ResidentSession`](../../../../exec/session/warm/resident.zig) warm behind a
 Unix-domain socket so a persistent client answers an eligible query without
 re-paying the cold subprocess's process + index-mmap + candidate-read startup —
 the mechanism behind the warm session certificate.
@@ -41,7 +41,7 @@ idleness and then exits; the next query re-spawns one.
 
 `socketPath` resolves `$GIST_SESSION_SOCK`, else `.local/gist-verify/gistd.sock`.
 
-Because that default sits *inside* the artifact directory, an absolute
+Because that default sits _inside_ the artifact directory, an absolute
 `$GIST_DIR` shared by two checkouts aims both at one **rendezvous** — and a warm
 answer names files by paths that resolve in either tree, so a crossed dial is
 invisible in the output. So the daemon records the tree it went resident over
@@ -50,6 +50,6 @@ in a hidden `.<socket>.tree` beside the socket
 re-proves it before dialing; a socket bound to another tree reads as no daemon
 at all and the query answers cold.
 
-The wire grammar is [`exec/session/protocol.zig`](../../../../exec/session/protocol.zig);
+The wire grammar is [`exec/session/conduit/protocol.zig`](../../../../exec/session/conduit/protocol.zig);
 the client that dials it is [`../client`](../client). End-to-end lifecycle is
 pinned in [`serve_test.zig`](serve_test.zig).

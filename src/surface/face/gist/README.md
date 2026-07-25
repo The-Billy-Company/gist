@@ -304,7 +304,7 @@ invariant.
 To stop paying startup costs, `gist serve` holds corpus bytes and a trigram
 index behind a per-repository Unix socket. The CLI may auto-spawn it after an
 eligible cold miss. The request classifier deliberately keeps the warm surface
-small. This table is a readable snapshot; `surface/exec/session/request.zig` remains
+small. This table is a readable snapshot; `surface/exec/session/answer/request.zig` remains
 the executable authority:
 
 | warm-eligible CLI shape                    | stays authoritative-cold                                      |

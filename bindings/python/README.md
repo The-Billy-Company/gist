@@ -9,10 +9,12 @@ doc_radar:
         - "[irregex.grades]"
         - "[irregex.lifecycle]"
         - "[compose.verbs]"
-      description: The matcher controls, the grade bands, the atlas lifecycle, and the composed verbs all remain contract sections.
-    - file: pkg/kernels/irregex/src/surface/cli/grade.zig
+        - "[row_schemas]"
+        - "[analytic.verbs]"
+      description: The matcher controls, the grade bands, the atlas lifecycle, the composed verbs, and the analytic row plane all remain contract sections.
+    - file: pkg/kernels/irregex/src/kernel/kinship/metric/channel.zig
       contains: ["pub const Channel = enum", "pub const Grade = enum"]
-      description: Kinship calibration has one Zig source, which irregex/grade.py mirrors and tests/test_grade_parity.py reads as its oracle.
+      description: Kinship calibration has one Zig source, which irregex/contract/grades.py mirrors and tests/test_grade_parity.py reads as its oracle.
 ---
 
 # billy-irregex — the importable kernel API
@@ -248,6 +250,70 @@ which is exactly the inversion a hand-rolled threshold gets wrong.
 alias, cut point, and polarity is asserted against the kernel, so the mirror
 cannot drift.
 
+## Package layout
+
+Six packages, one concern each — the same shape the Rust and Go bindings use, so
+a reader who knows one knows all three. Each has its own README.
+
+| Package                                           | Concern                                                                                 |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| [`irregex/contract/`](irregex/contract/README.md) | the mirrored contract: constants, grade calibration, and the generated row-schema table |
+| [`irregex/runtime/`](irregex/runtime/README.md)   | the transports and the ladder between them, plus the one row decoder                    |
+| [`irregex/exact/`](irregex/exact/README.md)       | pattern search: the request shape, the pull cursor, aggregation, the ranked view        |
+| [`irregex/relate/`](irregex/relate/README.md)     | kinship and retrieval — everything priced in bits                                       |
+| [`irregex/compose/`](irregex/compose/README.md)   | the composed verbs, where an exact match set narrows a statistical question             |
+| [`irregex/index/`](irregex/index/README.md)       | index / atlas lifecycle and capability introspection                                    |
+
+`irregex/__init__.py` is the facade: it is the whole public API, and importing a
+submodule is never necessary.
+
+## The analytic plane (ADR-377)
+
+Kinship, retrieval, and composed verbs used to be reachable only by spawning a
+CLI and re-parsing NDJSON — seventeen hand-written readers, one per verb, plus a
+regex scraper for the ranked view. They now dispatch through
+`irregex_analytic_run` and come back as typed rows:
+
+```python
+answer = irregex.pack("how does the resident session reconcile freshness", top=6)
+answer.coverage        # how much of the query the whole set explains
+answer.stats.foreign   # fingerprints this corpus has never seen
+answer.stats.source    # which tier answered: native | warm | cold
+```
+
+Three properties are worth knowing as a caller:
+
+**One decoder, driven by the contract.** Rows are read positionally against
+`contract/search_api.toml`'s `[row_schemas]`, so a field is never located by a key
+name that survived a transport. An enum ordinal this binding's generated table
+does not name decodes as `Unknown` rather than the nearest label it happens to
+know, and an unmeasured field is never a zero — `distance = 0.0` means
+_identical_.
+
+**The ladder is invisible.** Native, then the warm daemon where it applies, then
+the CLI. A tier that cannot express a request declines, and the next one answers
+identically; a library built without the plane simply has no first rung. Nothing
+about that is a failure, and nothing raises.
+
+**A schema disagreement is not.** The library's `irregex_schema_digest()` is
+compared with this binding's table at load, and a mismatch fails loudly, naming
+the schemas that moved — because decoding against the wrong table yields values
+of the right type read out of the wrong field.
+
+Answers stream, and batch on request:
+
+```python
+rows = irregex.runtime.analytic.answer(...)   # a Rows cursor
+for record in rows:                           # lazy, one pull per record
+    ...
+for chunk in rows.batches(256):               # one irregex_rows_next_batch per chunk
+    ...
+```
+
+Every record is an owned Python object: native rows borrow the cursor arena and
+die at the next pull, so materializing before yielding is what makes the cursor
+safe to hand out at all.
+
 ## Why it exists
 
 GIST used to be reachable only as a shell reflex (the `gist` CLI). Scripts that
@@ -304,7 +370,7 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 (`irregex.warm_eligible(req)` is `False` for scoped roots, globs/types, context, or
 any rich flag), or a wire hiccup transparently falls back to the byte-identical
 cold subprocess — the daemon is a pure accelerator, never a new failure mode.
-The wire protocol is the same one `src/surface/exec/session/protocol.zig` defines and the Zig
+The wire protocol is the same one `src/surface/exec/session/conduit/protocol.zig` defines and the Zig
 CLI + Rust clients speak, so all three frame-match against the one daemon.
 `refresh_generation()` reads the daemon's current three-part generation; a
 reconnect, daemon restart, or index publication is visible through
@@ -315,7 +381,7 @@ reconnect, daemon restart, or index publication is visible through
 When the host process already holds the shared library and `cffi` (e.g. the AI
 service, which depends on `cffi` via the sibling kernels), a `Session`
 transparently serves eligible queries **in-process** over the
-`irregex_open` / `irregex_search` / `irregex_close` C ABI (`irregex/_ffi.py`
+`irregex_open` / `irregex_search` / `irregex_close` C ABI (`irregex/runtime/native.py`
 over `libirregex.{dylib,so}`) — no
 subprocess or socket. Unlike the UDS transport (files/count only), it streams
 full `Match` records, so `Session.run` gains a warm path for the first time;
@@ -386,5 +452,5 @@ what `can_quote` is for, so it can be preflighted instead of caught.
 
 Wraps the same engine as `rg` (the tool it is a drop-in for); the request/result
 contract mirrors ripgrep's `--json` record stream. The cffi transport
-(`irregex/_ffi.py`) follows the sibling kernel bindings' ABI-mode `dlopen` loader
+(`irregex/runtime/native.py`) follows the sibling kernel bindings' ABI-mode `dlopen` loader
 (`lamina`, `principia`, `billog`).

@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const fault = @import("../../../../fault.zig");
 
 /// Refused before allocation — dwarfs any real response, caps a hostile peer.
 pub const max_frame: u32 = 16 << 20;
@@ -48,28 +49,33 @@ pub fn parseFrame(bytes: []const u8) WireError!?Parsed {
     return .{ .op = bytes[4], .payload = bytes[5..total], .consumed = total };
 }
 
+/// The per-send half of the SIGPIPE guard: Linux carries MSG_NOSIGNAL on every
+/// `send`/`sendmsg`; Darwin/BSD has no such flag and arms the socket instead
+/// (`armNoSigpipe`).
+const send_flags: u32 = if (builtin.os.tag == .linux) std.posix.MSG.NOSIGNAL else 0;
+
+/// The socket half of the SIGPIPE guard: Darwin/BSD's per-socket SO_NOSIGPIPE,
+/// idempotent, so every entry point that writes to a peer (`writeAll`,
+/// `sendWithFd`) arms once and server/client/tests all inherit it. A no-op on
+/// Linux, which flags the guard per send instead. CLI stdout SIGPIPE
+/// (`gist | head`) is left intact — this only ever touches the daemon socket.
+fn armNoSigpipe(fd: std.posix.fd_t) void {
+    if (comptime !builtin.os.tag.isDarwin()) return;
+    const on: c_int = 1;
+    fault.spare("suppress SIGPIPE on this socket", std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.NOSIGPIPE, std.mem.asBytes(&on)));
+}
+
 /// Write all of `bytes` to `fd`, retrying short writes; false on a dead peer.
-/// Never raises SIGPIPE: Linux uses MSG_NOSIGNAL; Darwin/BSD arms SO_NOSIGPIPE
-/// here (idempotent) so server/client/tests inherit the guard. CLI stdout
-/// SIGPIPE (`gist | head`) is left intact.
+/// Never raises SIGPIPE (see `armNoSigpipe`).
 pub fn writeAll(fd: std.posix.fd_t, bytes: []const u8) bool {
-    if (comptime builtin.os.tag.isDarwin()) {
-        const on: c_int = 1;
-        std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.NOSIGPIPE, std.mem.asBytes(&on)) catch {};
-    }
+    armNoSigpipe(fd);
     var off: usize = 0;
     while (off < bytes.len) {
-        const sent = sendNoSigpipe(fd, bytes.ptr + off, bytes.len - off);
-        if (sent <= 0) return false;
+        const sent: isize = @bitCast(std.posix.system.sendto(fd, bytes.ptr + off, bytes.len - off, send_flags, null, 0));
+        if (sent <= 0) return false; // dead peer or error
         off += @intCast(sent);
     }
     return true;
-}
-
-/// One SIGPIPE-safe `send` (see `writeAll`); byte count, ≤ 0 on dead peer/error.
-fn sendNoSigpipe(fd: std.posix.fd_t, ptr: [*]const u8, len: usize) isize {
-    const flags: u32 = if (comptime builtin.os.tag == .linux) std.posix.MSG.NOSIGNAL else 0;
-    return @bitCast(std.posix.system.sendto(fd, ptr, len, flags, null, 0));
 }
 
 /// Send one framed message on `fd`.
@@ -109,15 +115,36 @@ fn readExact(fd: std.posix.fd_t, dst: []u8) bool {
 /// Receive one whole frame from `fd`. `ConnClosed` on truncated peer;
 /// `FrameTooLarge` fails closed.
 pub fn recvFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!Frame {
+    var ignored: ?std.posix.fd_t = null;
+    return recvFramed(gpa, fd, false, &ignored);
+}
+
+/// The single frame-reassembly body both receive faces run: header, the
+/// fail-closed length check, one allocation for the whole frame, then the
+/// remainder. `capture_fd` picks the syscall at COMPTIME — plain `read`, or
+/// `recvmsg` so an SCM_RIGHTS fd is captured into `out_fd` instead of being
+/// silently dropped — so neither face pays for the other's branch and the frame
+/// grammar cannot drift between them.
+fn recvFramed(
+    gpa: std.mem.Allocator,
+    fd: std.posix.fd_t,
+    comptime capture_fd: bool,
+    out_fd: *?std.posix.fd_t,
+) WireError!Frame {
+    const fill = struct {
+        fn go(f: std.posix.fd_t, dst: []u8, o: *?std.posix.fd_t) bool {
+            return if (comptime capture_fd) recvExactMsg(f, dst, o) else readExact(f, dst);
+        }
+    }.go;
     var hdr: [4]u8 = undefined;
-    if (!readExact(fd, &hdr)) return WireError.ConnClosed;
+    if (!fill(fd, &hdr, out_fd)) return WireError.ConnClosed;
     const len = std.mem.readInt(u32, &hdr, .little);
     if (len == 0 or len > max_frame) return WireError.FrameTooLarge;
     const total = 4 + @as(usize, len);
     const bytes = gpa.alloc(u8, total) catch return WireError.OutOfMemory;
     errdefer gpa.free(bytes);
     @memcpy(bytes[0..4], &hdr);
-    if (!readExact(fd, bytes[4..])) return WireError.ConnClosed;
+    if (!fill(fd, bytes[4..], out_fd)) return WireError.ConnClosed;
     return .{ .op = bytes[4], .bytes = bytes, .gpa = gpa };
 }
 
@@ -156,10 +183,7 @@ fn cmsgHdrConst(ctrl: *align(cmsg_align) const [cmsg_space]u8) *const cmsghdr {
 /// first send finishes plain (`writeAll`) with the fd already across. Same
 /// SIGPIPE guard as `writeAll`. `false` on a dead peer.
 pub fn sendWithFd(fd: std.posix.fd_t, bytes: []const u8, pass_fd: std.posix.fd_t) bool {
-    if (comptime builtin.os.tag.isDarwin()) {
-        const on: c_int = 1;
-        std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.NOSIGPIPE, std.mem.asBytes(&on)) catch {};
-    }
+    armNoSigpipe(fd);
     var iov = [_]std.posix.iovec_const{.{ .base = bytes.ptr, .len = bytes.len }};
     var ctrl: [cmsg_space]u8 align(cmsg_align) = undefined;
     @memset(&ctrl, 0);
@@ -178,8 +202,7 @@ pub fn sendWithFd(fd: std.posix.fd_t, bytes: []const u8, pass_fd: std.posix.fd_t
         .controllen = @intCast(ctrl.len),
         .flags = 0,
     };
-    const flags: u32 = if (comptime builtin.os.tag == .linux) std.posix.MSG.NOSIGNAL else 0;
-    const n = std.c.sendmsg(fd, &msg, flags);
+    const n = std.c.sendmsg(fd, &msg, send_flags);
     if (n <= 0) return false;
     const sent: usize = @intCast(n);
     return sent >= bytes.len or writeAll(fd, bytes[sent..]);
@@ -199,16 +222,7 @@ pub fn recvFrameWithFd(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!FdF
     errdefer if (passed) |p| {
         _ = std.c.close(p);
     };
-    var hdr: [4]u8 = undefined;
-    if (!recvExactMsg(fd, &hdr, &passed)) return WireError.ConnClosed;
-    const len = std.mem.readInt(u32, &hdr, .little);
-    if (len == 0 or len > max_frame) return WireError.FrameTooLarge;
-    const total = 4 + @as(usize, len);
-    const bytes = gpa.alloc(u8, total) catch return WireError.OutOfMemory;
-    errdefer gpa.free(bytes);
-    @memcpy(bytes[0..4], &hdr);
-    if (!recvExactMsg(fd, bytes[4..], &passed)) return WireError.ConnClosed;
-    return .{ .frame = .{ .op = bytes[4], .bytes = bytes, .gpa = gpa }, .passed_fd = passed };
+    return .{ .frame = try recvFramed(gpa, fd, true, &passed), .passed_fd = passed };
 }
 
 /// Read exactly `dst.len` bytes via `recvmsg`, capturing the first SCM_RIGHTS fd

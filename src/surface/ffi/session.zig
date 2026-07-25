@@ -4,7 +4,7 @@
 //! or any C caller) hold a gist corpus WARM in its own process and stream match
 //! records over a callback — no subprocess, no Unix socket, no `stdout`, no
 //! `exit`. It is the in-process face of the same warm engine the resident
-//! daemon (`surface/exec/session/resident.zig`) serves over a socket, and it draws on the
+//! daemon (`surface/exec/session/warm/resident.zig`) serves over a socket, and it draws on the
 //! same shared search core (`kernel/match/query.zig`), so an in-process answer is
 //! byte-identical to the cold `gist --json` stream and to the UDS daemon.
 //!
@@ -30,8 +30,8 @@
 const std = @import("std");
 const contract = @import("contract.zig");
 const Relay = @import("relay.zig").Relay;
-const resident = @import("../exec/session/resident.zig");
-const request = @import("../exec/session/request.zig");
+const resident = @import("../exec/session/warm/resident.zig");
+const request = @import("../exec/session/answer/request.zig");
 const assay = @import("../../assay/assay.zig");
 
 /// The FFI allocates through the C allocator so a host that already owns the C
@@ -49,6 +49,12 @@ const MatchFn = contract.MatchFn;
 /// still can't corrupt one search's scratch from another (the resident engine's
 /// mutex already serializes the corpus/reconcile state under the hood).
 pub const Session = struct {
+    /// The allocator this handle (and everything under it) was opened with, so
+    /// `close` returns the memory where it came from. It is `gpa` for every C
+    /// caller; carrying it is what lets the adverse OOM suite drive this exact
+    /// entry under a failing allocator instead of asserting against a path
+    /// where the allocation cannot fail.
+    alloc: std.mem.Allocator,
     threaded: std.Io.Threaded,
     io: std.Io,
     inner: resident.ResidentSession,
@@ -63,26 +69,35 @@ pub const Session = struct {
 /// `out` untouched and returns a negative status (`.invalid` for a null `out`,
 /// or a null `roots_ptr` with `nroots > 0`).
 pub fn open(roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**Session) Status {
+    return openWith(gpa, roots_ptr, nroots, out);
+}
+
+/// `open`, with the heap named. The C entry pins `gpa`; the OOM suite passes a
+/// failing allocator so a walk-time allocation failure is a status the caller
+/// reads rather than a hypothetical.
+pub fn openWith(alloc: std.mem.Allocator, roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**Session) Status {
     // ADR-352's never-write contract, by construction: route every diagnostic
     // this process might emit (reconcile traces, degradation notices, summary
     // lines) to the dark sink, so no warm-path `assay.diag` can reach the
     // embedding host's stderr. Installed on first `open`; idempotent.
     assay.install(.{ .sink = .dark });
+    contract.beginCall();
     const out_slot = out orelse return .invalid;
-    const roots = gpa.alloc([]const u8, nroots) catch return .out_of_memory;
-    defer gpa.free(roots);
+    const roots = alloc.alloc([]const u8, nroots) catch return contract.report(.{ .code = error.OutOfMemory });
+    defer alloc.free(roots);
     if (nroots != 0) {
         const rp = roots_ptr orelse return .invalid;
         for (roots, 0..) |*r, i| r.* = std.mem.span(rp[i]);
     }
 
-    const s = gpa.create(Session) catch return .out_of_memory;
-    s.threaded = std.Io.Threaded.init(gpa, .{});
+    const s = alloc.create(Session) catch return contract.report(.{ .code = error.OutOfMemory });
+    s.alloc = alloc;
+    s.threaded = std.Io.Threaded.init(alloc, .{});
     s.io = s.threaded.io();
-    s.inner = resident.ResidentSession.init(gpa, s.io, roots) catch {
+    s.inner = resident.ResidentSession.init(alloc, s.io, roots) catch |e| {
         s.threaded.deinit();
-        gpa.destroy(s);
-        return .open_failed;
+        alloc.destroy(s);
+        return contract.reportAny(e, .open_failed);
     };
     out_slot.* = s;
     return .ok;
@@ -91,6 +106,7 @@ pub fn open(roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**Session) 
 /// Execute one complete search shape. Null, wrongly-sized, or unknown options
 /// fail closed; unsupported patterns return `.stale` for authoritative fallback.
 pub fn search(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, options_ptr: ?*const SearchOptions, on_match: MatchFn, ctx: ?*anyopaque) Status {
+    contract.beginCall();
     const options = options_ptr orelse return .invalid;
     if (options.struct_size != @sizeOf(SearchOptions) or options.flags & ~contract.known_flags != 0)
         return .invalid;
@@ -123,19 +139,29 @@ fn searchRequest(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, fla
 
     // A fresh per-call arena for the transient candidate list — no session-wide
     // mutable state, so overlapping calls can't reset each other's scratch.
-    var arena = std.heap.ArenaAllocator.init(gpa);
+    var arena = std.heap.ArenaAllocator.init(s.alloc);
     defer arena.deinit();
-    const any = s.inner.search(arena.allocator(), req, &relay) catch |e| switch (e) {
-        error.Stale => return .stale,
-        error.OutOfMemory => return .out_of_memory,
+    const any = switch (s.inner.search(arena.allocator(), req, &relay) catch
+        return contract.report(.{ .code = error.OutOfMemory })) {
+        .got => |got| got,
+        // A declinature, not a fault: the cold tier answers this identically, so
+        // it installs nothing and `irregex_last_fault` stays silent about it.
+        .declined => return .stale,
     };
-    if (relay.oom) return .out_of_memory;
+    if (relay.oom) return contract.report(.{ .code = error.OutOfMemory });
     return if (any) .match else .ok;
 }
 
 /// Free the session and all its warm state (corpus, index, I/O pool, handle).
 pub fn close(s: *Session) void {
+    const alloc = s.alloc;
     s.inner.deinit();
     s.threaded.deinit();
-    gpa.destroy(s);
+    alloc.destroy(s);
+}
+
+test {
+    // The seam's adverse allocation-failure suite lives in a sibling file (shape
+    // cap) and is wired in from here, the entry it proves things about.
+    _ = @import("oom_test.zig");
 }

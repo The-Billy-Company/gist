@@ -5,14 +5,15 @@
 //! query → result → shutdown round-trip: the daemon answers an eligible `-l`
 //! query with the correct sorted file set, honors `ping`, and stops cleanly on
 //! `shutdown` (the thread joins — no leaked listener, socket unlinked). This is
-//! the transport counterpart to `surface/exec/session/resident_test.zig` (which proves the
+//! the transport counterpart to `surface/exec/session/warm/resident_test.zig` (which proves the
 //! engine's correctness directly); here we prove the socket carries it faithfully.
 
 const std = @import("std");
 const serve = @import("serve.zig");
-const protocol = @import("../../../../exec/session/protocol.zig");
-const request = @import("../../../../exec/session/request.zig");
-const shm = @import("../../../../exec/session/shm.zig");
+const protocol = @import("../../../../exec/session/conduit/protocol.zig");
+const request = @import("../../../../exec/session/answer/request.zig");
+const shm = @import("../../../../exec/session/conduit/shm.zig");
+const fault = @import("../../../../../fault.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
@@ -24,7 +25,7 @@ const DaemonArgs = struct {
 };
 
 fn daemonMain(args: DaemonArgs) void {
-    serve.run(args.gpa, args.io, args.roots, args.socket) catch {};
+    fault.spare("run test daemon", serve.run(args.gpa, args.io, args.roots, args.socket));
 }
 
 /// Dial the daemon, retrying to absorb the bind/listen race with the freshly
@@ -34,7 +35,7 @@ fn daemonMain(args: DaemonArgs) void {
 fn dial(io: std.Io, socket: []const u8) !net.Stream {
     const ua = try net.UnixAddress.init(socket);
     for (0..1000) |_| {
-        if (ua.connect(io)) |s| return s else |_| {}
+        if (ua.connect(io) catch null) |s| return s;
         try io.sleep(.fromNanoseconds(10 * std.time.ns_per_ms), .real);
     }
     return error.DaemonNeverCameUp;
@@ -44,10 +45,10 @@ fn dial(io: std.Io, socket: []const u8) !net.Stream {
 /// happy-path tail: an assertion or protocol error must not strand `join()` on
 /// the daemon's ten-minute idle TTL.
 fn shutdownAndJoin(gpa: std.mem.Allocator, io: std.Io, socket: []const u8, thread: std.Thread) void {
-    if (dial(io, socket)) |stream| {
+    if (dial(io, socket) catch null) |stream| {
         defer stream.close(io);
-        protocol.sendFrame(gpa, stream.socket.handle, .shutdown, "") catch {};
-    } else |_| {}
+        fault.spare("send shutdown frame", protocol.sendFrame(gpa, stream.socket.handle, .shutdown, ""));
+    }
     thread.join();
 }
 
@@ -55,7 +56,7 @@ fn shutdownAndJoin(gpa: std.mem.Allocator, io: std.Io, socket: []const u8, threa
 /// The caller `defer`s its removal.
 fn freshRoot(io: std.Io, a: std.mem.Allocator, comptime tag: []const u8, key: usize) ![]const u8 {
     const root = try std.fmt.allocPrint(a, "/tmp/gist_" ++ tag ++ "_{x}", .{key});
-    Dir.cwd().deleteTree(io, root) catch {};
+    fault.spare("clear leftover fixture", Dir.cwd().deleteTree(io, root));
     try Dir.cwd().createDirPath(io, root);
     return root;
 }
@@ -196,7 +197,7 @@ test "serve: fd-transport carries an emit-heavy answer byte-identically to chunk
     const a = arena.allocator();
 
     const root = try freshRoot(io, a, "fd", @intFromPtr(&threaded));
-    defer Dir.cwd().deleteTree(io, root) catch {};
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
 
     // An emit-heavy fixture: enough matching lines that the rendered answer
     // clears `fd_transport_floor` (1 MiB) and takes the fd path.
@@ -275,7 +276,7 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     const a = arena.allocator();
 
     const root = try freshRoot(io, a, "serve", @intFromPtr(&threaded));
-    defer Dir.cwd().deleteTree(io, root) catch {};
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
     try putFile(io, a, root, "a.txt", "WalletService here\n");
     try putFile(io, a, root, "b.txt", "nothing\n");
     try putFile(io, a, root, "c.txt", "also WalletService\n");
@@ -471,7 +472,7 @@ test "serve: an idle persistent client does not starve a second connection" {
     const a = arena.allocator();
 
     const root = try freshRoot(io, a, "mux", @intFromPtr(&threaded));
-    defer Dir.cwd().deleteTree(io, root) catch {};
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
     try putFile(io, a, root, "a.txt", "needle\n");
 
     const daemon = try spawnDaemon(gpa, io, a, root);
@@ -513,7 +514,7 @@ test "serve: a blocked query occupies only its worker — a second client's ping
     const a = arena.allocator();
 
     const root = try freshRoot(io, a, "pool", @intFromPtr(&threaded));
-    defer Dir.cwd().deleteTree(io, root) catch {};
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
     try putFile(io, a, root, "a.txt", "needle\n");
 
     // Arm the in-flight gate: a query blocks in its handler until we set it,
@@ -591,7 +592,7 @@ test "serve: a query that overruns its budget is declined and the daemon stays r
     const a = arena.allocator();
 
     const root = try freshRoot(io, a, "budget", @intFromPtr(&threaded));
-    defer Dir.cwd().deleteTree(io, root) catch {};
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
     try putFile(io, a, root, "a.txt", "needle here\n");
 
     // A 1 ns budget: the first checkpoint in the reconcile/fold walk is already
@@ -650,7 +651,7 @@ test "serve: annals consult declines pre-coverage instants and vouches for a liv
     const a = arena.allocator();
 
     const root = try freshRoot(io, a, "annals", @intFromPtr(&threaded));
-    defer Dir.cwd().deleteTree(io, root) catch {};
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
     try putFile(io, a, root, "seed.txt", "needle\n");
 
     const daemon = try spawnDaemon(gpa, io, a, root);

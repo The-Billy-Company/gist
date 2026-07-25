@@ -18,9 +18,10 @@
 //! We only avoid the obviously-wasteful spawn when a daemon is already up.
 
 const std = @import("std");
-const request = @import("../../../../exec/session/request.zig");
+const request = @import("../../../../exec/session/answer/request.zig");
 const run = @import("../../../../exec/cold/engine/serial.zig");
-const session_spawn = @import("../../../../exec/session/spawn.zig");
+const session_spawn = @import("../../../../exec/session/conduit/spawn.zig");
+const fault = @import("../../../../../fault.zig");
 const net = std.Io.net;
 
 /// Fire off a detached `gist serve` iff this query would benefit from a warm
@@ -52,14 +53,14 @@ pub fn maybeSpawn(
     // A daemon may have come up since the client's dial (a coworker's spawn, or
     // one still binding). Probe once; if it answers, leave it be.
     if (net.UnixAddress.init(socket_path)) |ua| {
-        if (ua.connect(io)) |stream| {
+        if (ua.connect(io) catch null) |stream| {
             stream.close(io);
             return;
-        } else |_| {}
+        }
     } else |_| return;
     // No root arg: bare `gist serve` serves the rootless CWD walk the child
     // inherits — exactly the tree this rootless query walks cold (warm==cold
     // parity), and the CWD-relative socket keeps scopes from a differently-rooted
     // daemon apart.
-    session_spawn.detach(gpa, io, "serve") catch {};
+    fault.spare("detach serve for the next query", session_spawn.detach(gpa, io, "serve"));
 }

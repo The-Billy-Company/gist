@@ -38,9 +38,9 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const request = @import("../../../../exec/session/request.zig");
-const protocol = @import("../../../../exec/session/protocol.zig");
-const shm = @import("../../../../exec/session/shm.zig");
+const request = @import("../../../../exec/session/answer/request.zig");
+const protocol = @import("../../../../exec/session/conduit/protocol.zig");
+const shm = @import("../../../../exec/session/conduit/shm.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
 const frame = @import("../../../../../corpus/index/frame/frame.zig");
 const run = @import("../../../../exec/cold/engine/serial.zig");

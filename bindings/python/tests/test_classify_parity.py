@@ -1,12 +1,12 @@
 """Cross-language eligibility parity (ADR-352 rung 2.5).
 
 `session.warm_eligible` (a cheap pure-Python predicate on `SearchRequest`) and
-`src/surface/exec/session/request.zig::classify` (the daemon's argv authority) are two
+`src/surface/exec/session/answer/request.zig::classify` (the daemon's argv authority) are two
 independent projections of ONE contract: which requests the resident path may
 answer warm. They take different inputs — request fields vs an rg argv — so they
 cannot share code, only agree. This suite is the mechanical guard the plan
 demands: it lowers each request to the real argv (`to_argv()` + pattern + paths),
-runs the built `gist` binary with `GIST_DEBUG_WARM=1` (which prints the classify
+runs the built `gist` binary with `GIST_TRACE=warm` (which prints the classify
 verdict *before* dialing, so the oracle is daemon-independent), and asserts BOTH
 sides land on the same DECLARED verdict — so neither can drift, and the test can
 never pass by both mislabeling the same shape.
@@ -22,8 +22,8 @@ import pytest
 
 import irregex
 from irregex import warm_eligible
-from irregex.request import SearchEngine, SearchRequest
-from irregex.session import ffi_eligible
+from irregex.exact.request import SearchEngine, SearchRequest
+from irregex.runtime.daemon import ffi_eligible
 
 
 def _binary_available() -> bool:
@@ -140,7 +140,7 @@ _BINDING_COLD_BINARY_WARM: list[SearchRequest] = [
 
 
 def _binary_verdict(req: SearchRequest, cwd) -> bool:
-    """The built classifier's verdict for `req`, read from `GIST_DEBUG_WARM`.
+    """The built classifier's verdict for `req`, read under `GIST_TRACE=warm`.
 
     Lowers the request to the exact argv the CLI accepts and runs it with
     auto-spawn off (hermetic: no lingering daemon). The `[eligible]` /
@@ -148,7 +148,7 @@ def _binary_verdict(req: SearchRequest, cwd) -> bool:
     classify verdict — no daemon required.
     """
     argv = [irregex.binary(), *req.to_argv(), req.pattern, *req.paths]
-    env = {**os.environ, "GIST_DEBUG_WARM": "1", "GIST_NO_AUTOSERVE": "1"}
+    env = {**os.environ, "GIST_TRACE": "warm", "GIST_NO_AUTOSERVE": "1"}
     proc = subprocess.run(  # noqa: S603 — trusted binary, list argv, no shell
         argv, cwd=str(cwd), env=env, capture_output=True, text=True
     )

@@ -12,7 +12,7 @@
 //! Anything the server cannot serve warm comes back as `decline` (client → cold).
 
 const std = @import("std");
-const request = @import("request.zig");
+const request = @import("../answer/request.zig");
 const wire = @import("wire.zig");
 const shm = @import("shm.zig");
 

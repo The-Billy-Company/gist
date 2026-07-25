@@ -16,7 +16,7 @@ daemon ([`../serve`](../serve)). Warm acceleration is opportunistic; correctness
 always has the cold engine behind it.
 
 `attempt(gpa, io, argv, socket_path)` classifies the argv
-([`exec/session/request.zig`](../../../../exec/session/request.zig)) and only dials when
+([`exec/session/answer/request.zig`](../../../../exec/session/answer/request.zig)) and only dials when
 the request is one the warm path can answer with **cold's own per-file bytes
 and exit code**:
 

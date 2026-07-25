@@ -39,13 +39,14 @@ const persist = @import("../../../../corpus/index/trigrams/persist.zig");
 const codicil = @import("../../../../corpus/index/trigrams/codicil.zig");
 const journal = @import("../../../../corpus/tree/journal.zig");
 const client = @import("../daemon/client/client.zig");
-const session_spawn = @import("../../../exec/session/spawn.zig");
+const session_spawn = @import("../../../exec/session/conduit/spawn.zig");
 const crest_sidecar = @import("../../../../corpus/index/crest/sidecar.zig");
 const frame = @import("../../../../corpus/index/frame/frame.zig");
 const treemap = @import("../../../../corpus/index/phantom/treemap.zig");
 const shard = @import("../../../../corpus/index/content/shard.zig");
 const Index = @import("../../../../corpus/index/trigrams/trigram.zig").Index;
 const assay = @import("../../../../assay/assay.zig");
+const fault = @import("../../../../fault.zig");
 
 /// Refresh the persisted index: amend incrementally when the base admits it,
 /// else build + persist the full pair.
@@ -84,11 +85,14 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     if (jtok) |t| fresh.writeJournalToken(io, t); // journal since-token (best-effort)
     // Phantom tree.map (self-anchored, whole-CWD corpora only): best-effort —
     // a failure costs the phantom walk tier, never the index build.
-    treemap.build(gpa, io, roots) catch {};
+    fault.spare("phantom tree.map (costs the phantom walk tier)", treemap.build(gpa, io, roots));
     // Content shard (self-anchored on the SAME `built_ns`, sharing this exact
     // corpus snapshot): best-effort — a failure costs the shard read tier, so a
     // full-scan query falls back to opening every file, never the index build.
-    shard.build(gpa, io, corpus.docs, corpus.paths, built.ns()) catch {};
+    fault.spare(
+        "content shard (costs the shard read tier)",
+        shard.build(gpa, io, corpus.docs, corpus.paths, built.ns()),
+    );
     // Bind the directory to this tree LAST: until it lands, every reader still
     // sees whatever binding was here before, so a rebuild that repurposes a
     // foreign artifact directory never exposes a window where the new anchor
@@ -307,7 +311,7 @@ fn spawnForNextAmend(gpa: std.mem.Allocator, io: std.Io) void {
     if (comptime !session_spawn.can_spawn) return;
     for ([_][*:0]const u8{ "GIST_NO_AUTOSERVE", "GIST_NO_PARALLEL", "GIST_SESSION_SOCK" }) |k|
         if (std.c.getenv(k) != null) return;
-    session_spawn.detach(gpa, io, "serve") catch {};
+    fault.spare("detach serve for the next amend", session_spawn.detach(gpa, io, "serve"));
 }
 
 fn envDisabled(name: [*:0]const u8) bool {

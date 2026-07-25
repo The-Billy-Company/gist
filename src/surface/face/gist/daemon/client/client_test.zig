@@ -7,6 +7,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const client = @import("client.zig");
+const fault = @import("../../../../../fault.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
@@ -60,9 +61,9 @@ test "client: wedged daemon times out to cold" {
     const a = arena.allocator();
 
     const root = try std.fmt.allocPrint(a, "/tmp/gist_client_wedge_{x}", .{@intFromPtr(&threaded)});
-    Dir.cwd().deleteTree(io, root) catch {};
+    fault.spare("clear leftover fixture", Dir.cwd().deleteTree(io, root));
     try Dir.cwd().createDirPath(io, root);
-    defer Dir.cwd().deleteTree(io, root) catch {};
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
 
     const socket = try std.fmt.allocPrint(a, "{s}/wedged.sock", .{root});
     const ready = try std.fmt.allocPrint(a, "{s}/ready", .{root});
@@ -75,7 +76,7 @@ test "client: wedged daemon times out to cold" {
     defer t.join();
 
     for (0..400) |_| {
-        if (Dir.cwd().access(io, ready, .{})) |_| break else |_| {}
+        if (Dir.cwd().access(io, ready, .{}) catch null) |_| break;
         try io.sleep(.fromNanoseconds(5 * std.time.ns_per_ms), .real);
     } else return error.WedgedNeverReady;
 
@@ -93,10 +94,10 @@ test "client: wedged daemon times out to cold" {
         _ = std.c.dup2(saved_stdin, 0);
         _ = std.c.close(saved_stdin);
     };
-    if (std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDONLY }, 0)) |nul| {
+    if (std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDONLY }, 0) catch null) |nul| {
         _ = std.c.dup2(nul, 0);
         _ = std.c.close(nul);
-    } else |_| {}
+    }
 
     // Exercise the same poll/recv path with a short deadline. The server keeps
     // the socket open until the client closes, so returning `.cold` itself

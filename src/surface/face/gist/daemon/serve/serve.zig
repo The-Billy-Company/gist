@@ -70,10 +70,10 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const resident = @import("../../../../exec/session/resident.zig");
-const annals_mod = @import("../../../../exec/session/annals.zig");
-const protocol = @import("../../../../exec/session/protocol.zig");
-const watch = @import("../../../../exec/session/watch.zig");
+const resident = @import("../../../../exec/session/warm/resident.zig");
+const annals_mod = @import("../../../../exec/session/freshness/annals.zig");
+const protocol = @import("../../../../exec/session/conduit/protocol.zig");
+const watch = @import("../../../../exec/session/watch/watch.zig");
 const idle = @import("idle.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../../../corpus/index/trigrams/fresh.zig");
@@ -81,6 +81,7 @@ const fresh = @import("../../../../../corpus/index/trigrams/fresh.zig");
 const frame_mod = @import("../../../../../corpus/index/frame/frame.zig");
 const journal = @import("../../../../../corpus/tree/journal.zig");
 const assay = @import("../../../../../assay/assay.zig");
+const fault = @import("../../../../../fault.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
@@ -206,7 +207,7 @@ const Server = struct {
     /// the accumulated wakeup bytes; any residue simply re-triggers next loop.
     fn drainWake(self: *Server) void {
         var buf: [256]u8 = undefined;
-        _ = std.posix.read(self.wake_r, &buf) catch {};
+        fault.spare("drain the wakeup self-pipe", std.posix.read(self.wake_r, &buf));
     }
 
     /// Apply every finished query the workers posted: re-register a kept
@@ -355,12 +356,16 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     // (the consult declines; the client falls back to its own replay/walk).
     seedAnnals(gpa, io, &session);
 
-    if (std.fs.path.dirnamePosix(socket_path)) |dir| Dir.cwd().createDirPath(io, dir) catch {};
-    Dir.cwd().deleteFile(io, socket_path) catch {}; // clear a stale socket from a crashed daemon
+    // Both are best-effort because `listen` below is the real check: if the
+    // directory is genuinely unusable, binding fails there with a fault the
+    // caller sees, so failing here would only report it twice.
+    if (std.fs.path.dirnamePosix(socket_path)) |dir|
+        fault.spare("pre-create the socket directory", Dir.cwd().createDirPath(io, dir));
+    fault.spare("clear a stale socket from a crashed daemon", Dir.cwd().deleteFile(io, socket_path));
     const ua = try net.UnixAddress.init(socket_path);
     var listener = try ua.listen(io, .{});
     defer listener.deinit(io);
-    defer Dir.cwd().deleteFile(io, socket_path) catch {};
+    defer fault.spare("unlink the socket on shutdown", Dir.cwd().deleteFile(io, socket_path));
     // Say which tree went resident here, beside the socket. The socket lives in
     // the artifact directory, so a `GIST_DIR` shared by two checkouts aims both
     // at THIS rendezvous — and resident bytes carry no path prefix to give the
@@ -373,7 +378,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
         frame_mod.publishBinding(io, bind_path);
     }
     defer if (frame_mod.socketBindingPath(&bind_buf, socket_path)) |bind_path| {
-        Dir.cwd().deleteFile(io, bind_path) catch {};
+        fault.spare("unlink the socket binding on shutdown", Dir.cwd().deleteFile(io, bind_path));
     };
 
     // Shared server state + the worker-completion wakeup pipe. Pipe failure is
@@ -577,7 +582,10 @@ fn seedAnnals(gpa: std.mem.Allocator, io: std.Io, session: *ResidentSession) voi
 fn acquireSingleton(io: std.Io, socket_path: []const u8) ?std.posix.fd_t {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const lock_path = std.fmt.bufPrint(&buf, "{s}.lock", .{socket_path}) catch return null;
-    if (std.fs.path.dirnamePosix(lock_path)) |dir| Dir.cwd().createDirPath(io, dir) catch {};
+    // Best-effort for the same reason as the socket directory: the `openat`
+    // below is the real check and already declines by returning null.
+    if (std.fs.path.dirnamePosix(lock_path)) |dir|
+        fault.spare("pre-create the lock directory", Dir.cwd().createDirPath(io, dir));
     const fd = std.posix.openat(std.posix.AT.FDCWD, lock_path, .{ .ACCMODE = .RDWR, .CREAT = true }, 0o600) catch return null;
     if (flock(fd, std.posix.LOCK.EX | std.posix.LOCK.NB) != 0) {
         _ = close(fd); // held by a live daemon → this racer stands down
@@ -689,9 +697,9 @@ fn sendReady(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
     if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
 }
 
-/// Decode + answer one query. A malformed frame or an unservable request
-/// (`error.Stale` from a lost freshness anchor / rebuilt index, OOM) comes back
-/// as `decline` — the client re-runs it on the certified cold path. `caps` is
+/// Decode + answer one query. A malformed frame, unservable request, or typed
+/// warm declinature comes back as `decline` — the client re-runs it on the
+/// certified cold path. OOM remains a fault and propagates. `caps` is
 /// the connection's advertised transport capabilities (see `Conn.caps`). Runs on
 /// a pool worker (or inline when the pool is down); the session's `Ward` makes
 /// concurrent workers safe.
@@ -731,16 +739,20 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
         // terminal-`result` transport as a `lines` answer, with `matched=true` so
         // the client exits 0 — cold `--rank` always exits 0 (only a path error is
         // 2, and the client's `rootsExist` gate already sent those cold).
-        const bytes = session.queryRank(arena.allocator(), req, k) catch
-            return protocol.sendFrame(gpa, fd, .decline, "");
+        const bytes = switch (try session.queryRank(arena.allocator(), req, k)) {
+            .got => |got| got,
+            .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+        };
         try protocol.encodeLines(&buf, gpa, bytes, true);
     } else if (req.quiet) {
         // `-q`: an existence-only answer regardless of the mode byte. The walk
         // halts at the first hit (`queryExists`); framed as a zero-chunk `lines`
         // result carrying just the matched flag, so the client prints nothing
         // and exits 0/1 on it. `-m0` resolves to `matched=false` inside.
-        const found = session.queryExists(req) catch
-            return protocol.sendFrame(gpa, fd, .decline, "");
+        const found = switch (try session.queryExists(req)) {
+            .got => |got| got,
+            .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+        };
         try protocol.encodeLines(&buf, gpa, "", found);
     } else if (req.mode == .lines) {
         // The default line search. A client that advertised fd-transport gets the
@@ -752,8 +764,10 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
         // never a new failure mode. A peer that didn't advertise takes the plain
         // `queryLines` + `chunk` path unchanged.
         if ((caps & protocol.caps_supported & protocol.cap_fd_transport) != 0) {
-            switch (session.queryLinesShm(arena.allocator(), req, protocol.fd_transport_floor) catch
-                return protocol.sendFrame(gpa, fd, .decline, "")) {
+            switch (switch (try session.queryLinesShm(arena.allocator(), req, protocol.fd_transport_floor)) {
+                .got => |got| got,
+                .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+            }) {
                 .fd => |shl| {
                     var buffer = shl.buffer;
                     defer buffer.close();
@@ -770,12 +784,16 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
                 },
             }
         }
-        const ans = session.queryLines(arena.allocator(), req) catch
-            return protocol.sendFrame(gpa, fd, .decline, "");
+        const ans = switch (try session.queryLines(arena.allocator(), req)) {
+            .got => |got| got,
+            .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+        };
         try protocol.encodeLines(&buf, gpa, ans.out, ans.matched);
     } else {
-        const result = session.query(arena.allocator(), req) catch
-            return protocol.sendFrame(gpa, fd, .decline, "");
+        const result = switch (try session.query(arena.allocator(), req)) {
+            .got => |got| got,
+            .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+        };
         switch (result.mode) {
             .files => try protocol.encodeFiles(&buf, gpa, result.files),
             .count => try protocol.encodeCount(&buf, gpa, result.count),
@@ -792,7 +810,7 @@ fn handleQuery(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.
 /// stdout are the contract, the timing line is advisory. Empty → nothing sent.
 fn sendDiag(gpa: std.mem.Allocator, fd: std.posix.fd_t, bytes: []const u8) void {
     if (bytes.len == 0 or bytes.len > protocol.max_frame) return;
-    protocol.sendFrame(gpa, fd, .diag, bytes) catch {};
+    fault.spare("ship warm diagnostics to the client", protocol.sendFrame(gpa, fd, .diag, bytes));
 }
 
 /// The socket path a daemon binds / a client dials: `$GIST_SESSION_SOCK` when
