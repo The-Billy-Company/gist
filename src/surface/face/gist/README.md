@@ -30,9 +30,11 @@ doc_radar:
     - description: "the committed fail-closed certificate exists and is fail-closed"
       file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
       contains: ["Mann-Whitney significance test", "**fail-closed**"]
-    - description: "the certificate carries the live ripgrep macro comparison and its honest optimality disclaimer (re-mint preserves both)"
+    - description: "the certificate still carries the live ripgrep macro comparison (a re-mint may move every number, but never drop the section)"
       file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
-      contains: ["20492 files · 195.8 MiB", "7.76x", "2.10x"]
+      contains:
+        - "## Layer A — macroscopic dominance over ripgrep"
+        - "gist vs ripgrep across 12 classes"
 ---
 
 # `gist`: indexed regex search for a live working tree

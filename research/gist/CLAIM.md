@@ -17,12 +17,14 @@ doc_radar:
         - 'subprocess = { status = "authoritative"'
         - 'uds = { status = "operational-accelerator"'
         - 'ffi = { status = "operational-accelerator"'
-    - file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+    - description: "every measured number this page quotes is still the one the certificate carries"
+      file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
       contains:
         - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
-        - "8.2× geomean end-to-end speedup"
-        - "8.1× faster than csearch"
-        - "34.9× faster than ripgrep"
+        - "8.4× geomean end-to-end speedup"
+    - description: "the warm claim is sourced from the armed resident-session certificate, never the cold race"
+      file: pkg/kernels/irregex/bench/session/session_meta.json
+      contains: ['"armed": true', '"geomean_speedup": 565.6']
 ---
 
 # Gist — exact code search built for agents
@@ -186,7 +188,7 @@ answer with less ceremony.
 compared with a regex-AST-derived lower bound on runs every match must contain.
 It soundly prunes literal-free class repetitions that substring indexes cannot
 express. On the committed narrow-class slate, it turns a trigram blind spot
-into an 8.2× geomean end-to-end speedup. The theorem, calculus, count-cousin
+into an 8.4× geomean end-to-end speedup. The theorem, calculus, count-cousin
 ablation, adversarial prior-art review, and corpus proof live in
 [`../crest/`](../crest/).
 
@@ -203,9 +205,14 @@ putting linear and PCRE2-only expressions behind the same candidate index
 whenever proof permits. Against csearch and Zoekt, it keeps the live local
 tree—not an indexed snapshot—in command; against tgrep, its closest public
 shape, every uncertain resident request can decline to a complete cold path.
-On the certified warm workload that composition is 8.1× faster than csearch
-and 34.9× faster than ripgrep by geomean. It does not claim the hosted scale or
-semantic and structural breadth of adjacent systems.
+Cold, that composition wins every one of the twelve certified classes against
+ripgrep (12 win · 0 parity · 0 loss, each fail-closed on Mann-Whitney p<0.05);
+warm, the resident-session certificate measures the armed path at a 565.6×
+geomean over ripgrep-cold. The two numbers come from different harnesses on
+purpose — a fresh-process race cannot speak for a long-lived client, and the
+warm figure is only claimed where a filesystem watcher proves quiescence. It
+does not claim the hosted scale or semantic and structural breadth of adjacent
+systems.
 
 ### Hand-tuned craft
 
