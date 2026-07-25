@@ -5,7 +5,7 @@
 //! records over a callback — no subprocess, no Unix socket, no `stdout`, no
 //! `exit`. It is the in-process face of the same warm engine the resident
 //! daemon (`surface/exec/session/warm/resident.zig`) serves over a socket, and it draws on the
-//! same shared search core (`kernel/match/query.zig`), so an in-process answer is
+//! same shared search core (`kernel/match/query/query.zig`), so an in-process answer is
 //! byte-identical to the cold `gist --json` stream and to the UDS daemon.
 //!
 //! ## Why this is the rung the C ABI graduated on

@@ -77,7 +77,7 @@ PROFILES=(
 # probe | production source file | bound-kind
 PROBES=(
   "simd_contains|src/kernel/match/scan/simd.zig|throughput"
-  "dfa_step|src/kernel/match/regex/linear/dfa.zig|latency"
+  "dfa_step|src/kernel/match/regex/linear/dfa/dfa.zig|latency"
 )
 
 # Bytes consumed per marked iteration. dfa_step steps one byte; simd_contains

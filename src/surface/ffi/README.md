@@ -37,7 +37,7 @@ socket, `stdout`, or `exit`.
 
 It is the in-process sibling of the socket-served resident daemon
 ([`../face/gist/daemon/serve`](../face/gist/daemon/serve)) and draws on the same shared
-search core ([`../../kernel/match/query.zig`](../../kernel/match/query.zig)),
+search core ([`../../kernel/match/query/query.zig`](../../kernel/match/query/query.zig)),
 so an in-process answer is byte-identical to cold `gist --json` and to the UDS
 daemon.
 

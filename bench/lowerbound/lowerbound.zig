@@ -7,7 +7,7 @@
 //!      the worst (adversarial) case, examine every byte of that document — an
 //!      unread byte could be the match, or could break it (Knuth-Morris-Pratt
 //!      1977; Boyer-Moore 1977, Ω(n) worst-case reads). gist's fused byte-class
-//!      DFA (`src/kernel/match/regex/linear/dfa.zig`) touches each candidate byte **exactly
+//!      DFA (`src/kernel/match/regex/linear/dfa/dfa.zig`) touches each candidate byte **exactly
 //!      once** — a single forward pass, no memchr-then-rescan double traffic;
 //!      its SIMD literal path (`src/kernel/match/scan/simd.zig`) touches **≤** N (vector
 //!      skips + early exit). This harness proves both structurally.
