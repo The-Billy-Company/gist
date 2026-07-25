@@ -5,7 +5,7 @@ doc_radar:
     - pkg/kernels/irregex/contract/search_api.toml
     - pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
   sentinels:
-    - file: pkg/kernels/irregex/src/surface/exec/cold/argv/args.zig
+    - file: pkg/kernels/irregex/src/surface/exec/cold/argv/catalog.zig
       contains:
         - "pub const flag_catalog"
         - "unsupported_fail_loud"

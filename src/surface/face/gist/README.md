@@ -15,7 +15,7 @@ doc_radar:
         - "const serve = gist.commands.serve;"
         - "const client = gist.commands.client;"
     - description: "the public flag surface still comes from one compatibility catalog"
-      file: pkg/kernels/irregex/src/surface/exec/cold/argv/args.zig
+      file: pkg/kernels/irregex/src/surface/exec/cold/argv/catalog.zig
       contains:
         - "pub const flag_catalog"
         - "improvement"
@@ -200,7 +200,7 @@ This section teaches selection, not a second flag registry. The checked-in
 ## The search contract
 
 The cold runtime's
-[`flag_catalog`](../../exec/cold/argv/args.zig) is the source of truth for both argv
+[`flag_catalog`](../../exec/cold/argv/catalog.zig) is the source of truth for both argv
 handling and `gist --schema`. It separates the public surface into four buckets:
 exact support, **improvements** (identical-or-superset results that are strictly
 better — faster, more robust, or better for code search — never a regression),
