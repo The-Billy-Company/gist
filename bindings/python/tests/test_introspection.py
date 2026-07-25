@@ -47,6 +47,28 @@ def test_parse_status_returns_every_structured_field() -> None:
     assert unavailable.path is None
 
 
+def test_parse_status_surfaces_an_artifact_directory_from_another_tree() -> None:
+    """Real counts, a real anchor — describing files that aren't here.
+
+    Every accelerator declines in this state, so the answer comes live: an
+    embedder that only read the numbers would see a healthy index and wonder
+    why nothing is ever warm.
+    """
+    foreign = parse_status(
+        '{"schema_version":1,"state":"ready","index":{"path":"/other/.d/index.gist",'
+        '"paths_file":"/other/.d/paths.list","files_indexed":9,"distinct_trigrams":9,'
+        '"postings":9,"index_bytes":9,"paths_bytes":9},'
+        '"freshness":{"anchor_unix_ns":1234,"age_seconds":1.0},"roots":["."],'
+        '"bound_here":false,"built_over":"/other"}'
+    )
+    assert foreign.ready
+    assert not foreign.bound_here
+    assert foreign.built_over == "/other"
+    # An anchor dates the tree it was minted in, so a foreign one folds nothing
+    # in here however recent it reads.
+    assert not foreign.freshness_anchor
+
+
 @needs_gist
 def test_capability_schema_is_typed_and_queryable() -> None:
     schema = irregex.capabilities()

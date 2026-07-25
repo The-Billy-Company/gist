@@ -26,6 +26,11 @@
 //! The self-anchored side artifacts (phantom `tree.map`, `content.shard`)
 //! refresh only on a FULL build: both fail open per file (a stale entry means
 //! a live list/read, never a wrong answer), so an amend soundly leaves them.
+//!
+//! A full build closes by publishing `tree.root` — the absolute directory the
+//! whole artifact set describes (`corpus/index/frame/frame.zig`). Anchors date
+//! files; only this says WHICH files, and every reader that trusts an anchor
+//! re-proves it first.
 
 const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
@@ -36,6 +41,7 @@ const journal = @import("../../../../corpus/tree/journal.zig");
 const client = @import("../daemon/client/client.zig");
 const session_spawn = @import("../../../exec/session/spawn.zig");
 const crest_sidecar = @import("../../../../corpus/index/crest/sidecar.zig");
+const frame = @import("../../../../corpus/index/frame/frame.zig");
 const treemap = @import("../../../../corpus/index/phantom/treemap.zig");
 const shard = @import("../../../../corpus/index/content/shard.zig");
 const Index = @import("../../../../corpus/index/trigrams/trigram.zig").Index;
@@ -83,6 +89,12 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // corpus snapshot): best-effort — a failure costs the shard read tier, so a
     // full-scan query falls back to opening every file, never the index build.
     shard.build(gpa, io, corpus.docs, corpus.paths, built.ns()) catch {};
+    // Bind the directory to this tree LAST: until it lands, every reader still
+    // sees whatever binding was here before, so a rebuild that repurposes a
+    // foreign artifact directory never exposes a window where the new anchor
+    // vouches for the old tree's snapshot and shard. Best-effort — an
+    // unwritable binding costs the warm tiers, never a wrong answer.
+    frame.publishBinding(io, frame.treeRootFile());
 
     const dur = span.read(io).ms();
     assay.summary(gpa, false, "indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{
@@ -129,6 +141,12 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
     // FlushSync barrier runs AFTER this instant — every event that occurred
     // before it has been noted by the time the annals answer.
     const built = assay.anchor(io);
+
+    // An artifact directory that isn't bound to this tree has nothing to amend
+    // — its base describes other files, and its anchor dates them. Decline so
+    // the caller runs the full build, which republishes the binding: pointing
+    // `GIST_DIR` at a foreign directory and re-indexing is how you adopt it.
+    if (!frame.boundHere()) return false;
 
     // Cheap header reads only — no mmap, no path table.
     const gen = persist.readPublishedGeneration(gpa, io) catch return false;

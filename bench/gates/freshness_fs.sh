@@ -37,8 +37,9 @@ fi
 
 CORPUS="$(mktemp -d)"
 REF="$(mktemp -d)"
+FOREIGN="$(mktemp -d)"
 # chmod first so the 000 subdir from the unreadable-dir case is removable.
-trap 'chmod -R u+rwx "${CORPUS}" 2>/dev/null; rm -rf "${CORPUS}" "${REF}"' EXIT
+trap 'chmod -R u+rwx "${CORPUS}" 2>/dev/null; rm -rf "${CORPUS}" "${REF}" "${FOREIGN}"' EXIT
 
 mkdir -p "${CORPUS}/libs/sub"
 printf 'needle base\n' > "${CORPUS}/libs/base.txt"      # indexed, has needle
@@ -59,6 +60,16 @@ while [[ "${i}" -lt 1100 ]]; do
   printf 'ordinary noise %04d\n' "${i}" > "${CORPUS}/libs/noise_${i}.txt"
   i=$((i + 1))
 done
+
+# A SECOND tree the index will never describe, written BEFORE the build so every
+# file here predates the anchor — the state in which a foreign anchor is most
+# tempting to believe. It shares two relative paths with the corpus and inverts
+# both (`base.txt` loses the needle, `plain.txt` gains one), and it has no
+# `libs/sub/`, so trusting the foreign artifacts fabricates a hit, hides a real
+# one, and walks into a directory that isn't here. Asserted after the live gate.
+mkdir -p "${FOREIGN}/libs"
+printf 'nothing at all\n' > "${FOREIGN}/libs/base.txt"
+printf 'needle sneaked in\n' > "${FOREIGN}/libs/plain.txt"
 
 cd "${CORPUS}" || exit 1
 "${GIST}" index > /dev/null 2>&1 || {
@@ -221,6 +232,78 @@ walk_error_case() { # <engine label>
 }
 walk_error_case "parallel/pipeline.zig"
 walk_error_case "serial/run.zig"
+
+echo "### foreign artifacts — a directory built over ANOTHER tree accelerates nothing ###"
+# Every persisted accelerator names files RELATIVE to its build directory and
+# dates them against that build's anchor, so aiming GIST_DIR at another
+# checkout is not a stale index — it is a confident one about the wrong tree.
+# The whole surface must decline (`corpus/index/frame/frame.zig`) and answer
+# live: the content shard must not serve the corpus's `base.txt` bytes, the
+# anchor must not "prove" `plain.txt` unchanged and elide the real hit, and the
+# phantom walk must not descend a `libs/sub/` that exists only over there.
+ART="${CORPUS}/.local/gist-verify"
+foreign_out="$(cd "${FOREIGN}" && GIST_DIR="${ART}" "${GIST}" rg -l --sort path -e needle . 2> "${REF}/foreign.err")"
+foreign_exit=$?
+foreign_ref="$(cd "${FOREIGN}" && rg -l --sort path -e needle . 2> /dev/null)"
+foreign_err="$(< "${REF}/foreign.err")"
+if [[ "${foreign_exit}" -eq 0 && "${foreign_out}" == "${foreign_ref}" && "${foreign_err}" != *"No such file or directory"* ]]; then
+  echo "  ok    : foreign GIST_DIR answers live and equals rg (${foreign_ref})"
+else
+  echo "  FAIL  : foreign GIST_DIR diverges (exit=${foreign_exit}, stderr=[${foreign_err}])"
+  diff <(printf '%s\n' "${foreign_ref}") <(printf '%s\n' "${foreign_out}") | sed -n '1,10p' | sed 's/^/          /'
+  fails=$((fails + 1))
+fi
+
+# Right answers alone leave the caller wondering why nothing is ever warm, so
+# status must NAME the tree these artifacts do describe.
+foreign_status="$(cd "${FOREIGN}" && GIST_DIR="${ART}" "${GIST}" status 2>&1)"
+if [[ "${foreign_status}" == *"built over"* && "${foreign_status}" == *"not this tree"* ]]; then
+  echo "  ok    : status names the other tree instead of reporting a healthy index"
+else
+  echo "  FAIL  : status hides the foreign binding: [${foreign_status}]"
+  fails=$((fails + 1))
+fi
+
+# The same confusion reaches the RESIDENT tier, where it would be silent: the
+# socket lives in the artifact directory too, so a shared GIST_DIR aims both
+# trees at one rendezvous, and a warm answer carries no path prefix to give the
+# mix-up away. The daemon records its tree beside its socket and the client
+# re-proves it before dialing (`corpus/index/frame/frame.zig`).
+"${GIST}" serve > /dev/null 2>&1 &
+daemon_pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [[ -S "${ART}/gistd.sock" ]] && break
+  sleep 0.3
+done
+here_trace="$(GIST_TRACE=warm "${GIST}" needle -l 2>&1)"
+if [[ "${here_trace}" == *"[warm]"* ]]; then
+  here_set="$(printf '%s\n' "${here_trace}" | grep -v '^gist: \[' | sort)"
+  here_ref="$(rg -l needle | sort)"
+  there_set="$(cd "${FOREIGN}" && GIST_DIR="${ART}" "${GIST}" needle -l 2> /dev/null | sort)"
+  there_ref="$(cd "${FOREIGN}" && rg -l needle | sort)"
+  if [[ "${here_set}" == "${here_ref}" && "${there_set}" == "${there_ref}" ]]; then
+    echo "  ok    : the resident daemon stays warm for its own tree and declines the other one"
+  else
+    echo "  FAIL  : resident rendezvous crossed trees"
+    diff <(printf '%s\n' "${there_ref}") <(printf '%s\n' "${there_set}") | sed -n '1,10p' | sed 's/^/          /'
+    fails=$((fails + 1))
+  fi
+else
+  echo "  (skipped: no daemon went warm here; the cold cases above still ran)"
+fi
+kill "${daemon_pid}" 2> /dev/null
+wait "${daemon_pid}" 2> /dev/null
+
+# …and indexing here must HEAL it: the amend path cannot fold into artifacts it
+# cannot prove are ours, so it falls back to a full build and rebinds.
+(cd "${FOREIGN}" && GIST_DIR="${ART}" "${GIST}" index > /dev/null 2>&1)
+healed="$(cd "${FOREIGN}" && GIST_DIR="${ART}" "${GIST}" status 2>&1)"
+if [[ "${healed}" != *"built over"* && "${healed}" == *"freshness anchor set"* ]]; then
+  echo "  ok    : \`gist index\` rebinds the directory to this tree"
+else
+  echo "  FAIL  : indexing did not rebind: [${healed}]"
+  fails=$((fails + 1))
+fi
 
 echo
 if [[ "${fails}" -eq 0 ]]; then

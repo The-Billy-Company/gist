@@ -10,13 +10,16 @@
 //! `index`), never an error, so this is safe to call blind.
 //!
 //! Everything here is derived from the same two mmap'd artifacts the query path
-//! loads (`persist.loadQuiet`) plus the freshness anchor (`fresh.readAnchor`).
+//! loads (`persist.loadQuiet`) plus the freshness anchor as recorded
+//! (`fresh.anchorOnDisk` — status reports what is on disk and says separately
+//! whether it binds here, so a foreign directory reads as what it is).
 //! One `Snapshot` feeds both the byte-compatible human report and `--json`, so
 //! machine consumers never need to scrape prose and the two views cannot drift.
 
 const std = @import("std");
 const persist = @import("../../../../corpus/index/trigrams/persist.zig");
 const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
+const frame = @import("../../../../corpus/index/frame/frame.zig");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const Dir = std.Io.Dir;
 
@@ -58,6 +61,15 @@ pub const Snapshot = struct {
     index: ?Index,
     freshness: Freshness,
     roots: []const []const u8,
+    /// Do these artifacts describe the directory being searched? False for a
+    /// `GIST_DIR` aimed at another checkout, and for a pre-binding build that
+    /// records no origin at all. Every accelerator declines in either state
+    /// (`frame.boundHere`), so answers stay right and nothing is ever warm —
+    /// which is invisible from the numbers above, hence this field.
+    bound_here: bool = true,
+    /// The tree the artifacts say they were built over, when they say. Naming
+    /// it is the difference between a diagnosable state and a silent one.
+    built_over: ?[]const u8 = null,
 };
 
 /// The on-disk byte size of `path`, or 0 if it can't be stat'd (treated as
@@ -76,11 +88,14 @@ fn mib(bytes: u64) f64 {
 /// `corpus_mod.freeRoots` (a ready index reports the roots it was BUILT over;
 /// an unavailable one reports what a build here WOULD cover).
 pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
+    const bound = frame.boundHere();
     var p = (try persist.loadQuiet(gpa, io)) orelse return .{
         .state = .unavailable,
         .index = null,
         .freshness = .{ .anchor_unix_ns = null, .age_seconds = null },
         .roots = try corpus_mod.resolveRoots(gpa),
+        .bound_here = bound,
+        .built_over = frame.treeBinding(gpa),
     };
     defer p.deinit();
 
@@ -93,8 +108,12 @@ pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
         duped += 1;
     }
 
-    const built_ns = fresh.readAnchor(gpa, io);
-    // Sample after readAnchor's own future-anchor validation so a concurrent
+    // What the artifact RECORDS, not what a query may trust: a foreign
+    // directory has a perfectly real build instant, and reporting it as absent
+    // would hide the anchor behind the very confusion `bound_here` exists to
+    // name (`fresh.anchorOnDisk`).
+    const built_ns = fresh.anchorOnDisk(gpa, io);
+    // Sample after its own future-anchor validation so a concurrent
     // index publish cannot produce a negative age in the machine contract.
     const now_ns = std.Io.Clock.now(.real, io).nanoseconds;
     return .{
@@ -113,6 +132,8 @@ pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
             .age_seconds = if (built_ns) |a| @as(f64, @floatFromInt(now_ns - a.ns())) / std.time.ns_per_s else null,
         },
         .roots = roots,
+        .bound_here = bound,
+        .built_over = frame.treeBinding(gpa),
     };
 }
 
@@ -142,7 +163,12 @@ fn renderHuman(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
     });
 
     if (snapshot.freshness.age_seconds) |age_s| {
-        try buf.print(gpa, "  built            {d:.0} s ago (freshness anchor set — new/edited files are folded in per query)\n", .{age_s});
+        // An anchor dates the files of the tree it was minted in, so an
+        // unbound one proves nothing here however recent it reads.
+        try buf.print(gpa, "  built            {d:.0} s ago ({s})\n", .{ age_s, if (snapshot.bound_here)
+            "freshness anchor set — new/edited files are folded in per query"
+        else
+            "anchor dates another tree — nothing here can be proven unchanged" });
     } else {
         try buf.appendSlice(gpa, "  built            (no freshness anchor — rebuild with `index` to enable the freshness overlay)\n");
     }
@@ -150,6 +176,17 @@ fn renderHuman(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
     try buf.appendSlice(gpa, "  roots           ");
     for (snapshot.roots) |r| try buf.print(gpa, " {s}", .{r});
     try buf.append(gpa, '\n');
+
+    // The one state where every number above is real yet none of it describes
+    // the tree the caller is standing in — say so, and name the other tree
+    // when the artifacts recorded one, rather than let a healthy-looking
+    // report leave them wondering why nothing is ever warm.
+    if (!snapshot.bound_here) {
+        if (snapshot.built_over) |tree|
+            try buf.print(gpa, "  built over        {s} — not this tree; every accelerator stays off until `gist index`\n", .{tree})
+        else
+            try buf.appendSlice(gpa, "  built over        (unrecorded) — these artifacts name no tree; every accelerator stays off until `gist index`\n");
+    }
     return buf.toOwnedSlice(gpa);
 }
 
@@ -166,6 +203,7 @@ fn renderJson(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
 pub fn run(gpa: std.mem.Allocator, io: std.Io, json: bool) !void {
     const snapshot = try collect(gpa, io);
     defer corpus_mod.freeRoots(gpa, snapshot.roots);
+    defer if (snapshot.built_over) |t| gpa.free(t);
     const output = if (json) try renderJson(gpa, snapshot) else try renderHuman(gpa, snapshot);
     defer gpa.free(output);
     corpus_mod.emitStdout(output);
@@ -218,11 +256,57 @@ test "JSON renderer exposes the stable ready contract" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        "{\"schema_version\":1,\"state\":\"ready\",\"index\":{\"path\":\"index.gist\",\"paths_file\":\"paths.list\",\"files_indexed\":2,\"distinct_trigrams\":3,\"postings\":5,\"index_bytes\":8,\"paths_bytes\":13},\"freshness\":{\"anchor_unix_ns\":1000,\"age_seconds\":2.5},\"roots\":[\"libs\"]}\n",
+        "{\"schema_version\":1,\"state\":\"ready\",\"index\":{\"path\":\"index.gist\",\"paths_file\":\"paths.list\",\"files_indexed\":2,\"distinct_trigrams\":3,\"postings\":5,\"index_bytes\":8,\"paths_bytes\":13},\"freshness\":{\"anchor_unix_ns\":1000,\"age_seconds\":2.5},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null}\n",
         output,
     );
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, output, .{});
     defer parsed.deinit();
+}
+
+test "an unbound artifact directory reports which tree it does describe" {
+    const t = std.testing;
+    const foreign: Index = .{
+        .path = "/tmp/other/.d/index.gist",
+        .paths_file = "/tmp/other/.d/paths.list",
+        .files_indexed = 2,
+        .distinct_trigrams = 3,
+        .postings = 4,
+        .index_bytes = 1 << 20,
+        .paths_bytes = 524_288,
+    };
+    const named = try renderHuman(t.allocator, .{
+        .state = .ready,
+        .index = foreign,
+        .freshness = .{ .anchor_unix_ns = 1, .age_seconds = 7.4 },
+        .roots = &.{"."},
+        .bound_here = false,
+        .built_over = "/tmp/other",
+    });
+    defer t.allocator.free(named);
+    // Every count above is real; these two lines are the only thing saying
+    // none of it describes the tree the caller is standing in.
+    try t.expect(std.mem.containsAtLeast(u8, named, 1, "anchor dates another tree"));
+    try t.expect(std.mem.endsWith(
+        u8,
+        named,
+        "  built over        /tmp/other — not this tree; every accelerator stays off until `gist index`\n",
+    ));
+
+    // Pre-binding artifacts record no origin — still cold, but there is no
+    // other tree to point at, and claiming one would be a fresh lie.
+    const anonymous = try renderHuman(t.allocator, .{
+        .state = .ready,
+        .index = foreign,
+        .freshness = .{ .anchor_unix_ns = 1, .age_seconds = 7.4 },
+        .roots = &.{"."},
+        .bound_here = false,
+    });
+    defer t.allocator.free(anonymous);
+    try t.expect(std.mem.endsWith(
+        u8,
+        anonymous,
+        "  built over        (unrecorded) — these artifacts name no tree; every accelerator stays off until `gist index`\n",
+    ));
 }
 
 test "JSON unavailable state stays valid and null-bearing" {
@@ -235,7 +319,7 @@ test "JSON unavailable state stays valid and null-bearing" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        "{\"schema_version\":1,\"state\":\"unavailable\",\"index\":null,\"freshness\":{\"anchor_unix_ns\":null,\"age_seconds\":null},\"roots\":[\"libs\"]}\n",
+        "{\"schema_version\":1,\"state\":\"unavailable\",\"index\":null,\"freshness\":{\"anchor_unix_ns\":null,\"age_seconds\":null},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null}\n",
         output,
     );
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, output, .{});

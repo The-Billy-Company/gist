@@ -38,6 +38,8 @@ class IndexStatus:
     anchor_unix_ns: int | None = None
     age_seconds: float | None = None
     roots: tuple[str, ...] = ()
+    bound_here: bool = True
+    built_over: str | None = None
 
     @property
     def ready(self) -> bool:
@@ -47,7 +49,7 @@ class IndexStatus:
     @property
     def freshness_anchor(self) -> bool:
         """Whether changed files can be folded in against a build anchor."""
-        return self.anchor_unix_ns is not None
+        return self.anchor_unix_ns is not None and self.bound_here
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +107,9 @@ class _StatusPayload(TypedDict):
     index: _IndexPayload | None
     freshness: _FreshnessPayload
     roots: list[str]
+    # Added within schema_version 1 (additive); absent from an older binary.
+    bound_here: NotRequired[bool]
+    built_over: NotRequired[str | None]
 
 
 class _FlagPayload(TypedDict):
@@ -176,6 +181,12 @@ def parse_status(report: str) -> IndexStatus:
         anchor_unix_ns=freshness["anchor_unix_ns"],
         age_seconds=freshness["age_seconds"],
         roots=tuple(payload["roots"]),
+        # An artifact directory built over ANOTHER tree reports real counts and
+        # a real anchor that describe none of the files here, so every
+        # accelerator declines and the answer comes live. Default True: an older
+        # binary that never published a binding has no other tree to name.
+        bound_here=payload.get("bound_here", True),
+        built_over=payload.get("built_over"),
     )
 
 

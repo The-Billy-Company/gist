@@ -42,6 +42,7 @@ const request = @import("../../../../exec/session/request.zig");
 const protocol = @import("../../../../exec/session/protocol.zig");
 const shm = @import("../../../../exec/session/shm.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
+const frame = @import("../../../../../corpus/index/frame/frame.zig");
 const run = @import("../../../../exec/cold/engine/serial.zig");
 const assay = @import("../../../../../assay/assay.zig");
 const net = std.Io.net;
@@ -109,6 +110,19 @@ fn rootsExist(io: std.Io, roots: []const []const u8) bool {
     return true;
 }
 
+/// Is the daemon on the other end resident over the tree we are standing in?
+/// The socket lives in the artifact directory, so an absolute `GIST_DIR` shared
+/// by two checkouts points both at one rendezvous — and a warm answer names
+/// files by paths that resolve in either, so the mix-up is invisible in the
+/// output. Every daemon records its tree beside its socket at bind time
+/// (`serve.run`), which makes this the same proof `frame.boundHere` runs for
+/// the persisted artifacts. Fails CLOSED: an unwritten or unreadable binding
+/// answers cold, which is always correct.
+fn rendezvousIsOurs(socket_path: []const u8) bool {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    return frame.bindingHolds(frame.socketBindingPath(&buf, socket_path) orelse return false);
+}
+
 /// Try to answer `argv` warm. Never errors: any failure is `.cold`.
 pub fn attempt(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8, socket_path: []const u8) Outcome {
     return attemptWithDeadline(gpa, io, argv, socket_path, client_io_timeout_ms);
@@ -133,6 +147,8 @@ fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const
     // daemon's piped-frame envelope — the certified path owns the terminal.
     // Same detection cold's `--color auto` resolution uses (run.zig).
     if (std.Io.File.stdout().isTty(io) catch false) return .cold;
+
+    if (!rendezvousIsOurs(socket_path)) return .cold;
 
     const ua = net.UnixAddress.init(socket_path) catch return .cold;
     const stream = ua.connect(io) catch return .cold; // no daemon → cold

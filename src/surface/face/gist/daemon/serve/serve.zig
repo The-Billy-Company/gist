@@ -77,6 +77,8 @@ const watch = @import("../../../../exec/session/watch.zig");
 const idle = @import("idle.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../../../corpus/index/trigrams/fresh.zig");
+// `frame` is taken by the protocol frames threaded through this file.
+const frame_mod = @import("../../../../../corpus/index/frame/frame.zig");
 const journal = @import("../../../../../corpus/tree/journal.zig");
 const assay = @import("../../../../../assay/assay.zig");
 const net = std.Io.net;
@@ -359,6 +361,20 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     var listener = try ua.listen(io, .{});
     defer listener.deinit(io);
     defer Dir.cwd().deleteFile(io, socket_path) catch {};
+    // Say which tree went resident here, beside the socket. The socket lives in
+    // the artifact directory, so a `GIST_DIR` shared by two checkouts aims both
+    // at THIS rendezvous — and resident bytes carry no path prefix to give the
+    // mix-up away. The client re-proves the binding before it dials
+    // (`frame_mod.socketBindingPath`) and answers cold when it names another
+    // tree; publishing after `listen` means the file exists for as long as
+    // anyone can connect.
+    var bind_buf: [std.fs.max_path_bytes]u8 = undefined;
+    if (frame_mod.socketBindingPath(&bind_buf, socket_path)) |bind_path| {
+        frame_mod.publishBinding(io, bind_path);
+    }
+    defer if (frame_mod.socketBindingPath(&bind_buf, socket_path)) |bind_path| {
+        Dir.cwd().deleteFile(io, bind_path) catch {};
+    };
 
     // Shared server state + the worker-completion wakeup pipe. Pipe failure is
     // fatal to the daemon (essentially only fd exhaustion) — the client then
