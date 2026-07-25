@@ -51,6 +51,7 @@ const builtin = @import("builtin");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const args = @import("../argv/args.zig");
 const assay = @import("../../../../assay/assay.zig");
+const Outcome = @import("../../../cli/outcome.zig").Outcome;
 const output = @import("../emit/output.zig");
 const json = @import("../emit/json.zig");
 const ignore = @import("../../../../corpus/tree/ignore.zig");
@@ -1797,7 +1798,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         json.summary(gpa, &sbuf, st, search_span.read(io));
         _ = corpus_mod.writeStdout(sbuf.items);
         grepfile.diagSearch(gpa, o.json, st, search_span.read(io));
-        std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (st.get(.files_with_match) > 0) 0 else 1);
+        (Outcome{ .matched = st.get(.files_with_match) > 0, .faulted = q.walk_error.load(.acquire) or nothing_searched }).exit();
     }
     // `--stats`: every worker streamed its match fragments; fold their per-
     // worker tallies, stamp `files_with_match` / `bytes_printed` from the sink
@@ -1813,14 +1814,14 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, parsed: args.Parsed, o: Opts, re:
         grepfile.emitStats(gpa, &sbuf, st, search_span.read(io));
         _ = corpus_mod.writeStdout(sbuf.items);
         grepfile.diagSearch(gpa, o.json, st, search_span.read(io));
-        std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);
+        (Outcome{ .matched = sink.matched_files > 0, .faulted = q.walk_error.load(.acquire) or nothing_searched }).exit();
     }
     // `--files-without-match`: `matched_files` counts files that LACKED the
     // pattern (each `bufferPath` → `emitFilesChunk`), so exit 0 iff at least
     // one such file was found — ripgrep's success predicate for this mode.
     if (re != null and !o.quiet and !o.files_list and !o.files_without and sink.matched_files == 0 and !nothing_searched and !q.walk_error.load(.acquire))
         hints.noMatches(hints.shape(parsed.patterns, o, parsed.roots, parsed.roots.len > 0), null);
-    std.process.exit(if (q.walk_error.load(.acquire) or nothing_searched) 2 else if (sink.matched_files > 0) 0 else 1);
+    (Outcome{ .matched = sink.matched_files > 0, .faulted = q.walk_error.load(.acquire) or nothing_searched }).exit();
 }
 
 // ─────────────────────── callable file-set walk ───────────────────────

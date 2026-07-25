@@ -1,15 +1,8 @@
-//! relate — the `similar`, `dups`, and `patterns` verbs over irregex primitives.
+//! relate — the `dups` and `patterns` verbs over irregex primitives.
 //!
-//! The CLI surface over `src/kernel/{similarity,batch}/`: three native shapes no
-//! rg flag can express (like `--rank`, they are irregex vocabulary, not rg's):
-//!
-//!   relate similar <path> [--lens bytes|structure|fused] [--top N] [--json]
-//!                  [--no-index] [ROOT...]
-//!       nearest files to <path> by compression kinship — "what else in this
-//!       tree is LIKE this file?" The lens picks the distance: `bytes` (LZJD
-//!       over raw bytes — vocabulary-true, the default), `structure` (the
-//!       silhouette channel — renamed twins surface), or `fused` (min of
-//!       both — "close in EITHER channel counts").
+//! The CLI surface over `src/kernel/{similarity,batch}/`: native shapes no rg
+//! flag can express (like `--rank`, they are irregex vocabulary, not rg's).
+//! The probe query `similar` lives beside this file in `similar.zig`.
 //!
 //!   relate dups [--max-distance T] [--top N] [--json] [--no-index] [ROOT...]
 //!       near-duplicate pairs across the corpus, closest first — copy-paste
@@ -36,90 +29,18 @@ const persist = @import("../../../corpus/index/trigrams/persist.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
 const assay = @import("../../../assay/assay.zig");
 const scope = @import("../../../corpus/scope/glob.zig");
-const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
-const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const patterns_mod = @import("../../../kernel/batch/patterns.zig");
 const loom = @import("../../../kernel/batch/loom.zig");
 const query = @import("../../../kernel/match/query.zig");
 const parallel = @import("../../../kernel/primitives/parallel.zig");
 const kinship = @import("kinship.zig");
 const flags = @import("../../cli/flags.zig");
+const grade = @import("../../cli/grade.zig");
 const emit = @import("../../cli/emit.zig");
 const grepfile = @import("../../exec/cold/read/grepfile.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
-
-// ── `relate similar` ──
-
-/// One scored neighbor, for the sort.
-const Scored = struct {
-    dist: f64,
-    idx: u32,
-
-    fn less(paths: []const []const u8, x: Scored, y: Scored) bool {
-        if (x.dist != y.dist) return x.dist < y.dist;
-        return std.mem.order(u8, paths[x.idx], paths[y.idx]) == .lt;
-    }
-};
-
-pub fn runSimilar(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
-    var o: kinship.Opts = .{ .top = 20 };
-    var roots: std.ArrayList([]const u8) = .empty;
-    defer roots.deinit(gpa);
-    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .no_index = true, .lens = true, .positional = true });
-    const target = o.arg orelse die("usage: relate similar <path> [--lens bytes|structure|fused] [--top N] [--json] [--no-index] [ROOT...]\n", .{});
-
-    const run = assay.Run.open(gpa, io, o.json);
-    const body = std.Io.Dir.cwd().readFileAlloc(io, target, gpa, .limited(corpus_mod.per_file_cap)) catch |e|
-        die("cannot read {s}: {s}\n", .{ target, @errorName(e) });
-    defer gpa.free(body);
-    var target_sketch = sketch.build(gpa, body) catch oom();
-    var target_sil: silhouette_mod.Silhouette = if (o.lens != .bytes) silhouette_mod.build(gpa, body) catch oom() else .empty;
-
-    var view = try kinship.resolve(gpa, io, roots.items, o.no_index, if (o.lens == .bytes) .bytes else .structure);
-    defer view.deinit();
-
-    // Self-exclusion compares canonical shapes: a corpus path under an
-    // explicit `.` root arrives `./`-prefixed while the arg may not (or vice
-    // versa), and byte equality would leave the target ranked first at 0.0.
-    const norm_target = flags.stripDotSlash(target);
-    var scored: std.ArrayList(Scored) = .empty;
-    defer scored.deinit(gpa);
-    for (view.sketches, 0..) |*s, d| {
-        if (std.mem.eql(u8, flags.stripDotSlash(view.paths[d]), norm_target)) continue; // self
-        const dist = switch (o.lens) {
-            .bytes => sketch.distance(&target_sketch, s),
-            .structure => silhouette_mod.distance(&target_sil, &view.silhouettes[d]),
-            .fused => @min(
-                sketch.distance(&target_sketch, s),
-                silhouette_mod.distance(&target_sil, &view.silhouettes[d]),
-            ),
-        };
-        try scored.append(gpa, .{ .dist = dist, .idx = @intCast(d) });
-    }
-    std.mem.sort(Scored, scored.items, view.paths, Scored.less);
-
-    var buf: std.ArrayList(u8) = .empty;
-    defer buf.deinit(gpa);
-    var emitted: usize = 0;
-    for (scored.items) |sc| {
-        if (emitted >= o.top) break;
-        if (!view.gate(sc.idx)) continue; // deleted since the atlas anchor
-        emitted += 1;
-        emit.emitRow(&buf, gpa, o.json, .{ .{ "path", "s", view.paths[sc.idx] }, .{ "distance", "d:.4", sc.dist } }, "{d:.4}  {s}\n", .{ sc.dist, view.paths[sc.idx] });
-    }
-    corpus_mod.emitStdout(buf.items);
-    const dur = run.elapsed().ms();
-    run.emit("similar: {d} sketches ({s}{d} refreshed) · lens {s} · {d:.0} ms\n", .{ view.sketches.len, view.provenance(), view.refreshed, @tagName(o.lens), dur }, .{
-        .{ "verb", "s", "similar" },
-        .{ "sketches", "d", view.sketches.len },
-        .{ "source", "s", view.source() },
-        .{ "refreshed", "d", view.refreshed },
-        .{ "lens", "s", @tagName(o.lens) },
-        .{ "ms", "d:.0", dur },
-    });
-}
 
 // ── `relate dups` ──
 
@@ -127,7 +48,7 @@ pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
     var o: kinship.Opts = .{ .top = 100 };
     var roots: std.ArrayList([]const u8) = .empty;
     defer roots.deinit(gpa);
-    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .max_dist = true, .no_index = true });
+    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .max_dist = true, .no_index = true, .min_grade = true });
 
     const run = assay.Run.open(gpa, io, o.json);
     var view = try kinship.resolve(gpa, io, roots.items, o.no_index, .bytes);
@@ -137,14 +58,31 @@ pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
-    var emitted: usize = 0;
+    var verdict = grade.Verdict{
+        .channel = .copies,
+        .scored = view.paths.len,
+        .floor = o.min_grade,
+        .scoped = roots.items.len > 0,
+    };
     for (pairs) |p| {
-        if (emitted >= o.top) break;
+        if (verdict.shown >= o.top) break;
         if (!view.gate(p.i) or !view.gate(p.j)) continue; // deleted since the anchor
-        emitted += 1;
-        emit.emitRow(&buf, gpa, o.json, .{ .{ "a", "s", view.paths[p.i] }, .{ "b", "s", view.paths[p.j] }, .{ "distance", "d:.4", p.dist } }, "{d:.4}  {s}  {s}\n", .{ p.dist, view.paths[p.i], view.paths[p.j] });
+        if (verdict.best == null) verdict.best = p.dist;
+        const g = grade.of(.copies, p.dist);
+        if (o.min_grade) |floor| if (!g.meets(floor)) {
+            verdict.withheld += 1;
+            continue;
+        };
+        verdict.shown += 1;
+        emit.emitRow(&buf, gpa, o.json, .{
+            .{ "a", "s", view.paths[p.i] },
+            .{ "b", "s", view.paths[p.j] },
+            .{ "distance", "d:.4", p.dist },
+            .{ "grade", "s", g.label() },
+        }, "{d:.4}  {s}  {s}\n", .{ p.dist, view.paths[p.i], view.paths[p.j] });
     }
     corpus_mod.emitStdout(buf.items);
+    grade.report("relate", "this corpus", verdict);
     const dur = run.elapsed().ms();
     run.emit("dups: {d} files ({s}{d} refreshed) · {d} pair(s) ≤ {d:.2} · {d:.0} ms\n", .{ view.paths.len, view.provenance(), view.refreshed, pairs.len, o.max_dist, dur }, .{
         .{ "verb", "s", "dups" },
@@ -155,6 +93,7 @@ pub fn runDups(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !vo
         .{ "max_distance", "d:.2", o.max_dist },
         .{ "ms", "d:.0", dur },
     });
+    grade.settle(verdict);
 }
 
 // ── `relate patterns` attribution ──

@@ -409,14 +409,14 @@ pub fn pathErrNote(err: anyerror) []const u8 {
 /// so a directory neither could descend is reported byte-identically. Each
 /// engine layers its own exit-2 flagging on top (plain bool vs queue atomic).
 pub fn printWalkError(rel: []const u8, e: anyerror) void {
-    std.debug.print("gist: {s}: {s}\n", .{ rel, pathErrNote(e) });
+    assay.diag("gist: {s}: {s}\n", .{ rel, pathErrNote(e) });
 }
 
 /// ripgrep's `-L` cycle report (walk_entry_err in its ignore crate): a symlink
 /// directory pointing at an ancestor of the walk is announced with both
 /// DISPLAY paths and refused — the walk continues past it, exit 2 (errored).
 pub fn printLoopError(link: []const u8, ancestor: []const u8) void {
-    std.debug.print("gist: File system loop found: {s} points to an ancestor {s}\n", .{ link, ancestor });
+    assay.diag("gist: File system loop found: {s} points to an ancestor {s}\n", .{ link, ancestor });
 }
 
 /// ripgrep's implicit-path heuristic (`eprint_nothing_searched`, main.rs): the
@@ -427,7 +427,7 @@ pub fn printLoopError(link: []const u8, ancestor: []const u8) void {
 /// "it can otherwise be noisy when it is intended that there is nothing to
 /// search"). Both engines print through here so the wording cannot drift.
 pub fn printNothingSearched() void {
-    std.debug.print(
+    assay.diag(
         \\gist: No files were searched, which means gist probably applied a filter you didn't expect.
         \\gist: try -uu (fold hidden + gitignored files in), or `gist --files` to see what the walk admits.
         \\

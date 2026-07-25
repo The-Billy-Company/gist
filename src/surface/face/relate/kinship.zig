@@ -29,6 +29,7 @@ const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const pairs = @import("../../../kernel/kinship/cluster/pairs.zig");
 const parallel = @import("../../../kernel/primitives/parallel.zig");
 const flags = @import("../../cli/flags.zig");
+const grade = @import("../../cli/grade.zig");
 
 const oom = cli_args.oom;
 const die = cli_args.die;
@@ -38,10 +39,10 @@ pub const Silhouette = silhouette_mod.Silhouette;
 // ── the relate query option surface (Opts + parseOpts) ──
 // Face-agnostic argv/root/emit plumbing lives in `../../cli/{flags,emit}.zig`.
 
-/// Which distance a kinship verb ranks by: the raw-byte LZJD sketch, the
-/// normalized-structure silhouette, or their minimum ("close in EITHER
-/// channel counts" — the best renamed-twin retriever on the graduation eval).
-pub const Lens = enum { bytes, structure, fused };
+/// Which kinship question a verb answers — the ONE channel vocabulary, shared
+/// with every other face (`surface/cli/grade.zig`). Spelled `--as` and, for
+/// callers who learned the metric names, `--lens`.
+pub const Channel = grade.Channel;
 
 /// The option surface the relate query verbs share; each verb seeds its own
 /// `top` default and reads only the fields its `parseOpts` config admits.
@@ -49,11 +50,31 @@ pub const Opts = struct {
     top: usize,
     json: bool = false,
     no_index: bool = false,
+    /// Distance-channel admission (`copies`/`shapes`/`any`): closer than this.
     max_dist: f64 = 0.25,
     min_size: usize = 2,
-    lens: Lens = .bytes,
+    channel: Channel = .copies,
+    /// Gap-channel admission (`twins`): a bytes−structure gap at least this wide.
     min_echo: f64 = 0.15,
+    /// Withhold rows weaker than this calibrated grade (`--min-grade`).
+    min_grade: ?grade.Grade = null,
     arg: ?[]const u8 = null, // the one positional (similar's path, search/pack's text)
+
+    /// The channel-relative admission threshold, so a verb never has to
+    /// remember which polarity its flag carried.
+    pub fn floor(self: Opts) f64 {
+        return if (self.channel.polarity() == .gap) self.min_echo else self.max_dist;
+    }
+
+    /// Is `score` admitted by both the numeric floor and any `--min-grade`?
+    pub fn admits(self: Opts, score: f64) bool {
+        const passes_floor = switch (self.channel.polarity()) {
+            .distance => score <= self.max_dist,
+            .gap => score >= self.min_echo,
+        };
+        if (!passes_floor) return false;
+        return if (self.min_grade) |g| grade.of(self.channel, score).meets(g) else true;
+    }
 };
 
 /// One flag loop for every relate query verb: `--top`/`--json` always, the
@@ -70,8 +91,9 @@ pub fn parseOpts(
         max_dist: bool = false,
         min_size: bool = false,
         no_index: bool = false,
-        lens: bool = false,
+        channel: bool = false,
         min_echo: bool = false,
+        min_grade: bool = false,
         positional: bool = false,
         strict: ?[]const u8 = null,
     },
@@ -83,10 +105,14 @@ pub fn parseOpts(
             opts.max_dist = flags.unitFloat(flags.need(argv, &i, "--max-distance needs a number in [0,1]\n"), "--max-distance");
         } else if (cfg.min_size and std.mem.eql(u8, arg, "--min-size")) {
             opts.min_size = flags.minSize(argv, &i);
-        } else if (cfg.lens and std.mem.eql(u8, arg, "--lens")) {
-            opts.lens = std.meta.stringToEnum(Lens, flags.need(argv, &i, "--lens needs bytes|structure|fused\n")) orelse die("--lens: bytes, structure, or fused, not {s}\n", .{argv[i]});
+        } else if (cfg.channel and (std.mem.eql(u8, arg, "--as") or std.mem.eql(u8, arg, "--lens"))) {
+            opts.channel = Channel.parse(flags.need(argv, &i, "--as needs copies|twins|shapes|any\n")) orelse
+                die("--as: copies, twins, shapes, or any, not {s}\n", .{argv[i]});
         } else if (cfg.min_echo and std.mem.eql(u8, arg, "--min-echo")) {
             opts.min_echo = flags.unitFloat(flags.need(argv, &i, "--min-echo needs a number in [0,1]\n"), "--min-echo");
+        } else if (cfg.min_grade and std.mem.eql(u8, arg, "--min-grade")) {
+            opts.min_grade = grade.Grade.parse(flags.need(argv, &i, "--min-grade needs identical|strong|moderate|weak|none\n")) orelse
+                die("--min-grade: identical, strong, moderate, weak, or none, not {s}\n", .{argv[i]});
         } else if (std.mem.eql(u8, arg, "--top")) {
             opts.top = flags.count(argv, &i, "--top");
         } else if (std.mem.eql(u8, arg, "--json")) {
@@ -225,6 +251,12 @@ pub const View = struct {
 /// similar, echoes). The atlas persists both, so warm answers carry both
 /// either way; the flag only spares the LIVE rung a second per-doc pass.
 pub const Wants = enum { bytes, structure };
+
+/// Which channels `channel` needs resolved. Only `copies` can answer from the
+/// byte sketches alone; every other channel reads the silhouette too.
+pub fn wantsOf(channel: Channel) Wants {
+    return if (channel == .copies) .bytes else .structure;
+}
 
 /// Loading + validating the global atlas has a fixed whole-artifact cost. For
 /// a narrow explicit scope, rebuilding a few hundred sketches from source is

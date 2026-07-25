@@ -5,10 +5,17 @@ doc_radar:
       glob: pkg/kernels/irregex/src/surface/face/*
       unit: dirs
       equals: 3
+  occurrences:
+    - description: "relate's eleven verbs are declared once, and the unknown-verb line is rendered from them"
+      file: pkg/kernels/irregex/src/surface/face/relate/repertoire.zig
+      pattern: '\.run = '
+      equals: 11
   sentinels:
-    - description: "relate's eleven verbs stay on the unknown-verb help line"
-      file: pkg/kernels/irregex/src/surface/face/relate/main.zig
-      contains: "search | pack | quote | similar | dups | clusters | echoes | concepts | patterns | index | status"
+    - description: "every face's unknown verb reports the whole repertoire, from that one table"
+      file: pkg/kernels/irregex/src/surface/cli/manifest.zig
+      contains:
+        - "unknown verb '{s}'"
+        - "pub fn names("
 ---
 
 # `src/surface/face/` — the product faces

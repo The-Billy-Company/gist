@@ -8,6 +8,7 @@ const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const args = @import("../../../exec/cold/argv/args.zig");
 const jsonstr = @import("../../../exec/cold/emit/jsonstr.zig");
+const assay = @import("../../../../assay/assay.zig");
 
 const manifest_prefix =
     \\{
@@ -143,7 +144,7 @@ fn render(a: std.mem.Allocator) ![]u8 {
 pub fn emit() void {
     const a = std.heap.page_allocator;
     const manifest = render(a) catch {
-        std.debug.print("gist: could not render --schema\n", .{});
+        assay.diag("gist: could not render --schema\n", .{});
         std.process.exit(2);
     };
     defer a.free(manifest);

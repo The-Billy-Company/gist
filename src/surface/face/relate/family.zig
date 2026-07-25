@@ -28,6 +28,7 @@ const assay = @import("../../../assay/assay.zig");
 const families = @import("../../../kernel/kinship/cluster/families.zig");
 const kinship = @import("kinship.zig");
 const emit = @import("../../cli/emit.zig");
+const grade = @import("../../cli/grade.zig");
 
 const oom = cli_args.oom;
 
@@ -49,7 +50,7 @@ pub fn runClusters(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
     var o: kinship.Opts = .{ .top = 50 };
     var roots: std.ArrayList([]const u8) = .empty;
     defer roots.deinit(gpa);
-    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .max_dist = true, .min_size = true, .no_index = true, .strict = "clusters" });
+    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .max_dist = true, .min_size = true, .min_grade = true, .no_index = true, .strict = "clusters" });
 
     const run = assay.Run.open(gpa, io, o.json);
     var view = try kinship.resolve(gpa, io, roots.items, o.no_index, .bytes);
@@ -100,12 +101,29 @@ pub fn runClusters(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
     }
     std.mem.sort(Family, fams.items, view.paths, Family.less);
 
+    // Families sort by size, not by distance, so the verdict's `best` is a
+    // minimum over the whole list rather than the first row's score: the
+    // tightest family in the answer, whatever position it landed in.
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
-    const n = @min(o.top, fams.items.len);
-    for (fams.items[0..n]) |f| {
+    var verdict = grade.Verdict{
+        .channel = .copies,
+        .scored = view.paths.len,
+        .floor = o.min_grade,
+        .scoped = roots.items.len > 0,
+    };
+    for (fams.items) |f| {
+        if (verdict.shown >= o.top) break;
+        if (verdict.best == null or f.max_edge < verdict.best.?) verdict.best = f.max_edge;
+        // A family is only as tight as its loosest verified edge.
+        const g = grade.of(.copies, f.max_edge);
+        if (o.min_grade) |floor| if (!g.meets(floor)) {
+            verdict.withheld += 1;
+            continue;
+        };
+        verdict.shown += 1;
         if (o.json) {
-            buf.print(gpa, "{{\"size\":{d},\"max_distance\":{d:.4},\"paths\":[", .{ f.members.len, f.max_edge }) catch oom();
+            buf.print(gpa, "{{\"size\":{d},\"max_distance\":{d:.4},\"grade\":\"{s}\",\"paths\":[", .{ f.members.len, f.max_edge, g.label() }) catch oom();
             for (f.members, 0..) |m, k| {
                 if (k > 0) buf.append(gpa, ',') catch oom();
                 emit.jsonStr(&buf, gpa, view.paths[m]);
@@ -117,6 +135,7 @@ pub fn runClusters(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         }
     }
     corpus_mod.emitStdout(buf.items);
+    grade.report("relate", "this corpus", verdict);
     const dur = run.elapsed().ms();
     run.emit("clusters: {d} files ({s}{d} refreshed) · {d} famil{s} ≥ {d} member(s) at ≤ {d:.2} · {d:.0} ms\n", .{
         view.paths.len,
@@ -137,6 +156,7 @@ pub fn runClusters(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         .{ "max_distance", "d:.2", o.max_dist },
         .{ "ms", "d:.0", dur },
     });
+    grade.settle(verdict);
 }
 
 // ── tests ──────────────────────────────────────────────────────────────────

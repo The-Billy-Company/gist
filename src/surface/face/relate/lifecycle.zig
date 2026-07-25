@@ -18,6 +18,7 @@
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
+const Outcome = @import("../../cli/outcome.zig").Outcome;
 const fresh = @import("../../../corpus/index/trigrams/fresh.zig");
 const persist = @import("../../../corpus/index/trigrams/persist.zig");
 const atlas_mod = @import("../../../corpus/index/atlas/atlas.zig");
@@ -207,5 +208,5 @@ pub fn runStatus(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
         , .{ atlas_mod.atlasFile(), shelf_line });
     }
     corpus_mod.emitStdout(out.items);
-    std.process.exit(if (st.atlas.state == .ready) 0 else 1);
+    (Outcome{ .matched = st.atlas.state == .ready }).exit();
 }

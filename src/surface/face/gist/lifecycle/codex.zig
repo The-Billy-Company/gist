@@ -26,6 +26,7 @@
 
 const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
+const Outcome = @import("../../../cli/outcome.zig").Outcome;
 const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
 const persist = @import("../../../../corpus/index/trigrams/persist.zig");
 const shelf_mod = @import("../../../../corpus/index/codex/shelf.zig");
@@ -41,7 +42,7 @@ pub fn shelfFile() []const u8 {
 pub const schema_version = 1;
 
 fn dieUsage() noreturn {
-    std.debug.print(
+    assay.diag(
         \\usage:
         \\  gist codex build                   build + persist the self-index shelf
         \\  gist codex count <text>  [--json]  exact corpus-wide occurrence count (zero corpus I/O)
@@ -103,12 +104,12 @@ fn runBuild(gpa: std.mem.Allocator, io: std.Io) !void {
 /// reads the same artifact through its own product face.
 pub fn loadShelf(gpa: std.mem.Allocator, io: std.Io, comptime rebuild: []const u8) shelf_mod.Shelf {
     const blob = Dir.cwd().readFileAlloc(io, shelfFile(), gpa, .unlimited) catch {
-        std.debug.print("no codex shelf at {s} — run " ++ rebuild ++ " first\n", .{shelfFile()});
+        assay.diag("no codex shelf at {s} — run " ++ rebuild ++ " first\n", .{shelfFile()});
         std.process.exit(2);
     };
     defer gpa.free(blob);
     return shelf_mod.Shelf.load(gpa, blob) catch {
-        std.debug.print("corrupt codex shelf at {s} — run " ++ rebuild ++ " to rebuild\n", .{shelfFile()});
+        assay.diag("corrupt codex shelf at {s} — run " ++ rebuild ++ " to rebuild\n", .{shelfFile()});
         std.process.exit(2);
     };
 }
@@ -171,8 +172,8 @@ fn runQuery(gpa: std.mem.Allocator, io: std.Io, pattern: []const u8, top: ?usize
     }
     corpus_mod.emitStdout(out.items);
     if (stale > 0)
-        std.debug.print("codex: {d} file(s) changed since the shelf was built — exact as of the anchor; `gist codex build` refreshes\n", .{stale});
-    std.process.exit(if (total > 0) 0 else 1);
+        assay.diag("codex: {d} file(s) changed since the shelf was built — exact as of the anchor; `gist codex build` refreshes\n", .{stale});
+    (Outcome{ .matched = total > 0 }).exit();
 }
 
 const Status = struct {
@@ -191,7 +192,7 @@ fn runStatus(gpa: std.mem.Allocator, io: std.Io, json: bool) !void {
         if (json) {
             corpus_mod.emitStdout("{\"schema_version\":1,\"state\":\"unavailable\"}\n");
         } else {
-            std.debug.print("no codex shelf at {s} — run `gist codex build` first\n", .{shelfFile()});
+            assay.diag("no codex shelf at {s} — run `gist codex build` first\n", .{shelfFile()});
         }
         std.process.exit(1);
     };

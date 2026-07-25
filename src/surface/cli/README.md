@@ -1,15 +1,21 @@
 # `src/surface/cli/` — the shared face vocabulary
 
 The plumbing every product face speaks to the terminal — argv value parsing,
-corpus-root resolution, and result-row emission. It lives here, a sibling of
-[`face/`](../face/), so `gist` · `relate` · `irregex` (and relate's kinship
-verb-support) share one spelling of a flag value, one root-boundary rule, and
-one JSON escaper instead of forking them per binary.
+result-row emission, the verb table a face is described by, and the stderr
+guidance that keeps a weak answer from reading like a strong one. It lives
+here, a sibling of [`face/`](../face/), so `gist` · `relate` · `irregex` (and
+relate's kinship verb-support) share one spelling of a flag value, one root
+boundary rule, one JSON escaper, and one hint grammar instead of forking them
+per binary.
 
-| File        | Owns                                                                                                                                                                                                                                            |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `flags.zig` | Argv → values + roots: `need` (value after a flag), `count`/`minSize`/`unitFloat` (bounded number parses), `onlyFlag` (lifecycle parse), `Roots`/`rootsOf` (positional → corpus roots), `stripDotSlash` + `underAnyRoot` (path/root membership) |
-| `emit.zig`  | Result rows: `jsonStr` (the one NDJSON escaper, re-exported from the cold emit floor), `jsonRow` (one object from a comptime field spec), `emitRow` (text vs `--json` off one bool)                                                             |
+| File           | Owns                                                                                                                                                                                                                                          |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `flags.zig`    | Argv → values + roots: `need` (value after a flag), `count`/`minSize`/`unitFloat` (bounded number parses), `onlyFlag` (lifecycle parse), `Roots`/`rootsOf` (positional → corpus roots), `stripDotSlash` + `underAnyRoot` (path/root membership) |
+| `emit.zig`     | Result rows: `jsonStr` (the one NDJSON escaper, re-exported from the cold emit floor), `jsonRow` (one object from a comptime field spec), `emitRow` (text vs `--json` off one bool)                                                            |
+| `manifest.zig` | The verb table a face declares itself as (`Face`/`Verb`/`Flag` with typed defaults), and the four renderings derived from it: `--help`, the `--schema` JSON manifest with its shared envelope, verb dispatch, and the unknown-verb line         |
+| `grade.zig`    | The kinship vocabulary: one `Channel` enum (`copies`/`twins`/`shapes`/`any`) with its polarity and scoring rule, the calibrated `Grade` bands that tell a finding from background, and the `Verdict` a verb reports when an answer is weak      |
+| `guide.zig`    | The stderr guidance grammar both gist's no-match hints and relate's verdicts speak: `tool: try …` / `tool: note: …` lines under a shared budget                                                                                                |
+| `outcome.zig`  | The process exit code: ripgrep's `0`/`1`/`2` contract computed in one place, including the two precedences (a fault normally outranks a match; under `--quiet` a match outranks a fault)                                                        |
 
 ## Why it sits beside `face/`, not inside it
 
@@ -22,7 +28,11 @@ walk/scope ([`../../corpus/`](../../corpus/)); nothing here imports a face.
 
 ## When to edit
 
-Flag-value parse shapes, the corpus-root resolution/membership rule, or the
-NDJSON/text row framing. Kinship math and per-verb dispatch stay in
-[`face/relate/`](../face/relate/); the composed-verb option surface stays in
-[`face/irregex/`](../face/irregex/).
+Flag-value parse shapes, the corpus-root resolution/membership rule, the
+NDJSON/text row framing, how a face renders itself, or what a kinship score is
+worth. What each face's verbs *are* stays in that face's `repertoire.zig`
+([relate](../face/relate/repertoire.zig) ·
+[irregex](../face/irregex/repertoire.zig)) — this directory renders a verb
+table, it never enumerates one. Kinship math stays in
+[`face/relate/`](../face/relate/) and
+[`kernel/kinship/`](../../kernel/kinship/).

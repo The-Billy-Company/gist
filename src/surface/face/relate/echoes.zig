@@ -46,6 +46,7 @@ const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
 const signals = @import("../../../kernel/rank/signals.zig");
 const kinship = @import("kinship.zig");
+const grade = @import("../../cli/grade.zig");
 const emit = @import("../../cli/emit.zig");
 
 /// A file needs at least this many structural fingerprints for a
@@ -71,10 +72,10 @@ const Echo = struct {
 };
 
 pub fn runEchoes(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
-    var o: kinship.Opts = .{ .top = 50 };
+    var o: kinship.Opts = .{ .top = 50, .channel = .twins };
     var roots: std.ArrayList([]const u8) = .empty;
     defer roots.deinit(gpa);
-    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .min_echo = true, .no_index = true, .strict = "echoes" });
+    try kinship.parseOpts(gpa, argv, &o, &roots, .{ .min_echo = true, .no_index = true, .min_grade = true, .strict = "echoes" });
 
     const run = assay.Run.open(gpa, io, o.json);
     var view = try kinship.resolve(gpa, io, roots.items, o.no_index, .structure);
@@ -114,22 +115,35 @@ pub fn runEchoes(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
-    var emitted: usize = 0;
+    var verdict = grade.Verdict{
+        .channel = .twins,
+        .scored = view.paths.len,
+        .floor = o.min_grade,
+        .scoped = roots.items.len > 0,
+    };
     for (ctx.pairs.items) |p| {
-        if (emitted >= o.top) break;
+        if (verdict.shown >= o.top) break;
         if (!view.gate(p.i) or !view.gate(p.j)) continue; // deleted since the anchor
-        emitted += 1;
+        if (verdict.best == null) verdict.best = p.echo;
+        const g = grade.of(.twins, p.echo);
+        if (o.min_grade) |floor| if (!g.meets(floor)) {
+            verdict.withheld += 1;
+            continue;
+        };
+        verdict.shown += 1;
         emit.emitRow(&buf, gpa, o.json, .{
             .{ "a", "s", view.paths[p.i] },
             .{ "b", "s", view.paths[p.j] },
             .{ "echo", "d:.4", p.echo },
             .{ "bytes", "d:.4", p.d_bytes },
             .{ "structure", "d:.4", p.d_structure },
+            .{ "grade", "s", g.label() },
         }, "{d:.4}  (bytes {d:.4} · structure {d:.4})  {s}  {s}\n", .{
             p.echo, p.d_bytes, p.d_structure, view.paths[p.i], view.paths[p.j],
         });
     }
     corpus_mod.emitStdout(buf.items);
+    grade.report("relate", "this corpus", verdict);
     const dur = run.elapsed().ms();
     run.emit("echoes: {d} files ({s}{d} refreshed) · {d} pair(s) ≥ {d:.2} · {d:.0} ms\n", .{
         view.paths.len,
@@ -147,4 +161,5 @@ pub fn runEchoes(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
         .{ "min_echo", "d:.2", o.min_echo },
         .{ "ms", "d:.0", dur },
     });
+    grade.settle(verdict);
 }

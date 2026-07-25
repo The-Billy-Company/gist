@@ -1,14 +1,28 @@
 ---
 doc_radar:
   counts:
-    - description: "the relate face: dispatch, nine verb drivers, lifecycle, schema, shared kinship plumbing"
+    - description: "the relate face: dispatch shell, nine verb drivers, lifecycle, the verb table, shared kinship plumbing"
       glob: pkg/kernels/irregex/src/surface/face/relate/*.zig
       unit: files
+      equals: 12
+  occurrences:
+    - description: "the verb table declares exactly eleven verbs, each owning its handler"
+      file: pkg/kernels/irregex/src/surface/face/relate/repertoire.zig
+      pattern: '\.run = '
       equals: 11
   sentinels:
-    - description: "main.zig lists exactly the eleven verbs on the unknown-verb help line"
+    - description: "the binary is its repertoire and nothing else — the process is rendered too"
       file: pkg/kernels/irregex/src/surface/face/relate/main.zig
-      contains: "search | pack | quote | similar | dups | clusters | echoes | concepts | patterns | index | status"
+      contains:
+        - "manifest.drive("
+        - "relate_repertoire.face"
+    - description: "help, --schema, dispatch, the verb list, and the process all render from the one table"
+      file: pkg/kernels/irregex/src/surface/cli/manifest.zig
+      contains:
+        - "pub fn dispatch("
+        - "pub fn usage("
+        - "pub fn schema("
+        - "pub fn drive("
     - description: "the verbs are contract-documented, not CLI folklore"
       file: pkg/kernels/irregex/contract/search_api.toml
       contains: "[irregex.verbs]"
@@ -60,14 +74,17 @@ relate quote <text>   [--json]
     shelf is O(|text|) after load; CLI latency also includes loading the
     shelf and checking filesystem freshness
 
-relate similar <path> [--lens bytes|structure|fused] [--top N] [--json]
-               [--no-index] [ROOT...]
+relate similar <path> [--as copies|twins|shapes|any] [--min-grade G]
+               [--top N] [--json] [--no-index] [ROOT...]
     nearest files by compression kinship: "what else in this tree is
-    LIKE this file?" The lens picks the distance channel: bytes (LZJD
-    dictionary distance, vocabulary-true, the default), structure (the
-    normalized silhouette: renamed twins surface), or fused (min of both)
+    LIKE this file?" `--as` picks the channel — copies (LZJD dictionary
+    distance, vocabulary-true, the default), shapes (the normalized
+    silhouette: renamed twins surface), twins (the bytes−structure gap),
+    or any (whichever channel sees more). Ranking always returns rows, so
+    each one is graded and a background-only answer says so on stderr
 
-relate dups           [--max-distance T] [--top N] [--json] [--no-index] [ROOT...]
+relate dups           [--max-distance T] [--min-grade G] [--top N] [--json]
+                      [--no-index] [ROOT...]
     verified near-duplicate candidate pairs, closest first: copy-paste
     drift, forked fixtures, mirrored modules (candidate generation is
     probabilistic and bucket-capped; emitted-pair precision is exact)
@@ -78,10 +95,12 @@ relate clusters       [--max-distance T] [--min-size N] [--top N] [--json]
     largest first: the whole fixture farm in one answer, not a pair
     list the caller re-joins (exactly the transitive closure of dups)
 
-relate echoes         [--min-echo E] [--top N] [--json] [--no-index] [ROOT...]
+relate echoes         [--min-echo E] [--min-grade G] [--top N] [--json]
+                      [--no-index] [ROOT...]
     DRY candidates dups cannot see: pairs far apart in bytes but close
     in structure (echo = byte distance − structure distance), widest
-    gap first — same skeleton, different vocabulary
+    gap first — same skeleton, different vocabulary. A GAP channel:
+    higher is stronger, and byte-identical files score zero
 
 relate concepts [TEXT] [--lens structure|bytes|echo] [--max-distance T]
                 [--min-echo E] [--min-lines N] [--min-size N] [--top N]
@@ -154,10 +173,21 @@ For humans and coding agents:
   chooses a set whose members pay only for information not already covered by
   earlier picks. Use `pack` for context assembly; use `search` when independent
   rank is the desired output.
-- **Similarity lens:** `similar` defaults to `--lens bytes`, which respects
-  vocabulary and copy-paste drift. `--lens structure` normalizes identifiers,
-  numbers, strings, and comments so renamed twins surface. `--lens fused`
-  accepts whichever channel sees the stronger kinship.
+- **One channel vocabulary:** every kinship verb reads the same `--as`
+  channel. `copies` (the default) respects vocabulary and finds copy-paste
+  drift; `shapes` normalizes identifiers, numbers, strings, and comments so
+  renamed twins surface; `twins` ranks the gap between those two, which is the
+  `echoes` signal; `any` accepts whichever channel sees the stronger kinship.
+  The metric names `bytes`/`structure`/`echo`/`fused` remain accepted as
+  `--lens` aliases — they are spellings of the same enum, not a second path.
+- **Grades, so background never reads as a hit:** ranking verbs always return
+  rows, which is why an answer with no real kin used to look exactly like a
+  find. Every score is now banded (`identical`/`strong`/`moderate`/`weak`/
+  `none`) against the thresholds this README documents, the band rides each
+  `--json` row, `--min-grade G` withholds anything weaker than `G`, and an
+  answer that is entirely background explains itself on stderr in gist's hint
+  grammar (`GIST_HINTS=0` mutes it). A trimmed but genuine answer reports what
+  it withheld without recanting the finding.
 - **Pairs, families, and echoes:** `dups --max-distance T` verifies nominated
   pairs at or below a distance threshold. Seed buckets are probabilistic and
   capped, so this guarantees emitted-pair precision, not exhaustive recall.
@@ -195,11 +225,16 @@ The checked-in [`search_api.toml`](../../../../contract/search_api.toml) is the
 versioned verb contract. The sections below explain the math, corpus policy,
 and evidence behind each choice.
 
-This directory is only the face: `main.zig` classifies the verb and hands
-off to the sibling drivers (`search.zig` · `pack.zig` · `quote.zig` ·
-`verbs.zig` · `family.zig` · `echoes.zig` · `concepts.zig` · `lifecycle.zig`
-· `schema.zig`), with the shared view resolver + pair machinery in
-`kinship.zig`. The engines live under
+This directory is only the face. `repertoire.zig` declares the verb surface
+once — each row carrying its usage form, its human blurb, its machine summary,
+its typed flags, and the handler that runs it — and
+[`surface/cli/manifest.zig`](../../cli/manifest.zig) renders `--help`,
+`--schema`, the dispatch, the unknown-verb line, **and the process itself**
+from that one table. So `main.zig` holds no surface at all: it names its
+repertoire and hands over. The work lives in the sibling drivers (`search.zig` · `pack.zig`
+· `quote.zig` · `similar.zig` · `verbs.zig` · `family.zig` · `echoes.zig` ·
+`concepts.zig` · `lifecycle.zig`), with the shared view resolver + pair
+machinery in `kinship.zig`. The engines live under
 [`src/kernel/kinship/`](../../../kernel/kinship/README.md)
 (sketch · silhouette · concepts · lexicon · zipper),
 [`src/kernel/batch/`](../../../kernel/batch/README.md)

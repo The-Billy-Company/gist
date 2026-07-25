@@ -185,7 +185,13 @@ fn usage() void {
     );
 }
 
-pub fn main(init: std.process.Init) !void {
+/// `main` takes no error union on purpose: Zig's default handler exits 1 with a
+/// stack trace, and 1 is "no match" under the rg contract. `fatal` exits 2.
+pub fn main(init: std.process.Init) void {
+    run(init) catch |e| gist.fatal("gist", e);
+}
+
+fn run(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
 
@@ -207,7 +213,7 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
     if (std.mem.eql(u8, mode, "--version") or std.mem.eql(u8, mode, "-V")) {
-        std.debug.print("gist {s}\n", .{gist.version_string});
+        gist.assay.diag("gist {s}\n", .{gist.version_string});
         return;
     }
     if (std.mem.eql(u8, mode, "--schema")) {
@@ -249,7 +255,7 @@ pub fn main(init: std.process.Init) !void {
         const arg = it.next();
         const json = if (arg) |value| std.mem.eql(u8, value, "--json") else false;
         if (arg != null and !json or it.next() != null) {
-            std.debug.print("gist: status accepts only --json\n", .{});
+            gist.assay.diag("gist: status accepts only --json\n", .{});
             std.process.exit(2);
         }
         try status.run(gpa, io, json);
@@ -278,7 +284,7 @@ pub fn main(init: std.process.Init) !void {
     // a redirect stub regresses nothing a literal searcher could reach; it just
     // routes muscle memory (and agents replaying old argv) to the new face.
     if (std.mem.eql(u8, mode, "similar") or std.mem.eql(u8, mode, "dups") or std.mem.eql(u8, mode, "patterns")) {
-        std.debug.print("gist: '{s}' moved to the relate binary — run `relate {s} ...` (same flags; `make install-gist` installs both)\n", .{ mode, mode });
+        gist.assay.diag("gist: '{s}' moved to the relate binary — run `relate {s} ...` (same flags; `make install-gist` installs both)\n", .{ mode, mode });
         std.process.exit(2);
     }
 
