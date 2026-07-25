@@ -17,3 +17,11 @@ class UnsupportedPatternError(GistError):
 
 class SearchFailedError(GistError):
     """The engine exited 2 for an I/O or walk reason (an unreadable directory, a missing explicit path) — fail-loud, never a silent empty result."""
+
+
+class SchemaDriftError(GistError):
+    """The loaded library's row-schema digest disagrees with the table this binding was generated from, so a decoded row would be a plausible lie (ADR-377). Names the schemas that differ. Rebuild the library and rerun `make gen`; never decode past this."""
+
+
+class RowDecodeError(GistError):
+    """A row did not honor its declared schema — a required field arrived absent, or the value count disagreed with the field count. A kernel or transport bug, not a caller's."""

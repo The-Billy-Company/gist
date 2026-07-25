@@ -47,17 +47,15 @@ pub const Cursor = struct {
 /// 0` = the rootless CWD walk). Writes the handle to `out`; `.invalid` on a null
 /// `out` or a null `roots` with `nroots > 0`.
 pub fn engineOpen(roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**api.Engine) Status {
+    contract.beginCall();
     const slot = out orelse return .invalid;
-    const roots = gpa.alloc([]const u8, nroots) catch return .out_of_memory;
+    const roots = gpa.alloc([]const u8, nroots) catch return contract.report(.{ .code = error.OutOfMemory });
     defer gpa.free(roots);
     if (nroots != 0) {
         const rp = roots_ptr orelse return .invalid;
         for (roots, 0..) |*r, i| r.* = std.mem.span(rp[i]);
     }
-    const engine = api.Engine.open(gpa, roots) catch |e| return switch (e) {
-        error.OutOfMemory => .out_of_memory,
-        else => .open_failed,
-    };
+    const engine = api.Engine.open(gpa, roots) catch |e| return contract.reportAny(e, .open_failed);
     slot.* = engine;
     return .ok;
 }
@@ -69,8 +67,9 @@ pub fn engineClose(engine: *api.Engine) void {
 
 /// Allocate a fresh cancellation token (unset). Writes it to `out`.
 pub fn cancelNew(out: ?**api.CancelToken) Status {
+    contract.beginCall();
     const slot = out orelse return .invalid;
-    const token = gpa.create(api.CancelToken) catch return .out_of_memory;
+    const token = gpa.create(api.CancelToken) catch return contract.report(.{ .code = error.OutOfMemory });
     token.* = .{};
     slot.* = token;
     return .ok;
@@ -90,6 +89,7 @@ pub fn cancelFree(token: *api.CancelToken) void {
 /// options fail closed with `.invalid`; an unsupported pattern returns `.stale`
 /// (answer cold), never a cursor.
 pub fn searchCursor(engine: *api.Engine, req_ptr: ?*const contract.SearchRequest, out: ?**Cursor) Status {
+    contract.beginCall();
     const slot = out orelse return .invalid;
     const req = req_ptr orelse return .invalid;
     if (req.struct_size != @sizeOf(contract.SearchRequest) or req.flags & ~contract.known_flags != 0)
@@ -117,12 +117,14 @@ pub fn searchCursor(engine: *api.Engine, req_ptr: ?*const contract.SearchRequest
         .max_results = if (req.max_results == 0) null else req.max_results,
     };
     const inner = engine.search(query, run) catch |e| return switch (e) {
-        error.OutOfMemory => .out_of_memory,
+        error.OutOfMemory => contract.report(.{ .code = error.OutOfMemory }),
+        // The hosted spelling of a declinature — the caller answers cold and
+        // gets the identical result, so nothing lands in the fault slot.
         error.UnsupportedPattern => .stale,
     };
     const handle = gpa.create(Cursor) catch {
         inner.deinit();
-        return .out_of_memory;
+        return contract.report(.{ .code = error.OutOfMemory });
     };
     handle.* = .{ .inner = inner };
     slot.* = handle;
@@ -132,10 +134,11 @@ pub fn searchCursor(engine: *api.Engine, req_ptr: ?*const contract.SearchRequest
 /// Fill `out` with the next record. Returns `.match` (a record was written),
 /// `.ok` (end of stream — `out` untouched), or `.invalid` / `.out_of_memory`.
 pub fn cursorNext(cursor: *Cursor, out: ?*contract.Match) Status {
+    contract.beginCall();
     const slot = out orelse return .invalid;
     const rec = cursor.inner.next() orelse return .ok;
     cursor.subs.clearRetainingCapacity();
-    cursor.subs.ensureTotalCapacity(gpa, rec.spans.len) catch return .out_of_memory;
+    cursor.subs.ensureTotalCapacity(gpa, rec.spans.len) catch return contract.report(.{ .code = error.OutOfMemory });
     for (rec.spans) |sp| cursor.subs.appendAssumeCapacity(spanView(rec.text, sp));
     slot.* = viewOf(rec, cursor.subs.items.ptr, cursor.subs.items.len);
     return .match;
@@ -146,6 +149,7 @@ pub fn cursorNext(cursor: *Cursor, out: ?*contract.Match) Status {
 /// written), or a failure. All views in the batch share the wrapper's scratch,
 /// so the batch is valid only until the next call on this cursor.
 pub fn cursorNextBatch(cursor: *Cursor, out_ptr: ?[*]contract.Match, cap: usize, written: ?*usize) Status {
+    contract.beginCall();
     const count_slot = written orelse return .invalid;
     count_slot.* = 0;
     if (cap == 0) return .ok;
@@ -159,13 +163,13 @@ pub fn cursorNextBatch(cursor: *Cursor, out_ptr: ?[*]contract.Match, cap: usize,
     var total_spans: usize = 0;
     while (gathered.items.len < cap) {
         const rec = cursor.inner.next() orelse break;
-        gathered.append(gpa, rec) catch return .out_of_memory;
+        gathered.append(gpa, rec) catch return contract.report(.{ .code = error.OutOfMemory });
         total_spans += rec.spans.len;
     }
     if (gathered.items.len == 0) return .ok;
 
     cursor.subs.clearRetainingCapacity();
-    cursor.subs.ensureTotalCapacity(gpa, total_spans) catch return .out_of_memory;
+    cursor.subs.ensureTotalCapacity(gpa, total_spans) catch return contract.report(.{ .code = error.OutOfMemory });
     var offset: usize = 0;
     for (gathered.items, 0..) |rec, i| {
         for (rec.spans) |sp| cursor.subs.appendAssumeCapacity(spanView(rec.text, sp));
@@ -203,6 +207,27 @@ fn viewOf(rec: api.OwnedMatch, subs: [*]const contract.Submatch, nsubs: usize) c
         .nsubmatches = nsubs,
         .kind = @enumFromInt(@intFromEnum(rec.kind)),
     };
+}
+
+test "a successful entry hands back no fault, however the previous call failed" {
+    const t = std.testing;
+    const fault = @import("../../fault.zig");
+    const sc = fault.scope();
+    defer sc.end();
+
+    // The failure a host would have just been told about, still in the slot.
+    fault.install(.{ .code = error.Corrupt, .path = "kinship.atlas", .at = 7 });
+    var detail: contract.FaultDetail = .{ .struct_size = @sizeOf(contract.FaultDetail), .status = 0, .has_at = 0, .name = "", .path = null, .path_len = 0, .at = 0 };
+    try t.expectEqual(Status.match, contract.lastFault(&detail));
+
+    var token: *api.CancelToken = undefined;
+    try t.expectEqual(Status.ok, cancelNew(&token));
+    defer cancelFree(token);
+
+    // The assertion the scope policy exists for: no stale fault survives a call
+    // that succeeded. Without `beginCall` at this entry the pull still reports
+    // `Corrupt`, and a host would blame a clean run for an earlier failure.
+    try t.expectEqual(Status.ok, contract.lastFault(&detail));
 }
 
 /// A stable, static, NUL-terminated message for a status code — the pragmatic

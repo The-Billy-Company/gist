@@ -1,7 +1,7 @@
 //! Persistent resident-session client (ADR-352 rung 2.5) — Unix only.
 //!
 //! Long-lived Unix-socket connection to a `gist serve` daemon. Same wire
-//! protocol as `src/surface/exec/session/protocol.zig` / Zig CLI / Python. Fail-open:
+//! protocol as `src/surface/exec/session/conduit/protocol.zig` / Zig CLI / Python. Fail-open:
 //! connect miss, ineligible request, or `decline` → cold
 //! ([`SearchRequest::files`] / [`SearchRequest::count`]).
 
@@ -10,18 +10,25 @@ use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 
-use crate::error::Result;
-use crate::request::SearchRequest;
+use crate::exact::SearchRequest;
 
-const PROTOCOL_VERSION: u8 = 6; // must match `protocol.protocol_version`
+use super::Result;
+
+const PROTOCOL_VERSION: u8 = 7; // must match `protocol.protocol_version`
 const DEFAULT_OUT_DIR: &str = ".local/gist-verify"; // `$GIST_DIR` default
 const MAX_FRAME: u32 = 16 << 20; // `protocol.max_frame`
+// A diagnostic stream is bounded by the lenses a query can light; a peer that
+// never stops emitting them is misbehaving, and cold is the honest answer.
+const MAX_DIAG_FRAMES: usize = 64;
 
 // Mirror `protocol.zig::Opcode` / `request.Mode` / `flag_*`.
 const OP_HELLO: u8 = 1;
 const OP_READY: u8 = 2;
 const OP_QUERY: u8 = 3;
 const OP_RESULT: u8 = 4;
+// v7: a warm query relays the diagnostics it produced ahead of its answer, so a
+// warm run is as measurable as a cold one. Zero or more frames, then the answer.
+const OP_DIAG: u8 = 16;
 const MODE_FILES: u8 = 0;
 const MODE_COUNT: u8 = 1;
 // `smart_case` ships raw; Zig resolves via `effectiveIgnoreCase`. `quiet` is the
@@ -186,17 +193,31 @@ impl Session {
                 body.extend_from_slice(&u64::from(request.max_count).to_le_bytes());
             }
             body.extend_from_slice(request.pattern.as_bytes());
-            let exchange = send(s, OP_QUERY, &body).and_then(|()| recv(s));
-            match exchange {
-                Ok((OP_RESULT, payload)) => return decode_result(&payload, mode),
+            match send(s, OP_QUERY, &body).and_then(|()| answer(s)) {
+                Ok(Some((OP_RESULT, payload))) => return decode_result(&payload, mode),
                 Ok(_) => return None, // decline / err → cold
                 Err(_) => {
                     self.stream = None; // stale connection → reconnect + retry once
-                }
+                },
             }
         }
         None
     }
+}
+
+/// The answer frame, with any diagnostics that preceded it relayed to stderr
+/// exactly as the CLI client relays them — a warm query stays as measurable as a
+/// cold one, and a host that mutes them (`GIST_HINTS=0`) simply gets none.
+/// `None` guards against a peer that only ever sends diagnostics.
+fn answer(s: &mut UnixStream) -> io::Result<Option<(u8, Vec<u8>)>> {
+    for _ in 0..MAX_DIAG_FRAMES {
+        let (op, payload) = recv(s)?;
+        if op != OP_DIAG {
+            return Ok(Some((op, payload)));
+        }
+        io::stderr().write_all(&payload).ok();
+    }
+    Ok(None)
 }
 
 /// A decoded warm answer.
@@ -239,7 +260,9 @@ fn decode_result(payload: &[u8], expect_mode: u8) -> Option<Answer> {
     }
     if expect_mode == MODE_COUNT {
         let n = payload.get(1..9)?;
-        return Some(Answer::Count(u64::from_le_bytes(n.try_into().ok()?) as usize));
+        return Some(Answer::Count(
+            u64::from_le_bytes(n.try_into().ok()?) as usize
+        ));
     }
     // files: [u8 mode][u32 n][ per file: u32 len + bytes ]
     let count = u32::from_le_bytes(payload.get(1..5)?.try_into().ok()?);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 import functools
 import json
@@ -12,17 +13,25 @@ import shutil
 import subprocess
 from typing import TYPE_CHECKING
 
-from .contract import EXIT_ERROR, EXIT_MATCHED, EXIT_NO_MATCH
+from ..contract import EXIT_ERROR, EXIT_MATCHED, EXIT_NO_MATCH
+from ..contract.table import ENUMS, SCHEMA_ID
+from ..exact.request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
+from .decode import Row, record
 from .errors import GistNotFoundError, SearchFailedError, UnsupportedPatternError
-from .introspection import IndexStatus
-from .request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from ..index.lifecycle import IndexStatus
+
 
 DEFAULT_TIMEOUT = 30.0
+
+# The rendered `--rank` row abbreviates the class the contract spells in full, so
+# the ordinal is read off the contract rather than restated.
+_RANKED = SCHEMA_ID["ranked"]
+_RANK_ORDINAL = {RankKind(label).value: ordinal for ordinal, label in enumerate(ENUMS["rank_kind"])}
 # stderr phrases the engine prints when a pattern/flag is outside its
 # linear-time syntax (see src/surface/exec/cold/{argv/args,engine/serial}.zig `die` messages).
 _UNSUPPORTED_MARKERS = (
@@ -82,7 +91,7 @@ def irregex_binary() -> str:
 
 def _build_cli(zig: str, kernel: Path) -> None:
     """`zig build -Doptimize=ReleaseFast` in the kernel dir — idempotent, and Zig's build cache makes a warm rebuild ~instant. Best-effort: on failure `binary()` falls through to its fail-closed `GistNotFoundError`."""
-    try:
+    with suppress(OSError, subprocess.TimeoutExpired):
         subprocess.run(  # noqa: S603 — fixed argv, no shell
             [zig, "build", "-Doptimize=ReleaseFast"],
             cwd=kernel,
@@ -91,8 +100,6 @@ def _build_cli(zig: str, kernel: Path) -> None:
             timeout=600,
             check=False,
         )
-    except OSError, subprocess.TimeoutExpired:
-        pass
 
 
 def _uncapped_env() -> dict[str, str]:
@@ -376,28 +383,39 @@ def rank(
     timeout: float = DEFAULT_TIMEOUT,
 ) -> list[Ranked]:
     """The engine's definition-first `--rank` view: the top-`limit` files for the request's pattern, each tagged with the engine's own `def`/`use`/`gen` class (`limit <= 0` uses the engine default of 20). Ranking needs a persisted index — with none there is nothing to rank, so the result is empty. This is gist's one native shape with no rg equivalent; the def/use/gen class is read straight from the engine, never reclassified here."""
+    return [record(row) for row in rank_rows(request, limit=limit, cwd=cwd, timeout=timeout)]
+
+
+def rank_rows(
+    request: SearchRequest,
+    *,
+    limit: int = 20,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> list[Row]:
+    """The `--rank` view as raw `ranked` rows — the cold rung of the analytic ladder.
+
+    `--rank` is a *human* view: there is no `--json` for it, so this scrapes the
+    rendered rows. That is why it stays a fallback rather than a path anyone
+    should prefer, and why the values are handed to the same schema decoder the
+    in-process plane feeds instead of being assembled here (timing goes to
+    stderr, so stdout is rows only).
+    """
     tail = ["--rank"] if limit <= 0 else [f"--rank={limit}"]
-    proc = _invoke(tail, request, cwd=cwd, timeout=timeout)
-    return _parse_rank(proc.stdout)
+    return _scrape_rank(_invoke(tail, request, cwd=cwd, timeout=timeout).stdout)
 
 
-def _parse_rank(stream: str) -> list[Ranked]:
-    """Parse `--rank` stdout rows into `Ranked` records (timing goes to stderr, so stdout is rows only)."""
-    out: list[Ranked] = []
-    for line in stream.splitlines():
-        m = _RANK_ROW.match(line)
-        if m is None:
-            continue
-        out.append(
-            Ranked(
-                path=m["path"],
-                line_number=int(m["line"]),
-                kind=RankKind(m["kind"]),
-                count=int(m["count"]),
-                snippet=m["snippet"],
-            )
+def _scrape_rank(stream: str) -> list[Row]:
+    """The rendered rank block as `ranked` rows. Any line that is not a row is skipped rather than half-read."""
+    scraped = (_RANK_ROW.match(line) for line in stream.splitlines())
+    return [
+        Row(
+            _RANKED,
+            (m["path"], int(m["line"]), _RANK_ORDINAL[m["kind"]], int(m["count"]), m["snippet"]),
         )
-    return out
+        for m in scraped
+        if m is not None
+    ]
 
 
 def status(
@@ -406,7 +424,7 @@ def status(
     timeout: float = DEFAULT_TIMEOUT,
 ) -> IndexStatus:
     """Structured persisted-index state; retained here for adapter callers."""
-    from .introspection import status as inspect
+    from ..index.lifecycle import status as inspect
 
     return inspect(cwd=cwd, timeout=timeout)
 

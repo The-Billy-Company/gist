@@ -5,7 +5,7 @@ doc_radar:
       file: pkg/kernels/irregex/bindings/python/irregex/__init__.py
       contains: ["def search", "def files", "def count", "SearchRequest"]
     - description: "constants mirror the unified contract"
-      file: pkg/kernels/irregex/bindings/python/irregex/contract.py
+      file: pkg/kernels/irregex/bindings/python/irregex/contract/__init__.py
       contains: ["ABI_VERSION", "ENGINE_VERSION"]
 ---
 
@@ -15,19 +15,16 @@ Implementation of `import irregex` (distribution name `billy-irregex`). Parent
 [`../README.md`](../README.md) is the user-facing guide; this README maps the
 modules for people changing the binding.
 
-| Module             | Job                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------ |
-| `__init__.py`      | Public surface: `search` / `files` / `count` / `run` / `rank` / `summary` / `status` |
-| `request.py`       | `SearchRequest`, `Match`, rank kinds — the shared shape                              |
-| `engine.py`        | Subprocess transport (authoritative) + result parsing                                |
-| `session.py`       | UDS warm-session client (fail-open accelerator)                                      |
-| `_ffi.py`          | In-process `libirregex` cffi (fail-open; rootless or explicit roots)                 |
-| `contract.py`      | Mirrored constants from `contract/search_api.toml`                                   |
-| `aggregate.py`     | `summary` / tally helpers over a hit stream                                          |
-| `introspection.py` | `status` / `capabilities` / index freshness                                          |
-| `agent.py`         | `request_from_tool` — loose agent dict → `SearchRequest`                             |
-| `kinship.py`       | Relate-backed `similar` / `dups` / `patterns` operations                             |
-| `errors.py`        | Typed errors (`UnsupportedPatternError`, …)                                          |
+| Module / package | Job                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| `__init__.py`    | Public surface: `search` / `files` / `count` / `run` / `rank` / `summary` / `status` |
+| `exact/`         | `SearchRequest`, cursor, ranked/aggregate helpers — the exact-match shape            |
+| `runtime/`       | Cold subprocess, UDS daemon client, in-process FFI (`native.py`), decode/errors      |
+| `contract/`      | Mirrored constants + grades from `contract/search_api.toml`                          |
+| `relate/`        | Kinship (`similar` / `pairs` / `families`), retrieval, multi-pattern sweep           |
+| `compose/`       | Composed verbs (`provenance` / `blast`) over exact + compression                     |
+| `index/`         | Atlas / shelf lifecycle                                                              |
+| `agent.py`       | `request_from_tool` — loose agent dict → `SearchRequest`                             |
 
 ## Transport rule
 

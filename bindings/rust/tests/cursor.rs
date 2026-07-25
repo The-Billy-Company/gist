@@ -28,11 +28,19 @@ fn have_gist() -> bool {
 fn corpus() -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
     let p = dir.path();
-    std::fs::write(p.join("a.py"), "def alpha():\n    return TODO\n# TODO trailing\n").unwrap();
+    std::fs::write(
+        p.join("a.py"),
+        "def alpha():\n    return TODO\n# TODO trailing\n",
+    )
+    .unwrap();
     std::fs::write(p.join("b.py"), "class Beta:\n    pass  # TODO later\n").unwrap();
     std::fs::write(p.join("c.txt"), "no marker here\nplain text\n").unwrap();
     std::fs::create_dir(p.join("pkg")).unwrap();
-    std::fs::write(p.join("pkg/d.py"), "x = 1  # todo lowercase\nTODO upper TODO twice\n").unwrap();
+    std::fs::write(
+        p.join("pkg/d.py"),
+        "x = 1  # todo lowercase\nTODO upper TODO twice\n",
+    )
+    .unwrap();
     dir
 }
 
@@ -98,7 +106,12 @@ fn batches_are_the_same_stream_chunked() {
     assert_eq!(chunked, cold(&req));
 
     // Every batch but the last is full — proves the batch call actually fills.
-    let sizes: Vec<usize> = eng.search(&req).unwrap().batches(2).map(|b| b.unwrap().len()).collect();
+    let sizes: Vec<usize> = eng
+        .search(&req)
+        .unwrap()
+        .batches(2)
+        .map(|b| b.unwrap().len())
+        .collect();
     assert!(sizes.iter().rev().skip(1).all(|&n| n == 2));
     assert!((1..=2).contains(sizes.last().unwrap()));
 }
@@ -114,7 +127,10 @@ fn max_results_stops_at_a_boundary_but_still_matched() {
     let eng = warm(dir.path());
     let mut cur = eng.run(&req, gist::Run::default().max_results(1)).unwrap();
     let first = cur.next().unwrap().unwrap();
-    assert!(cur.next().is_none(), "budget of 1 yields exactly one record");
+    assert!(
+        cur.next().is_none(),
+        "budget of 1 yields exactly one record"
+    );
     assert!(cur.matched(), "matched reflects the corpus, not the budget");
     assert_eq!(first, cold(&req)[0], "the one record is cold's first");
 }
@@ -128,7 +144,9 @@ fn matched_flag_tracks_any_hit() {
     let dir = corpus();
     let eng = warm(dir.path());
     assert!(eng.search(&rooted(dir.path(), "TODO")).unwrap().matched());
-    let mut empty = eng.search(&rooted(dir.path(), "absent_needle_xyzzy")).unwrap();
+    let mut empty = eng
+        .search(&rooted(dir.path(), "absent_needle_xyzzy"))
+        .unwrap();
     assert!(!empty.matched());
     assert_eq!(drain(empty), Vec::<Match>::new());
 }
@@ -201,7 +219,10 @@ fn unrepresentable_options_are_typed_errors() {
     ];
     for req in &cases {
         let err = eng.search(req).unwrap_err();
-        assert!(matches!(err, Error::Unrepresentable(_)), "got {err:?} for {req:?}");
+        assert!(
+            matches!(err, Error::Unrepresentable(_)),
+            "got {err:?} for {req:?}"
+        );
     }
 }
 

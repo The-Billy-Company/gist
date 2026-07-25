@@ -15,9 +15,9 @@ import subprocess
 import pytest
 
 import irregex
-from irregex.engine import _parse_json
-from irregex.errors import UnsupportedPatternError
-from irregex.request import MatchKind, SearchEngine, SearchRequest
+from irregex.exact.request import MatchKind, SearchEngine, SearchRequest
+from irregex.runtime.errors import UnsupportedPatternError
+from irregex.runtime.shell import _parse_json
 
 
 def _binary_available() -> bool:

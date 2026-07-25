@@ -1,14 +1,16 @@
-"""Behavioral tests for the composed face — `blast` / `context` / `family` / `provenance`.
+"""Behavioral tests for composition — narrowing as a modifier, plus `blast` and `provenance`.
 
-Each verb claims something neither engine claims alone, so each test checks the
-*composition*, not the plumbing:
+ADR-367's claim is that exact match and compression answer better together than
+either does alone, and (since the fold) that the composition is a *modifier* on
+the relate questions rather than a separate family of verbs. So each test checks
+the composition, not the plumbing:
 
   * `blast` must reach a caller that exact search finds AND a fork that only
     kinship finds, while keeping the two kinds of evidence in separate fields.
-  * `context` must refuse a file that would win on coverage alone but matches no
-    pattern — the filtering is the whole point.
-  * `family` must group two functions that share a skeleton under different
-    names, which whole-file `dups` cannot see.
+  * `pack(matching=…)` must refuse a file that would win on coverage alone but
+    matches no pattern — the filtering is the whole point.
+  * `families(matching=…, unit="function")` must group two functions that share a
+    skeleton under different names, which whole-file kinship cannot see.
   * `provenance` must mark a citation verified only when the live bytes still
     hold the phrase.
 
@@ -23,7 +25,7 @@ import shutil
 import pytest
 
 import irregex
-from irregex import compose, radius
+from irregex.compose import radius, verbs as compose
 
 
 def _binary_available() -> bool:
@@ -50,9 +52,9 @@ def reconcile_ledger(entries, charge_id):
     return total
 '''
 
-# The same skeleton, renamed vocabulary — a Type-2 clone. `dups` compares whole
-# files and would miss it inside an otherwise-different module; `family` lifts
-# each hit to its enclosing function first.
+# The same skeleton, renamed vocabulary — a Type-2 clone. File kinship would miss
+# it inside an otherwise-different module; `unit="function"` lifts each hit to its
+# enclosing function first.
 _INVOICE = '''"""Invoice math, unrelated to wallets except in shape."""
 
 
@@ -148,85 +150,84 @@ def test_blast_of_an_unknown_symbol_is_empty_not_wrong(corpus):
     assert report.paths == ()
 
 
-# ── context ──────────────────────────────────────────────────────────────────
+# ── narrowing the reading set ────────────────────────────────────────────────
 
 
 @needs_irregex
-def test_context_excludes_the_file_that_matches_no_pattern(corpus):
+def test_a_narrowed_pack_excludes_the_file_that_matches_no_pattern(corpus):
     query = "settle every entry against one charge identifier"
-    # The decoy is the *closest* prose to the query but names no symbol.
+    # The decoy is the *closest* prose to the query but names no symbol, and
+    # coverage is a statistical measure that knows nothing about a word.
     packed = irregex.pack(query, roots=["."], top=4, cwd=corpus)
     assert any(p.endswith("decoy.md") for p in packed.paths), "fixture no longer tests anything"
 
-    picks = compose.context(query, ["reconcile_ledger"], roots=["."], top=4, cwd=corpus)
+    picks = irregex.pack(query, matching=["reconcile_ledger"], roots=["."], top=4, cwd=corpus)
     chosen = {p.path.removeprefix("./") for p in picks}
     assert "decoy.md" not in chosen, "an unmatched file must never be packed"
     assert chosen, "expected the matching files to be packed"
+    # Two scores, never fused: the coverage price, and the patterns that admitted
+    # the file.
     assert all("reconcile_ledger" in p.patterns for p in picks)
+    assert all(p.marginal_bits >= 0.0 for p in picks)
 
 
 @needs_irregex
-def test_context_match_all_narrows_further_than_any(corpus):
+def test_match_all_narrows_further_than_match_any(corpus):
     query = "settle entries against a charge"
     both = ["reconcile_ledger", "def settle"]
-    any_hit = compose.context(query, both, match="any", roots=["."], cwd=corpus)
-    all_hit = compose.context(query, both, match="all", roots=["."], cwd=corpus)
+    any_hit = irregex.pack(query, matching=both, match="any", roots=["."], cwd=corpus)
+    all_hit = irregex.pack(query, matching=both, match="all", roots=["."], cwd=corpus)
     assert {p.path for p in all_hit} <= {p.path for p in any_hit}
     for pick in all_hit:
         assert set(pick.patterns) == set(both), "match=all must credit every pattern"
 
 
 @needs_irregex
-def test_context_refuses_an_unscoped_or_patternless_query():
-    with pytest.raises(ValueError, match="requires a scope"):
-        compose.context("anything", ["pattern"])
-    with pytest.raises(ValueError, match="at least one pattern"):
-        compose.context("anything", [], corpus_wide=True)
+def test_narrowed_recall_prices_only_the_matching_files(corpus):
+    """The same filter on the recall question: "among the files that mention X, which explains this best?" — the lexicon is built over the admitted subset, so a decoy cannot win on prose alone."""
+    query = "settle every entry against one charge identifier"
+    wide = {r.path.removeprefix("./") for r in irregex.recall(query, roots=["."], cwd=corpus)}
+    assert "decoy.md" in wide, "fixture no longer tests anything"
+    narrow = irregex.recall(query, matching=["reconcile_ledger"], roots=["."], cwd=corpus)
+    assert narrow, "expected the matching files to be priced"
+    assert "decoy.md" not in {r.path.removeprefix("./") for r in narrow}
 
 
-# ── family ───────────────────────────────────────────────────────────────────
+# ── the narrowed fork family ─────────────────────────────────────────────────
 
 
 @needs_irregex
-def test_family_groups_the_renamed_twin_that_dups_cannot_see(corpus):
-    whole_file = irregex.dups(roots=["."], max_distance=0.25, cwd=corpus)
+def test_narrowed_families_group_the_renamed_twin_file_kinship_cannot_see(corpus):
+    whole_file = irregex.pairs(channel="copies", roots=["."], max_distance=0.25, cwd=corpus)
     files = [{p.a.removeprefix("./"), p.b.removeprefix("./")} for p in whole_file]
     assert {"ledger.py", "invoice.py"} not in files, "fixture no longer tests anything"
 
-    report = compose.family("def reconcile_", echo_min=0.05, roots=["."], cwd=corpus)
-    grouped = {p.removeprefix("./") for f in report.families for p in f.paths}
-    assert {"ledger.py", "invoice.py"} <= grouped, f"families={report.families}"
-    for fam in report.families:
-        assert fam.size >= 2, "a family of one is a distinct region, not a family"
-        assert all(m.lines > 0 for m in fam.members)
+    grouped = irregex.families(
+        matching=["def reconcile_"], unit="function", min_echo=0.05, roots=["."], cwd=corpus
+    )
+    reached = {m.removeprefix("./").partition("#L")[0] for f in grouped for m in f.members}
+    assert {"ledger.py", "invoice.py"} <= reached, f"families={list(grouped)}"
+    for fam in grouped:
+        assert fam.size >= 2, "a family of one is a distinct unit, not a family"
 
 
 @needs_irregex
-def test_family_keeps_unaffiliated_implementations_first_class(corpus):
-    report = compose.family("def ", echo_min=0.9, roots=["."], cwd=corpus)
-    # An impossible threshold admits no family, so every match must come back as
-    # a distinct region — silence would imply "all the same" by omission.
-    assert not report.families
-    assert report.distinct, "matches must be reported even when nothing groups"
-    for lone in report.distinct:
+def test_the_narrowed_complement_reports_what_grouped_with_nothing(corpus):
+    """An impossible threshold admits no family, and silence would imply "all the same" by omission. The complement reports every matching unit with its nearest miss instead."""
+    axes = {
+        "matching": ["def "],
+        "unit": "function",
+        "min_echo": 0.9,
+        "roots": ["."],
+        "cwd": corpus,
+    }
+    assert not list(irregex.families(**axes))
+    lonely = irregex.distinct(**axes)
+    assert lonely, "matches must be reported even when nothing groups"
+    for lone in lonely:
         assert 0.0 <= lone.byte_distance <= 1.0
         assert 0.0 <= lone.structure_distance <= 1.0
-
-
-@needs_irregex
-def test_family_members_carry_readable_source(corpus):
-    report = compose.family("def reconcile_", echo_min=0.05, roots=["."], cwd=corpus)
-    members = [m for f in report.families for m in f.members]
-    assert members, "expected at least one family member"
-    body = members[0].read(cwd=corpus)
-    assert "def reconcile_" in body
-    assert body.count("\n") == members[0].lines
-
-
-@needs_irregex
-def test_family_refuses_an_unscoped_query():
-    with pytest.raises(ValueError, match="requires a scope"):
-        compose.family("def ")
+        assert lone.line is not None, "a function unit carries its span"
 
 
 # ── provenance ───────────────────────────────────────────────────────────────

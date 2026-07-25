@@ -9,4 +9,6 @@
 // produced `pkg/kernels/irregex/zig-out/{lib,include}` first.
 module irregex/bindings/go
 
-go 1.23
+go 1.26.3
+
+toolchain go1.26.4

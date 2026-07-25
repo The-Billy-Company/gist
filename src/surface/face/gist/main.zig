@@ -91,12 +91,14 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
             // resolution site) without a second full flag parse; eligible
             // requests are always rootless.
             var hint_sa: gist.session.request.ScopeArgs = .{};
-            if (code == 1) if (gist.session.request.classify(argv, &hint_sa)) |req| {
+            // An unclassifiable argv simply earns no hint — `classify` declining
+            // is the routine answer here, not a failure to report.
+            if (code == 1) if (gist.session.request.classify(argv, &hint_sa) catch null) |req| {
                 // `-q` and `-m0` are SILENT on a miss (cold exits 1 with no
                 // stderr guidance — `serial.zig`), so suppress the hint for them.
                 if (!req.quiet and !req.matchNothing())
                     search.hints.noMatches(search.hints.shapeBare(req.pattern, req.fixed, req.effectiveIgnoreCase()), null);
-            } else |_| {};
+            };
             std.process.exit(code);
         },
         // Cold miss on an eligible shape with no daemon up: fork one detached so

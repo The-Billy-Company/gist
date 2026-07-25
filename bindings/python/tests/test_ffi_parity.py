@@ -18,8 +18,8 @@ from __future__ import annotations
 import pytest
 
 import irregex
-from irregex import _ffi, engine
-from irregex.request import Match, SearchEngine, SearchRequest
+from irregex.exact.request import Match, SearchEngine, SearchRequest
+from irregex.runtime import native as _ffi, shell as engine
 
 
 pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirregex/cffi unavailable")

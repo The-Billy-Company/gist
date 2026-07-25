@@ -12,8 +12,11 @@ are the same answer.
 
     # compression — what is this like, and what would explain it?
     for kin in irregex.similar("services/backend/api/main.go", min_grade="strong"):
-        print(kin.path, kin.grade)
+        print(kin.unit, kin.grade)
     reading_set = irregex.pack("how does wallet crediting settle").paths
+
+    # both engines on one question — narrowing is a modifier, not a verb
+    forks = irregex.families(matching=["WalletService"], unit="function")
 
     # composed — both engines on one question
     radius = irregex.blast("WalletService")
@@ -33,46 +36,41 @@ throws structure away; a program wants the opposite. So:
   lift it, because a silently-trimmed list is a wrong list.
 * **Answers, not sections.** `blast` prints six panes for a human to skim; here it
   is one object whose `paths` is the edit set, `exact_paths` the provable subset.
-  `family` interleaves two row classes on one stream; here they are two fields.
+* **One shape per row type.** The CLI's `echoes` answers in three shapes on one
+  stream; here each is its own function (`pairs`/`families`/`distinct`) because
+  the row type differs, while every configuration axis stays shared.
 * **The warm tier is inspectable.** `atlas_status()` lets a long-running process
   decide once whether to build, instead of paying a cold walk per call.
 
-Faces: `search`/`files`/`count`/`rank`/`summary` (exact) · `similar`/`dups`/
-`clusters`/`echoes`/`concepts`/`fragments`/`patterns` (kinship) ·
-`recall`/`pack`/`quote` (retrieval) · `blast`/`context`/`family`/`provenance`
-(composed). Row types too generic to stand alone — a blast's `Reference`, `Twin`,
-`Ripple` — live on their module (`irregex.compose.Reference`).
+Faces: `search`/`files`/`count`/`rank`/`summary` (exact) · `similar` and
+`pairs`/`families`/`distinct`/`patterns` (kinship) · `recall`/`pack`/`quote`
+(retrieval) · `blast`/`provenance` (composed). Every kinship and retrieval
+question takes `matching=[…]` to ask it inside an exact filter (ADR-367). Row
+types too generic to stand alone — a blast's `Reference`, `Twin`, `Ripple` — live
+on their module (`irregex.radius.Reference`).
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import (
-    aggregate,
-    compose,
-    corpus,
-    engine,
-    grade,
-    introspection,
-    kinship,
-    radius,
-    retrieval,
-    sweep,
+from . import compose
+from .compose import Attribution, Blast, blast, provenance, radius
+from .contract import ABI_VERSION, ENGINE_VERSION, Channel, Grade, grade_of, grades as grade
+from .exact import aggregate, ranked
+from .exact.aggregate import Group, Tally, tally
+from .exact.cursor import CancelToken, Cursor, Engine
+from .exact.request import (
+    Match,
+    MatchKind,
+    Ranked,
+    RankKind,
+    SearchEngine,
+    SearchRequest,
+    Submatch,
 )
-from .aggregate import Group, Tally, tally
-from .compose import Attribution, Distinct, Family, FamilyReport, context, family, provenance
-from .contract import ABI_VERSION, ENGINE_VERSION
-from .corpus import Kin, Region
-from .cursor import CancelToken, Cursor, Engine
-from .errors import (
-    GistError,
-    GistNotFoundError,
-    SearchFailedError,
-    UnsupportedPatternError,
-)
-from .grade import Channel, Grade, grade_of
-from .introspection import (
+from .index import lifecycle as introspection
+from .index.lifecycle import (
     Artifact,
     AtlasStatus,
     Capabilities,
@@ -85,31 +83,22 @@ from .introspection import (
     index,
     status,
 )
-from .kinship import (
-    Cluster,
-    Concept,
-    DupPair,
-    Echo,
-    Similar,
-    clusters,
-    concepts,
-    dups,
-    echoes,
-    fragments,
+from .relate import corpus, kinship, retrieval, sweep
+from .relate.corpus import Kin, Region
+from .relate.kinship import (
+    Family,
+    Lonely,
+    Neighbor,
+    Pair,
+    distinct,
+    families,
+    pairs,
     similar,
 )
-from .radius import Blast, blast
-from .request import (
-    Match,
-    MatchKind,
-    Ranked,
-    RankKind,
-    SearchEngine,
-    SearchRequest,
-    Submatch,
-)
-from .retrieval import Packed, Phrase, Pick, Quotation, Recalled, pack, quote, recall
-from .session import (
+from .relate.retrieval import Packed, Phrase, Pick, Quotation, Recalled, pack, quote, recall
+from .relate.sweep import PatternCount, PatternHit, pattern_counts, patterns
+from .runtime import shell as engine
+from .runtime.daemon import (
     Session,
     SessionGeneration,
     ensure_serve,
@@ -117,7 +106,15 @@ from .session import (
     opening_session,
     warm_eligible,
 )
-from .sweep import PatternCount, PatternHit, pattern_counts, patterns
+from .runtime.errors import (
+    GistError,
+    GistNotFoundError,
+    RowDecodeError,
+    SchemaDriftError,
+    SearchFailedError,
+    UnsupportedPatternError,
+)
+
 
 schema = capabilities
 
@@ -129,6 +126,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ABI_VERSION",
+    "ENGINE_VERSION",
     "Artifact",
     "AtlasStatus",
     "Attribution",
@@ -136,16 +134,9 @@ __all__ = [
     "CancelToken",
     "Capabilities",
     "Channel",
-    "Cluster",
-    "Concept",
     "Cursor",
-    "Distinct",
-    "DupPair",
-    "ENGINE_VERSION",
-    "Echo",
     "Engine",
     "Family",
-    "FamilyReport",
     "FlagCapability",
     "GistError",
     "GistNotFoundError",
@@ -154,9 +145,12 @@ __all__ = [
     "IndexState",
     "IndexStatus",
     "Kin",
+    "Lonely",
     "Match",
     "MatchKind",
+    "Neighbor",
     "Packed",
+    "Pair",
     "PatternCount",
     "PatternHit",
     "Phrase",
@@ -166,12 +160,13 @@ __all__ = [
     "Ranked",
     "Recalled",
     "Region",
+    "RowDecodeError",
+    "SchemaDriftError",
     "SearchEngine",
     "SearchFailedError",
     "SearchRequest",
     "Session",
     "SessionGeneration",
-    "Similar",
     "Submatch",
     "Tally",
     "UnsupportedPatternError",
@@ -181,21 +176,16 @@ __all__ = [
     "binary",
     "blast",
     "capabilities",
-    "clusters",
     "compose",
-    "concepts",
-    "context",
     "corpus",
     "count",
     "count_matches",
-    "dups",
-    "echoes",
+    "distinct",
     "engine",
     "ensure_serve",
-    "family",
+    "families",
     "ffi_eligible",
     "files",
-    "fragments",
     "grade",
     "grade_of",
     "index",
@@ -203,6 +193,7 @@ __all__ = [
     "kinship",
     "opening_session",
     "pack",
+    "pairs",
     "pattern_counts",
     "patterns",
     "provenance",
@@ -301,7 +292,7 @@ def rank(
     **options: object,
 ) -> list[Ranked]:
     """The engine's definition-first ranked view: the top-`limit` files for `pattern`, each tagged `def`/`use`/`gen` by the engine itself — a symbol's definition ahead of its call sites, generated files demoted. Uses the persisted index when available and live-ranks otherwise."""
-    return engine.rank(
+    return ranked.rank(
         SearchRequest(pattern=pattern, **options), limit=limit, cwd=cwd, timeout=timeout
     )
 

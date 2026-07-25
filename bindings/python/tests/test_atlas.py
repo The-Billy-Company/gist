@@ -17,7 +17,7 @@ import shutil
 import pytest
 
 import irregex
-from irregex.introspection import IndexState, parse_atlas_status
+from irregex.index.lifecycle import IndexState, parse_atlas_status
 
 
 def _binary_available() -> bool:

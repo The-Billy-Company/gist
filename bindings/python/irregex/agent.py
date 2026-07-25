@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .contract import ALIASES, REQUEST_OPTIONS, ROUTING_KEYS
-from .request import SearchRequest
+from .exact.request import SearchRequest
 
 
 if TYPE_CHECKING:

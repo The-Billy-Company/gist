@@ -2,6 +2,6 @@
   "armed": true,
   "watcher": "kqueue (per-vnode EVFILT_VNODE)",
   "platform": "Darwin arm64",
-  "geomean_speedup": 693.0,
+  "geomean_speedup": 565.6,
   "needles": 20
 }

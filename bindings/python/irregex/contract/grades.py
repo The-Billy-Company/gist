@@ -1,4 +1,4 @@
-"""The kinship calibration, importable — a Python mirror of `src/surface/cli/grade.zig`.
+"""The kinship calibration, importable — a Python mirror of `src/kernel/kinship/metric/channel.zig`.
 
 A distance is not an answer. `similar` returning 0.7813 *looks* like a result,
 but it sits past the line where kinship stops meaning "related" and starts
@@ -13,12 +13,13 @@ caller cannot read stderr, so the same calibration lives here as values:
     a real twin from statistical background without memorizing cut points.
 
 Polarity differs by channel and is load-bearing: `copies`/`shapes`/`any` score a
-DISTANCE (lower is closer) while `twins` scores a GAP (higher is stronger), so
-one threshold spelling for both would silently invert. `score()` and
-`grade_of()` make that explicit rather than remembered.
+DISTANCE (lower is closer) while `twins` scores a GAP and `recall` a coding GAIN
+(higher is stronger), so one threshold spelling for all three would silently
+invert. `score()`, `quantity`, and `grade_of()` make that explicit rather than
+remembered — which is also why a row's score column is *named* for its polarity.
 
 The bands are the engine's, not a second opinion: `tests/test_grade_parity.py`
-reads `grade.zig` and asserts every cut point and alias matches.
+reads `channel.zig` and asserts every cut point and alias matches.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ class Channel(StrEnum):
     TWINS = "twins"  # bytes − structure — same skeleton, renamed vocabulary
     SHAPES = "shapes"  # normalized-structure silhouette — shared skeleton
     ANY = "any"  # min(copies, shapes) — close in EITHER channel counts
+    RECALL = "recall"  # Ziv–Merhav coding gain — how cheaply the corpus says a TEXT
 
     @property
     def metric(self) -> str:
@@ -42,11 +44,23 @@ class Channel(StrEnum):
 
     @property
     def higher_is_stronger(self) -> bool:
-        """True for gap channels (`twins`), False for distance channels."""
-        return self is Channel.TWINS
+        """True where the score grows with confidence (`twins`, `recall`), False for distance channels."""
+        return self in {Channel.TWINS, Channel.RECALL}
+
+    @property
+    def pairwise(self) -> bool:
+        """Can two records be compared on this channel? `recall` cannot — it prices one text probe against one document, so it is chosen by a probe's *shape*, never by `--as`."""
+        return self is not Channel.RECALL
+
+    @property
+    def quantity(self) -> str:
+        """The JSON key a row's score arrives under: `distance`, `echo`, or `gain`. Naming all three "distance" would invert the meaning of a downstream threshold."""
+        if self is Channel.TWINS:
+            return "echo"
+        return "gain" if self is Channel.RECALL else "distance"
 
     def score(self, byte_distance: float, structure_distance: float) -> float:
-        """This channel's score from a pair's two measured distances — the one definition of what each channel means. `copies` ignores `structure_distance`."""
+        """This channel's score from a pair's two measured distances — the one definition of what each channel means. `copies` ignores `structure_distance`; `recall` is not pairwise and returns NaN, which grades as background rather than inventing a relation."""
         match self:
             case Channel.COPIES:
                 return byte_distance
@@ -54,6 +68,8 @@ class Channel(StrEnum):
                 return structure_distance
             case Channel.TWINS:
                 return byte_distance - structure_distance
+            case Channel.RECALL:
+                return math.nan
             case _:
                 return min(byte_distance, structure_distance)
 
@@ -78,6 +94,7 @@ _METRIC: dict[Channel, str] = {
     Channel.TWINS: "echo",
     Channel.SHAPES: "structure",
     Channel.ANY: "fused",
+    Channel.RECALL: "gain",
 }
 _ALIASES: dict[str, Channel] = {metric: channel for channel, metric in _METRIC.items()}
 
@@ -126,6 +143,18 @@ _GAP_BANDS: tuple[tuple[float, Grade], ...] = (
     (0.30, Grade.MODERATE),
     (0.15, Grade.WEAK),
 )
+# Coding gain, measured over this repo's ~20k-file corpus: a sentence lifted
+# verbatim out of a source file scored 0.9496, an on-target descriptive query
+# 0.63–0.82, an English query about a subject the scope does not contain
+# 0.32–0.44, and nonsense 0.16–0.23. A one-word query is cheap to explain
+# anywhere, which is why `def` at 0.43 has to land in the same band as
+# "not really here".
+_GAIN_BANDS: tuple[tuple[float, Grade], ...] = (
+    (0.90, Grade.IDENTICAL),
+    (0.60, Grade.STRONG),
+    (0.45, Grade.MODERATE),
+    (0.30, Grade.WEAK),
+)
 
 
 def grade_of(channel: Channel | str, score: float) -> Grade:
@@ -133,6 +162,8 @@ def grade_of(channel: Channel | str, score: float) -> Grade:
     resolved = Channel.parse(channel)
     if math.isnan(score):
         return Grade.NONE
+    if resolved is Channel.RECALL:
+        return next((g for floor, g in _GAIN_BANDS if score >= floor), Grade.NONE)
     if resolved.higher_is_stronger:
         return next((g for floor, g in _GAP_BANDS if score >= floor), Grade.NONE)
     return next((g for ceiling, g in _DISTANCE_BANDS if score <= ceiling), Grade.NONE)

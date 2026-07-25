@@ -1,6 +1,6 @@
 """The engine's `--rank` view, surfaced into Python (ADR-352).
 
-Two layers. The pure layer drives `engine._parse_rank` over captured rank rows —
+Two layers. The pure layer drives the scrape + schema decode over captured rank rows —
 no binary, so it pins the row grammar (rank index, `path:line`, `[def|use|gen]`,
 the per-file count, snippet) and the `def`/`use`/`gen` classification exactly. The
 integration layer builds a throwaway index and asserts `irregex.rank` reads it back
@@ -15,8 +15,9 @@ import subprocess
 import pytest
 
 import irregex
-from irregex.engine import _parse_rank
-from irregex.request import Ranked, RankKind
+from irregex.exact.request import Ranked, RankKind
+from irregex.runtime.decode import records
+from irregex.runtime.shell import _scrape_rank
 
 
 def _binary_available() -> bool:
@@ -27,6 +28,11 @@ def _binary_available() -> bool:
     except irregex.GistNotFoundError:
         return False
     return True
+
+
+def _ranked(stream: str) -> list[Ranked]:
+    """The rendered block through the tier it actually travels: scrape to `ranked` rows, then the one generic decoder."""
+    return list(records(_scrape_rank(stream)))
 
 
 needs_gist = pytest.mark.skipif(not _binary_available(), reason="no gist binary")
@@ -44,7 +50,7 @@ _SAMPLE = (
 
 
 def test_parse_rank_reads_every_field() -> None:
-    rows = _parse_rank(_SAMPLE)
+    rows = _ranked(_SAMPLE)
     assert len(rows) == 3
     first = rows[0]
     assert first == Ranked(
@@ -57,11 +63,11 @@ def test_parse_rank_reads_every_field() -> None:
 
 
 def test_parse_rank_classifies_kinds() -> None:
-    assert [r.kind for r in _parse_rank(_SAMPLE)] == [RankKind.DEF, RankKind.USE, RankKind.GEN]
+    assert [r.kind for r in _ranked(_SAMPLE)] == [RankKind.DEF, RankKind.USE, RankKind.GEN]
 
 
 def test_generated_property_flags_only_gen() -> None:
-    rows = _parse_rank(_SAMPLE)
+    rows = _ranked(_SAMPLE)
     assert [r.generated for r in rows] == [False, False, True]
     assert [r.path for r in rows if not r.generated] == [
         r.path for r in rows if r.kind is not RankKind.GEN
@@ -73,7 +79,7 @@ def test_parse_rank_ignores_the_stderr_timing_and_blanks() -> None:
     still skip any non-row line rather than mis-parse it.
     """
     noisy = _SAMPLE + "\n— 3 ranked matches (top 3) · read 24/26456 candidates · total 48.4 ms\n"
-    assert len(_parse_rank(noisy)) == 3
+    assert len(_ranked(noisy)) == 3
 
 
 # ─────────────────────────── integration (real engine + index) ───────────────────────────

@@ -809,7 +809,7 @@
    "--stats",
    "Sherlock"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "f411_single_threaded_quiet_search_stats",
@@ -2512,7 +2512,7 @@
    "tests",
    "src"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "ignore_rgignore_multi_root_order#1",
@@ -2772,7 +2772,7 @@
   "argv": [
    "--files"
   ],
-  "detail": "order-agnostic oracle (eqnice_sorted)"
+  "detail": ""
  },
  {
   "name": "type_list",

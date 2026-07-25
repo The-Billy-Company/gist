@@ -615,6 +615,12 @@ pub fn main(init: std.process.Init) !void {
         try @import("flagbench.zig").run(gpa, io, roots, gate);
         return;
     }
+    if (std.mem.eql(u8, mode, "sessionprof")) {
+        // Owns its own flag/root parsing (`--reps`, `--baseline`, `--gate`), so
+        // the iterator is handed over rather than pre-drained.
+        try @import("sessionprof.zig").run(gpa, io, &it);
+        return;
+    }
 
     // bench mode: remaining args (after the mode token) are roots, if any.
     var roots_list: std.ArrayList([]const u8) = .empty;

@@ -7,7 +7,7 @@ import shutil
 import pytest
 
 import irregex
-from irregex.introspection import IndexState, IndexStatus, parse_status
+from irregex.index.lifecycle import IndexState, IndexStatus, parse_status
 
 
 def _binary_available() -> bool:

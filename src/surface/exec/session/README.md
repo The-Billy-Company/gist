@@ -17,7 +17,7 @@ an eligible request answers without re-paying the cold subprocess's process +
 index-mmap + candidate-read startup. It selects its corpus with the cold path's
 own certified rg-default walk (`surface/exec/cold/engine/serial.zig::defaultFileSet`),
 ingests each file exactly as a cold read would, and lowers each query through the
-shared search core (`kernel/match/query.zig` over `corpus/index/trigrams`,
+shared search core (`kernel/match/query/query.zig` over `corpus/index/trigrams`,
 `scan/verify`, `scan/simd`, `regex/core`) — but every entry point **returns
 errors** instead of calling `die()`, which is exactly why the resident path
 sidesteps the exit hazard ADR-352 defers the in-process C FFI on.
@@ -26,14 +26,14 @@ sidesteps the exit hazard ADR-352 defers the in-process C FFI on.
 
 Read them in this order; each answers a different question.
 
-| Folder | The question it answers |
-|---|---|
-| [`answer/`](answer) | What may be asked warm, what comes back, and the one candidate walk between them. The contract a consumer can read without opening an engine. |
-| [`warm/`](warm) | What is held **across** queries — both resident engines (gist's byte mirror, relate's index session), the two-tier corpus store, and the mutation overlay. |
-| [`facet/`](facet) | The four faces one answer can wear: a set, a count, finished bytes, or a record stream. Formats nothing itself — it borrows the cold path's own renderer. |
-| [`freshness/`](freshness) | May the session serve the bytes it already holds? The fail-closed barrier, its seqlock, the exact dirty log, and the O(changed) resolver. |
-| [`watch/`](watch) | Can that barrier skip the walk — and how narrowly? A pure accelerator (Linux inotify · macOS kqueue), never a correctness dependency. |
-| [`conduit/`](conduit) | How a request reaches the daemon and an answer gets back: the UDS frame grammar, the shm carrier, and daemon auto-spawn. |
+| Folder                    | The question it answers                                                                                                                                    |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`answer/`](answer)       | What may be asked warm, what comes back, and the one candidate walk between them. The contract a consumer can read without opening an engine.              |
+| [`warm/`](warm)           | What is held **across** queries — both resident engines (gist's byte mirror, relate's index session), the two-tier corpus store, and the mutation overlay. |
+| [`facet/`](facet)         | The four faces one answer can wear: a set, a count, finished bytes, or a record stream. Formats nothing itself — it borrows the cold path's own renderer.  |
+| [`freshness/`](freshness) | May the session serve the bytes it already holds? The fail-closed barrier, its seqlock, the exact dirty log, and the O(changed) resolver.                  |
+| [`watch/`](watch)         | Can that barrier skip the walk — and how narrowly? A pure accelerator (Linux inotify · macOS kqueue), never a correctness dependency.                      |
+| [`conduit/`](conduit)     | How a request reaches the daemon and an answer gets back: the UDS frame grammar, the shm carrier, and daemon auto-spawn.                                   |
 
 Tests live beside the code they exercise, and each folder's own `README.md`
 carries its per-module table.

@@ -10,8 +10,8 @@ import tomllib
 import pytest
 
 import irregex
-from irregex import contract
-from irregex.request import SearchRequest
+from irregex.contract import abi as contract
+from irregex.exact.request import SearchRequest
 
 
 def _binary_available() -> bool:

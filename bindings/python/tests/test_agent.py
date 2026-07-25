@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from irregex import request_from_tool
-from irregex.request import SearchRequest
+from irregex.exact.request import SearchRequest
 
 
 def test_canonical_fields_pass_through() -> None:

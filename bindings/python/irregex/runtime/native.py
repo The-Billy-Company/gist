@@ -32,67 +32,15 @@ import sys
 import threading
 from typing import TYPE_CHECKING
 
-from .request import Match, MatchKind, Submatch
+from ..contract import abi
+from ..exact.request import Match, MatchKind, Submatch
 
 
 if TYPE_CHECKING:
     from cffi import FFI
 
-    from .request import SearchRequest
+    from ..exact.request import SearchRequest
 
-
-# C declarations mirroring include/irregex.h (the session ABI subset). ABI mode
-# needs no struct field layout beyond what we read, but the full structs let
-# cffi compute offsets for the callback's `irregex_match *`.
-_CDEF = """
-typedef struct irregex_session irregex_session;
-typedef struct {
-  const uint8_t *text; size_t len; size_t start; size_t end;
-} irregex_submatch;
-typedef struct {
-  const uint8_t *path; size_t path_len; uint64_t line_number;
-  const uint8_t *line; size_t line_len;
-  const irregex_submatch *submatches; size_t nsubmatches;
-  uint32_t kind;
-} irregex_match;
-typedef int32_t (*irregex_match_fn)(void *ctx, const irregex_match *m);
-typedef struct {
-  uint32_t struct_size; uint32_t flags; uint64_t max_count;
-  uint64_t before_context; uint64_t after_context;
-} irregex_search_options;
-uint32_t irregex_abi_version(void);
-int32_t irregex_open(const char *const *roots, size_t nroots, irregex_session **out);
-int32_t irregex_search(irregex_session *s, const uint8_t *pattern,
-                    size_t pattern_len, const irregex_search_options *options,
-                    irregex_match_fn on_match, void *ctx);
-void irregex_close(irregex_session *s);
-
-/* the pull-cursor surface (ADR-352): open an engine, materialize a cursor,
-   walk it with next / next_batch — no C-to-Python callback, so cffi releases
-   the GIL for the duration of each native pull. */
-typedef struct irregex_engine irregex_engine;
-typedef struct irregex_cursor irregex_cursor;
-typedef struct irregex_cancel irregex_cancel;
-typedef struct {
-  uint32_t struct_size; uint32_t flags; uint64_t max_count;
-  uint64_t before_context; uint64_t after_context;
-  const uint8_t *pattern; size_t pattern_len;
-  uint64_t timeout_ns; size_t max_results; irregex_cancel *cancel;
-} irregex_search_request;
-int32_t irregex_engine_open(const char *const *roots, size_t nroots, irregex_engine **out);
-void irregex_engine_close(irregex_engine *engine);
-int32_t irregex_cancel_new(irregex_cancel **out);
-void irregex_cancel_request(irregex_cancel *token);
-void irregex_cancel_free(irregex_cancel *token);
-int32_t irregex_search_cursor(irregex_engine *engine, const irregex_search_request *request,
-                              irregex_cursor **out);
-int32_t irregex_cursor_next(irregex_cursor *cursor, irregex_match *out);
-int32_t irregex_cursor_next_batch(irregex_cursor *cursor, irregex_match *out, size_t cap,
-                                  size_t *written);
-int32_t irregex_cursor_matched(irregex_cursor *cursor);
-void irregex_cursor_close(irregex_cursor *cursor);
-const char *irregex_status_message(int32_t code);
-"""
 
 # The C-ABI symbol version the loader gates on (`root.zig::abi`). ABI 2 is the
 # open/search/close interface whose match callback (`irregex_match_fn`) returns
@@ -167,7 +115,7 @@ def _try_load() -> tuple[FFI, object] | None:
     except ImportError:
         return None
     ffi = FFI()
-    ffi.cdef(_CDEF)
+    ffi.cdef(abi.CDEF + abi.ANALYTIC_CDEF)
     try:
         lib = ffi.dlopen(lib_path)
         # Resolve the required search entry eagerly; a stale library declines
@@ -183,6 +131,25 @@ def _try_load() -> tuple[FFI, object] | None:
 def available() -> bool:
     """Whether the in-process transport can be used (library loaded, ABI matches)."""
     return _load() is not None
+
+
+def exports(*names: str) -> bool:
+    """Whether the loaded library exports every named symbol.
+
+    The analytic plane is additive, so a library built before it landed answers
+    the exact ABI perfectly and simply has no `irregex_analytic_run`. cffi
+    resolves an ABI-mode symbol on first attribute access, which makes this the
+    honest probe — and its absence a declinature, never an error.
+    """
+    loaded = _load()
+    if loaded is None:
+        return False
+    try:
+        for name in names:
+            getattr(loaded[1], name)
+    except AttributeError:
+        return False
+    return True
 
 
 def load() -> tuple[FFI, object] | None:
@@ -392,7 +359,7 @@ def _eligible_handle(request: SearchRequest, cwd: str | os.PathLike[str] | None)
     # STRICT predicate: the options ABI carries the complete warm request
     # subset; every later unsupported family must decline here, never be
     # silently dropped.
-    from .session import ffi_eligible
+    from .daemon import ffi_eligible
 
     if not ffi_eligible(request) or not _uses_process_cwd(cwd):
         return None

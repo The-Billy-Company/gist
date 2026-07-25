@@ -1,8 +1,9 @@
+# MONOLITHIC: tightly-coupled-protocol — one UDS wire contract (framing, handshake, spawn/reap, eligibility) that fragments if split
 """Persistent resident-session client (ADR-352 rung 2.5).
 
 Long-lived Unix-socket connection to a `gist serve` daemon. Same wire protocol
-as `src/surface/exec/session/protocol.zig` / the Zig CLI. Fail-open: connect miss,
-ineligible request, or `decline` → cold subprocess (`engine.files`/`engine.count`).
+as `src/surface/exec/session/conduit/protocol.zig` / the Zig CLI. Fail-open: connect miss,
+ineligible request, or `decline` → cold subprocess (`shell.files`/`shell.count`).
 """
 
 from __future__ import annotations
@@ -17,9 +18,9 @@ import subprocess
 import time
 from typing import TYPE_CHECKING
 
-from . import _ffi, engine
+from ..exact.request import Match, Ranked, SearchEngine, SearchRequest
+from . import native, shell
 from .errors import GistNotFoundError
-from .request import Match, Ranked, SearchEngine, SearchRequest
 
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ _FLAG_FIXED, _FLAG_IGNORE_CASE, _FLAG_WORD, _FLAG_SMART_CASE = 1 << 0, 1 << 1, 1
 _FLAG_INVERT, _FLAG_QUIET, _FLAG_MAX_COUNT = 1 << 4, 1 << 6, 1 << 7
 _MAX_FRAME = 16 << 20  # `protocol.max_frame`
 
-# Warm-ineligible fields — projection of `surface/exec/session/request.zig::classify`
+# Warm-ineligible fields — projection of `surface/exec/session/answer/request.zig::classify`
 # (`tests/test_classify_parity.py`). `quiet`/`max_count`/`invert` are NOT here:
 # the UDS daemon and the payload-bearing FFI options entry both serve them
 # (existence early-halt, per-file cap, and — lane 3b — the set-complement
@@ -122,7 +123,7 @@ def _eligible(
 
 
 def warm_eligible(request: SearchRequest) -> bool:
-    r"""True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping — ±case including `smart_case` (sent raw; the Zig session resolves it), ±`word` (the session applies cold's exact post-match word rule), ±`invert` (lane 3b: the session answers `-v` by the `lines(f) − matches(f)` set-complement, sound under the trigram index), ±`quiet` (the existence early-halt) and ±`max_count` including `-m0` (the per-file cap, resolved in the resident session). Every clause mirrors `surface/exec/session/request.zig::classify` term-for-term (a `\n`/`\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
+    r"""True iff the resident daemon can answer `request` byte-identically to cold: a single-line, NUL-free, non-empty pattern over default roots, with no rich flags, no extra argv, and no glob/type scoping — ±case including `smart_case` (sent raw; the Zig session resolves it), ±`word` (the session applies cold's exact post-match word rule), ±`invert` (lane 3b: the session answers `-v` by the `lines(f) − matches(f)` set-complement, sound under the trigram index), ±`quiet` (the existence early-halt) and ±`max_count` including `-m0` (the per-file cap, resolved in the resident session). Every clause mirrors `surface/exec/session/answer/request.zig::classify` term-for-term (a `\n`/`\x00` pattern steps outside rg's per-line model, so the warm whole-doc engine could match where cold cannot); `tests/test_classify_parity.py` drives real argv through the built classifier to prove the two never drift."""
     return _eligible(request, _INELIGIBLE_FIELDS)
 
 
@@ -175,7 +176,7 @@ def ensure_serve(
     if os.environ.get("GIST_NO_AUTOSERVE") is not None:
         return False
     try:
-        gist_bin = engine.binary()
+        gist_bin = shell.binary()
     except GistNotFoundError:
         return False
     # A bare `gist serve` binds `$GIST_SESSION_SOCK` else the CWD-relative
@@ -314,7 +315,7 @@ class Session:
         self,
         request: SearchRequest,
         *,
-        timeout: float = engine.DEFAULT_TIMEOUT,
+        timeout: float = shell.DEFAULT_TIMEOUT,
     ) -> list[Match]:
         """Full structured matches — served WARM in-process over the FFI when eligible.
 
@@ -323,39 +324,37 @@ class Session:
         session answers full `Match` records, so this is the first warm
         `run`.
         """
-        ffi_matches = _ffi.run(request, cwd=self._cwd)
+        ffi_matches = native.run(request, cwd=self._cwd)
         if ffi_matches is not None:
             return ffi_matches
-        return engine.run(request, cwd=self._cwd, timeout=timeout)
+        return shell.run(request, cwd=self._cwd, timeout=timeout)
 
-    def files(
-        self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT
-    ) -> list[str]:
+    def files(self, request: SearchRequest, *, timeout: float = shell.DEFAULT_TIMEOUT) -> list[str]:
         """Paths of files with ≥1 matching line (`-l`), sorted.
 
         In-process FFI if eligible, else the UDS daemon, else the
         byte-identical cold answer.
         """
-        ffi_files = _ffi.files(request, cwd=self._cwd)
+        ffi_files = native.files(request, cwd=self._cwd)
         if ffi_files is not None:
             return ffi_files
         warm = self._query(request, _MODE_FILES) if warm_eligible(request) else None
         if isinstance(warm, list):
             return sorted(warm)
-        return engine.files(request, cwd=self._cwd, timeout=timeout)
+        return shell.files(request, cwd=self._cwd, timeout=timeout)
 
-    def count(self, request: SearchRequest, *, timeout: float = engine.DEFAULT_TIMEOUT) -> int:
+    def count(self, request: SearchRequest, *, timeout: float = shell.DEFAULT_TIMEOUT) -> int:
         """Total matching lines across the tree.
 
         In-process FFI if eligible, else the UDS daemon, else cold.
         """
-        ffi_count = _ffi.count(request, cwd=self._cwd)
+        ffi_count = native.count(request, cwd=self._cwd)
         if ffi_count is not None:
             return ffi_count
         warm = self._query(request, _MODE_COUNT) if warm_eligible(request) else None
         if isinstance(warm, int):
             return warm
-        return engine.count(request, cwd=self._cwd, timeout=timeout)
+        return shell.count(request, cwd=self._cwd, timeout=timeout)
 
     def absent(self, pattern: str, *, fixed: bool = False, ignore_case: bool = False) -> bool:
         """Prefilter for a broad scoped scan.
@@ -374,7 +373,7 @@ class Session:
         rung 2.5).
         """
         probe = SearchRequest(pattern=pattern, fixed=fixed, ignore_case=ignore_case)
-        ffi_count = _ffi.count(probe, cwd=self._cwd)
+        ffi_count = native.count(probe, cwd=self._cwd)
         if ffi_count is not None:
             return ffi_count == 0
         if not warm_eligible(probe):
@@ -386,10 +385,10 @@ class Session:
         request: SearchRequest,
         *,
         limit: int = 20,
-        timeout: float = engine.DEFAULT_TIMEOUT,
+        timeout: float = shell.DEFAULT_TIMEOUT,
     ) -> list[Ranked]:
         """Return the engine's ranked view through the authoritative cold path."""
-        return engine.rank(request, limit=limit, cwd=self._cwd, timeout=timeout)
+        return shell.rank(request, limit=limit, cwd=self._cwd, timeout=timeout)
 
     def _query(self, request: SearchRequest, mode: int) -> list[str] | int | None:
         """One request/response over the (reconnecting) connection. None on any miss — no daemon, `decline`/`err`, or a wire hiccup — so the caller runs cold. A dropped connection is retried once (a daemon may have restarted)."""

@@ -14,7 +14,7 @@ doc_radar:
 
 # bench/portcert — Layer B (port-optimality: static bound + measured on this machine)
 
-Layer B of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
+Layer B of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layers-ag).
 Where Layer A proves empirical dominance over ripgrep on the registered
 workloads, Layer B proves _why the hot loop can't be beaten on this instruction sequence_ — in
 two legs: a **static** `llvm-mca` microarchitectural bound (port pressure /
@@ -31,7 +31,7 @@ cross-machine cross-check.
 | `portcert_report.py`       | renders the `## Layer B` markdown section (static + the Layer B′ measured subsection) from `portcert.json` + `portbound.json` and splices it into `.local/gist-verify/CERTIFICATE.md`                    |
 | `portbound.zig`            | **Layer B′** — `gist-portbound`: times the same drift-guarded probes natively under the PMU (`bench/harness/pmu.zig`), writing `portbound.json` (measured cyc/byte + cyc/step; fail-closed without root) |
 | `probes/simd_contains.zig` | byte-faithful copy of the hot loop in [`../../src/kernel/match/scan/simd.zig`](../../src/kernel/match/scan/simd.zig)'s `contains` — throughput-bound                                                     |
-| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/kernel/match/regex/linear/dfa.zig`](../../src/kernel/match/regex/linear/dfa.zig)'s `docMatch` — latency-bound                                          |
+| `probes/dfa_step.zig`      | byte-faithful copy of the hot loop in [`../../src/kernel/match/regex/linear/dfa/dfa.zig`](../../src/kernel/match/regex/linear/dfa/dfa.zig)'s `docMatch` — latency-bound                                  |
 | `probes_test.zig`          | the drift guard — asserts each probe is bit-identical to the real production function it copies, over adversarial random inputs (`zig build test`)                                                       |
 
 **Why cross-compiled reference cores, not this machine.** This dev box is

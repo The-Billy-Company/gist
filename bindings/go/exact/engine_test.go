@@ -10,7 +10,7 @@
 // unsupported pattern is a catchable error, and records outlive both handles.
 //
 // Requires a resolvable `gist` binary (the cold oracle); fails closed without it.
-package irregex
+package exact
 
 import (
 	"context"
@@ -24,6 +24,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	irregex "irregex/bindings/go"
+	"irregex/bindings/go/runtime"
 )
 
 // gistBin resolves the certified binary: $GIST_BIN, then the kernel's built
@@ -64,7 +67,7 @@ func corpus(t *testing.T) string {
 
 // cold execs `gist --json` with the argv equivalent of req over root and parses
 // the record stream — the cross-face oracle.
-func cold(t *testing.T, bin, root string, req Request) []Match {
+func oracle(t *testing.T, bin, root string, req irregex.Request) []irregex.Match {
 	t.Helper()
 	args := []string{"--json"}
 	add := func(on bool, flag string) {
@@ -105,10 +108,10 @@ func cold(t *testing.T, bin, root string, req Request) []Match {
 	return parseJSON(t, out)
 }
 
-func parseJSON(t *testing.T, stream []byte) []Match {
+func parseJSON(t *testing.T, stream []byte) []irregex.Match {
 	t.Helper()
-	var out []Match
-	for _, line := range strings.Split(string(stream), "\n") {
+	var out []irregex.Match
+	for line := range strings.SplitSeq(string(stream), "\n") {
 		if line == "" {
 			continue
 		}
@@ -128,21 +131,20 @@ func parseJSON(t *testing.T, stream []byte) []Match {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			continue
 		}
-		kind := KindMatch
+		kind := irregex.KindMatch
 		switch rec.Type {
 		case "match":
-			kind = KindMatch
 		case "context":
-			kind = KindContext
+			kind = irregex.KindContext
 		default:
 			continue
 		}
 		text := strings.TrimSuffix(strings.TrimSuffix(rec.Data.Lines.Text, "\n"), "\r")
-		var subs []Submatch
+		var subs []irregex.Submatch
 		for _, s := range rec.Data.Submatches {
-			subs = append(subs, Submatch{Text: s.Match.Text, Start: s.Start, End: s.End})
+			subs = append(subs, irregex.Submatch{Text: s.Match.Text, Start: s.Start, End: s.End})
 		}
-		out = append(out, Match{
+		out = append(out, irregex.Match{
 			Path:       rec.Data.Path.Text,
 			LineNumber: rec.Data.LineNumber,
 			Text:       text,
@@ -154,9 +156,9 @@ func parseJSON(t *testing.T, stream []byte) []Match {
 }
 
 // drain iterates a cursor to exhaustion, failing on a mid-stream error.
-func drain(t *testing.T, c *Cursor) []Match {
+func drain(t *testing.T, c *Cursor) []irregex.Match {
 	t.Helper()
-	var got []Match
+	var got []irregex.Match
 	for c.Next() {
 		got = append(got, c.Match())
 	}
@@ -187,7 +189,7 @@ func TestEngineSearchEqualsCold(t *testing.T) {
 	defer eng.Close()
 
 	no := false
-	cases := []Request{
+	cases := []irregex.Request{
 		{Pattern: "TODO"},
 		{Pattern: "TODO", Fixed: true},
 		{Pattern: "TODO", IgnoreCase: true},
@@ -197,13 +199,13 @@ func TestEngineSearchEqualsCold(t *testing.T) {
 		{Pattern: "TODO", Unicode: &no},
 	}
 	for _, req := range cases {
-		cur, err := eng.Search(context.Background(), req)
+		cur, err := eng.Search(t.Context(), req)
 		if err != nil {
 			t.Fatalf("search %q: %v", req.Pattern, err)
 		}
 		got := drain(t, cur)
 		cur.Close()
-		want := cold(t, bin, root, req)
+		want := oracle(t, bin, root, req)
 		if !reflect.DeepEqual(normalize(got), normalize(want)) {
 			t.Fatalf("drift on %q:\n got=%v\nwant=%v", req.Pattern, got, want)
 		}
@@ -211,14 +213,14 @@ func TestEngineSearchEqualsCold(t *testing.T) {
 }
 
 // normalize collapses nil vs empty submatch slices so DeepEqual compares content.
-func normalize(ms []Match) []Match {
+func normalize(ms []irregex.Match) []irregex.Match {
 	for i := range ms {
 		if ms[i].Submatches == nil {
-			ms[i].Submatches = []Submatch{}
+			ms[i].Submatches = []irregex.Submatch{}
 		}
 	}
 	if ms == nil {
-		return []Match{}
+		return []irregex.Match{}
 	}
 	return ms
 }
@@ -229,13 +231,13 @@ func TestAllIteratesSameStream(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	c1, _ := eng.Search(context.Background(), Request{Pattern: "TODO"})
+	c1, _ := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
 	defer c1.Close()
 	scanner := drain(t, c1)
 
-	c2, _ := eng.Search(context.Background(), Request{Pattern: "TODO"})
+	c2, _ := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
 	defer c2.Close()
-	var ranged []Match
+	var ranged []irregex.Match
 	for m, err := range c2.All() {
 		if err != nil {
 			t.Fatal(err)
@@ -253,7 +255,7 @@ func TestMaxCountStopsButMatched(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	cur, err := eng.Search(context.Background(), Request{Pattern: "TODO", MaxCount: 1})
+	cur, err := eng.Search(t.Context(), irregex.Request{Pattern: "TODO", MaxCount: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,12 +276,12 @@ func TestMatchedTracksAnyHit(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	hit, _ := eng.Search(context.Background(), Request{Pattern: "TODO"})
+	hit, _ := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
 	defer hit.Close()
 	if !hit.Matched() {
 		t.Fatal("expected a match")
 	}
-	miss, _ := eng.Search(context.Background(), Request{Pattern: "absent_needle_xyzzy"})
+	miss, _ := eng.Search(t.Context(), irregex.Request{Pattern: "absent_needle_xyzzy"})
 	defer miss.Close()
 	if got := drain(t, miss); len(got) != 0 {
 		t.Fatalf("expected empty, got %v", got)
@@ -295,14 +297,14 @@ func TestCanceledContextSurfacesErr(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := eng.Search(ctx, Request{Pattern: "TODO"})
+	_, err := eng.Search(ctx, irregex.Request{Pattern: "TODO"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 	// The engine stays healthy: a fresh search still returns the full set.
-	cur, err := eng.Search(context.Background(), Request{Pattern: "TODO"})
+	cur, err := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,9 +321,9 @@ func TestDeadlineIsHonored(t *testing.T) {
 	defer eng.Close()
 
 	// An already-past deadline surfaces as DeadlineExceeded, never a hang.
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
-	_, err := eng.Search(ctx, Request{Pattern: "TODO"})
+	_, err := eng.Search(ctx, irregex.Request{Pattern: "TODO"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded, got %v", err)
 	}
@@ -333,20 +335,20 @@ func TestUnsupportedPatternIsError(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	_, err := eng.Search(context.Background(), Request{Pattern: `(a)\1`})
-	if !errors.Is(err, ErrUnsupportedPattern) {
-		t.Fatalf("expected ErrUnsupportedPattern, got %v", err)
+	_, err := eng.Search(t.Context(), irregex.Request{Pattern: `(a)\1`})
+	if !errors.Is(err, runtime.ErrUnsupportedPattern) {
+		t.Fatalf("expected runtime.ErrUnsupportedPattern, got %v", err)
 	}
 }
 
 func TestRecordsOutliveHandles(t *testing.T) {
 	requireBin(t)
 	root := corpus(t)
-	var records []Match
+	var records []irregex.Match
 	func() {
 		eng, _ := Open(root)
 		defer eng.Close()
-		cur, _ := eng.Search(context.Background(), Request{Pattern: "TODO"})
+		cur, _ := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
 		records = drain(t, cur)
 		cur.Close()
 	}()

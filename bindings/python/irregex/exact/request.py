@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from ..runtime.decode import bind
+
 
 class MatchKind(StrEnum):
     """What a `Match` line is."""
@@ -53,7 +55,13 @@ class RankKind(StrEnum):
     USE = "use"  # only call sites / references
     GEN = "gen"  # generated file (codegen), demoted by the authored boost
 
+    @classmethod
+    def _missing_(cls, value: object) -> RankKind | None:
+        """Accept the contract's `[row_enums].rank_kind` spellings, which name the class in full where the CLI abbreviates it."""
+        return {"definition": cls.DEF, "generated": cls.GEN}.get(str(value))
 
+
+@bind("ranked", absent={"snippet": ""})
 @dataclass(frozen=True, slots=True)
 class Ranked:
     """One row of the engine's `--rank` view: a file ranked definition-first by the RRF kernel, tagged with the engine's own class. This is gist's native ranked shape (no rg equivalent) — a *presentation* result, deliberately not a wire-contract match kind, so it lives beside `Match` but outside the `SearchRequest` contract."""

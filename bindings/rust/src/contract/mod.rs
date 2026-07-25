@@ -1,19 +1,33 @@
-//! Runtime mirror of `contract/search_api.toml` (ADR-352) plus the result
-//! records the engine's `--json` stream reports.
+//! Runtime mirror of `contract/search_api.toml` (ADR-352, ADR-377) plus the
+//! result records both planes report.
 //!
 //! The package embeds the contract's load-bearing constants so it carries no
 //! runtime dependency on the repo file (an OSS checkout ships without it); the
 //! crate's parity test reads the canonical TOML and asserts this mirror matches
 //! it — the standard registry-as-contract shape, so the two cannot silently
 //! drift from the engine.
+//!
+//! The analytic plane's row-schema table is not hand-mirrored at all: it is
+//! lowered from the same TOML into [`schema`] by
+//! `tools/build_schema_tables.py`, and [`crate::runtime`] walks it to decode
+//! every analytic row.
 
-use serde::Deserialize;
+pub mod calibration;
+
+/// The generated `[row_schemas]` / `[row_enums]` / `[analytic.verbs]` tables.
+///
+/// The generator writes this file to the crate's `src/` root, so the module is
+/// mounted here by path rather than living beside its siblings.
+#[path = "../schema.gen.rs"]
+pub mod schema;
+
+pub use calibration::{Channel, Grade, Polarity, Unit, Variant};
 
 // ── `[meta]` ─────────────────────────────────────────────────────────────
 /// C-ABI compatibility integer (tracks `src/root.zig` `abi()`).
 pub const ABI_VERSION: u32 = 2;
 /// Engine semver (tracks `src/root.zig` `version_string`).
-pub const ENGINE_VERSION: &str = "0.1.0";
+pub const ENGINE_VERSION: &str = "0.2.0";
 /// The Python distribution name (this crate is the Rust face of the same contract).
 pub const PACKAGE_DIST: &str = "billy-irregex";
 /// The Python import name.
@@ -59,6 +73,26 @@ pub const EXIT_MATCHED: i32 = 0;
 pub const EXIT_NO_MATCH: i32 = 1;
 /// Unsupported pattern/flag or an I/O/walk error — never a silent empty result.
 pub const EXIT_ERROR: i32 = 2;
+
+// ── `[status_codes]` — the in-process C-ABI return vocabulary ──────────────
+// Deliberately NOT folded into the exit codes above: exit 1 is "no match" while
+// status 1 is "match", so one merged table would be a live hazard. Mirrored
+// here rather than in the FFI module so a subprocess-only build still carries
+// the vocabulary its parity test checks.
+/// Ran cleanly, no match.
+pub const STATUS_OK: i32 = 0;
+/// Ran cleanly, at least one match (or: a record/row was written).
+pub const STATUS_MATCH: i32 = 1;
+/// This tier declines — a **declinature**, not a failure. The caller answers
+/// through the next tier down and gets the identical result, so no binding may
+/// surface it as an error value.
+pub const STATUS_STALE: i32 = -1;
+/// Allocation failed (fault domain `resource`).
+pub const STATUS_OOM: i32 = -2;
+/// The warm corpus could not be stood up (`corpus` / `persist` / `wire`).
+pub const STATUS_OPEN_FAILED: i32 = -3;
+/// An unknown flag bit or a wrongly-sized request struct — fail-closed.
+pub const STATUS_INVALID: i32 = -4;
 
 /// Mirrors `[tool_boundary.aliases]` — a tool-boundary parameter name → its
 /// canonical request option (the agent / code-place seam lives in the Python
@@ -132,7 +166,7 @@ impl Match {
 // ── ranked view (`gist --rank`) ──────────────────────────────────────────────
 
 /// How the engine's `--rank` view classified a file — the property `grep` can't
-/// express (`src/rank/signals.zig`).
+/// express (`src/rank/signals.zig`), and the `rank_kind` row enum on the wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RankKind {
     /// A match on one of this file's lines *defines* the symbol.
@@ -144,7 +178,7 @@ pub enum RankKind {
 }
 
 impl RankKind {
-    /// The contract spelling (`"def"` / `"use"` / `"gen"`).
+    /// The CLI spelling (`"def"` / `"use"` / `"gen"`).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -154,22 +188,32 @@ impl RankKind {
         }
     }
 
-    /// Parse the engine's one-word tag; `None` for anything else.
-    fn parse(tag: &str) -> Option<Self> {
+    /// The `[row_enums].rank_kind` spelling the analytic plane carries.
+    #[must_use]
+    pub const fn variant(self) -> &'static str {
+        match self {
+            Self::Def => "definition",
+            Self::Use => "use",
+            Self::Gen => "generated",
+        }
+    }
+
+    /// Parse either spelling — the CLI's short tag or the row enum's variant.
+    /// `None` for anything else, including an ordinal past this build's table.
+    #[must_use]
+    pub fn parse(tag: &str) -> Option<Self> {
         match tag {
-            "def" => Some(Self::Def),
+            "def" | "definition" => Some(Self::Def),
             "use" => Some(Self::Use),
-            "gen" => Some(Self::Gen),
+            "gen" | "generated" => Some(Self::Gen),
             _ => None,
         }
     }
 }
 
 /// One row of the engine's `--rank` view: a file ranked definition-first by the
-/// RRF kernel and tagged with the engine's own class. This is gist's native
-/// ranked shape (no rg equivalent) — a *presentation* result, deliberately not a
-/// wire-contract [`MatchKind`], so it lives beside [`Match`] but outside the
-/// [`crate::SearchRequest`] contract.
+/// RRF kernel and tagged with the engine's own class. Schema `ranked` (id 22)
+/// on the analytic plane; recovered from human stdout on the subprocess tier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ranked {
     /// Path of the ranked file.
@@ -180,7 +224,7 @@ pub struct Ranked {
     pub kind: RankKind,
     /// Matching lines in this file.
     pub count: u64,
-    /// The surfaced line, trimmed by the engine.
+    /// The surfaced line, trimmed by the engine (empty when absent).
     pub snippet: String,
 }
 
@@ -189,197 +233,5 @@ impl Ranked {
     #[must_use]
     pub fn generated(&self) -> bool {
         self.kind == RankKind::Gen
-    }
-}
-
-/// Parse `--rank` stdout into [`Ranked`] rows in the engine's definition-first
-/// order, dropping the interleaved timing/blank lines. Timing prints to stderr,
-/// so stdout is rows-only, but the filter is defensive by design.
-pub(crate) fn parse_rank(stream: &str) -> Vec<Ranked> {
-    stream.lines().filter_map(parse_rank_row).collect()
-}
-
-/// Parse one `--rank` row — `  N. path:line  [kind]  ×count  snippet` (rank.zig)
-/// — into a [`Ranked`], or `None` if the line isn't a row. The `[kind]` bracket
-/// is the anchor: `path:line` sits before it, `×count snippet` after; this
-/// mirrors the Python face's `_RANK_ROW` regex without a regex dependency.
-fn parse_rank_row(line: &str) -> Option<Ranked> {
-    let (kind, open, close) = ["def", "use", "gen"].iter().find_map(|tag| {
-        let bracket = format!("[{tag}]");
-        let i = line.find(&bracket)?;
-        Some((RankKind::parse(tag)?, i, i + bracket.len()))
-    })?;
-
-    // Left of the bracket: `<n>. path:line`. The regex's non-greedy path means
-    // the line number is the digit run immediately before the bracket.
-    let left = line[..open].trim_end();
-    let colon = left.rfind(':')?;
-    let line_number: u64 = left[colon + 1..].parse().ok()?;
-    let path = strip_rank_index(&left[..colon]);
-    if path.is_empty() {
-        return None;
-    }
-
-    // Right of the bracket: `  ×count  snippet` (× is U+00D7, the sign rank.zig
-    // prints ahead of the per-file count).
-    let rest = line[close..].trim_start().strip_prefix('\u{00d7}')?;
-    let digits = rest.find(|c: char| !c.is_ascii_digit())?;
-    let count: u64 = rest[..digits].parse().ok()?;
-
-    Some(Ranked {
-        path: path.to_owned(),
-        line_number,
-        kind,
-        count,
-        snippet: rest[digits..].trim_start().to_owned(),
-    })
-}
-
-/// Strip the `\s*\d+\.\s*` rank-index prefix, leaving the bare path. Dot-safe:
-/// only a leading run of digits followed by `.` is removed, so a dotted path
-/// (`atelier.pb.go`) survives intact.
-fn strip_rank_index(head: &str) -> &str {
-    let h = head.trim_start();
-    let digits = h.find(|c: char| !c.is_ascii_digit()).unwrap_or(h.len());
-    if digits == 0 {
-        return h;
-    }
-    h[digits..].strip_prefix('.').map_or(h, str::trim_start)
-}
-
-// ── `--json` wire records (private; deserialized then mapped to `Match`) ────
-
-#[derive(Deserialize)]
-struct Text {
-    #[serde(default)]
-    text: String,
-}
-
-#[derive(Deserialize)]
-struct WireSubmatch {
-    #[serde(rename = "match")]
-    matched: Text,
-    start: usize,
-    end: usize,
-}
-
-#[derive(Deserialize)]
-struct WireData {
-    path: Text,
-    #[serde(default)]
-    line_number: u64,
-    lines: Text,
-    #[serde(default)]
-    submatches: Vec<WireSubmatch>,
-}
-
-#[derive(Deserialize)]
-struct WireRecord {
-    #[serde(rename = "type")]
-    kind: String,
-    data: WireData,
-}
-
-/// Parse ripgrep's JSON-lines record stream into [`Match`] records, preserving
-/// engine output order and dropping non-match/context records (begin/end/summary).
-pub(crate) fn parse_json(stream: &str) -> Vec<Match> {
-    let mut out = Vec::new();
-    for line in stream.lines().filter(|l| !l.is_empty()) {
-        let Ok(rec) = serde_json::from_str::<WireRecord>(line) else {
-            continue;
-        };
-        let kind = match rec.kind.as_str() {
-            "match" => MatchKind::Match,
-            "context" => MatchKind::Context,
-            _ => continue,
-        };
-        out.push(Match {
-            path: rec.data.path.text,
-            line_number: rec.data.line_number,
-            text: rec.data.lines.text.trim_end_matches('\n').to_owned(),
-            kind,
-            submatches: rec
-                .data
-                .submatches
-                .into_iter()
-                .map(|s| Submatch {
-                    text: s.matched.text,
-                    start: s.start,
-                    end: s.end,
-                })
-                .collect(),
-        });
-    }
-    out
-}
-
-#[cfg(test)]
-mod rank_parse {
-    use super::{RankKind, Ranked, parse_rank};
-
-    // A captured `--rank` stdout block (rank.zig's exact
-    // ` N. path:line  [kind]  ×count  snippet`; × is U+00D7).
-    const SAMPLE: &str = concat!(
-        " 1. pkg/kernels/irregex/bindings/rust/src/request.rs:33  [def]  \u{00d7}11  pub struct SearchRequest {\n",
-        " 2. pkg/kernels/irregex/bindings/rust/tests/session.rs:15  [use]  \u{00d7}19  use gist::{SearchRequest};\n",
-        " 3. services/backend/api/internal/pb/grpc/atelierpb/atelier.pb.go:2227  [gen]  \u{00d7}52  type SearchRequest struct {\n",
-    );
-
-    #[test]
-    fn reads_every_field() {
-        let rows = parse_rank(SAMPLE);
-        assert_eq!(rows.len(), 3);
-        assert_eq!(
-            rows[0],
-            Ranked {
-                path: "pkg/kernels/irregex/bindings/rust/src/request.rs".to_owned(),
-                line_number: 33,
-                kind: RankKind::Def,
-                count: 11,
-                snippet: "pub struct SearchRequest {".to_owned(),
-            }
-        );
-    }
-
-    #[test]
-    fn classifies_kinds() {
-        let kinds: Vec<RankKind> = parse_rank(SAMPLE).iter().map(|r| r.kind).collect();
-        assert_eq!(kinds, [RankKind::Def, RankKind::Use, RankKind::Gen]);
-    }
-
-    #[test]
-    fn generated_flags_only_gen() {
-        let flags: Vec<bool> = parse_rank(SAMPLE).iter().map(Ranked::generated).collect();
-        assert_eq!(flags, [false, false, true]);
-    }
-
-    #[test]
-    fn dotted_generated_path_survives() {
-        // The rank-index prefix strip must not eat the `.pb.go` dots in the path.
-        let row = &parse_rank(SAMPLE)[2];
-        assert_eq!(
-            row.path,
-            "services/backend/api/internal/pb/grpc/atelierpb/atelier.pb.go"
-        );
-        assert_eq!(row.line_number, 2227);
-        assert_eq!(row.count, 52);
-    }
-
-    #[test]
-    fn skips_timing_and_blank_lines() {
-        // Timing prints to stderr; a defensive parse still drops any non-row.
-        let noisy = format!(
-            "{SAMPLE}\n— 3 ranked matches (top 3) · read 24/26456 candidates · total 48.4 ms\n"
-        );
-        assert_eq!(parse_rank(&noisy).len(), 3);
-    }
-
-    #[test]
-    fn rejects_empty_and_malformed_rows() {
-        // Adverse: blank / missing `[kind]` / missing `×count` never invent rows.
-        assert!(parse_rank("").is_empty());
-        assert!(parse_rank("\n\n").is_empty());
-        assert!(parse_rank(" 1. path/to/file.rs:10  no-kind-tag  ×3  snip\n").is_empty());
-        assert!(parse_rank(" 1. path/to/file.rs:10  [def]  3  missing-times\n").is_empty());
     }
 }

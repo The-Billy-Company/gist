@@ -34,6 +34,34 @@
 //! # Ok::<(), gist::Error>(())
 //! ```
 //!
+//! ## The analytic plane — resemblance, not pattern
+//!
+//! Exact search answers *where a pattern occurs*. The analytic verbs (ADR-377)
+//! answer the questions regex cannot: what resembles this file ([`relate`]),
+//! which files jointly explain a piece of text, where a pasted snippet came
+//! from, and what moves if a symbol changes ([`compose`]). All seventeen return
+//! the *same* self-describing row, so there is one decoder and one cursor rather
+//! than seventeen result types:
+//!
+//! ```no_run
+//! let kin = gist::relate::similar("src/lib.rs").min_grade(gist::Grade::Strong).rows()?;
+//! for row in kin.iter() {
+//!     let row = row?;
+//!     println!("{:?}  {:?}", row.text("path"), row.real("distance"));
+//! }
+//!
+//! // `foreign` distinguishes "your text isn't in this repo" from "no results".
+//! let picks = gist::relate::pack("how does the resident session reconcile freshness").rows()?;
+//! eprintln!("{} foreign fingerprints", picks.stats().foreign);
+//! # Ok::<(), gist::Error>(())
+//! ```
+//!
+//! A [`Row`] **borrows** the cursor it came from, so the compiler — not a doc
+//! comment — is what stops one outliving its arena; [`Row::to_owned`] is the
+//! explicit exit. [`Rows::batches`] pulls many rows per crossing and several
+//! batches may be alive at once. See [`runtime`] for the transport ladder and
+//! [`index`] for the artifacts that make a warm answer possible.
+//!
 //! ## Why subprocess, not FFI
 //!
 //! The engine fails loud on unsupported input via `die()` → `process::exit(2)`,
@@ -66,26 +94,22 @@
 //! # Ok::<(), gist::Error>(())
 //! ```
 
-mod aggregate;
+pub mod compose;
 pub mod contract;
-#[cfg(feature = "native")]
-mod cursor;
-mod engine;
-mod error;
-mod request;
-#[cfg(unix)]
-mod session;
-#[cfg(feature = "native")]
-mod sys;
+pub mod exact;
+pub mod index;
+pub mod relate;
+pub mod runtime;
 
-pub use aggregate::{Axis, Group, Tally, tally, tally_by};
-pub use contract::{Match, MatchKind, RankKind, Ranked, Submatch};
+pub use contract::{Channel, Grade, Match, MatchKind, RankKind, Ranked, Submatch, Unit, Variant};
+pub use exact::{Axis, Group, SearchEngine, SearchRequest, Tally, tally, tally_by};
 #[cfg(feature = "native")]
-pub use cursor::{Batches, CancelToken, Cursor, Engine, Run, DEFAULT_BATCH};
-pub use error::{Error, Result};
-pub use request::{SearchEngine, SearchRequest};
+pub use exact::{Batches, CancelToken, Cursor, DEFAULT_BATCH, Engine, Run};
+pub use runtime::{
+    Batch, Error, OwnedRow, OwnedValue, Result, Row, RowSeq, Rows, Stats, Texts, Tier, Value,
+};
 #[cfg(unix)]
-pub use session::{Session, default_socket_path, warm_eligible};
+pub use runtime::{Session, default_socket_path, warm_eligible};
 
 /// Find `pattern`, returning structured [`Match`] records. For anything beyond a
 /// bare pattern (paths, case-folding, globs, context…) build a [`SearchRequest`].
@@ -137,7 +161,7 @@ pub fn rank(pattern: impl Into<SearchRequest>, limit: u32) -> Result<Vec<Ranked>
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves, [`Error::Io`] on spawn failure.
 pub fn status() -> Result<String> {
-    engine::status()
+    runtime::shell::status()
 }
 
 /// The driven binary's semver.
@@ -145,7 +169,7 @@ pub fn status() -> Result<String> {
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves, [`Error::Io`] on spawn failure.
 pub fn version() -> Result<String> {
-    engine::version()
+    runtime::shell::version()
 }
 
 /// Absolute path to the resolved `gist` binary.
@@ -153,5 +177,5 @@ pub fn version() -> Result<String> {
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves.
 pub fn binary() -> Result<std::path::PathBuf> {
-    engine::binary()
+    runtime::shell::binary()
 }

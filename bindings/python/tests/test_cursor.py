@@ -21,8 +21,8 @@ import threading
 import pytest
 
 import irregex
-from irregex import _ffi, engine
-from irregex.request import SearchRequest
+from irregex.exact.request import SearchRequest
+from irregex.runtime import native as _ffi, shell as engine
 
 
 pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirregex/cffi unavailable")

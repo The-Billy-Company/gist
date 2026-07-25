@@ -119,7 +119,7 @@ matcher.
 ## Which hit matters most — the ranked view
 
 `rank` is gist's one native shape with no rg equivalent: the definition-first
-[RRF view](../../README.md#ranking) that puts a symbol's declaration ahead of
+[RRF view](../../README.md#gist-in-brief) that puts a symbol's declaration ahead of
 its 200 call sites and **demotes generated files** (which the repo forbids
 editing, so they're never the target):
 

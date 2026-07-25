@@ -56,6 +56,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+from typing import TypedDict
 
 
 HERE = Path(__file__).resolve().parent
@@ -119,7 +120,15 @@ def _geomean(values: list[float]) -> float | None:
     return math.exp(sum(map(math.log, usable)) / len(usable)) if usable else None
 
 
-def _macro(text: str) -> dict[str, object]:
+class _Macro(TypedDict):
+    classes: int
+    wins: int
+    parity: int
+    loss: int
+    rg_geomean: float | None
+
+
+def _macro(text: str) -> _Macro:
     """Cold-race verdict tally + geomean speedup over ripgrep, read from the certificate.
 
     Parsed from the document rather than the side-car CSV so a historical mint
@@ -182,6 +191,7 @@ def read_mint(bundle: Path, *, note: str = "", text: str | None = None) -> Mint 
     crest = CREST_RE.search(text)
     os_field = str(machine.get("os", "")).strip()
     commit = str(machine.get("git_commit", "")).strip() or None
+    macro = _macro(text)
 
     return Mint(
         recorded=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -196,7 +206,11 @@ def read_mint(bundle: Path, *, note: str = "", text: str | None = None) -> Mint 
         crest_geomean=float(crest.group(1)) if crest else None,
         commit=commit,
         note=note,
-        **_macro(text),  # type: ignore[arg-type]
+        classes=macro["classes"],
+        wins=macro["wins"],
+        parity=macro["parity"],
+        loss=macro["loss"],
+        rg_geomean=macro["rg_geomean"],
     )
 
 

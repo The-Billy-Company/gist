@@ -105,7 +105,7 @@ bench/gates/unicode_parity.sh
 `equality.sh` proves the path where the trigram index elides reads. A regex
 the index can't prefilter at all (`\w{3,8}`, `[a-f0-9]{2,}`, `panic|0x`, …)
 gets no elision — the unified `ripgrep/` engine reads and regex-scans every
-candidate itself over the live tree ([`src/surface/exec/cold/engine/parallel.zig`](../../src/surface/exec/cold/engine/parallel.zig)
+candidate itself over the live tree ([`src/surface/exec/cold/engine/swarm/`](../../src/surface/exec/cold/engine/swarm)
 drives the fused work-stealing walk+read+scan fan-out), so `equality.sh`'s frozen-snapshot proof
 doesn't cover it — this script is the companion oracle:
 

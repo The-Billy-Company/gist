@@ -14,8 +14,8 @@ import shutil
 import pytest
 
 import irregex
-from irregex.aggregate import Group, Tally, resolve_axis, tally
-from irregex.request import Match, MatchKind, Submatch
+from irregex.exact.aggregate import Group, Tally, resolve_axis, tally
+from irregex.exact.request import Match, MatchKind, Submatch
 
 
 def _binary_available() -> bool:

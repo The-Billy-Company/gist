@@ -6,12 +6,12 @@ doc_radar:
       contains: ['.class = "literal-rare"', '.class = "regex-litalt"']
     - description: "the generated certificate cites the current production kernels"
       file: pkg/kernels/irregex/bench/lowerbound/lowerbound_report.py
-      contains: ["src/kernel/match/scan/simd.zig", "src/kernel/match/regex/linear/dfa.zig"]
+      contains: ["src/kernel/match/scan/simd.zig", "src/kernel/match/regex/linear/dfa/dfa.zig"]
 ---
 
 # gist/bench/lowerbound — Layer D (algorithmic lower bound)
 
-Layer D of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
+Layer D of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layers-ag).
 Where Layer A proves empirical dominance over ripgrep on the registered
 workloads and Layer C places its cycles/byte against the _hardware_ ceiling,
 Layer D proves the last thing
@@ -53,7 +53,7 @@ not asserted:
    pattern occurs in a candidate document forces you, in the worst (adversarial)
    case, to examine every one of its bytes: an unread byte could _be_ the match,
    or could _break_ one — the adversary sets it after you commit. gist's fused
-   byte-class DFA (`src/kernel/match/regex/linear/dfa.zig`) reads each candidate
+   byte-class DFA (`src/kernel/match/regex/linear/dfa/dfa.zig`) reads each candidate
    byte **exactly once** — `passes ≡ 1.0000` for every DFA class — with none of
    the memchr-then-rescan _double_ byte-traffic a per-line matcher pays. The SIMD
    literal path (`src/kernel/match/scan/simd.zig`) reads **≤ N** through vector
@@ -114,7 +114,7 @@ paper over by weakening the assertion.
   Code Search Worked" (2012), <https://swtch.com/~rsc/regexp/regexp4.html>.**
   The trigram-index prefilter that makes whole-corpus search sublinear for
   selective patterns — gist's direct ancestor (see also `../README.md` and
-  `src/kernel/match/regex/linear/dfa.zig`, which cites Cox's linear-time NFA/DFA work). The `cand%`
+  `src/kernel/match/regex/linear/dfa/dfa.zig`, which cites Cox's linear-time NFA/DFA work). The `cand%`
   column is the empirical measure of this pruning.
 - gist's own [`../harness/probes.zig`](../harness/probes.zig) — the shared
   probe-class registry [`certify.zig`](../harness/certify.zig) (Layer A) also

@@ -22,13 +22,13 @@ import subprocess
 import time
 from typing import TYPE_CHECKING, NotRequired, TypedDict
 
-from .errors import SearchFailedError
+from ..runtime.errors import SearchFailedError
 
 
 if TYPE_CHECKING:
     import os
 
-    from .engine import Output
+    from ..runtime.shell import Output
 
 
 class IndexState(StrEnum):
@@ -159,7 +159,7 @@ def _command(
     cwd: str | os.PathLike[str] | None,
     timeout: float,
 ) -> subprocess.CompletedProcess[str]:
-    from .engine import binary
+    from ..runtime.shell import binary
 
     try:
         proc = subprocess.run(  # noqa: S603 — fixed executable and argv list
@@ -395,6 +395,6 @@ def _relate(
     ok_codes: tuple[int, ...] = (0,),
 ) -> Output:
     """Invoke the `relate` binary. Imported at call time because `engine` imports this module for `IndexStatus` — lifecycle types are the lower layer, and the transport is the upper one."""
-    from .engine import run_verb
+    from ..runtime.shell import run_verb
 
     return run_verb("relate", argv, cwd=cwd, timeout=timeout, ok_codes=ok_codes)

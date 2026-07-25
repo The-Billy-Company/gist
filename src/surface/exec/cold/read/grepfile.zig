@@ -13,6 +13,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
+const fault = @import("../../../../fault.zig");
 const args = @import("../argv/args.zig");
 const assay = @import("../../../../assay/assay.zig");
 const output = @import("../emit/output.zig");
@@ -21,8 +22,8 @@ const die = args.die;
 const oom = args.oom;
 const multiline = @import("../emit/multiline.zig");
 const Emitter = output.Emitter;
-const Regex = @import("../../../../kernel/match/regex/linear/core.zig").Regex;
-const Matcher = @import("../../../../kernel/match/regex/linear/matcher.zig").Matcher;
+const Regex = @import("../../../../kernel/match/regex/linear/program/core.zig").Regex;
+const Matcher = @import("../../../../kernel/match/regex/linear/ladder/matcher.zig").Matcher;
 const simd = @import("../../../../kernel/match/scan/simd.zig");
 
 /// ripgrep's default read-buffer capacity. Binary detection scans each fill's
@@ -387,21 +388,25 @@ pub fn diagSearch(gpa: std.mem.Allocator, json: bool, s: Stats, elapsed: assay.D
 
 /// ripgrep's `<bin>: <path>: <errno phrase>` note for a path that can't be
 /// opened/descended — an explicit PATH arg or an unreadable directory hit
-/// mid-walk. Shared by both engines (`run.zig`'s serial walk + explicit-PATH
-/// probe, `pipeline.zig`'s parallel `processDir`) so a walk-error message
-/// can't drift between them. The differential harness keys only on the errno
-/// phrase and the exit class (never the `rg:`/`gist:` prefix or the exact
-/// number — see `bench/rgsuite/run.py`), so the common cases carry rg's own
-/// wording and anything rarer falls back to the Zig error name.
-pub fn pathErrNote(err: anyerror) []const u8 {
-    return switch (err) {
-        error.FileNotFound => "No such file or directory (os error 2)",
-        error.AccessDenied => "Permission denied (os error 13)",
-        error.NotDir => "Not a directory (os error 20)",
-        error.SymLinkLoop => "Too many levels of symbolic links (os error 62)",
-        error.NameTooLong => "File name too long (os error 63)",
-        else => @errorName(err),
-    };
+/// mid-walk. The differential harness keys only on the errno phrase and the
+/// exit class (never the `rg:`/`gist:` prefix or the exact number — see
+/// `bench/rgsuite/run.py`), so the phrases are contract.
+///
+/// The phrases themselves live in `fault.pathNote`, whose switch is exhaustive
+/// over `fault.Corpus` (ADR-373 law 2). All this decides is whether a walk
+/// error IS one of that domain's members, and it asks the domain instead of
+/// re-listing it: a sixth corpus member picks up rg's phrasing here the moment
+/// `fault.pathNote` names it, and cannot reach the arm below by omission.
+///
+/// A real descent produces a much wider set than the corpus domain (EMFILE,
+/// ENODEV, a bad UTF-8 name), and ripgrep prints the OS string for those too,
+/// so the widening is the walk's truth rather than an erased domain.
+fn pathErrNote(err: anyerror) []const u8 {
+    inline for (@typeInfo(fault.Corpus).error_set.?) |m| {
+        const member = @field(fault.Corpus, m.name);
+        if (err == member) return fault.pathNote(member);
+    }
+    return @errorName(err);
 }
 
 /// ripgrep's walk-error stderr line (`rg: <path>: <errno>` → `gist: …`) — THE
@@ -665,8 +670,8 @@ fn mapWhole(fd: std.posix.fd_t, min_len: usize) ?[]const u8 {
     // the 2.1 GiB page-cached blob this mapping exists for: 13.7 → ~40 GiB/s
     // (~160 ms → ~54 ms), the difference between fault-per-cluster and
     // batched fault-ahead. Advice is best-effort; failure changes nothing.
-    std.posix.madvise(mapped.ptr, size, std.posix.MADV.SEQUENTIAL) catch {};
-    std.posix.madvise(mapped.ptr, size, std.posix.MADV.WILLNEED) catch {};
+    fault.spare("advise sequential access", std.posix.madvise(mapped.ptr, size, std.posix.MADV.SEQUENTIAL));
+    fault.spare("advise fault-ahead", std.posix.madvise(mapped.ptr, size, std.posix.MADV.WILLNEED));
     return mapped[0..size];
 }
 

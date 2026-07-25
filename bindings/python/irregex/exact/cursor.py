@@ -7,7 +7,7 @@ queries, each producing a **pull `Cursor`** the caller iterates at its own pace.
 
 It drives the pull-cursor symbols (`irregex_engine_open` / `irregex_search_cursor`
 / `irregex_cursor_next` / `_next_batch` / `_close`, plus `irregex_cancel_*`) — the
-callback-free sibling of the push session `_ffi.Handle` uses. Because no
+callback-free sibling of the push session `native.Handle` uses. Because no
 C-to-Python callback runs during a pull, **cffi releases the GIL for the whole
 native scan**, so one thread can `cancel()` a `search()` another thread is
 blocked in.
@@ -37,8 +37,8 @@ import os
 import threading
 from typing import TYPE_CHECKING
 
-from . import _ffi
-from .errors import GistError, GistNotFoundError, UnsupportedPatternError
+from ..runtime import native
+from ..runtime.errors import GistError, GistNotFoundError, UnsupportedPatternError
 from .request import Match, MatchKind, SearchEngine, SearchRequest, Submatch
 
 
@@ -79,7 +79,7 @@ def _require_abi() -> tuple[FFI, object]:
     helpers there is no subprocess to fall back to, so an absent or ABI-skewed
     library is a loud `GistNotFoundError` (build it with `make install-gist`).
     """
-    loaded = _ffi.load()
+    loaded = native.load()
     if loaded is None:
         msg = (
             "the native gist library is unavailable or ABI-skewed; "
@@ -98,14 +98,14 @@ def _require_abi() -> tuple[FFI, object]:
 def _flags(req: SearchRequest) -> int:
     """The `irregex_search_request.flags` bitset for the representable subset."""
     return (
-        (_ffi._FLAG_FIXED if req.fixed else 0)
-        | (_ffi._FLAG_IGNORE_CASE if req.ignore_case else 0)
-        | (_ffi._FLAG_SMART_CASE if req.smart_case else 0)
-        | (_ffi._FLAG_NO_UNICODE if req.unicode is False else 0)
-        | (_ffi._FLAG_WORD if req.word else 0)
-        | (_ffi._FLAG_INVERT if req.invert else 0)
-        | (_ffi._FLAG_QUIET if req.quiet else 0)
-        | (_ffi._FLAG_MAX_COUNT if req.max_count is not None else 0)
+        (native._FLAG_FIXED if req.fixed else 0)
+        | (native._FLAG_IGNORE_CASE if req.ignore_case else 0)
+        | (native._FLAG_SMART_CASE if req.smart_case else 0)
+        | (native._FLAG_NO_UNICODE if req.unicode is False else 0)
+        | (native._FLAG_WORD if req.word else 0)
+        | (native._FLAG_INVERT if req.invert else 0)
+        | (native._FLAG_QUIET if req.quiet else 0)
+        | (native._FLAG_MAX_COUNT if req.max_count is not None else 0)
     )
 
 

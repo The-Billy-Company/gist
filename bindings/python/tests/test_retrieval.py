@@ -18,7 +18,7 @@ import shutil
 import pytest
 
 import irregex
-from irregex import retrieval
+from irregex.relate import retrieval
 
 
 def _binary_available() -> bool:
@@ -76,6 +76,18 @@ def test_recall_prices_every_row_in_bits(corpus):
     for hit in hits:
         assert hit.cost_bits > 0.0, "a described file must cost something to describe"
         assert hit.factors + hit.literals > 0, "a parse with no factors and no literals is empty"
+
+
+@needs_relate
+def test_a_recalled_row_is_graded_so_a_ranking_cannot_pass_for_a_hit(corpus):
+    """Retrieval always returns rows, so the grade is what separates "here it is" from "here are the four least-bad files". A sentence the corpus contains verbatim must band far above a subject it has never heard of."""
+    planted = retrieval.recall(PLANTED, roots=["."], top=3, cwd=corpus)
+    assert planted[0].grade.meets(irregex.Grade.MODERATE)
+    assert planted[0].grade is irregex.grade_of(irregex.Channel.RECALL, planted[0].gain)
+    alien = retrieval.recall(
+        "quarterly amortization of leasehold improvements", roots=["."], top=3, cwd=corpus
+    )
+    assert not alien or not alien[0].grade.meets(irregex.Grade.MODERATE)
 
 
 @needs_relate

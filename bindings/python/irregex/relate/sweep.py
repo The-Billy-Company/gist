@@ -18,11 +18,13 @@ than one line per hit.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from . import engine
-from .corpus import Scope, run
+from ..contract.table import verb_schema
+from ..runtime import analytic, cold, shell
+from ..runtime.decode import bind
+from .corpus import Scope, scope_argv
 
 
 if TYPE_CHECKING:
@@ -30,20 +32,22 @@ if TYPE_CHECKING:
     import os
 
 
+@bind("pattern_hit", extra=("pattern",))
 @dataclass(frozen=True, slots=True)
 class PatternHit:
-    """One attributed match row: pattern `pattern_id` (source `pattern`) hit `path` at `line`."""
+    """One attributed match row: pattern `pattern_id` (source `pattern`) hit `path` at `line`. The engine attributes by id; the pattern text is filled in from the request, which is the only party that has it."""
 
     path: str
     line: int
     pattern_id: int
-    pattern: str
+    pattern: str = ""
 
     def __str__(self) -> str:
         """`path:line`."""
         return f"{self.path}:{self.line}"
 
 
+@bind("pattern_count")
 @dataclass(frozen=True, slots=True)
 class PatternCount:
     """One engine-side group: `label` is a pattern source or a file path."""
@@ -89,19 +93,21 @@ def patterns(
     top: int = 0,
     roots: Scope = (),
     cwd: str | os.PathLike[str] | None = None,
-    timeout: float = engine.DEFAULT_TIMEOUT,
+    timeout: float = shell.DEFAULT_TIMEOUT,
 ) -> list[PatternHit]:
     """One walk, every pattern in `specs`, exact per-pattern attribution as `PatternHit` rows in total (path, line, pattern) order. This is the batched shape that replaces N sequential searches plus downstream re-classification."""
-    argv = _Batch(specs, fixed, ignore_case, under, top).argv()
-    rows, _ = run("relate", "patterns", argv, roots, cwd=cwd, timeout=timeout)
+    hits = _sweep(
+        "patterns",
+        _Batch(specs, fixed, ignore_case, under, top),
+        analytic.Sweep(tuple(specs), under=under, top=top, fixed=fixed, ignore_case=ignore_case),
+        roots,
+        cwd=cwd,
+        timeout=timeout,
+    )
+    # The engine attributes a hit to a pattern *id* — the request owns the text.
     return [
-        PatternHit(
-            path=engine.as_str(r, "path"),
-            line=engine.as_int(r, "line"),
-            pattern_id=engine.as_int(r, "pattern_id"),
-            pattern=engine.as_str(r, "pattern"),
-        )
-        for r in rows
+        replace(hit, pattern=specs[hit.pattern_id]) if hit.pattern_id < len(specs) else hit
+        for hit in hits
     ]
 
 
@@ -115,11 +121,40 @@ def pattern_counts(
     top: int = 0,
     roots: Scope = (),
     cwd: str | os.PathLike[str] | None = None,
-    timeout: float = engine.DEFAULT_TIMEOUT,
+    timeout: float = shell.DEFAULT_TIMEOUT,
 ) -> list[PatternCount]:
     """Grouped counts (`by` = `"pattern"` or `"file"`), descending, computed engine-side by the loom — no rows cross the process boundary."""
-    argv = _Batch(specs, fixed, ignore_case, under, top, ("--by", by)).argv()
-    rows, _ = run("relate", "patterns", argv, roots, cwd=cwd, timeout=timeout)
-    return [
-        PatternCount(label=engine.as_str(r, "label"), count=engine.as_int(r, "count")) for r in rows
-    ]
+    return _sweep(
+        "pattern_counts",
+        _Batch(specs, fixed, ignore_case, under, top, ("--by", by)),
+        analytic.Sweep(
+            tuple(specs), under=under, top=top, fixed=fixed, ignore_case=ignore_case, by=by
+        ),
+        roots,
+        cwd=cwd,
+        timeout=timeout,
+    )
+
+
+def _sweep[R](
+    verb: str,
+    batch: _Batch,
+    params: analytic.Sweep,
+    roots: Scope,
+    *,
+    cwd: str | os.PathLike[str] | None,
+    timeout: float,
+) -> list[R]:
+    """Answer one sweep verb through the ladder. `batch.argv()` is lowered eagerly so an empty pattern set is rejected on both tiers alike."""
+    argv, scope = batch.argv(), scope_argv(roots)
+    schema = verb_schema(verb)
+    answer = analytic.answer(
+        verb,
+        params,
+        roots=scope,
+        cwd=cwd,
+        cold=lambda: cold.answer(
+            "relate", "patterns", argv, schema=schema, roots=scope, cwd=cwd, timeout=timeout
+        ),
+    )
+    return list(answer.drain())

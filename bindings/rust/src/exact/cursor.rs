@@ -22,9 +22,10 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::contract::{Match, MatchKind, Submatch};
-use crate::error::{Error, Result};
-use crate::request::{SearchEngine, SearchRequest};
-use crate::sys;
+use crate::runtime::sys;
+use crate::runtime::{Error, Result};
+
+use super::{SearchEngine, SearchRequest};
 
 /// Records-per-native-call default for [`Cursor::batches`]: enough to amortize the
 /// FFI crossing without holding a large transient view buffer.
@@ -161,11 +162,11 @@ impl Iterator for Cursor {
             sys::OK => {
                 self.done = true;
                 None
-            }
+            },
             other => {
                 self.done = true;
                 Some(Err(status_error(other, "cursor advance")))
-            }
+            },
         }
     }
 }
@@ -206,15 +207,15 @@ impl Iterator for Batches {
                     .iter()
                     .map(|v| to_match(unsafe { v.assume_init_ref() }))
                     .collect()))
-            }
+            },
             sys::OK => {
                 self.cursor.done = true;
                 None
-            }
+            },
             other => {
                 self.cursor.done = true;
                 Some(Err(status_error(other, "cursor batch")))
-            }
+            },
         }
     }
 }
@@ -456,7 +457,8 @@ fn cstring(p: &Path) -> Result<CString> {
     };
     #[cfg(not(unix))]
     let bytes = p.to_string_lossy().into_owned().into_bytes();
-    CString::new(bytes).map_err(|_| Error::Unrepresentable(format!("root path has interior NUL: {p:?}")))
+    CString::new(bytes)
+        .map_err(|_| Error::Unrepresentable(format!("root path has interior NUL: {p:?}")))
 }
 
 /// Map a negative native status to the crate's typed error.

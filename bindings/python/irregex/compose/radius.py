@@ -31,8 +31,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from . import engine
-from .corpus import CORPUS_TIMEOUT, Scope, merge_paths, run
+from ..relate.corpus import CORPUS_TIMEOUT, Scope, merge_paths, run
+from ..runtime import shell
 
 
 if TYPE_CHECKING:
@@ -191,61 +191,61 @@ def _decode(report: dict[str, object]) -> Blast:
     tangential = _section(report, "tangential")
     stats = _section(report, "stats")
     return Blast(
-        symbol=engine.as_str(seed, "symbol"),
-        kind=engine.as_str(seed, "kind"),
+        symbol=shell.as_str(seed, "symbol"),
+        kind=shell.as_str(seed, "kind"),
         definitions=tuple(
-            Site(engine.as_str(r, "path"), engine.as_int(r, "line"))
-            for r in engine.as_rows(seed, "def")
+            Site(shell.as_str(r, "path"), shell.as_int(r, "line"))
+            for r in shell.as_rows(seed, "def")
         ),
         dependents=tuple(
             Reference(
-                path=engine.as_str(r, "path"),
-                line=engine.as_int(r, "line"),
-                enclosing=engine.as_str(r, "in"),
-                defines=engine.as_str(r, "use") == "def",
+                path=shell.as_str(r, "path"),
+                line=shell.as_int(r, "line"),
+                enclosing=shell.as_str(r, "in"),
+                defines=shell.as_str(r, "use") == "def",
             )
-            for r in engine.as_rows(direct, "dependents")
+            for r in shell.as_rows(direct, "dependents")
         ),
         dependencies=tuple(
             Dependency(
-                symbol=engine.as_str(r, "symbol"),
-                path=engine.as_str(r, "path"),
-                line=engine.as_int(r, "line"),
+                symbol=shell.as_str(r, "symbol"),
+                path=shell.as_str(r, "path"),
+                line=shell.as_int(r, "line"),
             )
-            for r in engine.as_rows(direct, "dependencies")
+            for r in shell.as_rows(direct, "dependencies")
         ),
         twins=tuple(
-            Twin(engine.as_str(r, "path"), engine.as_float(r, "distance", 1.0) or 0.0)
-            for r in engine.as_rows(tangential, "twins")
+            Twin(shell.as_str(r, "path"), shell.as_float(r, "distance", 1.0) or 0.0)
+            for r in shell.as_rows(tangential, "twins")
         ),
         ripple=tuple(
             Ripple(
-                path=engine.as_str(r, "path"),
-                via=engine.as_str(r, "via"),
-                hops=engine.as_int(r, "hops", 2),
+                path=shell.as_str(r, "path"),
+                via=shell.as_str(r, "via"),
+                hops=shell.as_int(r, "hops", 2),
             )
-            for r in engine.as_rows(tangential, "ripple")
+            for r in shell.as_rows(tangential, "ripple")
         ),
         comments=tuple(
             Mention(
-                path=engine.as_str(r, "path"),
-                line=engine.as_int(r, "line"),
-                text=engine.as_str(r, "text"),
+                path=shell.as_str(r, "path"),
+                line=shell.as_int(r, "line"),
+                text=shell.as_str(r, "text"),
             )
-            for r in engine.as_rows(report, "comments")
+            for r in shell.as_rows(report, "comments")
         ),
         stats=Stats(
-            files=engine.as_int(stats, "files"),
-            with_symbol=engine.as_int(stats, "with_symbol"),
-            dependents=engine.as_int(stats, "dependents"),
-            dependencies=engine.as_int(stats, "dependencies"),
-            twins=engine.as_int(stats, "twins"),
-            ripple=engine.as_int(stats, "ripple"),
-            comments=engine.as_int(stats, "comments"),
-            omitted=engine.as_int(stats, "omitted"),
+            files=shell.as_int(stats, "files"),
+            with_symbol=shell.as_int(stats, "with_symbol"),
+            dependents=shell.as_int(stats, "dependents"),
+            dependencies=shell.as_int(stats, "dependencies"),
+            twins=shell.as_int(stats, "twins"),
+            ripple=shell.as_int(stats, "ripple"),
+            comments=shell.as_int(stats, "comments"),
+            omitted=shell.as_int(stats, "omitted"),
             short_name=bool(stats.get("short_name")),
         ),
-        notes=engine.as_strs(report, "notes"),
+        notes=shell.as_strs(report, "notes"),
     )
 
 

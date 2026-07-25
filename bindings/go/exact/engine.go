@@ -1,405 +1,386 @@
-// Package irregex is the Go binding for Billy's code-search kernel over the
-// pull-cursor C ABI (ADR-352).
+// Package exact is the pattern plane: where is this exact pattern, and what does
+// the corpus say about where it is?
 //
-// A host opens a warm [Engine] over some roots, then runs many [Engine.Search]
-// queries, each materializing a pull [Cursor] it drives at its own pace. This is
-// the callback-free sibling of the engine's push session: no C-to-Go trampoline
-// runs during a scan (cgo forbids one cheaply anyway), so cancellation is a
-// pull-side concern the binding wires straight to a [context.Context].
+// A host opens a warm [Engine] over some roots and runs many [Engine.Search]
+// queries, each materializing a pull [Cursor] it drives at its own pace. The
+// engine picks its transport: the in-process pull cursor when this build has cgo
+// and the library is there, the certified `gist` binary otherwise, and the child
+// again whenever the in-process tier declines a pattern its linear-time engine
+// cannot express. Both tiers answer the same question, so which one ran is a fact
+// about speed, never about the result.
 //
-// Records are copied into Go-owned values as the cursor yields them, so a [Match]
-// outlives the cursor and the engine. Every handle has an idempotent Close and a
-// GC finalizer safety net, but callers should Close explicitly (the native arena
-// is not visible to the Go GC's sizing).
-//
-// Requires `make build-gist` to have produced
-// `pkg/kernels/irregex/zig-out/{lib/libirregex.a,include/irregex.h}`; the cgo
-// directives below resolve both relative to this file.
-package irregex
-
-/*
-#cgo CFLAGS:  -I${SRCDIR}/../../zig-out/include
-#cgo LDFLAGS: ${SRCDIR}/../../zig-out/lib/libirregex.a
-#include <stdlib.h>
-#include <irregex.h>
-*/
-import "C"
+// Records are Go-owned values copied off whichever transport produced them, so a
+// [irregex.Match] outlives the cursor and the engine.
+package exact
 
 import (
 	"context"
-	"errors"
-	"fmt"
+	"encoding/json"
 	"iter"
-	"runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
-	"unsafe"
+
+	irregex "irregex/bindings/go"
+	"irregex/bindings/go/runtime"
 )
 
-// defaultBatch is the records-per-native-call [Cursor.Next] pulls under the hood
-// — enough to amortize the cgo crossing without holding a large transient buffer.
-const defaultBatch = 64
+// batch is the records-per-pull [Cursor.Next] fills under the hood — enough to
+// amortize a cgo crossing without holding a large transient buffer.
+const batch = 64
 
-// Status codes mirror the C ABI's `contract.Status` (negative = declined safely).
-const (
-	stOK      = 0
-	stMatch   = 1
-	stStale   = -1
-	stOOM     = -2
-	stOpenErr = -3
-	stInvalid = -4
-)
-
-// ErrUnsupportedPattern wraps a pattern the linear-time engine declines (a
-// lookaround/backreference needing PCRE2). It is a value, never a dead process —
-// test for it with [errors.Is].
-var ErrUnsupportedPattern = errors.New("irregex: pattern outside the linear-time engine")
-
-// MatchKind distinguishes a match line from a context neighbor (-A/-B/-C).
-type MatchKind uint32
-
-const (
-	// KindMatch is a line carrying at least one submatch.
-	KindMatch MatchKind = C.IRREGEX_KIND_MATCH
-	// KindContext is a leading/trailing context line (no submatches).
-	KindContext MatchKind = C.IRREGEX_KIND_CONTEXT
-)
-
-// Submatch is one matched span within a line: its text and byte offsets [Start,End).
-type Submatch struct {
-	Text  string
-	Start int
-	End   int
-}
-
-// Match is one Go-owned result record, copied off the cursor's arena.
-type Match struct {
-	Path       string
-	LineNumber uint64
-	Text       string
-	Kind       MatchKind
-	Submatches []Submatch
-}
-
-// Column is the 1-based column of the first submatch (0 for a context line).
-func (m Match) Column() int {
-	if len(m.Submatches) == 0 {
-		return 0
-	}
-	return m.Submatches[0].Start + 1
-}
-
-// Request is one match-finding intent — the representable subset of the unified
-// search contract the pull-cursor ABI carries. Presentation, ranking, glob/type
-// scoping, and multiline stay CLI-only; a query needing them uses the `gist`
-// binary, not this in-process engine.
-type Request struct {
-	// Pattern is the regex (or literal, with Fixed) to find.
-	Pattern string
-	// Fixed treats Pattern as a literal string (-F).
-	Fixed bool
-	// IgnoreCase folds case (-i); SmartCase folds only when Pattern has no
-	// uppercase (-S); Unicode, when set, forces Unicode (true) or ASCII (false)
-	// class/fold/boundary semantics (nil keeps the engine default, rg-on).
-	IgnoreCase bool
-	SmartCase  bool
-	Unicode    *bool
-	// Word bounds matches to whole words (-w); Invert selects non-matching lines
-	// (-v); Quiet halts at the first match (-q).
-	Word   bool
-	Invert bool
-	Quiet  bool
-	// Before/After add context lines (-B/-A); Context sets both when they are 0.
-	Before  uint
-	After   uint
-	Context uint
-	// MaxCount caps matching lines per file (-m); 0 = unlimited.
-	MaxCount uint
-}
-
-func (r Request) flags() C.uint32_t {
-	var f C.uint32_t
-	set := func(on bool, bit C.uint) {
-		if on {
-			f |= C.uint32_t(bit)
-		}
-	}
-	set(r.Fixed, C.IRREGEX_FIXED)
-	set(r.IgnoreCase, C.IRREGEX_IGNORE_CASE)
-	set(r.SmartCase, C.IRREGEX_SMART_CASE)
-	set(r.Word, C.IRREGEX_WORD)
-	set(r.Invert, C.IRREGEX_INVERT)
-	set(r.Quiet, C.IRREGEX_QUIET)
-	set(r.Unicode != nil && !*r.Unicode, C.IRREGEX_NO_UNICODE)
-	set(r.MaxCount > 0, C.IRREGEX_MAX_COUNT)
-	return f
-}
-
-// Engine is a warm in-process corpus queried many times, each yielding a pull
-// [Cursor]. Open it with [Open]; Search is serialized (the resident engine is
-// single-writer), but the cursors it returns are independent and safe to iterate
-// concurrently. Free it with [Engine.Close].
+// Engine is a warm corpus queried many times. Searches are serialized (the
+// resident engine is single-writer); the cursors they return are independent and
+// safe to iterate concurrently. Free it with [Engine.Close].
 type Engine struct {
-	mu  sync.Mutex
-	ptr *C.irregex_engine
+	mu     sync.Mutex
+	native *runtime.Native // nil while unopened, and once the tier is unavailable
+	opened bool
+	roots  []string
+	dir    string
 }
 
-// Open stands up a warm engine over roots (each an absolute or CWD-relative path;
-// none = the rootless CWD walk a bare `gist <pattern>` scans).
-func Open(roots ...string) (*Engine, error) {
-	cRoots := make([]*C.char, len(roots))
-	for i, r := range roots {
-		cRoots[i] = C.CString(r)
+// Open declares an engine over roots (each absolute or CWD-relative; none = the
+// rootless CWD walk a bare `gist <pattern>` scans). It never fails for want of a
+// library: with no in-process tier the engine answers through the child, which is
+// what makes a CGO_ENABLED=0 host a first-class consumer.
+func Open(roots ...string) (*Engine, error) { return &Engine{roots: roots}, nil }
+
+// warm is the in-process corpus, stood up on first search so [Engine.In] has
+// already had its say about which tree the relative roots name. nil means this
+// process has no in-process tier for these roots and the child answers.
+func (e *Engine) warm() *runtime.Native {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.opened {
+		e.opened = true
+		e.native, _ = runtime.OpenNative(runtime.Scope(e.dir, e.roots)...)
 	}
-	defer func() {
-		for _, p := range cRoots {
-			C.free(unsafe.Pointer(p))
-		}
-	}()
-	var rootPtr **C.char
-	if len(cRoots) > 0 {
-		rootPtr = (**C.char)(unsafe.Pointer(&cRoots[0]))
-	}
-	var out *C.irregex_engine
-	status := C.irregex_engine_open(rootPtr, C.size_t(len(roots)), &out)
-	if status != stOK {
-		return nil, statusError(status, "engine open")
-	}
-	e := &Engine{ptr: out}
-	runtime.SetFinalizer(e, (*Engine).Close)
-	return e, nil
+	return e.native
 }
 
-// Close frees the warm corpus, index, and I/O pool (idempotent). Cursors already
-// materialized own their records and stay valid.
+// In sets the working directory the child runs in and the base its relative roots
+// resolve against, for a host searching a tree other than its own CWD.
+func (e *Engine) In(dir string) *Engine {
+	e.dir = dir
+	return e
+}
+
+// Close frees the warm corpus (idempotent). Cursors already materialized own
+// their records and stay valid.
 func (e *Engine) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.ptr != nil {
-		C.irregex_engine_close(e.ptr)
-		e.ptr = nil
-		runtime.SetFinalizer(e, nil)
+	if e.native == nil {
+		return nil
 	}
-	return nil
+	native := e.native
+	e.native = nil
+	return native.Close()
 }
 
-// Search runs req over the warm corpus and returns a pull [Cursor]. The ctx is
-// honored at record boundaries: its deadline becomes the scan's wall-clock budget
-// and its cancellation trips a cooperative stop, so a long scan is abortable from
-// another goroutine. A canceled ctx surfaces as ctx.Err().
-func (e *Engine) Search(ctx context.Context, req Request) (*Cursor, error) {
+// Search runs req and returns a pull [Cursor]. The ctx is honored at record
+// boundaries by both tiers: its deadline becomes the scan's wall-clock budget,
+// and cancelling it stops an in-process scan cooperatively and kills a child.
+func (e *Engine) Search(ctx context.Context, req irregex.Request) (*Cursor, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	pat := []byte(req.Pattern)
-	patC := C.CBytes(pat)
-	defer C.free(patC)
-
-	before, after := C.uint64_t(req.Before), C.uint64_t(req.After)
-	if req.Before == 0 && req.After == 0 {
-		before, after = C.uint64_t(req.Context), C.uint64_t(req.Context)
-	}
-	var creq C.irregex_search_request
-	creq.struct_size = C.uint32_t(unsafe.Sizeof(creq))
-	creq.flags = req.flags()
-	creq.max_count = C.uint64_t(req.MaxCount)
-	creq.before_context = before
-	creq.after_context = after
-	creq.pattern = (*C.uint8_t)(patC)
-	creq.pattern_len = C.size_t(len(pat))
-	if dl, ok := ctx.Deadline(); ok {
-		if d := time.Until(dl); d > 0 {
-			creq.timeout_ns = C.uint64_t(d.Nanoseconds())
+	if native := e.warm(); native != nil {
+		cur, err := native.Search(ctx, req)
+		switch {
+		case err == nil:
+			return &Cursor{records: cur, buf: make([]irregex.Match, batch)}, nil
+		case ctx.Err() != nil:
+			return nil, err
 		}
+		// A pattern the linear-time engine cannot express, or an engine that could
+		// not stand up: the child answers it correctly, so this is a tier change
+		// and not a failure.
 	}
+	return e.cold(ctx, req)
+}
 
-	// A token the ctx watcher trips; the engine observes it at the next record
-	// boundary. The watcher is torn down before the token frees, so no goroutine
-	// can touch freed memory.
-	var tok *C.irregex_cancel
-	if C.irregex_cancel_new(&tok) != stOK {
-		return nil, errors.New("irregex: could not allocate a cancel token")
-	}
-	defer C.irregex_cancel_free(tok)
-	stop := make(chan struct{})
-	watched := make(chan struct{})
-	go func() {
-		defer close(watched)
-		select {
-		case <-ctx.Done():
-			C.irregex_cancel_request(tok)
-		case <-stop:
-		}
-	}()
-	creq.cancel = tok
-
-	var out *C.irregex_cursor
-	e.mu.Lock()
-	if e.ptr == nil {
-		e.mu.Unlock()
-		close(stop)
-		<-watched
-		return nil, errors.New("irregex: engine is closed")
-	}
-	status := C.irregex_search_cursor(e.ptr, &creq, &out)
-	e.mu.Unlock()
-	close(stop)
-	<-watched
-
-	if status != stOK {
-		return nil, statusError(status, fmt.Sprintf("search %q", req.Pattern))
-	}
-	if err := ctx.Err(); err != nil {
-		C.irregex_cursor_close(out)
+// Files lists the paths with at least one matching line (`-l`), sorted.
+func (e *Engine) Files(ctx context.Context, req irregex.Request) ([]string, error) {
+	out, err := e.lines(ctx, req, "-l")
+	if err != nil {
 		return nil, err
 	}
-	c := &Cursor{ptr: out}
-	runtime.SetFinalizer(c, (*Cursor).Close)
-	return c, nil
+	slices.Sort(out)
+	return out, nil
+}
+
+// Count totals the matching lines across the searched tree — one line counted
+// once however many times the pattern hits it, the semantic every count surface
+// in this kernel shares.
+func (e *Engine) Count(ctx context.Context, req irregex.Request) (int, error) {
+	out, err := e.lines(ctx, req, "--count", "--no-filename")
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, line := range out {
+		if n, err := strconv.Atoi(strings.TrimSpace(line)); err == nil {
+			total += n
+		}
+	}
+	return total, nil
+}
+
+// Ranked is one row of the definition-first view: the engine's own def/use/gen
+// class, not a reclassification of it.
+type Ranked struct {
+	Path       string
+	LineNumber int64
+	Kind       irregex.RankKind
+	Count      int64
+	Snippet    string
+}
+
+// Rank is the definition-first view of req's pattern: the top rows for it, each
+// tagged with the engine's class, definitions ahead of call sites and generated
+// files demoted. This is gist's one shape with no ripgrep equivalent; top <= 0
+// takes the engine's default. Ranking reads the persisted index, so with none
+// there is nothing to rank and the answer is empty.
+func (e *Engine) Rank(ctx context.Context, req irregex.Request, top int) ([]Ranked, error) {
+	rows, err := runtime.Run(ctx, runtime.Query{
+		Op:     irregex.OpRank,
+		Params: irregex.Rank{Pattern: req.Pattern, Top: top, Fixed: req.Fixed, IgnoreCase: req.IgnoreCase},
+		Roots:  e.roots,
+		Dir:    e.dir,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Ranked
+	for row, err := range rows.All() {
+		if err != nil {
+			return out, err
+		}
+		kind, _ := irregex.ParseRankKind(row.Enum("kind").Label)
+		out = append(out, Ranked{
+			Path:       row.Text("path"),
+			LineNumber: row.Int("line_number"),
+			Kind:       kind,
+			Count:      row.Int("count"),
+			Snippet:    row.Text("snippet"),
+		})
+	}
+	return out, nil
+}
+
+// lines runs one presentation-shaped query through the child, whose rendered
+// answers (a path list, a per-file count) the pull ABI does not carry.
+func (e *Engine) lines(ctx context.Context, req irregex.Request, flags ...string) ([]string, error) {
+	argv := append(slices.Clone(flags), req.Argv(e.roots...)[1:]...) // [1:] drops Argv's --json
+	out, err := runtime.Spawn(ctx, runtime.ToolGist, argv, e.dir)
+	if err != nil {
+		return nil, err
+	}
+	var kept []string
+	for line := range strings.SplitSeq(out.Stdout, "\n") {
+		if line != "" {
+			kept = append(kept, line)
+		}
+	}
+	return kept, nil
 }
 
 // Cursor is a pull result handle over one search. Drive it scanner-style —
-// [Cursor.Next] advances, [Cursor.Match] reads the current record, [Cursor.Err]
-// reports a mid-stream failure — or range over [Cursor.All]. Records are copied,
-// so they outlive the cursor. Free it with [Cursor.Close].
+// [Cursor.Next] advances, [Cursor.Match] reads the current record — range over
+// [Cursor.All], or fill your own slice with [Cursor.NextBatch] to keep allocation
+// off the hot path. Free it with [Cursor.Close].
 type Cursor struct {
-	ptr  *C.irregex_cursor
-	buf  []Match
-	pos  int
-	cur  Match
-	err  error
-	done bool
+	records records
+	buf     []irregex.Match
+	held    []irregex.Match
+	cur     irregex.Match
+	err     error
+	done    bool
+}
+
+// records is one search's supply, whichever tier produced it.
+type records interface {
+	NextBatch(dst []irregex.Match) (int, error)
+	Matched() bool
+	Close() error
 }
 
 // Next advances to the next record, returning false at end of stream or on error
-// (check [Cursor.Err]). It refills an internal batch under the hood, so it pays
-// the cgo crossing once per defaultBatch records, not once per record.
+// (check [Cursor.Err]).
 func (c *Cursor) Next() bool {
-	if c.pos < len(c.buf) {
-		c.cur = c.buf[c.pos]
-		c.pos++
-		return true
+	if len(c.held) == 0 {
+		if c.done || c.err != nil {
+			return false
+		}
+		n, err := c.records.NextBatch(c.buf)
+		switch {
+		case err != nil:
+			c.err = err
+			return false
+		case n == 0:
+			c.done = true
+			return false
+		}
+		c.held = c.buf[:n]
 	}
-	if c.done || c.err != nil || c.ptr == nil {
-		return false
-	}
-	n, err := c.fill()
-	if err != nil {
-		c.err = err
-		return false
-	}
-	if n == 0 {
-		c.done = true
-		return false
-	}
-	c.cur = c.buf[0]
-	c.pos = 1
+	c.cur, c.held = c.held[0], c.held[1:]
 	return true
 }
 
 // Match is the record the last [Cursor.Next] landed on.
-func (c *Cursor) Match() Match { return c.cur }
+func (c *Cursor) Match() irregex.Match { return c.cur }
+
+// NextBatch fills dst with up to len(dst) records and returns how many it wrote;
+// 0 is a clean end of stream. Records are Go-owned, so a caller may keep every
+// batch it pulls.
+func (c *Cursor) NextBatch(dst []irregex.Match) (int, error) {
+	if c.err != nil {
+		return 0, c.err
+	}
+	n := copy(dst, c.held)
+	c.held = c.held[n:]
+	if n == len(dst) || c.done {
+		return n, nil
+	}
+	more, err := c.records.NextBatch(dst[n:])
+	if err != nil {
+		c.err = err
+		return n, err
+	}
+	if more == 0 {
+		c.done = true
+	}
+	return n + more, nil
+}
 
 // Err is the failure that stopped iteration, or nil at a clean end of stream.
 func (c *Cursor) Err() error { return c.err }
 
-// Matched reports whether any file matched (cold's exit-code boolean), even if a
-// budget cut the scan short.
-func (c *Cursor) Matched() bool {
-	if c.ptr == nil {
-		return false
-	}
-	return C.irregex_cursor_matched(c.ptr) != 0
-}
+// Matched reports whether any file matched (the engine's exit-code boolean), even
+// if a budget cut the scan short.
+func (c *Cursor) Matched() bool { return c.records.Matched() }
 
-// All returns a range-over-func iterator of the remaining records. The final
-// yield carries any error (with a zero Match); a clean end yields nothing extra.
-func (c *Cursor) All() iter.Seq2[Match, error] {
-	return func(yield func(Match, error) bool) {
+// All ranges over the remaining records. The final yield carries any error with a
+// zero Match; a clean end yields nothing extra.
+func (c *Cursor) All() iter.Seq2[irregex.Match, error] {
+	return func(yield func(irregex.Match, error) bool) {
 		for c.Next() {
-			if !yield(c.Match(), nil) {
+			if !yield(c.cur, nil) {
 				return
 			}
 		}
 		if c.err != nil {
-			yield(Match{}, c.err)
+			yield(irregex.Match{}, c.err)
 		}
 	}
 }
 
-// Close frees the native cursor and its record buffer (idempotent).
+// Collect drains the cursor into one slice.
+func (c *Cursor) Collect() ([]irregex.Match, error) {
+	var out []irregex.Match
+	for c.Next() {
+		out = append(out, c.cur)
+	}
+	return out, c.err
+}
+
+// Close releases the answer (idempotent).
 func (c *Cursor) Close() error {
-	if c.ptr != nil {
-		C.irregex_cursor_close(c.ptr)
-		c.ptr = nil
-		runtime.SetFinalizer(c, nil)
+	if c.records == nil {
+		return nil
 	}
-	return nil
+	r := c.records
+	c.records, c.held, c.done = nil, nil, true
+	return r.Close()
 }
 
-// fill pulls up to defaultBatch records in one native call, copying each into a
-// Go-owned Match. The C views alias the cursor's scratch only until the next
-// call, so every field is copied out before returning.
-func (c *Cursor) fill() (int, error) {
-	views := make([]C.irregex_match, defaultBatch)
-	var written C.size_t
-	status := C.irregex_cursor_next_batch(c.ptr, &views[0], C.size_t(defaultBatch), &written)
-	switch status {
-	case stMatch:
-		n := int(written)
-		c.buf = c.buf[:0]
-		for i := range n {
-			c.buf = append(c.buf, goMatch(&views[i]))
+// cold answers one search by running `gist --json` and decoding its record
+// stream, which is ripgrep's JSON-lines shape.
+func (e *Engine) cold(ctx context.Context, req irregex.Request) (*Cursor, error) {
+	out, err := runtime.Spawn(ctx, runtime.ToolGist, req.Argv(e.roots...), e.dir)
+	if err != nil {
+		return nil, err
+	}
+	found, err := decodeRecords(out.Stdout)
+	if err != nil {
+		return nil, err
+	}
+	return &Cursor{records: &coldRecords{rest: found, any: len(found) > 0}, buf: make([]irregex.Match, batch)}, nil
+}
+
+type coldRecords struct {
+	rest []irregex.Match
+	any  bool
+}
+
+func (c *coldRecords) NextBatch(dst []irregex.Match) (int, error) {
+	n := copy(dst, c.rest)
+	c.rest = c.rest[n:]
+	return n, nil
+}
+
+func (c *coldRecords) Matched() bool { return c.any }
+func (c *coldRecords) Close() error  { return nil }
+
+// record is the ripgrep-shaped JSON-lines envelope the engine prints under
+// --json. Only match and context records carry lines; the summary records are
+// deliberately ignored, since a cursor's counters come from Stats.
+type record struct {
+	Type string `json:"type"`
+	Data struct {
+		Path struct {
+			Text string `json:"text"`
+		} `json:"path"`
+		Lines struct {
+			Text string `json:"text"`
+		} `json:"lines"`
+		LineNumber uint64 `json:"line_number"`
+		Submatches []struct {
+			Match struct {
+				Text string `json:"text"`
+			} `json:"match"`
+			Start int `json:"start"`
+			End   int `json:"end"`
+		} `json:"submatches"`
+	} `json:"data"`
+}
+
+func decodeRecords(stdout string) ([]irregex.Match, error) {
+	var out []irregex.Match
+	for line := range strings.SplitSeq(stdout, "\n") {
+		if line == "" || line[0] != '{' {
+			continue
 		}
-		c.pos = 0
-		return n, nil
-	case stOK:
-		return 0, nil
-	default:
-		return 0, statusError(status, "cursor batch")
-	}
-}
-
-// goMatch copies one borrowed C view into a Go-owned Match. C.GoStringN copies the
-// bytes, so nothing aliases the cursor arena after this returns.
-func goMatch(m *C.irregex_match) Match {
-	text := C.GoStringN((*C.char)(unsafe.Pointer(m.line)), C.int(m.line_len))
-	// The line view excludes '\n' but may keep a trailing '\r'; strip it to match
-	// the cold `--json` parser exactly.
-	text = strings.TrimSuffix(text, "\r")
-	var subs []Submatch
-	if n := int(m.nsubmatches); n > 0 && m.submatches != nil {
-		sl := unsafe.Slice(m.submatches, n)
-		subs = make([]Submatch, n)
-		for i, s := range sl {
-			subs[i] = Submatch{
-				Text:  C.GoStringN((*C.char)(unsafe.Pointer(s.text)), C.int(s.len)),
-				Start: int(s.start),
-				End:   int(s.end),
-			}
+		var rec record
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			return nil, err
 		}
+		kind := irregex.KindMatch
+		switch rec.Type {
+		case "match":
+		case "context":
+			kind = irregex.KindContext
+		default:
+			continue
+		}
+		subs := make([]irregex.Submatch, 0, len(rec.Data.Submatches))
+		for _, s := range rec.Data.Submatches {
+			subs = append(subs, irregex.Submatch{Text: s.Match.Text, Start: s.Start, End: s.End})
+		}
+		if len(subs) == 0 {
+			subs = nil
+		}
+		out = append(out, irregex.Match{
+			Path:       rec.Data.Path.Text,
+			LineNumber: rec.Data.LineNumber,
+			Text:       strings.TrimSuffix(strings.TrimSuffix(rec.Data.Lines.Text, "\n"), "\r"),
+			Kind:       kind,
+			Submatches: subs,
+		})
 	}
-	return Match{
-		Path:       C.GoStringN((*C.char)(unsafe.Pointer(m.path)), C.int(m.path_len)),
-		LineNumber: uint64(m.line_number),
-		Text:       text,
-		Kind:       MatchKind(m.kind),
-		Submatches: subs,
-	}
-}
-
-func statusError(status C.int32_t, what string) error {
-	switch int(status) {
-	case stStale:
-		return fmt.Errorf("%s: %w (use the gist binary with -P/--engine auto for lookaround)", what, ErrUnsupportedPattern)
-	case stOOM:
-		return fmt.Errorf("%s: native out of memory", what)
-	case stOpenErr:
-		return fmt.Errorf("%s: could not stand up the warm corpus", what)
-	case stInvalid:
-		return fmt.Errorf("%s: invalid or wrongly-sized request", what)
-	default:
-		return fmt.Errorf("%s: native status %d", what, int(status))
-	}
+	return out, nil
 }

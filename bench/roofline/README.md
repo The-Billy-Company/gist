@@ -13,7 +13,7 @@ doc_radar:
 
 # bench/roofline — Layer C (measured headroom)
 
-Layer C of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layer-a).
+Layer C of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layers-ag).
 Where Layer A proves empirical dominance over ripgrep on the registered
 workloads and Layer B bounds its hot loop against static instruction-level
 pressure, Layer C tests the hardware claim: gist's cycles/byte sit against this machine's memory

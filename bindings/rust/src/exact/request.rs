@@ -14,8 +14,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::contract::Match;
-use crate::engine::{self, DEFAULT_TIMEOUT};
-use crate::error::Result;
+use crate::runtime::Result;
+use crate::runtime::shell::{self as engine, DEFAULT_TIMEOUT};
 
 /// Which matcher runs the pattern. Mirrors `[request_options].engine`: the
 /// linear-time engine is the default, `Auto` escalates to PCRE2 only when the
@@ -485,7 +485,7 @@ impl SearchRequest {
     /// As [`run`](SearchRequest::run); the ranked rows are parsed from the
     /// engine's `--rank` stdout.
     pub fn rank(&self, limit: u32) -> Result<Vec<crate::Ranked>> {
-        engine::rank(self, limit)
+        super::rank::Rank::new(self, limit).list()
     }
 }
 

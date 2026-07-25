@@ -28,8 +28,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from . import engine
-from .grade import Channel, Grade
+from ..contract.grades import Channel, Grade
+from ..runtime import shell
 
 
 if TYPE_CHECKING:
@@ -41,10 +41,12 @@ if TYPE_CHECKING:
 # only has to cover a cold live rebuild of the kinship view.
 CORPUS_TIMEOUT = 120.0
 
-# The population field each verb reports in its stderr summary record. Verbs
-# count different units (files, sketches, function fragments), so `Kin.scored`
-# reads whichever one the verb actually measured.
-_POPULATION_KEYS = ("files", "sketches", "fragments", "indexed_files")
+# The population field a verb reports in its stderr summary record. `scored` is
+# what the kinship verbs now measure — the candidates that actually produced a
+# number, after the noise floors — and it is one field because the unit is a
+# flag rather than a verb. `units` is the corpus the floors were applied to, and
+# `indexed_files` is the retrieval path's nomination pool.
+_POPULATION_KEYS = ("scored", "units", "indexed_files")
 
 
 type Scope = str | os.PathLike[str] | Iterable[str | os.PathLike[str]]
@@ -74,6 +76,33 @@ def shape_argv(
     return argv
 
 
+def matching_argv(
+    patterns: Sequence[str],
+    *,
+    match: str = "any",
+    fixed: bool = False,
+    ignore_case: bool = False,
+) -> list[str]:
+    """Lower the exact filter every relate query verb accepts (ADR-367).
+
+    `--matching PAT` runs the exact engine first and asks the compression question
+    only inside what matched, which is what makes narrowing a *modifier* rather
+    than a separate verb: it composes with the unit, channel, and shape axes
+    instead of duplicating them. `match="all"` requires every pattern in a unit,
+    `"any"` admits a unit that hit one. One engine compiles the whole set, so
+    `fixed`/`ignore_case` apply to all of them.
+    """
+    argv = [flag for p in patterns for flag in ("--matching", p)]
+    if not argv:
+        return argv
+    argv += ["--match", match]
+    if fixed:
+        argv.append("-F")
+    if ignore_case:
+        argv.append("-i")
+    return argv
+
+
 def run(
     tool: str,
     verb: str,
@@ -94,14 +123,14 @@ def run(
     corpus with no kin above the floor, or a pattern nothing matches. That is a
     result the caller asked for, so it returns empty; only a genuine 2 raises.
     """
-    out = engine.run_verb(
+    out = shell.run_verb(
         tool,
         [verb, *argv, "--json", *scope_argv(roots)],
         cwd=cwd,
         timeout=timeout,
         ok_codes=(0, 1),
     )
-    return engine.ndjson_rows(out.stdout), engine.diagnostic(out.stderr)
+    return shell.ndjson_rows(out.stdout), shell.diagnostic(out.stderr)
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,17 +169,17 @@ class Region:
 def region(row: dict[str, object]) -> Region:
     """Decode a `{path, line_start, line_end, headline?, distance?}` span."""
     return Region(
-        path=engine.as_str(row, "path"),
-        line_start=engine.as_int(row, "line_start"),
-        line_end=engine.as_int(row, "line_end"),
-        headline=engine.as_str(row, "headline"),
-        distance=engine.as_float(row, "distance"),
+        path=shell.as_str(row, "path"),
+        line_start=shell.as_int(row, "line_start"),
+        line_end=shell.as_int(row, "line_end"),
+        headline=shell.as_str(row, "headline"),
+        distance=shell.as_float(row, "distance"),
     )
 
 
 def graded(row: dict[str, object], channel: Channel, score: float) -> Grade:
     """The engine's own grade for a row, or this channel's band for `score` when an older binary omitted the field. Zig stays the calibration authority; this only keeps a version-skewed row typed."""
-    from .grade import grade_of
+    from ..contract.grades import grade_of
 
     reported = row.get("grade")
     return Grade(reported) if isinstance(reported, str) else grade_of(channel, score)
@@ -184,11 +213,11 @@ class Kin[R](Sequence[R]):
         self.rows: tuple[R, ...] = tuple(rows)
         self.channel = channel
         self.scored: int | None = next(
-            (engine.as_int(report, key) for key in _POPULATION_KEYS if key in report), None
+            (shell.as_int(report, key) for key in _POPULATION_KEYS if key in report), None
         )
         source = report.get("source")
         self.source: str | None = source if isinstance(source, str) else None
-        self.elapsed_ms: float | None = engine.as_float(report, "ms") or engine.as_float(
+        self.elapsed_ms: float | None = shell.as_float(report, "ms") or shell.as_float(
             report, "query_ms"
         )
 
