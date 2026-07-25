@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import functools
 import json
 import os
@@ -9,11 +10,16 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+from typing import TYPE_CHECKING
 
 from .contract import EXIT_ERROR, EXIT_MATCHED, EXIT_NO_MATCH
 from .errors import GistNotFoundError, SearchFailedError, UnsupportedPatternError
 from .introspection import IndexStatus
 from .request import Match, MatchKind, Ranked, RankKind, SearchRequest, Submatch
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 DEFAULT_TIMEOUT = 30.0
@@ -65,8 +71,13 @@ def binary() -> str:
 
 
 def relate_binary() -> str:
-    """The `relate` binary (compression-search face: similar/dups/patterns). Env override: `RELATE_BIN`."""
+    """The `relate` binary (compression-search face: similar/dups/clusters/echoes/concepts/search/pack/quote/patterns). Env override: `RELATE_BIN`."""
     return _resolve("relate", "RELATE_BIN")
+
+
+def irregex_binary() -> str:
+    """The `irregex` binary (the composed face, ADR-367: context/family/provenance/blast). Env override: `IRREGEX_BIN`."""
+    return _resolve("irregex", "IRREGEX_BIN")
 
 
 def _build_cli(zig: str, kernel: Path) -> None:
@@ -82,6 +93,134 @@ def _build_cli(zig: str, kernel: Path) -> None:
         )
     except OSError, subprocess.TimeoutExpired:
         pass
+
+
+def _uncapped_env() -> dict[str, str]:
+    """The child's environment with the agent output budget lifted.
+
+    Binding methods promise complete result sets; the CLI's context budget is a
+    presentation concern that would silently truncate a structured answer. The
+    engine's independent hard OOM ceiling still applies.
+    """
+    env = os.environ.copy()
+    env["GIST_UNCAP"] = "1"
+    env.pop("GIST_MAX_OUTPUT_BYTES", None)
+    env.pop("GIST_MAX_OUTPUT_TOKENS", None)
+    return env
+
+
+@dataclass(frozen=True, slots=True)
+class Output:
+    """One verb invocation's two streams: `rows` on stdout, diagnostics on stderr."""
+
+    stdout: str
+    stderr: str
+
+
+def run_verb(
+    tool: str,
+    argv: Sequence[str],
+    *,
+    cwd: str | os.PathLike[str] | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
+    ok_codes: tuple[int, ...] = (0,),
+) -> Output:
+    """Run one `relate`/`irregex` verb and return both streams.
+
+    `tool` is `"relate"` or `"irregex"`; the verb and its flags are `argv`.
+    Results arrive on stdout (NDJSON under `--json`) and diagnostics on stderr,
+    so a caller reads rows from one and provenance from the other without
+    either contaminating the other. Any exit code outside `ok_codes` is a loud
+    `SearchFailedError` — never a silently empty answer.
+    """
+    resolve = irregex_binary if tool == "irregex" else relate_binary
+    try:
+        proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
+            [resolve(), *argv],
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+            env=_uncapped_env(),
+            timeout=timeout,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+    except FileNotFoundError as e:  # binary vanished between resolution and run
+        raise GistNotFoundError(str(e)) from e
+    except subprocess.TimeoutExpired as e:
+        msg = f"{tool} {argv[0] if argv else ''} timed out after {timeout}s"
+        raise SearchFailedError(msg) from e
+    if proc.returncode not in ok_codes:
+        raise SearchFailedError(proc.stderr.strip() or f"{tool} exited {proc.returncode}")
+    return Output(proc.stdout, proc.stderr)
+
+
+def ndjson_rows(stream: str) -> list[dict[str, object]]:
+    """Decode a verb's NDJSON stdout — one JSON object per non-empty line."""
+    return [json.loads(line) for line in stream.splitlines() if line]
+
+
+def diagnostic(stream: str) -> dict[str, object]:
+    """The verb's stderr summary record — `{verb, files, source, ms, …}` under `--json`.
+
+    This is how a *program* learns what the CLI prints for a human to glance at:
+    how large a population the answer was drawn from, and whether it came warm
+    from a persisted artifact or from a live build. Best-effort by design — the
+    channel is a courtesy, so an absent or unparseable record yields `{}` rather
+    than failing a query that already produced its rows.
+    """
+    for line in reversed(stream.splitlines()):
+        if line.startswith("{"):
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                return record
+    return {}
+
+
+def as_float(row: dict[str, object], key: str, default: float | None = None) -> float | None:
+    """Narrow one NDJSON field to a number — the engine's rows are the trust boundary. A missing key yields `default`; a present non-number is a loud failure, never a coerced zero."""
+    if key not in row or row[key] is None:
+        return default
+    value = row[key]
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        msg = f"non-numeric {key!r} in engine row: {value!r}"
+        raise SearchFailedError(msg)
+    return float(value)
+
+
+def as_int(row: dict[str, object], key: str, default: int = 0) -> int:
+    """`as_float` narrowed to an integer count."""
+    return int(as_float(row, key, default) or 0)
+
+
+def as_str(row: dict[str, object], key: str, default: str = "") -> str:
+    """Narrow one NDJSON field to text, tolerating an explicit JSON `null`."""
+    value = row.get(key)
+    return default if value is None else str(value)
+
+
+def as_list(row: dict[str, object], key: str) -> list[object]:
+    """Narrow one NDJSON field to a JSON array — absent or `null` reads as empty, a present non-array is a loud failure. Nested collections are as much a trust boundary as scalars are."""
+    value = row.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        msg = f"non-array {key!r} in engine row: {value!r}"
+        raise SearchFailedError(msg)
+    return value
+
+
+def as_strs(row: dict[str, object], key: str) -> tuple[str, ...]:
+    """`as_list` narrowed to text elements — the shape of a `paths`/`patterns`/`notes` field."""
+    return tuple(str(item) for item in as_list(row, key))
+
+
+def as_rows(row: dict[str, object], key: str) -> tuple[dict[str, object], ...]:
+    """`as_list` narrowed to nested records — the shape of a `members` field or a report section's rows."""
+    return tuple(item for item in as_list(row, key) if isinstance(item, dict))
 
 
 def _invoke(
@@ -105,12 +244,7 @@ def _invoke(
         request.pattern,
         *request.paths,
     ]
-    # Binding methods promise complete result sets; CLI context budgets are a
-    # presentation concern. The engine's independent hard OOM ceiling remains.
-    env = os.environ.copy()
-    env["GIST_UNCAP"] = "1"
-    env.pop("GIST_MAX_OUTPUT_BYTES", None)
-    env.pop("GIST_MAX_OUTPUT_TOKENS", None)
+    env = _uncapped_env()
     try:
         proc = subprocess.run(  # noqa: S603 — argv is a fixed list, no shell
             argv,

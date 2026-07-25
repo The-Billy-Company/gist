@@ -1,12 +1,69 @@
-r"""irregex — the importable face of Billy's search and kinship kernel (ADR-352). One script-friendly API drives the certified `gist` and `relate` engines without reimplementing either. import irregex for m in irregex.search(r"func\\s+\\w+\\(", paths=["services/backend"]): print(f"{m.path}:{m.line_number}: {m.text}") hits = irregex.files("TODO", types=["py"]) total = irregex.count("panic", paths=["services"]) neighbors = irregex.similar("services/backend/api/main.go") Every search convenience accepts the same options as `SearchRequest`; build one explicitly for reuse through `irregex.run` or `request_from_tool`. `summary` aggregates matches, `rank` provides Gist's definition-first view, and `similar` / `dups` / `patterns` expose Relate's native corpus operations."""
+r"""irregex — the importable face of Billy's search and kinship kernel (ADR-352/367).
+
+Three engines, one import. Nothing here reimplements a matcher: every call drives
+the same certified binaries the CLI drives, so a Python answer and a shell answer
+are the same answer.
+
+    import irregex
+
+    # exact — where is this pattern?
+    for m in irregex.search(r"func\s+\w+\(", paths=["services/backend"]):
+        print(f"{m.path}:{m.line_number}: {m.text}")
+
+    # compression — what is this like, and what would explain it?
+    for kin in irregex.similar("services/backend/api/main.go", min_grade="strong"):
+        print(kin.path, kin.grade)
+    reading_set = irregex.pack("how does wallet crediting settle").paths
+
+    # composed — both engines on one question
+    radius = irregex.blast("WalletService")
+    print(radius.paths)          # every file the change reaches
+
+**This is not the CLI with a Python skin.** A terminal reads top-to-bottom and
+throws structure away; a program wants the opposite. So:
+
+* **Calibration is a value, not stderr prose.** `similar` returning 0.78 looks
+  like a result but sits past where kinship means "both files are Zig". Every
+  kinship row carries a `Grade`, and `min_grade=` filters on it — the CLI's
+  stderr verdict, promoted to something a caller can branch on.
+* **Provenance rides the result.** A `Kin` knows how many candidates it was drawn
+  from, whether the answer came warm or live, and how long it took. "Nearest of
+  three" and "nearest of twenty thousand" are different claims.
+* **Complete by default.** The CLI truncates to a context budget; binding methods
+  lift it, because a silently-trimmed list is a wrong list.
+* **Answers, not sections.** `blast` prints six panes for a human to skim; here it
+  is one object whose `paths` is the edit set, `exact_paths` the provable subset.
+  `family` interleaves two row classes on one stream; here they are two fields.
+* **The warm tier is inspectable.** `atlas_status()` lets a long-running process
+  decide once whether to build, instead of paying a cold walk per call.
+
+Faces: `search`/`files`/`count`/`rank`/`summary` (exact) · `similar`/`dups`/
+`clusters`/`echoes`/`concepts`/`fragments`/`patterns` (kinship) ·
+`recall`/`pack`/`quote` (retrieval) · `blast`/`context`/`family`/`provenance`
+(composed). Row types too generic to stand alone — a blast's `Reference`, `Twin`,
+`Ripple` — live on their module (`irregex.compose.Reference`).
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import aggregate, engine, kinship
+from . import (
+    aggregate,
+    compose,
+    corpus,
+    engine,
+    grade,
+    introspection,
+    kinship,
+    radius,
+    retrieval,
+    sweep,
+)
 from .aggregate import Group, Tally, tally
+from .compose import Attribution, Distinct, Family, FamilyReport, context, family, provenance
 from .contract import ABI_VERSION, ENGINE_VERSION
+from .corpus import Kin, Region
 from .cursor import CancelToken, Cursor, Engine
 from .errors import (
     GistError,
@@ -14,25 +71,34 @@ from .errors import (
     SearchFailedError,
     UnsupportedPatternError,
 )
+from .grade import Channel, Grade, grade_of
 from .introspection import (
+    Artifact,
+    AtlasStatus,
     Capabilities,
     FlagCapability,
     IndexState,
     IndexStatus,
+    atlas_index,
+    atlas_status,
     capabilities,
     index,
     status,
 )
 from .kinship import (
+    Cluster,
+    Concept,
     DupPair,
-    PatternCount,
-    PatternHit,
+    Echo,
     Similar,
+    clusters,
+    concepts,
     dups,
-    pattern_counts,
-    patterns,
+    echoes,
+    fragments,
     similar,
 )
+from .radius import Blast, blast
 from .request import (
     Match,
     MatchKind,
@@ -42,6 +108,7 @@ from .request import (
     SearchRequest,
     Submatch,
 )
+from .retrieval import Packed, Phrase, Pick, Quotation, Recalled, pack, quote, recall
 from .session import (
     Session,
     SessionGeneration,
@@ -50,7 +117,7 @@ from .session import (
     opening_session,
     warm_eligible,
 )
-
+from .sweep import PatternCount, PatternHit, pattern_counts, patterns
 
 schema = capabilities
 
@@ -62,24 +129,43 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ABI_VERSION",
-    "ENGINE_VERSION",
+    "Artifact",
+    "AtlasStatus",
+    "Attribution",
+    "Blast",
     "CancelToken",
     "Capabilities",
+    "Channel",
+    "Cluster",
+    "Concept",
     "Cursor",
+    "Distinct",
     "DupPair",
+    "ENGINE_VERSION",
+    "Echo",
     "Engine",
+    "Family",
+    "FamilyReport",
     "FlagCapability",
     "GistError",
     "GistNotFoundError",
+    "Grade",
     "Group",
     "IndexState",
     "IndexStatus",
+    "Kin",
     "Match",
     "MatchKind",
+    "Packed",
     "PatternCount",
     "PatternHit",
+    "Phrase",
+    "Pick",
+    "Quotation",
     "RankKind",
     "Ranked",
+    "Recalled",
+    "Region",
     "SearchEngine",
     "SearchFailedError",
     "SearchRequest",
@@ -90,27 +176,49 @@ __all__ = [
     "Tally",
     "UnsupportedPatternError",
     "aggregate",
+    "atlas_index",
+    "atlas_status",
     "binary",
+    "blast",
     "capabilities",
+    "clusters",
+    "compose",
+    "concepts",
+    "context",
+    "corpus",
     "count",
     "count_matches",
     "dups",
+    "echoes",
+    "engine",
     "ensure_serve",
+    "family",
     "ffi_eligible",
     "files",
+    "fragments",
+    "grade",
+    "grade_of",
     "index",
+    "introspection",
     "kinship",
     "opening_session",
+    "pack",
     "pattern_counts",
     "patterns",
+    "provenance",
+    "quote",
+    "radius",
     "rank",
+    "recall",
     "request_from_tool",
+    "retrieval",
     "run",
     "schema",
     "search",
     "similar",
     "status",
     "summary",
+    "sweep",
     "tally",
     "version",
     "warm_eligible",
