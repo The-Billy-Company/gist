@@ -188,6 +188,10 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   # reproducibility gate would rightly fail. The canonical committed bundle comes
   # from `certify.sh`, which re-runs check_artifacts over the complete A–G set.
   note "published (partial B–F layers) → ${pub} — full A–G gate runs under certify.sh"
+  # A layers-only re-splice still rewrites the tracked certificate, so it is a
+  # mint like any other and gets a ledger row — that is how a lane discovers a
+  # layer went missing before the docs pinned to it start failing.
+  python3 "${HERE}/ledger.py" record --bundle "${pub}" --note "layers-only B–F re-splice" || die "ledger record failed"
 fi
 
 note "Layers B/B′/C/D/E/F spliced into ${CERT}"

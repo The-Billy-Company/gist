@@ -47,21 +47,23 @@ certifies the relate face's retrieval-quality contract + boundary — explicitly
 _not_ a dominance claim. `--include-zero` and composed `irregex` remain outside
 this certificate even when their correctness is proved elsewhere.
 
-| File                       | Role                                                                                                                                                                          |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `certify.sh`               | full A–G mint: Layer A micro (+ optional sudo PMU) + macroscopic field race + warm tier + `--rank` lane + relate (Layer G), auto-calls `certify_layers.sh`                    |
-| `certify_layers.sh`        | Layers B/B′/C/D/E/F — build lab bins, measure, splice; the half that used to be a manual checklist. `make bench-gist-certify` default                                         |
-| `certify_stats.py`         | a stdlib mirror of `../harness/stats.zig` — per-class bootstrap-CI median + Mann-Whitney verdict, splices the table into `.local/gist-verify/CERTIFICATE.md`                  |
-| `certify_warm_report.py`   | Layer A warm-tier splicer — per-class Mann-Whitney dominance of the resident daemon over cold gist + rivals                                                                   |
-| `certify_rank_report.py`   | Layer A `--rank` lane splicer — fail-closed no-fabrication/coverage/def-boost/demotion/overhead/selective-beats-rg from `certify_rank.sh`                                     |
-| `certify_crest_report.py`  | Layer E splicer — renders the fail-closed crest-sieve pruning/speedup table from `crest.csv` (`zig build crest`) into the certificate                                         |
-| `certify_codex_report.py`  | Layer F splicer — fail-closed decodability/sub-entropy space/n-free count/cheap reload/self-recognition from the `codex-scale` JSONL (`../codex/`)                            |
-| `certify_relate_report.py` | Layer G splicer — fail-closed relate boundary + recall@1 + pack + short-recall from `certify_relate.sh`                                                                       |
-| `check_artifacts.py`       | reproducibility gate — required files + Layer B–G headers/side-cars + corpus hashes + tool identities + raw-cell matrix                                                       |
-| `ratio_regress.py`         | principia-style **ratio** regression — committed `certify_macro.csv` vs `ratio_baseline.json` floors; optional live remasure behind `GIST_BENCH=1`                            |
-| `ratio_baseline.json`      | min gist/rg cold speedup floors (hardware cancels; refresh after a deliberate republish)                                                                                      |
-| `check_release.py`         | **release gate** — refuses a release until a valid, current certificate is attached for **both** the Mac and the Linux machine; run by Town Crier (`changelog build`)         |
-| `artifact/`                | committed, reproducible certificate bundle (`CERT_PUBLISH_DIR=… certify.sh` / `CERT_PUBLISH=1 make bench-gist-certify`); per-platform mints live in `artifact/<platform-id>/` |
+| File                         | Role                                                                                                                                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `certify.sh`                 | full A–G mint: Layer A micro (+ optional sudo PMU) + macroscopic field race + warm tier + `--rank` lane + relate (Layer G), auto-calls `certify_layers.sh`                                               |
+| `certify_layers.sh`          | Layers B/B′/C/D/E/F — build lab bins, measure, splice; the half that used to be a manual checklist. `make bench-gist-certify` default                                                                    |
+| `certify_stats.py`           | a stdlib mirror of `../harness/stats.zig` — per-class bootstrap-CI median + Mann-Whitney verdict, splices the table into `.local/gist-verify/CERTIFICATE.md`                                             |
+| `certify_warm_report.py`     | Layer A warm-tier splicer — per-class Mann-Whitney dominance of the resident daemon over cold gist + rivals                                                                                              |
+| `certify_rank_report.py`     | Layer A `--rank` lane splicer — fail-closed no-fabrication/coverage/def-boost/demotion/overhead/selective-beats-rg from `certify_rank.sh`                                                                |
+| `certify_crest_report.py`    | Layer E splicer — renders the fail-closed crest-sieve pruning/speedup table from `crest.csv` (`zig build crest`) into the certificate                                                                    |
+| `certify_codex_report.py`    | Layer F splicer — fail-closed decodability/sub-entropy space/n-free count/cheap reload/self-recognition from the `codex-scale` JSONL (`../codex/`)                                                       |
+| `certify_relate_report.py`   | Layer G splicer — fail-closed relate boundary + recall@1 + pack + short-recall from `certify_relate.sh`                                                                                                  |
+| `check_artifacts.py`         | reproducibility gate — required files + Layer B–G headers/side-cars + corpus hashes + tool identities + raw-cell matrix                                                                                  |
+| `ratio_regress.py`           | principia-style **ratio** regression — committed `certify_macro.csv` vs `ratio_baseline.json` floors; optional live remasure behind `GIST_BENCH=1`                                                       |
+| `ratio_baseline.json`        | min gist/rg cold speedup floors (hardware cancels; refresh after a deliberate republish)                                                                                                                 |
+| `check_release.py`           | **release gate** — refuses a release until a valid certificate is attached for **both** the Mac and the Linux machine; run by Town Crier (`changelog build`)                                             |
+| `ledger.py`                  | **mint ledger** — appends one row per published certificate (corpus, layers carried, verdict tally, geomeans); `verify` fail-closes on an unrecorded re-mint, `--require-layers` also on a dropped layer |
+| `LEDGER.md` / `ledger.jsonl` | the look-back itself: rendered table + append-only machine record, written by `ledger.py` (never hand-edited)                                                                                            |
+| `artifact/`                  | committed, reproducible certificate bundle (`CERT_PUBLISH_DIR=… certify.sh` / `CERT_PUBLISH=1 make bench-gist-certify`); per-platform mints live in `artifact/<platform-id>/`                            |
 
 The 12 classes are byte-identical to `../harness/certify.zig`'s probes, so the
 macroscopic table here and the microscopic table there map 1:1 by class name.
@@ -109,8 +111,8 @@ an M4 Max shows a clean sweep vs ripgrep — see ADR-320). So a release is only
 allowed to claim optimality once the certificate has been re-minted on **each**
 supported architecture and attached. `check_release.py` is what Town Crier
 ([`chronicle`](../../../../tools/changelog/README.md)) runs before it will cut an
-irregex release — `changelog build` refuses unless a valid, current-to-history
-certificate exists for **both** the Mac and the Linux machine:
+irregex release — `changelog build` refuses unless a valid certificate exists
+for **both** the Mac and the Linux machine:
 
 ```bash
 # What `make changelog-build PKG=irregex VERSION=x.y.z` enforces automatically:
@@ -130,8 +132,40 @@ CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify
 CERT_PUBLISH_DIR=bench/certify/artifact/linux-x86_64 bash bench/certify/certify.sh
 ```
 
-Each bundle must pass `check_artifacts.py` (internal reproducibility) and its
-recorded `git_commit` must belong to the released line of history (`--pin <sha>`
-locks it to an exact release commit; `--max-age-commits N` bounds staleness).
-`CHRONICLE_SKIP_RELEASE_GATE=1` (or `changelog build --skip-release-gate`) is the
-audited emergency override.
+Each bundle must pass `check_artifacts.py` (internal reproducibility). Its
+recorded `git_commit` is **provenance, not a condition** — surfaced so a human
+can trace a number back to a tree, never resolved or compared, and never a
+reason to fail. `CHRONICLE_SKIP_RELEASE_GATE=1` (or `changelog build
+--skip-release-gate`) is the audited emergency override.
+
+## Mint ledger — the certificate's memory
+
+A mint **rewrites the whole certificate**, and Layers B–G are spliced back
+afterward by separate reporters. That makes every certificate honest on its own
+and amnesiac about the last one: a re-mint that improves eight numbers looks
+exactly like one that also drops a layer. When that happened, the loss only
+surfaced days later as a documentation pin failing far from its cause.
+
+`ledger.py` is the memory. Every publish appends a row — corpus, the layers
+actually carried, the verdict tally, the cold and crest geomeans — keyed by a
+digest of `CERTIFICATE.md`, so a re-mint is never silent and the history is
+readable in [`LEDGER.md`](LEDGER.md):
+
+```bash
+make bench-gist-ledger                            # survey: is the certificate on disk recorded?
+make bench-gist-ledger ARGS="verify"              # fail-closed on unrecorded drift
+make bench-gist-ledger ARGS="verify --require-layers"  # …and on an incomplete mint
+make bench-gist-ledger ARGS="list --limit 10"     # the look-back
+make bench-gist-ledger ARGS="show latest"         # one mint in full
+```
+
+`verify` fails on **unrecorded drift** — a certificate on disk that no row
+describes. A missing layer is always _reported_ but only fails under
+`--require-layers`, because the two have different remedies: `record` clears
+drift, while only re-splicing the layer clears a gap. Keeping them separate
+means the fix the gate prints is always one that actually clears it.
+
+`record` runs automatically from `certify.sh` and `certify_layers.sh` on
+publish; `backfill` reconstructs rows from the certificate's git history.
+Because rows are read from the certificate document itself, a historical mint
+replays exactly as it was published rather than borrowing today's side-cars.
