@@ -12,7 +12,7 @@ name = "gist"
 version = "0.1.0"                                                                                                  # x-release-please-version
 edition = "2024"
 rust-version = "1.85"
-license = "MIT"
+license = "Apache-2.0"
 publish = false
 description = "Importable, rg-parity search API over the GIST code-search kernel (subprocess transport, ADR-352)."
 
