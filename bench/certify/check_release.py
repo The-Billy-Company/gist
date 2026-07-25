@@ -13,10 +13,19 @@ Linux machine.
 It composes the single-bundle reproducibility gate rather than re-implementing
 it: each platform bundle must pass ``check_artifacts.check_artifacts`` (every
 required file present, corpus hashes + tool identities + raw-cell matrix + size
-accounting internally agree), then this gate adds the two things that single
-check cannot see — **platform coverage** (one Darwin bundle, one Linux bundle)
-and **freshness** (each bundle's recorded commit belongs to the current line of
-history, so the numbers describe the code being released, not a stale branch).
+accounting internally agree), then this gate adds the one thing that single
+check cannot see — **platform coverage**: one Darwin bundle and one Linux
+bundle, each carrying its own measured numbers.
+
+**A commit is a reference, never a requirement.** This gate used to also demand
+that each bundle's recorded commit be an ancestor of HEAD, on the theory that it
+proved the numbers described the code being released. It did not: the mint
+rewrites the tracked bundle, so the tree is necessarily dirty by the time a
+certificate exists, and every real caller therefore ran with the check disabled.
+A gate that can only fire falsely is worse than no gate. What actually answers
+"did the certificate change, and how" is the mint ledger (``ledger.py``), which
+records every published certificate's layers and headline numbers. The recorded
+commit is surfaced here as provenance for a human, and nothing fails without it.
 
 Layout (additive — the flat ``artifact/`` stays the current-machine mint):
 
@@ -29,13 +38,11 @@ its platform, so the tree migrates cleanly to fully per-platform bundles without
 a flag day.
 
 Usage:
-    check_release.py [--artifacts-root DIR] [--platforms darwin,linux]
-                     [--require-head / --no-require-head] [--pin SHA]
-                     [--max-age-commits N] [--json]
+    check_release.py [--artifacts-root DIR] [--platforms darwin,linux] [--json]
 
-Exit 0 iff every required platform is present, valid, and fresh; 1 on a missing
-/ stale / invalid platform; 2 when no bundles exist at all (release not yet set
-up — mint them first).
+Exit 0 iff every required platform is present and valid; 1 on a missing or
+invalid platform; 2 when no bundles exist at all (release not yet set up — mint
+them first).
 """
 
 from __future__ import annotations
@@ -44,7 +51,6 @@ import argparse
 import csv
 import json
 from pathlib import Path
-import subprocess
 import sys
 
 
@@ -58,16 +64,6 @@ from check_artifacts import check_artifacts  # noqa: E402
 # Platform token (first word of machine.json ``os``, lowered) -> human label.
 # The release requires a fresh, valid certificate for each of these.
 DEFAULT_PLATFORMS: dict[str, str] = {"darwin": "Mac", "linux": "Linux"}
-
-
-def _git(*args: str) -> str | None:
-    """Stripped stdout of ``git -C REPO <args>`` or None on any failure."""
-    try:
-        return subprocess.check_output(
-            ["git", "-C", str(REPO), *args], text=True, stderr=subprocess.DEVNULL
-        ).strip()
-    except OSError, subprocess.CalledProcessError:
-        return None
 
 
 def _read_machine(bundle: Path) -> dict[str, object] | None:
@@ -137,51 +133,14 @@ def speeds_summary(bundle: Path) -> str:
     )
 
 
-def _freshness(commit: str, *, pin: str | None, max_age: int | None) -> tuple[bool, str]:
-    """Judge a bundle's recorded commit against the current history.
-
-    Returns ``(fresh, note)``. With ``pin`` the commit must equal it exactly (a
-    locked release). Otherwise the commit must be an ancestor of HEAD — it
-    belongs to the line of history being released, not a stale or unrelated
-    branch — and, when ``max_age`` is set, no further than that many commits
-    behind HEAD.
-    """
-    if pin:
-        ok = _git("rev-parse", "--verify", f"{commit}^{{commit}}") == _git(
-            "rev-parse", "--verify", f"{pin}^{{commit}}"
-        )
-        return ok, f"pinned to {pin[:12]}" if ok else f"commit {commit[:12]} != pin {pin[:12]}"
-    head = _git("rev-parse", "HEAD")
-    if head is None:
-        return False, "cannot resolve HEAD for freshness"
-    is_ancestor = (
-        subprocess.run(
-            ["git", "-C", str(REPO), "merge-base", "--is-ancestor", commit, "HEAD"],
-            capture_output=True,
-        ).returncode
-        == 0
-    )
-    if not is_ancestor:
-        return False, f"commit {commit[:12]} is not in the history of HEAD (stale/foreign mint)"
-    behind = _git("rev-list", "--count", f"{commit}..HEAD")
-    distance = int(behind) if behind and behind.isdigit() else 0
-    if max_age is not None and distance > max_age:
-        return False, f"{distance} commits behind HEAD (> --max-age-commits {max_age})"
-    return True, f"{distance} commit(s) behind HEAD"
-
-
 def verify_release(
-    root: Path,
-    *,
-    platforms: dict[str, str],
-    require_head: bool,
-    pin: str | None = None,
-    max_age: int | None = None,
+    root: Path, *, platforms: dict[str, str]
 ) -> tuple[bool, list[dict[str, object]]]:
-    """Verify a fresh, valid certificate exists for every required platform.
+    """Verify a valid certificate exists for every required platform.
 
     Returns ``(ok, rows)`` where each row reports one required platform's
-    presence, structural validity, freshness, recorded commit, and speed tally.
+    presence, structural validity, speed tally, and recorded commit (reference
+    only — a bundle without one is judged exactly like a bundle with one).
     """
     bundles = discover_bundles(root)
     rows: list[dict[str, object]] = []
@@ -199,22 +158,15 @@ def verify_release(
             rows.append(row)
             continue
         row["dir"] = str(bundle.relative_to(REPO) if bundle.is_relative_to(REPO) else bundle)
-        problems = check_artifacts(bundle, require_head=False)
+        problems = check_artifacts(bundle)
         if problems == ["__ABSENT__"]:
             problems = [f"{label} bundle is absent or pending regeneration"]
         row["valid"] = not problems
         meta = _read_machine(bundle) or {}
-        commit = str(meta.get("git_commit", ""))
-        row["commit"] = commit
+        row["commit"] = str(meta.get("git_commit", ""))
         row["speeds"] = speeds_summary(bundle)
-        if require_head and commit:
-            fresh, note = _freshness(commit, pin=pin, max_age=max_age)
-        else:
-            fresh, note = (True, "freshness not required")
-        row["fresh"] = fresh
-        row["freshness"] = note
-        if problems or not fresh:
-            row["problems"] = [*problems] + ([] if fresh else [note])
+        if problems:
+            row["problems"] = problems
             ok = False
         rows.append(row)
     return ok, rows
@@ -241,21 +193,6 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="comma list of required platform tokens (default: darwin,linux)",
     )
-    ap.add_argument(
-        "--require-head",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="require each bundle's commit to belong to HEAD's history (default: on)",
-    )
-    ap.add_argument(
-        "--pin", default=None, help="require every bundle's commit to equal this SHA exactly"
-    )
-    ap.add_argument(
-        "--max-age-commits",
-        type=int,
-        default=None,
-        help="reject a bundle more than N commits behind HEAD",
-    )
     ap.add_argument("--json", action="store_true", help="machine-readable JSON on stdout")
     args = ap.parse_args(argv)
 
@@ -273,33 +210,31 @@ def main(argv: list[str] | None = None) -> int:
             print(message, file=sys.stderr)
         return 2
 
-    ok, rows = verify_release(
-        root,
-        platforms=platforms,
-        require_head=args.require_head,
-        pin=args.pin,
-        max_age=args.max_age_commits,
-    )
+    ok, rows = verify_release(root, platforms=platforms)
 
     if args.json:
         print(json.dumps({"ok": ok, "platforms": rows}, indent=2, sort_keys=True))
         return 0 if ok else 1
 
     for row in rows:
-        mark = "✓" if row.get("present") and row.get("valid") and row.get("fresh") else "✗"
+        mark = "✓" if row.get("present") and row.get("valid") else "✗"
         label = row["machine"]
+        found = row.get("problems")
+        problems = [str(p) for p in found] if isinstance(found, list) else []
         if not row.get("present"):
-            print(f"  {mark} {label}: missing — {row.get('problems', ['?'])[0]}", file=sys.stderr)
+            print(f"  {mark} {label}: missing — {problems[0] if problems else '?'}", file=sys.stderr)
             continue
-        print(f"  {mark} {label} [{row.get('dir')}] — {row.get('speeds')} ({row.get('freshness')})")
-        for problem in row.get("problems", []):  # type: ignore[union-attr]
+        commit = str(row.get("commit") or "")
+        ref = f" · minted at {commit[:12]}" if commit else ""
+        print(f"  {mark} {label} [{row.get('dir')}] — {row.get('speeds')}{ref}")
+        for problem in problems:
             print(f"      - {problem}", file=sys.stderr)
     if ok:
-        print(f"OK: certificate attached, valid, and current on all {len(rows)} machine(s).")
+        print(f"OK: certificate attached and valid on all {len(rows)} machine(s).")
         return 0
     print(
-        "FAIL: release requires a fresh, valid Certificate of Optimality on every machine "
-        "(Mac + Linux). Re-mint the missing/stale ones and commit them.",
+        "FAIL: release requires a valid Certificate of Optimality on every machine "
+        "(Mac + Linux). Re-mint the missing/invalid ones and commit them.",
         file=sys.stderr,
     )
     return 1

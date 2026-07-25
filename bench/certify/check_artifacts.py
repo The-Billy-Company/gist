@@ -11,9 +11,15 @@ bundle. This gate enforces two independent contracts:
                 transcribed — fail if any `gist_*.py` still says "transcribe" /
                 "hardcoded" / "manual" or never actually reads its source CSV.
 
+``machine.json`` records a ``git_commit`` when one is available, but it is
+**provenance, not a requirement**: a commit only helps a human trace a number
+back to a tree, and it says nothing about whether the bundle reproduces. So
+nothing here resolves, compares, or demands it — a mint from a dirty tree, a
+detached worktree, or an exported tarball is judged purely on its bytes. What
+the certificate claimed, and when, is recorded by ``ledger.py``.
+
 Usage: check_artifacts.py [--artifacts-dir DIR] [--dataviz-dir DIR]
                           [--artifacts] [--dataviz]   (default: run both)
-                          [--require-head / --no-require-head]
 Exit 0 iff every requested check passes; 2 if a certificate dir is simply absent
 or pending regeneration (REGENERATE.md without machine.json).
 """
@@ -25,7 +31,6 @@ import csv
 import json
 from pathlib import Path
 import re
-import subprocess
 
 
 HERE = Path(__file__).resolve().parent
@@ -74,7 +79,6 @@ REQUIRED_MACHINE_KEYS = (
     "os",
     "kernel",
     "filesystem",
-    "git_commit",
     "corpus_file_count",
     "corpus_total_bytes",
     "runs",
@@ -105,46 +109,6 @@ TRANSCRIBE_MARKERS = re.compile(r"transcrib|hardcod|\bmanual\b|hand-wave|paste (
 CSV_READ = re.compile(
     r"read_csv|DictReader|loadtxt|genfromtxt|csv\.reader|json\.load|open\([^)]*\.(csv|json)"
 )
-
-
-def _git_output(*args: str) -> str | None:
-    """Return stripped stdout from git -C REPO, or None on failure."""
-    try:
-        return subprocess.check_output(
-            ["git", "-C", str(REPO), *args],
-            text=True,
-            stderr=subprocess.DEVNULL,
-        ).strip()
-    except (OSError, subprocess.CalledProcessError) as exc:
-        _ = exc
-        return None
-
-
-def _check_clean_head(meta: dict, problems: list[str]) -> None:
-    """Require machine.git_commit equals clean HEAD.
-
-    Appends human-readable problems when HEAD cannot be resolved, the recorded
-    commit drifts from HEAD, or the worktree is dirty.
-    """
-    commit = str(meta.get("git_commit", ""))
-    head = _git_output("rev-parse", "HEAD")
-    if head is None:
-        problems.append("unable to resolve git HEAD for certificate provenance")
-        return
-    if commit != head:
-        problems.append(
-            f"machine.json git_commit {commit} != HEAD {head} "
-            "(regenerate on a clean tree: CERT_PUBLISH_DIR=bench/certify/artifact "
-            "bash bench/certify/certify.sh)"
-        )
-    porcelain = _git_output("status", "--porcelain")
-    if porcelain is None:
-        problems.append("unable to resolve git status for certificate provenance")
-    elif porcelain:
-        problems.append(
-            "worktree is dirty — certificate requires a clean HEAD "
-            f"({len(porcelain.splitlines())} dirty path(s))"
-        )
 
 
 def _json(path: Path, problems: list[str]) -> object | None:
@@ -398,7 +362,7 @@ def _check_index_sizes(path: Path, problems: list[str]) -> None:
         problems.append("index-sizes.json required_files != required runtime components")
 
 
-def check_artifacts(d: Path, *, require_head: bool = True) -> list[str]:
+def check_artifacts(d: Path) -> list[str]:
     """Validate a certificate artifact directory.
 
     Returns a problem list, ``["__ABSENT__"]`` when the bundle is missing
@@ -419,10 +383,6 @@ def check_artifacts(d: Path, *, require_head: bool = True) -> list[str]:
     for key in REQUIRED_MACHINE_KEYS:
         if key not in meta:
             problems.append(f"machine.json missing key: {key}")
-    if not re.fullmatch(r"[0-9a-f]{40,64}", str(meta.get("git_commit", "")), re.I):
-        problems.append("machine.json git_commit must be an exact object id")
-    elif require_head:
-        _check_clean_head(meta, problems)
     tools = _check_tools(d / "tool-versions.txt", problems)
     _check_manifest(d / "corpus-manifest.tsv", meta, problems)
     _check_cells(d, meta, set(tools), problems)
@@ -465,12 +425,6 @@ def main() -> int:
     )
     ap.add_argument("--artifacts", action="store_true", help="run only the artifacts check")
     ap.add_argument("--dataviz", action="store_true", help="run only the dataviz check")
-    ap.add_argument(
-        "--require-head",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="require machine.git_commit == HEAD and a clean worktree (default: on)",
-    )
     args = ap.parse_args()
     run_art = args.artifacts or not args.dataviz
     run_dv = args.dataviz or not args.artifacts
@@ -478,7 +432,7 @@ def main() -> int:
     rc = 0
     if run_art:
         print(f"[artifacts] {args.artifacts_dir}")
-        probs = check_artifacts(args.artifacts_dir, require_head=args.require_head)
+        probs = check_artifacts(args.artifacts_dir)
         if probs == ["__ABSENT__"]:
             rc = max(rc, 2)
         elif probs:

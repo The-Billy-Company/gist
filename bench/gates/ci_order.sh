@@ -104,12 +104,12 @@ if [[ "${failures}" -ne 0 ]]; then
   echo "behavior is untrustworthy. Fix correctness (or re-run with --allow-known), then rerun."
   exit 1
 fi
-# Committed bundle provenance is recorded in machine.git_commit; integrity is
-# gated without requiring the *current* dirty coworking HEAD to equal that SHA
-# (--no-require-head). Minting still requires a clean tree (certify.sh).
+# Bundle provenance is recorded in machine.git_commit as a reference only —
+# integrity is judged from the committed bytes, never from the current HEAD.
+# What the certificate claimed over time is in bench/certify/LEDGER.md.
 set +e
 python3 bench/certify/check_artifacts.py \
-  --artifacts-dir bench/certify/artifact --artifacts --no-require-head
+  --artifacts-dir bench/certify/artifact --artifacts
 art_rc=$?
 set -e
 case "${art_rc}" in

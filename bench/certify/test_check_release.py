@@ -1,10 +1,12 @@
 """Hermetic tests for the cross-machine release gate (check_release.py).
 
-Pins the two contracts the single-bundle reproducibility check cannot see:
-**platform coverage** (a release needs one Mac *and* one Linux certificate) and
+Pins the contracts the single-bundle reproducibility check cannot see:
+**platform coverage** (a release needs one Mac *and* one Linux certificate),
 **bundle discovery** (an explicit ``artifact/<platform>/`` subdir wins over the
-flat dir). The single-bundle validity check is injected, so these cases stay
-pure — no real certificate, no git, no benchmark tools.
+flat dir), and that a recorded commit is **provenance, not a requirement** — a
+bundle carrying no commit at all is judged exactly like one that does. The
+single-bundle validity check is injected, so these cases stay pure — no real
+certificate, no git, no benchmark tools.
 """
 
 import json
@@ -16,10 +18,13 @@ from unittest import mock
 import check_release
 
 
-def _bundle(root: Path, *, os_field: str, commit: str = "a" * 40, verdicts=("win", "win")) -> Path:
+def _bundle(
+    root: Path, *, os_field: str, commit: str | None = "a" * 40, verdicts=("win", "win")
+) -> Path:
     """Write the minimal machine.json + certify_macro.csv a bundle needs here."""
     root.mkdir(parents=True, exist_ok=True)
-    (root / "machine.json").write_text(json.dumps({"os": os_field, "git_commit": commit}))
+    meta = {"os": os_field} | ({"git_commit": commit} if commit is not None else {})
+    (root / "machine.json").write_text(json.dumps(meta))
     rows = ["class\tpattern\ttool\tmedian_ms\tci_lo_ms\tci_hi_ms\tspeedup_vs_gist\tverdict"]
     for i, verdict in enumerate(verdicts):
         rows.append(f"class{i}\tp\trg\t1.0\t0.9\t1.1\t2.0\t{verdict}")
@@ -72,7 +77,7 @@ class SpeedsSummaryTests(unittest.TestCase):
 
 
 class VerifyReleaseTests(unittest.TestCase):
-    """Coverage + validity, with the single-bundle check injected (require_head off)."""
+    """Coverage + validity, with the single-bundle check injected."""
 
     PLATFORMS = {"darwin": "Mac", "linux": "Linux"}
 
@@ -83,9 +88,7 @@ class VerifyReleaseTests(unittest.TestCase):
             _bundle(root, os_field="Darwin 25.5.0")
             _bundle(root / "linux-x86_64", os_field="Linux 6.1.0")
             with mock.patch.object(check_release, "check_artifacts", return_value=[]):
-                ok, rows = check_release.verify_release(
-                    root, platforms=self.PLATFORMS, require_head=False
-                )
+                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
             assert ok is True
             assert {r["platform"] for r in rows} == {"darwin", "linux"}
             assert all(r["valid"] for r in rows)
@@ -96,9 +99,7 @@ class VerifyReleaseTests(unittest.TestCase):
             root = Path(tmp)
             _bundle(root, os_field="Darwin 25.5.0")  # only Mac
             with mock.patch.object(check_release, "check_artifacts", return_value=[]):
-                ok, rows = check_release.verify_release(
-                    root, platforms=self.PLATFORMS, require_head=False
-                )
+                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
             assert ok is False
             linux = next(r for r in rows if r["platform"] == "linux")
             assert linux["present"] is False
@@ -112,11 +113,31 @@ class VerifyReleaseTests(unittest.TestCase):
             with mock.patch.object(
                 check_release, "check_artifacts", return_value=["corpus hash mismatch"]
             ):
-                ok, rows = check_release.verify_release(
-                    root, platforms=self.PLATFORMS, require_head=False
-                )
+                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
             assert ok is False
             assert all(r["valid"] is False for r in rows)
+
+    def test_bundle_without_a_commit_still_passes(self) -> None:
+        """A commit is a reference: its absence must not fail an otherwise-valid mint."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _bundle(root, os_field="Darwin 25.5.0", commit=None)
+            _bundle(root / "linux-x86_64", os_field="Linux 6.1.0", commit=None)
+            with mock.patch.object(check_release, "check_artifacts", return_value=[]):
+                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
+            assert ok is True
+            assert all(r["commit"] == "" for r in rows)
+
+    def test_foreign_commit_is_reported_not_judged(self) -> None:
+        """An unrelated SHA is surfaced as provenance, never turned into a verdict."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _bundle(root, os_field="Darwin 25.5.0", commit="f" * 40)
+            _bundle(root / "linux-x86_64", os_field="Linux 6.1.0", commit="e" * 40)
+            with mock.patch.object(check_release, "check_artifacts", return_value=[]):
+                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
+            assert ok is True
+            assert {r["commit"] for r in rows} == {"f" * 40, "e" * 40}
 
 
 if __name__ == "__main__":
