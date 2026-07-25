@@ -54,10 +54,16 @@
 //!     `flock` on `<socket>.lock`. Exactly one racer wins; the losers return at
 //!     once *without* unlinking the winner's live socket. The lock is taken
 //!     first precisely so a loser never runs the stale-socket cleanup below.
-//!   * **Idle-TTL self-exit** — the accept loop `poll`s with a timeout; if no
-//!     client dials (and no query is in flight) within `idle_ttl_ms` the daemon
-//!     exits so an abandoned session doesn't pin RAM forever. The next query
-//!     just re-spawns it.
+//!   * **Idle self-release, in two stages** (`idle.zig`) — the accept loop
+//!     `poll`s with a timeout and gives resources back in the order they cost
+//!     the MACHINE rather than this process. First the watch set: macOS holds
+//!     one descriptor per watched vnode (~26k here, a real slice of the
+//!     system-wide file table) and several trees each keep their own daemon, so
+//!     a quiet daemon releases every one of them and drops to the
+//!     reconcile-always baseline — pure speed, never correctness (ADR-372) —
+//!     re-registering once returning traffic settles. Then the session: at
+//!     `idle.ttl_ms` of continuous idleness the daemon exits so an abandoned
+//!     session doesn't pin RAM forever. The next query just re-spawns it.
 //!
 //! An explicit `shutdown` frame also stops the loop; a client merely
 //! disconnecting just frees the daemon for the next one.
@@ -68,6 +74,7 @@ const resident = @import("../../../../exec/session/resident.zig");
 const annals_mod = @import("../../../../exec/session/annals.zig");
 const protocol = @import("../../../../exec/session/protocol.zig");
 const watch = @import("../../../../exec/session/watch.zig");
+const idle = @import("idle.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../../../corpus/index/trigrams/fresh.zig");
 const journal = @import("../../../../../corpus/tree/journal.zig");
@@ -266,12 +273,6 @@ fn note(comptime fmt: []const u8, args: anytype) void {
     std.debug.print(fmt, args);
 }
 
-/// Idle window with zero connections (and no query in flight) before a warm
-/// daemon self-exits: the resident index/corpus stops earning its RAM once
-/// nobody is querying, and a fresh query re-spawns one in the background anyway
-/// (see `client/spawn.zig`).
-const idle_ttl_ms: i32 = 10 * 60 * 1000;
-
 /// Default per-query wall-clock ceiling (see the header): a liveness backstop
 /// deliberately far above any legitimate local warm query, so it only bounds a
 /// runaway or abandoned scan that would otherwise pin a shared worker.
@@ -342,7 +343,7 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     watcher.start();
     defer watcher.stop();
     note("gist serve: watcher {s}, exact dirty log {s}\n", .{
-        if (session.seqlock.active) "armed" else "unavailable (reconcile-always)",
+        if (session.seqlock.armed()) "armed" else "unavailable (reconcile-always)",
         if (session.dirty_log.exact) "on" else "off",
     });
     // Boot-seed the annals from the persisted journal token: a `gist index`
@@ -408,6 +409,10 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     var last_scoped: u64 = 0;
     var last_full: u64 = 0;
     var last_aborts: u64 = 0;
+    // The two-stage idle policy (`idle.zig`). `idle_since` is null while anyone
+    // is connected, so `nextStep` always measures CONTINUOUS idleness.
+    var watch_set: idle.WatchSet = idle.settle(watcher.held());
+    var idle_since: ?i64 = null;
     serve_loop: while (true) {
         server.drainCompletions();
 
@@ -439,11 +444,51 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
             try pfd_slots.append(gpa, @intCast(i));
         }
 
-        // Idle-TTL only when nothing is connected AND nothing is in flight: a
-        // connected (even quiet) client, or a running query, keeps the session.
-        const timeout: i32 = if (live == 0) idle_ttl_ms else -1;
+        // The idle clock runs only with nothing connected AND nothing in flight:
+        // a connected (even quiet) client, or a running query, keeps the session
+        // whole. Idle, the daemon gives resources back in stages — the watch set
+        // first (descriptors the whole machine shares), the session itself last.
+        var step: ?idle.Step = null;
+        const timeout: i32 = if (live != 0) blk: {
+            idle_since = null;
+            break :blk -1;
+        } else blk: {
+            const now: i64 = @intCast(@divTrunc(std.Io.Clock.now(.awake, io).nanoseconds, std.time.ns_per_ms));
+            const since = idle_since orelse s: {
+                idle_since = now;
+                break :s now;
+            };
+            const plan = idle.nextStep(watch_set, now - since);
+            step = plan;
+            break :blk plan.in_ms;
+        };
         const ready = std.posix.poll(pfds.items, timeout) catch break;
-        if (ready == 0) break; // idle with no connections → self-exit
+        // A fired idle deadline is the only way out of this loop besides a
+        // `shutdown` frame or a dead listener. Shedding and re-arming both run
+        // HERE — with zero connections and nothing in flight, the same quiescent
+        // window the boot arm ran in, so the watcher stays single-consumer.
+        if (ready == 0) switch ((step orelse break).act) {
+            .exit => break,
+            .shed => {
+                const n = watcher.held();
+                watcher.shed();
+                watch_set = .released;
+                note("gist serve: idle — released {d} watch descriptors (reconcile-always until re-armed)\n", .{n});
+            },
+            .rearm => {
+                watcher.start();
+                watch_set = idle.settle(watcher.held());
+                // The ledger's live coverage restarts at this instant, so replay
+                // the journal back over the shed window exactly as at boot —
+                // otherwise a `changed` consult would decline for a gap the OS
+                // can still account for.
+                seedAnnals(gpa, io, &session);
+                note("gist serve: re-armed after idle ({d} watch descriptors, exact dirty log {s})\n", .{
+                    watcher.held(),
+                    if (session.dirty_log.exact) "on" else "off",
+                });
+            },
+        };
 
         if (pfds.items[1].revents & std.posix.POLL.IN != 0) server.drainWake();
 
@@ -464,6 +509,10 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
 
         if (pfds.items[0].revents & std.posix.POLL.IN != 0) {
             const stream = listener.accept(io) catch break;
+            // Somebody is back: a shed watch set has become worth re-registering
+            // (once this burst goes quiet again — never in front of this query,
+            // which answers on the baseline meanwhile).
+            if (watch_set == .released) watch_set = .wanted;
             if (server.freeSlot()) |slot| {
                 session_gen +%= 1;
                 server.conns[slot] = .{ .stream = stream, .gen = session_gen, .state = .active };

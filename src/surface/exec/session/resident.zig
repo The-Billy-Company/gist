@@ -590,6 +590,21 @@ pub const ResidentSession = struct {
         self.seqlock.arm();
     }
 
+    /// The watcher gave its coverage back on purpose — an idle daemon releasing
+    /// one descriptor per watched vnode (`watch.zig::shed`). Every later query
+    /// reconciles fully, and the scoped path's three preconditions are all
+    /// withdrawn with the stream that justified them: the fast path closes
+    /// (`seqlock`), the exactness promise lapses (`dirty_log`), and the covering
+    /// full pass is spent — so when a watcher arms again the first pass under it
+    /// is the full one, exactly as at boot. Reversible, unlike `markDoubtForever`.
+    /// Caller must hold the session quiescent (`serve.zig` sheds only with zero
+    /// connections and nothing in flight).
+    pub fn disarmWatcher(self: *ResidentSession) void {
+        self.seqlock.disarm();
+        self.dirty_log.disarmExact();
+        self.full_pass_done = false;
+    }
+
     // ── freshness + reload ──
 
     /// Rebuild the resident corpus/index when the on-disk index generation has
@@ -806,7 +821,7 @@ pub const ResidentSession = struct {
             self.extras_stale = true;
         } else {
             try self.reconcileFull(ceil);
-            if (self.seqlock.active) self.full_pass_done = true;
+            if (self.seqlock.armed()) self.full_pass_done = true;
             _ = self.full_reconciles.fetchAdd(1, .monotonic);
         }
 

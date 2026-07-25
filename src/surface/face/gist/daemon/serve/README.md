@@ -7,6 +7,9 @@ doc_radar:
     - description: "serve loop stays poll-multiplexed and decline-on-unservable"
       file: pkg/kernels/irregex/src/surface/face/gist/daemon/serve/serve.zig
       contains: ["pub fn run", "pub fn socketPath", "decline"]
+    - description: "idle release stays two-stage: watch set before session"
+      file: pkg/kernels/irregex/src/surface/face/gist/daemon/serve/idle.zig
+      contains: ["pub const ttl_ms", "pub const shed_ms", "pub fn nextStep"]
 ---
 
 # surface/face/gist/daemon/serve — `gist serve`
@@ -19,11 +22,22 @@ the mechanism behind the warm session certificate.
 `run(gpa, io, roots, socket_path)` builds the session, arms the freshness
 watcher, binds the socket (unlinking a stale one), then runs a
 **poll-multiplexed** accept loop: one `poll` set over the listener plus every
-connected client, one frame served per readable client per wakeup. Queries still
-execute one at a time on the single daemon thread, but an idle persistent client
-never starves a new connection. Only an explicit `shutdown` frame stops the
-loop. Every unservable request is answered `decline`, so a client only ever
-loses a warm acceleration, never correctness.
+connected client, one frame served per readable client per wakeup. The poll
+thread owns connection lifecycle and answers the cheap control frames inline; a
+search — and its potentially multi-MB response write — goes to a bounded worker
+pool, so one slow query never stalls the other coworkers sharing the daemon.
+Only an explicit `shutdown` frame stops the loop. Every unservable request is
+answered `decline`, so a client only ever loses a warm acceleration, never
+correctness.
+
+An idle daemon gives its two resources back in the order they cost the
+**machine** rather than this process ([`idle.zig`](idle.zig)). The macOS watch
+set is one descriptor per watched vnode — ~26k here, out of a system file table
+every sibling daemon shares — so it goes first, at `shed_ms`, dropping the
+session to the reconcile-always baseline (slower, never staler) and
+re-registering only once returning traffic settles again. The resident session
+itself is this process's own RAM, so it lives until `ttl_ms` of continuous
+idleness and then exits; the next query re-spawns one.
 
 `socketPath` resolves `$GIST_SESSION_SOCK`, else `.local/gist-verify/gistd.sock`.
 

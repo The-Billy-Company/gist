@@ -665,9 +665,10 @@ test "serve: annals consult declines pre-coverage instants and vouches for a liv
     // armed or not, the ledger never vouches for a window it did not watch.
     try std.testing.expect((try consultChanged(gpa, a, fd, 1)) == null);
 
-    // (2) The vouch path needs a live per-file-exact watcher (macOS FSEvents).
-    // Elsewhere — or when fseventsd won't arm in this environment — every
-    // consult declines, and (1) already proved that shape; skip the rest.
+    // (2) The vouch path needs a live per-file-exact watcher (macOS kqueue,
+    // ADR-372). Elsewhere — or when the watch set won't fit this environment's
+    // descriptor budget — every consult declines, and (1) already proved that
+    // shape; skip the rest.
     if (@import("builtin").os.tag != .macos) return error.SkipZigTest;
 
     // Wait for coverage to open (the watcher thread arms asynchronously to
@@ -696,8 +697,9 @@ test "serve: annals consult declines pre-coverage instants and vouches for a liv
         }
         try io.sleep(.fromNanoseconds(50 * std.time.ns_per_ms), .real);
     }
-    // No vouch within the budget ⇒ fseventsd never armed here (sandboxed CI);
-    // the decline shape was already proven, so skip rather than fake a pass.
+    // No vouch within the budget ⇒ the watcher never armed here (a descriptor
+    // ceiling too low for the tree); the decline shape was already proven, so
+    // skip rather than fake a pass.
     if (!vouched) return error.SkipZigTest;
     try std.testing.expect(saw_late);
 

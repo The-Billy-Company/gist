@@ -47,6 +47,17 @@
 //! SOURCES that decide admission, and a change to one re-derives both the rules
 //! and the set (`refreshCoverage` via `Cover.refresh`) — otherwise a rule edit
 //! could admit a file that nothing was watching.
+//!
+//! The same price makes the budget a question about the WHOLE MACHINE, not just
+//! this process: `watchBudget` clamps against the ceiling Darwin actually
+//! enforces (`kern.maxfilesperproc`, which `getrlimit` never reports) and
+//! against a bounded share of the live system file table, so declining is
+//! predictive rather than an `EMFILE` discovered halfway through registration.
+//! And because a watch set only earns its keep while somebody is querying, it
+//! is RELEASABLE: `shed` hands every descriptor back and returns the session to
+//! the reconcile-always baseline, `start` re-registers it. That is what lets an
+//! idle daemon stop taxing the commons its siblings share (`serve.zig`'s
+//! two-stage idle policy) without ever risking a stale answer.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -98,9 +109,20 @@ const vnode_notes: u32 = NOTE.DELETE | NOTE.WRITE | NOTE.EXTEND |
 
 /// Descriptors left for everything else the process needs — its listening
 /// socket, per-request fds, index mmaps. A watch set that will not fit under
-/// `RLIMIT_NOFILE` with this much headroom leaves the session unarmed rather
-/// than partially covered (fail-closed).
+/// the ENFORCED per-process ceiling with this much headroom leaves the session
+/// unarmed rather than partially covered (fail-closed).
 const fd_reserve: usize = 512;
+
+/// System-wide file-table entries no watch set may reach into, so a sibling
+/// process — the next daemon's `pipe(2)`, an editor's save — can still open a
+/// file after this session has armed.
+const table_reserve: usize = 4096;
+
+/// The largest fraction of the WHOLE system file table one session may hold as
+/// watches (1/8). Several trees each keep their own auto-spawned daemon, so the
+/// table is a commons: the fraction stops the first daemon claiming it, and the
+/// live free-headroom term (`commonsShare`) stops the last one exhausting it.
+const table_fraction: usize = 8;
 
 /// One registered vnode watch. `path` is the absolute path to `note` when the
 /// descriptor fires; `is_dir` marks the events that mean "membership changed
@@ -162,10 +184,24 @@ fn wallNowNs() ?i128 {
     return @as(i128, ts.sec) * std.time.ns_per_s + ts.nsec;
 }
 
-/// How many vnode watches may be held: whatever `RLIMIT_NOFILE` allows beyond
-/// `fd_reserve`, after trying to raise the soft limit to the hard one (a daemon
-/// holding one descriptor per corpus file is exactly what the limit is for).
-/// Zero when the limit cannot be read — the caller then stays unarmed.
+/// How many vnode watches may be held. THREE ceilings bind, all enforced by the
+/// kernel and only the first of them reported by `getrlimit`:
+///
+///   * `RLIMIT_NOFILE`, raised to the hard limit when it can be — a daemon
+///     holding one descriptor per corpus file is exactly what the limit is for.
+///   * macOS `kern.maxfilesperproc`, the per-process ceiling Darwin ACTUALLY
+///     enforces. `getrlimit` never reports it, and the gap is not academic: a
+///     soft limit of 1,048,575 against a `maxfilesperproc` of 245,760
+///     over-states the room by 4.3×, and a stock macOS box ships 24,576 — under
+///     the ~26k watches this repo alone admits. Unclamped, the fail-closed
+///     check is not PREDICTIVE: the session accepts a set it cannot register
+///     and meets `EMFILE` partway through instead of declining up front.
+///   * a bounded share of the system-wide file table (`commonsShare`), because
+///     one descriptor per vnode makes that table a commons several concurrent
+///     daemons share (`table_fraction`).
+///
+/// Zero when the rlimit cannot be read, or when the commons has no room left —
+/// the caller then stays unarmed (reconcile-always), which is the whole point.
 fn watchBudget() usize {
     var rl = std.posix.getrlimit(.NOFILE) catch return 0;
     if (rl.cur < rl.max) {
@@ -173,7 +209,7 @@ fn watchBudget() usize {
         std.posix.setrlimit(.NOFILE, rl) catch {};
         rl = std.posix.getrlimit(.NOFILE) catch return 0;
     }
-    return budgetFrom(rl.cur);
+    return @min(budgetFrom(rl.cur), procCeiling(), commonsCeiling());
 }
 
 /// The budget arithmetic alone, split out so the fail-closed edges are testable
@@ -183,7 +219,48 @@ fn watchBudget() usize {
 fn budgetFrom(limit: std.posix.rlim_t) usize {
     if (limit == std.posix.RLIM.INFINITY) return std.math.maxInt(usize);
     const cur = std.math.cast(usize, limit) orelse return std.math.maxInt(usize);
-    return if (cur > fd_reserve) cur - fd_reserve else 0;
+    return lessReserve(cur);
+}
+
+/// A descriptor ceiling minus the headroom the rest of the process needs.
+fn lessReserve(ceiling: usize) usize {
+    return ceiling -| fd_reserve;
+}
+
+/// One integer `sysctl`, or null when the name is unknown or the kernel answers
+/// with something other than the 32-bit int these are documented to be. Null is
+/// "one fewer ceiling to respect", never "no watches" — an unreadable clamp must
+/// not silently unarm a session that the reported limits already fit.
+fn sysctlInt(name: [*:0]const u8) ?usize {
+    if (comptime !is_macos) return null;
+    var v: c_int = 0;
+    var len: usize = @sizeOf(c_int);
+    if (std.c.sysctlbyname(name, &v, &len, null, 0) != 0) return null;
+    if (len != @sizeOf(c_int) or v <= 0) return null;
+    return @intCast(v);
+}
+
+/// The per-process ceiling the kernel enforces behind `RLIMIT_NOFILE`'s back
+/// (see `watchBudget`). Unbounded where no such second ceiling exists.
+fn procCeiling() usize {
+    return lessReserve(sysctlInt("kern.maxfilesperproc") orelse return std.math.maxInt(usize));
+}
+
+/// This session's share of the system-wide file table, priced against what is
+/// actually free right now — so a daemon arming into a machine that already
+/// runs four of them declines rather than starving the commons.
+fn commonsCeiling() usize {
+    const maxfiles = sysctlInt("kern.maxfiles") orelse return std.math.maxInt(usize);
+    return commonsShare(maxfiles, sysctlInt("kern.num_files") orelse 0);
+}
+
+/// The commons arithmetic alone (testable without a kernel): a fixed fraction of
+/// the whole table, never more than the free headroom above `table_reserve`.
+/// Both terms carry weight — the fraction keeps one daemon from claiming the
+/// table it shares with its siblings, the headroom keeps the LAST of them from
+/// emptying it out from under everybody's `pipe(2)`.
+fn commonsShare(maxfiles: usize, in_use: usize) usize {
+    return @min(maxfiles / table_fraction, maxfiles -| in_use -| table_reserve);
 }
 
 test "budget: a ceiling at or under the reserve arms nothing (fail-closed)" {
@@ -193,6 +270,47 @@ test "budget: a ceiling at or under the reserve arms nothing (fail-closed)" {
     try t.expectEqual(@as(usize, 1), budgetFrom(fd_reserve + 1));
     try t.expectEqual(@as(usize, 262144 - fd_reserve), budgetFrom(262144));
     try t.expectEqual(std.math.maxInt(usize), budgetFrom(std.posix.RLIM.INFINITY));
+}
+
+test "budget: the reported rlimit is not the ceiling macOS enforces" {
+    const t = std.testing;
+    // The measured gap this clamp exists for, on the machine ADR-372 was built
+    // on: a 1,048,575 soft `RLIMIT_NOFILE` against `kern.maxfilesperproc` of
+    // 245,760 — the rlimit alone over-states the room by more than 4×.
+    try t.expect(budgetFrom(1_048_575) > 4 * lessReserve(245_760));
+    // A stock macOS box (`kern.maxfilesperproc` 24,576) cannot hold this repo's
+    // ~26k-descriptor watch set at all, so the enforced clamp must decline it —
+    // which is exactly what an unclamped rlimit would have let through.
+    try t.expect(lessReserve(24_576) < 26_000);
+    try t.expect(budgetFrom(1_048_575) > 26_000);
+}
+
+test "the enforced ceilings are actually readable on the platform that has them" {
+    const t = std.testing;
+    if (comptime !is_macos) return; // no second ceiling to read; the clamps are unbounded
+    // The arithmetic above is only worth anything if the kernel answers, so pin
+    // the plumbing itself: a typo'd `sysctl` name would silently widen the
+    // budget back to the rlimit this whole clamp exists to distrust.
+    try t.expect(sysctlInt("kern.maxfilesperproc") != null);
+    try t.expect(sysctlInt("kern.maxfiles") != null);
+    try t.expect(sysctlInt("kern.num_files") != null);
+    try t.expectEqual(@as(?usize, null), sysctlInt("kern.no_such_knob_here"));
+    // And the ceilings must actually bind: unbounded means the clamp is absent.
+    try t.expect(procCeiling() < std.math.maxInt(usize));
+    try t.expect(commonsCeiling() < std.math.maxInt(usize));
+}
+
+test "commons: a fraction of the table, never more than is actually free" {
+    const t = std.testing;
+    const table = 491_520; // kern.maxfiles as measured
+    // Idle table: the fraction binds, so one daemon can never take the commons.
+    try t.expectEqual(@as(usize, table / table_fraction), commonsShare(table, 44_461));
+    // Siblings have filled it: the live free headroom binds instead, and it is
+    // what leaves room for the next daemon's pipe(2).
+    try t.expectEqual(@as(usize, table - 460_000 - table_reserve), commonsShare(table, 460_000));
+    // Nothing left to spend → zero watches → the session stays unarmed.
+    try t.expectEqual(@as(usize, 0), commonsShare(table, table - table_reserve));
+    try t.expectEqual(@as(usize, 0), commonsShare(table, table * 2));
 }
 
 /// The freshness watcher, generic over any resident `Session` that exposes the
@@ -310,7 +428,10 @@ pub fn Watcher(comptime Session: type) type {
 
         /// Best-effort start. Arms the session (enabling the clean fast path) only
         /// when a watcher backend fully registers; otherwise leaves the session in
-        /// the reconcile-always baseline and returns without error.
+        /// the reconcile-always baseline and returns without error. Also the
+        /// re-arm entry point after a `shed`: the backends register from an empty
+        /// set, and `disarmWatcher` already spent the covering full pass, so the
+        /// first reconcile under the new stream is a full walk exactly as at boot.
         pub fn start(self: *@This()) void {
             if (comptime builtin.os.tag == .linux) {
                 self.startInotify();
@@ -319,6 +440,33 @@ pub fn Watcher(comptime Session: type) type {
             }
             // Other targets: no watcher → reconcile-always baseline (already the
             // session's default; nothing to arm).
+        }
+
+        /// Descriptors this watcher is holding right now: the live vnode set plus
+        /// the queue itself on macOS, a single `inotify` fd on Linux however large
+        /// the tree, zero when nothing armed or after `shed`. It is the price the
+        /// rest of the machine pays for this session, which is why the daemon's
+        /// idle policy reads it rather than guessing from the corpus size.
+        pub fn held(self: *const @This()) usize {
+            if (comptime is_macos) {
+                if (self.kq_fd < 0) return 0;
+                return self.watches.items.len - self.free_slots.items.len + 1;
+            }
+            return if (self.inotify_fd >= 0) 1 else 0;
+        }
+
+        /// Hand the whole watch set back while nobody is querying. The session is
+        /// disarmed FIRST, so no answer can trust a quiescence that is about to
+        /// stop being proven; then the loop thread is retired and every descriptor
+        /// closed. The session falls back to the reconcile-always baseline — the
+        /// pre-ADR-372 behavior, slower but never stale — and `start` re-registers
+        /// from scratch. Caller must guarantee no query is in flight: `serve.zig`
+        /// sheds only with zero connections, the same quiescent window the initial
+        /// arm ran in.
+        pub fn shed(self: *@This()) void {
+            if (self.held() == 0) return;
+            self.session.disarmWatcher();
+            self.stop();
         }
 
         pub fn stop(self: *@This()) void {
@@ -904,9 +1052,11 @@ pub fn Watcher(comptime Session: type) type {
 
         /// Close every watch descriptor and the queue itself, freeing their
         /// bookkeeping. Idempotent: `stop` calls it after a failed start too. A
-        /// partial watch set is never armed, so this doubles as the bail-out path.
+        /// partial watch set is never armed, so this doubles as the bail-out path
+        /// — and, after `shed`, the reset a later `start` re-registers from.
         fn closeWatches(self: *@This()) void {
             if (comptime !is_macos) return;
+            self.ig_stale = false; // a pending refresh dies with the set it was about
             for (self.watches.items) |w| if (w.fd >= 0) {
                 _ = std.c.close(w.fd);
                 self.gpa.free(w.key);
