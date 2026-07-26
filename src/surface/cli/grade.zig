@@ -139,7 +139,11 @@ pub const Verdict = struct {
     /// What this answer was looking for, in one word.
     pub fn found(self: Verdict) []const u8 {
         if (self.noun) |n| return n;
-        return if (self.channel == .recall) "source" else "kin";
+        return switch (self.channel) {
+            .recall => "source",
+            .context => "picks",
+            else => "kin",
+        };
     }
 
     /// The grade of the best score, or `.none` when nothing scored.
@@ -230,6 +234,14 @@ pub fn render(a: std.mem.Allocator, out: *std.ArrayList(u8), tool: []const u8, s
             try guide.line(a, out, &left, tool, .act, "fewer, more specific words — a short query is cheap to explain anywhere, which reads as weak everywhere");
             try guide.line(a, out, &left, tool, .act, "gist '<a literal you expect>' — an exact miss is a faster answer than a weak gain");
         },
+        // A thin pack is a statement about the corpus, not about a channel:
+        // no `--as` changes how much of the question these files answer.
+        .context => {
+            if (v.best) |b|
+                try guide.linef(a, out, &left, tool, .note, "the picks explain {d:.0}% of the priced query — nothing here is really about it", .{b * 100.0});
+            try guide.line(a, out, &left, tool, .act, "the words the answer would use, not the words the question uses — an aspect no file holds is priced out, not searched harder");
+            try guide.line(a, out, &left, tool, .act, "relate similar '<text>' — rank single files by coding gain when no SET covers the question");
+        },
         else => {
             switch (v.channel.polarity()) {
                 .distance => if (v.best) |b| {
@@ -250,7 +262,7 @@ pub fn render(a: std.mem.Allocator, out: *std.ArrayList(u8), tool: []const u8, s
                 .shapes => try guide.line(a, out, &left, tool, .act, "--as twins — rank by how much MORE shape than vocabulary a pair shares"),
                 .twins => try guide.line(a, out, &left, tool, .act, "--as copies — no shared skeleton here; verbatim duplication may still exist"),
                 .any => try guide.line(a, out, &left, tool, .act, "--as twins — score how much MORE shape than vocabulary a pair shares"),
-                .recall => unreachable,
+                .recall, .context => unreachable,
             }
         },
     }
