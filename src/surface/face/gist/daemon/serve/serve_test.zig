@@ -10,6 +10,7 @@
 
 const std = @import("std");
 const serve = @import("serve.zig");
+const answer = @import("answer.zig"); // the query answer path owns the in-flight/budget test hooks
 const protocol = @import("../../../../exec/session/conduit/protocol.zig");
 const request = @import("../../../../exec/session/answer/request.zig");
 const shm = @import("../../../../exec/session/conduit/shm.zig");
@@ -523,8 +524,8 @@ test "serve: a blocked query occupies only its worker — a second client's ping
     // unblocks any pinned worker before teardown joins the pool — a failed
     // assertion can never deadlock the join (`set` latches, so it is idempotent).
     var gate: std.Io.Event = .unset;
-    serve.query_gate_for_test.store(&gate, .release);
-    defer serve.query_gate_for_test.store(null, .release);
+    answer.query_gate_for_test.store(&gate, .release);
+    defer answer.query_gate_for_test.store(null, .release);
 
     const daemon = try spawnDaemon(gpa, io, a, root);
     defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
@@ -599,8 +600,8 @@ test "serve: a query that overruns its budget is declined and the daemon stays r
     // past the deadline, so every eligible query declines — a deterministic
     // stand-in for a runaway/abandoned scan without a giant corpus. Reset the
     // hook before the next test regardless of outcome.
-    serve.query_budget_ns_override.store(1, .monotonic);
-    defer serve.query_budget_ns_override.store(-1, .monotonic);
+    answer.query_budget_ns_override.store(1, .monotonic);
+    defer answer.query_budget_ns_override.store(-1, .monotonic);
 
     const daemon = try spawnDaemon(gpa, io, a, root);
     defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
