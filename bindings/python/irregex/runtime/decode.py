@@ -34,7 +34,7 @@ from dataclasses import (
     make_dataclass,
 )
 from functools import cache
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Final
 
 from ..contract import table
 from ..contract.table import Tag
@@ -43,6 +43,7 @@ from .errors import RowDecodeError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
+    from dataclasses import Field
 
 
 class _Absent:
@@ -188,11 +189,7 @@ def bind[C: type](
                 f"{sorted({f.name for f in spec} | set(extra))}"
             )
             raise ImportError(msg)
-        defaulted = {
-            f.name
-            for f in declared
-            if f.default is not MISSING or f.default_factory is not MISSING  # type: ignore[misc]
-        }
+        defaulted = {f.name for f in declared if _has_default(f)}
         if unhandled := sorted({f.name for f in spec if f.optional} - defaulted - set(stand_ins)):
             msg = (
                 f"{cls.__name__}: optional schema fields need a default or an "
@@ -236,12 +233,16 @@ def row_type(schema: int) -> type:
     return generated
 
 
-def _default(tag: Tag) -> Any:
+def _has_default(field: Field[object]) -> bool:
+    return field.default is not MISSING or field.default_factory is not MISSING
+
+
+def _default(tag: Tag) -> Field[object]:
     """An optional field's stand-in: an empty tuple for a collection, `None` for a scalar. Never a zero, which would be a measurement."""
     return dc_field(default_factory=tuple) if tag in _EMPTY else dc_field(default=None)
 
 
-def record(row: Row) -> Any:
+def record(row: Row) -> object:
     """Decode one row into its typed record, recursing through nested row fields.
 
     Values are read positionally against the schema, so nothing depends on a key
@@ -273,7 +274,7 @@ def record(row: Row) -> Any:
     return row_type(row.schema)(**args)
 
 
-def records(rows: Iterable[Row]) -> Iterator[Any]:
+def records(rows: Iterable[Row]) -> Iterator[object]:
     """Decode a stream of rows lazily."""
     return (record(r) for r in rows)
 
@@ -283,18 +284,28 @@ def _coerce(tag: Tag, nested: int, value: object) -> object:
     match tag:
         case Tag.TEXT:
             return value if isinstance(value, str) else str(value)
-        case Tag.I64:
-            return int(value)  # type: ignore[arg-type]
+        case Tag.I64 | Tag.ENUM:
+            if not isinstance(value, int):
+                msg = f"{tag.name} expects an integer, got {type(value).__name__}"
+                raise RowDecodeError(msg)
+            return int(value) if tag is Tag.I64 else variant(nested, value)
         case Tag.F64:
-            return float(value)  # type: ignore[arg-type]
+            if not isinstance(value, int | float):
+                msg = f"F64 expects a number, got {type(value).__name__}"
+                raise RowDecodeError(msg)
+            return float(value)
         case Tag.BOOL:
             return bool(value)
-        case Tag.ENUM:
-            return variant(nested, int(value))  # type: ignore[arg-type]
         case Tag.TEXTS:
-            return tuple(str(v) for v in value)  # type: ignore[union-attr]
+            if not isinstance(value, list | tuple):
+                msg = f"TEXTS expects a sequence, got {type(value).__name__}"
+                raise RowDecodeError(msg)
+            return tuple(str(v) for v in value)
         case Tag.ROWS:
-            return tuple(record(r) for r in value)  # type: ignore[union-attr]
+            if not isinstance(value, list | tuple) or not all(isinstance(r, Row) for r in value):
+                msg = f"ROWS expects rows, got {type(value).__name__}"
+                raise RowDecodeError(msg)
+            return tuple(record(r) for r in value)
 
 
 def variant(enum: int, ordinal: int) -> str | Unknown:

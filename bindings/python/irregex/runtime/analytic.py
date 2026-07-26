@@ -34,7 +34,7 @@ from itertools import chain, islice
 import os
 from pathlib import Path
 import threading
-from typing import TYPE_CHECKING, Any, Final, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 from ..contract import table
 from . import native
@@ -110,7 +110,7 @@ class Stats:
 class Pull(Protocol):
     """A source of raw rows, pulled in bounded chunks."""
 
-    def __call__(self, cap: int) -> list[Row]:
+    def __call__(self, cap: int) -> list[object]:
         """Up to `cap` more rows; empty means the stream ended."""
         ...
 
@@ -140,11 +140,11 @@ class Rows:
         self._final: Stats | None = None
         self.closed = False
 
-    def __iter__(self) -> Iterator[Any]:
+    def __iter__(self) -> Iterator[object]:
         """Decode rows lazily, one native pull per record."""
         return chain.from_iterable(self.batches(1))
 
-    def batches(self, size: int = DEFAULT_BATCH) -> Iterator[list[Any]]:
+    def batches(self, size: int = DEFAULT_BATCH) -> Iterator[list[object]]:
         """Yield lists of up to `size` decoded records, one native pull each."""
         if size < 1:
             msg = "batch size must be >= 1"
@@ -158,11 +158,11 @@ class Rows:
         finally:
             self.close()
 
-    def drain(self) -> tuple[Any, ...]:
+    def drain(self) -> tuple[object, ...]:
         """Every record, then close. The shape a verb with a bounded `top` wants."""
         return tuple(chain.from_iterable(self.batches()))
 
-    def one(self) -> Any | None:
+    def one(self) -> object | None:
         """The single record of a one-row verb (`quote`, `blast`), or None when the answer is empty."""
         return next(iter(islice(iter(self), 1)), None)
 
@@ -194,11 +194,11 @@ class Rows:
             self.close()
 
 
-def rows_of(rows: Iterable[Row | Any], stats: Stats) -> Rows:
+def rows_of(rows: Iterable[object], stats: Stats) -> Rows:
     """An answer already materialized — how a lower tier presents itself as the same thing. Takes raw rows to decode, or records a tier typed itself."""
     pending = iter(rows)
 
-    def pull(cap: int) -> list[Row]:
+    def pull(cap: int) -> list[object]:
         return list(islice(pending, cap))
 
     return Rows(pull, lambda: stats)
