@@ -28,7 +28,7 @@ const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const Outcome = @import("../../../cli/outcome.zig").Outcome;
 const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
-const persist = @import("../../../../corpus/index/trigrams/persist.zig");
+const frame = @import("../../../../corpus/index/frame/frame.zig");
 const shelf_mod = @import("../../../../corpus/index/codex/shelf.zig");
 const assay = @import("../../../../assay/assay.zig");
 const Dir = std.Io.Dir;
@@ -62,7 +62,7 @@ pub fn persistShelf(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mo
     defer shelf.deinit(gpa);
     const blob = try shelf.save(gpa);
     defer gpa.free(blob);
-    try persist.writeAtomic(io, shelfFile(), blob);
+    try frame.writeAtomic(io, shelfFile(), blob);
     return .{ .bytes = blob.len, .bits_per_char = shelf.cx.stats.bitsPerChar() };
 }
 

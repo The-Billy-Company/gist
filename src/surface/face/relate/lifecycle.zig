@@ -20,7 +20,7 @@ const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const Outcome = @import("../../cli/outcome.zig").Outcome;
 const fresh = @import("../../../corpus/index/trigrams/fresh.zig");
-const persist = @import("../../../corpus/index/trigrams/persist.zig");
+const frame = @import("../../../corpus/index/frame/frame.zig");
 const atlas_mod = @import("../../../corpus/index/atlas/atlas.zig");
 const frag_mod = @import("../../../corpus/index/frag/frag.zig");
 const codex_face = @import("../gist/lifecycle/codex.zig");
@@ -51,7 +51,7 @@ pub fn runIndex(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     defer gpa.free(silhouettes);
     const blob = try atlas_mod.save(gpa, corpus.paths, sketches, silhouettes, built_ns, roots);
     defer gpa.free(blob);
-    try persist.writeAtomic(io, atlas_mod.atlasFile(), blob);
+    try frame.writeAtomic(io, atlas_mod.atlasFile(), blob);
     const atlas_dur = run.elapsed().ms();
     run.emit("atlas: {d} files · {d:.1} MiB corpus → {d:.1} MiB atlas · {d:.0} ms → {s}\n", .{
         corpus.docs.len,
@@ -75,7 +75,7 @@ pub fn runIndex(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     defer fbuild.deinit();
     const fblob = try frag_mod.save(gpa, &fbuild, built_ns, roots);
     defer gpa.free(fblob);
-    try persist.writeAtomic(io, frag_mod.fragFile(), fblob);
+    try frame.writeAtomic(io, frag_mod.fragFile(), fblob);
     const frag_dur = frag_span.read(io).ms();
     run.emit("frag:  {d} fragment(s) → {d:.1} MiB · {d:.0} ms → {s}\n", .{
         fbuild.count(),
