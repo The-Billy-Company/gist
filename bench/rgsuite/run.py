@@ -212,10 +212,10 @@ def _cmp_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg):
     return "FAIL", f"stdout differs (gist {len(out_g)}B rc={rc_g} · rg {len(out_rg)}B rc={rc_rg})"
 
 
-# The whole mined suite runs once per ENGINE — parallel (`pipeline.zig`,
-# gist's default recursive-walk dispatch) and serial (`run.zig`, forced via
-# the internal `GIST_NO_PARALLEL` knob — see `pipeline.eligible`'s doc
-# comment in the Zig source). A single-engine run isn't a complete parity
+# The whole mined suite runs once per ENGINE — parallel (`swarm/`,
+# gist's default recursive-walk dispatch) and serial (`serial.zig`, forced via
+# the internal `GIST_NO_PARALLEL` knob — see `assay.serialForced` /
+# `swarm.eligible` in the Zig source). A single-engine run isn't a complete parity
 # proof: the parallel engine landed a day after a serial-only ignore-parity
 # fix and silently missed porting it (`Ignore.skipFromVerdict` lacked the
 # whitelist-override pair `shouldSkip` had), and the vast majority of this

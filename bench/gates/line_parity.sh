@@ -166,9 +166,9 @@ track() { # <label> <reason> <args...> — a documented/tracked divergence: neve
   fi
 }
 
-# The whole case list runs once per ENGINE — parallel (pipeline.zig, gist's
-# default recursive-walk path) and serial (run.zig, forced via the internal
-# `GIST_NO_PARALLEL` knob — see `pipeline.eligible`'s doc comment). This is
+# The whole case list runs once per ENGINE — parallel (swarm/, gist's
+# default recursive-walk path) and serial (serial.zig, forced via the internal
+# `GIST_NO_PARALLEL` knob — see `assay.serialForced` / `swarm.eligible`). This is
 # not redundancy: the parallel engine landed a day after a serial-only ignore-
 # parity fix and silently missed porting it (`Ignore.skipFromVerdict` had no
 # whitelist-override params while `Ignore.shouldSkip` did) — a single-engine
