@@ -21,7 +21,7 @@ doc_radar:
       file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
       contains:
         - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
-        - "8.4× geomean end-to-end speedup"
+        - "7.5× geomean end-to-end speedup"
     - description: "the warm claim is sourced from the armed resident-session certificate, never the cold race"
       file: pkg/kernels/irregex/bench/session/session_meta.json
       contains: ['"armed": true', '"geomean_speedup": 565.6']
@@ -188,7 +188,7 @@ answer with less ceremony.
 compared with a regex-AST-derived lower bound on runs every match must contain.
 It soundly prunes literal-free class repetitions that substring indexes cannot
 express. On the committed narrow-class slate, it turns a trigram blind spot
-into an 8.4× geomean end-to-end speedup. The theorem, calculus, count-cousin
+into a 7.5× geomean end-to-end speedup. The theorem, calculus, count-cousin
 ablation, adversarial prior-art review, and corpus proof live in
 [`../crest/`](../crest/).
 

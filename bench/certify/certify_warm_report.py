@@ -244,7 +244,7 @@ def main() -> int:
     # them is `\w{3,8}` — a bare join puts that comma in the middle of a field and
     # silently shifts every column after it for that row.
     with args.csv.open("w", newline="") as fh:
-        csv.writer(fh).writerows(csv_rows)
+        csv.writer(fh, lineterminator="\n").writerows(csv_rows)
     measured = len(csv_rows) - 1
     print(f"warm tier: {measured} classes · {loss} loss vs rg → {args.certificate}")
     print(f"warm-tier CSV → {args.csv}")
