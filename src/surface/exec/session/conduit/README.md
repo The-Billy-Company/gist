@@ -7,7 +7,7 @@ doc_radar:
     - pkg/kernels/irregex/src/surface/exec/session/conduit/spawn.zig
   sentinels:
     - file: pkg/kernels/irregex/src/surface/exec/session/conduit/protocol.zig
-      contains: ["chunk = 11", "protocol_version: u8 = 6", "known_flags", "flag_word", "flag_invert", "flag_smart_case", "flag_quiet", "flag_max_count_present"]
+      contains: ["chunk = 11", "protocol_version: u8 = 7", "known_flags", "flag_word", "flag_invert", "flag_smart_case", "flag_quiet", "flag_max_count_present"]
 -->
 
 # `conduit/` — how a request reaches the daemon and an answer gets back

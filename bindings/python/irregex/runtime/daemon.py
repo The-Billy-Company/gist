@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-PROTOCOL_VERSION = 6  # must match `protocol.protocol_version`
+PROTOCOL_VERSION = 7  # must match `protocol.protocol_version`
 # `$GIST_SESSION_SOCK`, else `$GIST_DIR/gistd.sock` (default `.local/gist-verify`).
 DEFAULT_OUT_DIR = ".local/gist-verify"
 
@@ -44,6 +44,7 @@ SESSION_IO_TIMEOUT = 2.0
 # Mirror `protocol.zig::Opcode` / `request.Mode` / `flag_*`.
 _OP_HELLO, _OP_READY, _OP_QUERY, _OP_RESULT, _OP_DECLINE = 1, 2, 3, 4, 5
 _OP_ERR, _OP_SHUTDOWN, _OP_STATUS, _OP_PING, _OP_PONG = 6, 7, 8, 9, 10
+_OP_DIAG = 16
 _MODE_FILES, _MODE_COUNT = 0, 1
 # `smart_case` ships raw; Zig resolves via `effectiveIgnoreCase`. `quiet` is the
 # existence early-halt; `max_count` sets bit 7 AND writes a `u64 LE` after the
@@ -410,6 +411,9 @@ class Session:
                 body = bytes([mode, flags]) + cap + request.pattern.encode()
                 _send(s, _OP_QUERY, body)
                 op, payload = _recv(s)
+                while op == _OP_DIAG:
+                    os.write(2, payload)
+                    op, payload = _recv(s)
             except (OSError, _WireError) as _:
                 self._drop()
                 continue  # stale connection → reconnect + retry once
