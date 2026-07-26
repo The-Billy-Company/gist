@@ -85,6 +85,21 @@ pub fn frame(server: *crew.Server, slot: u16) Route {
             handleChanged(server.session, server.watcher, server.gpa, fd, f.payload()) catch return .drop;
             return .keep;
         },
+        // The answer keep. Both frames are epoch arithmetic over state the poll
+        // thread already holds — no walk, no session read — so they answer
+        // inline like the other control frames. A `retain` carries the caller's
+        // rendered answer and is the one control frame that can be large; it is
+        // still a plain memcpy off a local socket, not an O(corpus) walk.
+        .recall => {
+            defer f.deinit();
+            handleRecall(server, fd, f.payload()) catch return .drop;
+            return .keep;
+        },
+        .retain => {
+            defer f.deinit();
+            handleRetain(server, f.payload());
+            return .keep;
+        },
         .shutdown => {
             f.deinit();
             return .stop;
@@ -117,6 +132,48 @@ fn handleChanged(session: *ResidentSession, watcher: *watch.Watcher(ResidentSess
     defer if (snap) |*s| s.deinit(gpa);
     try protocol.encodeAnnals(&buf, gpa, if (snap) |s| .{ .prefix = s.prefix, .paths = s.paths } else null);
     if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+}
+
+/// The corpus change epoch, or null when the daemon cannot vouch for one — an
+/// unarmed or non-syscall-synchronous watcher, or a ledger poisoned by an event
+/// it could not attribute. Same causal barrier the annals consult stands on
+/// (ADR-372): the flush drains every event whose syscall completed before this
+/// request was sent, so an epoch read here cannot miss a write the client's own
+/// earlier run could have seen.
+fn epochNow(server: *crew.Server) ?u64 {
+    if (!server.watcher.flushSync()) return null;
+    return server.session.annals.epoch();
+}
+
+/// Answer a `recall`: the held answer if the corpus has not moved since it was
+/// computed, otherwise the current epoch for the caller to stamp its own answer
+/// with. An unvouchable epoch answers `ok=0` — the client then neither trusts
+/// nor feeds the keep, and simply runs cold as if no daemon existed.
+fn handleRecall(server: *crew.Server, fd: std.posix.fd_t, key: []const u8) !void {
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(server.gpa);
+    const epoch = epochNow(server) orelse {
+        try protocol.encodeRecalled(&buf, server.gpa, null);
+        if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+        return;
+    };
+    const found: ?protocol.Hit = switch (server.keep.recall(key, epoch)) {
+        .hit => |h| .{ .code = h.code, .answer = h.answer },
+        .stale, .absent => null,
+    };
+    try protocol.encodeRecalled(&buf, server.gpa, .{ .epoch = epoch, .hit = found });
+    if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+}
+
+/// Take a `retain` offer. Kept only when the corpus is still at the epoch the
+/// client read before it started computing — otherwise a file moved DURING the
+/// computation and the answer describes a tree that no longer exists. Silent
+/// either way: the client has already printed its answer and is not waiting.
+fn handleRetain(server: *crew.Server, payload: []const u8) void {
+    const r = protocol.decodeRetain(payload) catch return;
+    const epoch = epochNow(server) orelse return;
+    if (epoch != r.epoch) return;
+    server.keep.retain(r.key, epoch, r.code, r.answer);
 }
 
 /// Answer a `hello`/`status` frame with the READY triple (daemon gen, session

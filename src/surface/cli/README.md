@@ -1,3 +1,16 @@
+<!--
+doc_radar:
+  counts:
+    - glob: pkg/kernels/irregex/src/surface/cli/*.zig
+      equals: 7
+      unit: modules
+      description: the table below enumerates this folder — a new module needs a row
+  sentinels:
+    - file: pkg/kernels/irregex/src/surface/cli/reprise.zig
+      description: all three ways a face can finish route through the keep's door
+      contains: ["pub fn attempt", "pub fn seal", "pub fn depart"]
+-->
+
 # `src/surface/cli/` — the shared face vocabulary
 
 The plumbing every product face speaks to the terminal — argv value parsing,
@@ -16,6 +29,7 @@ per binary.
 | `grade.zig`    | The surface half of kinship judgment (the `Channel`/`Grade` vocabulary itself is a kernel fact, re-exported here): `Sift`, the shared emit ledger every ranking verb runs — cap, drop vanished rows, remember the strongest score, withhold under `--min-grade` — and the `Verdict` it reports when an answer is weak |
 | `guide.zig`    | The stderr guidance grammar both gist's no-match hints and relate's verdicts speak: `tool: try …` / `tool: note: …` lines under a shared budget                                                                                                 |
 | `outcome.zig`  | The process exit code: ripgrep's `0`/`1`/`2` contract computed in one place, including the two precedences (a fault normally outranks a match; under `--quiet` a match outranks a fault)                                                        |
+| `reprise.zig`  | Asking the same question twice: for a verb whose answer is a pure function of the corpus, consult the resident daemon's answer keep before running it and offer the rendered result back after. Owns the key (argv + cwd + scoping env + the running binary's own identity) and the stdout carbon copy; a hit prints held bytes and exits with the held code |
 
 ## Why it sits beside `face/`, not inside it
 

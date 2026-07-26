@@ -39,6 +39,7 @@ const outcome = @import("outcome.zig");
 const cli_args = @import("../exec/cold/argv/args.zig");
 const corpus_mod = @import("../../corpus/tree/corpus.zig");
 const assay = @import("../../assay/assay.zig");
+const reprise = @import("reprise.zig");
 
 const oom = cli_args.oom;
 
@@ -103,6 +104,15 @@ pub const Verb = struct {
     flags: []const Flag = &.{},
     section: Section = .query,
     run: *const fn (std.mem.Allocator, std.Io, []const []const u8) anyerror!void,
+    /// Whether this verb's answer is a pure function of the corpus, so the
+    /// resident daemon may hold it against a change epoch (`reprise.zig`).
+    ///
+    /// True for a question ABOUT the corpus. False for anything that reads the
+    /// clock, the artifacts' own state, or the world outside the tree — a
+    /// lifecycle verb reporting index freshness must never be answered from a
+    /// cache of what it said last time, because "what it said last time" is
+    /// precisely the thing being asked about.
+    keeps: bool = false,
 };
 
 /// A name that used to be a verb and is now a shape of another one.
@@ -396,6 +406,10 @@ fn emitSchema(face: Face, version: []const u8) void {
 /// trace, and 1 is "clean no-match" under the rg contract. Errors exit 2.
 pub fn drive(face: Face, version: []const u8, init: std.process.Init) void {
     steer(face, version, init) catch |e| outcome.fatal(face.tool, e);
+    // The third way a face can finish: no outcome, no verdict, just a verb that
+    // ran out of rows to print. Sealing here rather than only at the two exit
+    // sites is what makes the keep cover the kinship verbs at all.
+    reprise.seal(0);
 }
 
 fn steer(face: Face, version: []const u8, init: std.process.Init) !void {
@@ -418,6 +432,13 @@ fn steer(face: Face, version: []const u8, init: std.process.Init) !void {
     var rest: std.ArrayList([]const u8) = .empty;
     defer rest.deinit(init.gpa);
     while (it.next()) |arg| try rest.append(init.gpa, arg);
+    // A corpus-pure verb asks the resident keep first: a hit prints the held
+    // answer and exits here, and a miss arms the stdout copy the verb's own
+    // exit offers back (`reprise.zig`). Silent and fail-open — an unreachable
+    // or stale daemon leaves the dispatch below exactly as it was.
+    if (face.find(mode)) |v| {
+        if (v.keeps) reprise.attempt(init.gpa, init.io, init.environ_map, face.tool, v.name, rest.items);
+    }
     if (!try dispatch(face, mode, init.gpa, init.io, rest.items)) unknown(face, mode);
 }
 

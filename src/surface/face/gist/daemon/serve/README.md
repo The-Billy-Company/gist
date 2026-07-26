@@ -16,6 +16,9 @@ doc_radar:
     - description: "idle release stays two-stage: watch set before session"
       file: pkg/kernels/irregex/src/surface/face/gist/daemon/serve/idle.zig
       contains: ["pub const ttl_ms", "pub const shed_ms", "pub fn nextStep"]
+    - description: "the keep is routed inline and gated on an epoch the watcher can vouch for"
+      file: pkg/kernels/irregex/src/surface/face/gist/daemon/serve/route.zig
+      contains: ["handleRecall", "handleRetain", "epochNow"]
 ---
 
 # surface/face/gist/daemon/serve — `gist serve`
@@ -51,6 +54,23 @@ reports back — the reason one slow query never stalls the other coworkers.
 existence flag, lines over the socket or over shared memory, files/count) and
 holds the per-query wall-clock budget that reclaims a runaway or abandoned scan.
 [`idle.zig`](idle.zig) is what an idle daemon gives back, and when.
+
+## The other thing the session is good for: not answering twice
+
+Everything above makes ONE query cheaper. Some questions have no cheaper form —
+`relate echoes --shape distinct` is a claim about every pair of files, and no
+index makes a claim about every pair cheap. For those, `route.zig` also serves
+the [answer keep](../../../../exec/session/answer/keep.zig): rendered stdout plus
+an exit code, held against the corpus change epoch
+([`annals.epoch`](../../../../exec/session/freshness/annals.zig)).
+
+The daemon **never computes** a kept answer. A client computes cold and offers
+its rendered bytes back stamped with the epoch it read before it started; the
+daemon keeps them only if the corpus has not moved since. That asymmetry is the
+whole safety argument — a store that cannot recompute cannot recompute
+differently — and it is why `recall`/`retain` are control frames answered inline
+rather than pool work. The caller's half is
+[`cli/reprise.zig`](../../../../cli/reprise.zig).
 
 ## Idle release is ordered by what the resource costs the machine
 

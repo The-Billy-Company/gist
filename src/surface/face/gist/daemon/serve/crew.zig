@@ -31,7 +31,9 @@ const builtin = @import("builtin");
 const resident = @import("../../../../exec/session/warm/resident.zig");
 const protocol = @import("../../../../exec/session/conduit/protocol/protocol.zig");
 const watch = @import("../../../../exec/session/watch/watch.zig");
+const keep_mod = @import("../../../../exec/session/answer/keep.zig");
 const answer = @import("answer.zig");
+const assay = @import("../../../../../assay/assay.zig");
 const fault = @import("../../../../../fault.zig");
 const net = std.Io.net;
 
@@ -112,6 +114,11 @@ pub const Server = struct {
     io: std.Io,
     session: *ResidentSession,
     watcher: *watch.Watcher(ResidentSession),
+    /// Rendered answers from the sibling faces, held against the corpus epoch
+    /// (`keep.zig`). Owned by the daemon's run frame, not by the session: the
+    /// session answers questions this daemon understands, the keep holds
+    /// answers to questions it deliberately does not.
+    keep: *keep_mod.Keep,
 
     conns: [max_clients]Conn = [_]Conn{.{ .stream = undefined, .gen = 0 }} ** max_clients,
 
@@ -194,10 +201,20 @@ pub const Server = struct {
             var frame = job.frame;
             const c = &self.conns[job.slot];
             const ext = frame.op == .query_ext;
+            // `GIST_TRACE=session` is the only view of per-request service time.
+            // The lifecycle notes narrate the daemon; the summary a worker emits
+            // travels to the *client's* stderr through its buffer sink — so from
+            // the operator's side, "which requests are slow, and are any being
+            // dropped" is otherwise unobservable. Lands on the daemon's own
+            // stderr because this span is outside the worker's sink scope.
+            const served = assay.Span.open(self.io);
             const drop = if (answer.query(self.session, self.gpa, c.stream.socket.handle, frame.payload(), c.caps, ext)) |_|
                 false
             else |_|
                 true;
+            assay.trace(.session, "session: slot {d} · {t} · {d:.1} ms · {s}\n", .{
+                job.slot, frame.op, served.read(self.io).ms(), if (drop) "dropped" else "served",
+            });
             frame.deinit();
 
             self.mutex.lockUncancelable(self.io);
@@ -227,7 +244,13 @@ pub fn configuredWorkers() usize {
 /// test`: the daemon is spawned in-process by `serve_test.zig`, and any stderr
 /// from a passing unit-test binary makes the build runner dump the step tree
 /// with a spurious "failed command:" banner — a green run must read green.
+///
+/// Routed through `assay.diag` rather than `std.debug.print` (ADR-373 law 6):
+/// the sink is what decides where a lifecycle line lands, and the daemon is the
+/// one process where that decision is load-bearing — a worker answering a warm
+/// query holds a `buffer` sink so its diagnostics reach the *client's* stderr
+/// instead of the daemon's, which a direct write silently defeats.
 pub fn note(comptime fmt: []const u8, args: anytype) void {
     if (builtin.is_test) return;
-    std.debug.print(fmt, args);
+    assay.diag(fmt, args);
 }

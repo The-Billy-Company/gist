@@ -48,6 +48,7 @@
 const std = @import("std");
 const resident = @import("../../../../exec/session/warm/resident.zig");
 const watch = @import("../../../../exec/session/watch/watch.zig");
+const keep_mod = @import("../../../../exec/session/answer/keep.zig");
 const answer = @import("answer.zig");
 const crew = @import("crew.zig");
 const loop = @import("loop.zig");
@@ -123,8 +124,13 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
     // just answers cold and re-spawns later; worker-spawn failure only degrades
     // to inline handling (below), so it fails open.
     var wp: [2]std.posix.fd_t = undefined;
-    if (pipe(&wp) != 0) return error.WakePipeFailed;
-    var server = crew.Server{ .gpa = gpa, .io = io, .session = &session, .watcher = &watcher, .wake_r = wp[0], .wake_w = wp[1] };
+    if (pipe(&wp) != 0) return fault.Resource.Exhausted;
+    // The answer keep outlives every connection and dies with the daemon — its
+    // whole soundness argument rests on this watcher's epoch, so it must not
+    // survive the watcher that vouched for it.
+    var keep = keep_mod.Keep.init(gpa);
+    defer keep.deinit();
+    var server = crew.Server{ .gpa = gpa, .io = io, .session = &session, .watcher = &watcher, .keep = &keep, .wake_r = wp[0], .wake_w = wp[1] };
     // Teardown runs LIFO; register so it unwinds in this order: (1) stop + join
     // the workers — they touch the session, the connections, and the wake pipe,
     // so they must all be quiescent first; (2) close the connections; (3) close

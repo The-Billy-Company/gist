@@ -21,6 +21,7 @@ const std = @import("std");
 const corpus_mod = @import("../../corpus/tree/corpus.zig");
 const channel_mod = @import("../../kernel/kinship/metric/channel.zig");
 const guide = @import("guide.zig");
+const reprise = @import("reprise.zig");
 
 /// The one channel vocabulary + its calibrated bands (kernel-owned).
 pub const Channel = channel_mod.Channel;
@@ -98,7 +99,7 @@ pub const Sift = struct {
     /// line before its judgment.
     pub fn settle(self: *const Sift, tool: []const u8, subject: []const u8) void {
         report(tool, subject, self.verdict);
-        if (self.verdict.code() != 0) std.process.exit(self.verdict.code());
+        if (self.verdict.code() != 0) reprise.depart(self.verdict.code());
     }
 };
 
@@ -293,7 +294,7 @@ pub fn report(tool: []const u8, subject: []const u8, v: Verdict) void {
 /// Call it AFTER the run's trace line: how long the query took is a fact about
 /// the run, not about whether it found anything.
 pub fn settle(v: Verdict) void {
-    if (v.code() != 0) std.process.exit(v.code());
+    if (v.code() != 0) reprise.depart(v.code());
 }
 
 // ── tests ────────────────────────────────────────────────────────────────
