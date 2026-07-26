@@ -22,8 +22,8 @@ const die = args.die;
 const oom = args.oom;
 const multiline = @import("../emit/multiline.zig");
 const Emitter = output.Emitter;
-const Regex = @import("../../../../kernel/match/regex/linear/program/core.zig").Regex;
-const Matcher = @import("../../../../kernel/match/regex/linear/ladder/matcher.zig").Matcher;
+const Regex = @import("../../../../kernel/match/regex/regex.zig").Regex;
+const Matcher = @import("../../../../kernel/match/regex/regex.zig").Matcher;
 const simd = @import("../../../../kernel/match/scan/simd.zig");
 
 /// ripgrep's default read-buffer capacity. Binary detection scans each fill's
