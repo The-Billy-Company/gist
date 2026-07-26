@@ -23,7 +23,7 @@ const fresh = @import("../../../corpus/index/trigrams/fresh.zig");
 const frame = @import("../../../corpus/index/frame/frame.zig");
 const atlas_mod = @import("../../../corpus/index/atlas/atlas.zig");
 const frag_mod = @import("../../../corpus/index/frag/frag.zig");
-const codex_face = @import("../gist/lifecycle/codex.zig");
+const shelf_mod = @import("../../../corpus/index/codex/shelf.zig");
 const assay = @import("../../../assay/assay.zig");
 const kinship = @import("kinship.zig");
 const flags = @import("../../cli/flags.zig");
@@ -92,19 +92,19 @@ pub fn runIndex(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
 
     if (with_shelf) {
         const shelf_span = assay.Span.open(io);
-        const shelf = try codex_face.persistShelf(gpa, io, &corpus, built_ns);
+        const shelf = try shelf_mod.persist(gpa, io, corpus.docs, corpus.paths, built_ns);
         const shelf_dur = shelf_span.read(io).ms();
         run.emit("shelf: {d:.1} MiB ({d:.2} bits/char) · {d:.0} ms → {s}\n", .{
             @as(f64, @floatFromInt(shelf.bytes)) / (1 << 20),
             shelf.bits_per_char,
             shelf_dur,
-            codex_face.shelfFile(),
+            shelf_mod.shelfFile(),
         }, .{
             .{ "artifact", "s", "shelf" },
             .{ "shelf_mib", "d:.1", @as(f64, @floatFromInt(shelf.bytes)) / (1 << 20) },
             .{ "bits_per_char", "d:.2", shelf.bits_per_char },
             .{ "ms", "d:.0", shelf_dur },
-            .{ "path", "s", codex_face.shelfFile() },
+            .{ "path", "s", shelf_mod.shelfFile() },
         });
     }
 }
@@ -170,7 +170,7 @@ pub fn runStatus(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
             .built_unix_ns = f.built_ns,
         };
     }
-    if (fileBytes(io, codex_face.shelfFile())) |b| st.shelf = .{ .state = .ready, .bytes = b };
+    if (fileBytes(io, shelf_mod.shelfFile())) |b| st.shelf = .{ .state = .ready, .bytes = b };
 
     const shelf_line = if (st.shelf.state == .ready) "ready (quote answers)" else "missing — `relate index --shelf` builds it";
     var out: std.ArrayList(u8) = .empty;

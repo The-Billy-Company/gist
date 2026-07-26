@@ -347,7 +347,7 @@ def splice(cert: Path, section: str) -> None:
     """Replace an existing `## Layer C …` block (→ next `## Layer`/EOF); else insert it *before* the macroscopic Layer A section (which certify_stats.py rewrites to EOF) so a later macro re-splice can't clobber it; else append at EOF."""
     body = section.rstrip() + "\n"
     if not cert.exists():
-        cert.write_text("# gist — Certificate of Optimality\n\n" + body)
+        cert.write_text("# gist — Dominance-and-Fit Certificate\n\n" + body)
         return
     text = cert.read_text().replace(LEGACY_SUMMARY, SUMMARY)
     m = re.search(r"^## Layer C\b.*$", text, re.MULTILINE)

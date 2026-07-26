@@ -116,11 +116,14 @@ pub fn searchCursor(engine: *api.Engine, req_ptr: ?*const contract.SearchRequest
         .timeout_ns = if (req.timeout_ns == 0) null else req.timeout_ns,
         .max_results = if (req.max_results == 0) null else req.max_results,
     };
-    const inner = engine.search(query, run) catch |e| return switch (e) {
-        error.OutOfMemory => contract.report(.{ .code = error.OutOfMemory }),
-        // The hosted spelling of a declinature — the caller answers cold and
-        // gets the identical result, so nothing lands in the fault slot.
-        error.UnsupportedPattern => .stale,
+    const answered = engine.search(query, run) catch |e| switch (e) {
+        error.OutOfMemory => return contract.report(.{ .code = error.OutOfMemory }),
+    };
+    const inner = switch (answered) {
+        .got => |c| c,
+        // A declinature — the caller answers cold and gets the identical
+        // result, so nothing lands in the fault slot.
+        .declined => return .stale,
     };
     const handle = gpa.create(Cursor) catch {
         inner.deinit();

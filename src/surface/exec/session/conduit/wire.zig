@@ -19,7 +19,13 @@ const fault = @import("../../../../fault.zig");
 /// Refused before allocation — dwarfs any real response, caps a hostile peer.
 pub const max_frame: u32 = 16 << 20;
 
-pub const WireError = error{ FrameTooLarge, Truncated, BadOpcode, BadFrame, ConnClosed, Io, OutOfMemory };
+/// Every fault this transport can produce, drawn entirely from the declared
+/// `wire` + `persist` + `resource` domains (ADR-373 law 2). `UnexpectedFrame`
+/// carries what were once `BadFrame` and `BadOpcode`: no handler ever
+/// distinguished them — both mean "the peer sent bytes this protocol cannot
+/// read", and both end the connection — so two names bought nothing and cost
+/// the taxonomy a synonym pair.
+pub const WireError = fault.Wire || error{ Truncated, OutOfMemory };
 
 /// Append `v` little-endian to `buf` — the shared width-generic int writer
 /// every frame body composes headers/counts with.
@@ -39,11 +45,11 @@ pub fn writeFrame(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, op: u8, paylo
 pub const Parsed = struct { op: u8, payload: []const u8, consumed: usize };
 
 /// Parse one frame from the front of `bytes`, or `null` when incomplete.
-/// `FrameTooLarge` is the only hard error (a raw opcode is always valid here).
+/// `StreamTooLong` is the only hard error (a raw opcode is always valid here).
 pub fn parseFrame(bytes: []const u8) WireError!?Parsed {
     if (bytes.len < 4) return null;
     const len = std.mem.readInt(u32, bytes[0..4], .little);
-    if (len == 0 or len > max_frame) return WireError.FrameTooLarge;
+    if (len == 0 or len > max_frame) return WireError.StreamTooLong;
     const total = 4 + @as(usize, len);
     if (bytes.len < total) return null;
     return .{ .op = bytes[4], .payload = bytes[5..total], .consumed = total };
@@ -113,7 +119,7 @@ fn readExact(fd: std.posix.fd_t, dst: []u8) bool {
 }
 
 /// Receive one whole frame from `fd`. `ConnClosed` on truncated peer;
-/// `FrameTooLarge` fails closed.
+/// `StreamTooLong` fails closed.
 pub fn recvFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!Frame {
     var ignored: ?std.posix.fd_t = null;
     return recvFramed(gpa, fd, false, &ignored);
@@ -139,7 +145,7 @@ fn recvFramed(
     var hdr: [4]u8 = undefined;
     if (!fill(fd, &hdr, out_fd)) return WireError.ConnClosed;
     const len = std.mem.readInt(u32, &hdr, .little);
-    if (len == 0 or len > max_frame) return WireError.FrameTooLarge;
+    if (len == 0 or len > max_frame) return WireError.StreamTooLong;
     const total = 4 + @as(usize, len);
     const bytes = gpa.alloc(u8, total) catch return WireError.OutOfMemory;
     errdefer gpa.free(bytes);

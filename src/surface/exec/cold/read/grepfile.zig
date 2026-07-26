@@ -22,6 +22,7 @@ const die = args.die;
 const oom = args.oom;
 const multiline = @import("../emit/multiline.zig");
 const Emitter = output.Emitter;
+const Dir = std.Io.Dir;
 const Regex = @import("../../../../kernel/match/regex/regex.zig").Regex;
 const Matcher = @import("../../../../kernel/match/regex/regex.zig").Matcher;
 const simd = @import("../../../../kernel/match/scan/simd.zig");
@@ -401,7 +402,7 @@ pub fn diagSearch(gpa: std.mem.Allocator, json: bool, s: Stats, elapsed: assay.D
 /// A real descent produces a much wider set than the corpus domain (EMFILE,
 /// ENODEV, a bad UTF-8 name), and ripgrep prints the OS string for those too,
 /// so the widening is the walk's truth rather than an erased domain.
-fn pathErrNote(err: anyerror) []const u8 {
+fn pathErrNote(err: WalkFault) []const u8 {
     inline for (@typeInfo(fault.Corpus).error_set.?) |m| {
         const member = @field(fault.Corpus, m.name);
         if (err == member) return fault.pathNote(member);
@@ -409,11 +410,20 @@ fn pathErrNote(err: anyerror) []const u8 {
     return @errorName(err);
 }
 
+/// Everything the three descent call sites can hand this renderer: the serial
+/// engine's `std.Io` open + selective walk, the parallel engine's raw `openat`
+/// + iterate, and the explicit-PATH probe's `openat`. It is the UNION of the
+/// two engines' own `WalkFault` sets, each of which coerces into it — naming it
+/// (ADR-373 law 2) rather than taking `anyerror` means a widened std set is a
+/// build failure at the one place that decides how a walk failure reads, not a
+/// mystery string on a user's stderr.
+pub const WalkFault = Dir.OpenError || Dir.Iterator.Error || Dir.SelectiveWalker.Error || std.posix.OpenError;
+
 /// ripgrep's walk-error stderr line (`rg: <path>: <errno>` → `gist: …`) — THE
 /// one rendering, shared by the serial and parallel engines' `reportWalkError`
 /// so a directory neither could descend is reported byte-identically. Each
 /// engine layers its own exit-2 flagging on top (plain bool vs queue atomic).
-pub fn printWalkError(rel: []const u8, e: anyerror) void {
+pub fn printWalkError(rel: []const u8, e: WalkFault) void {
     assay.diag("gist: {s}: {s}\n", .{ rel, pathErrNote(e) });
 }
 

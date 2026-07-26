@@ -1,4 +1,4 @@
-//! gist bench — `gist-portbound`: Layer B′ of the optimality certificate —
+//! gist bench — `gist-portbound`: Layer B′ of the dominance-and-fit certificate —
 //! the **port bound, measured on this machine**.
 //!
 //! Layer B (`portcert.sh`) is a *static* llvm-mca bound on gist's two hot loops,

@@ -34,7 +34,7 @@ def _certificate(
     Headers come from the roster itself, so the fixture tracks the contract
     instead of duplicating it: adding a layer to ``LAYERS`` widens these tests.
     """
-    out = ["# Certificate of Optimality", "", f"corpus: **{files}** files · {mib} MiB", ""]
+    out = ["# Dominance-and-Fit Certificate", "", f"corpus: **{files}** files · {mib} MiB", ""]
     for name in layers:
         out += [f"## {ledger.LAYERS[name]} — section", ""]
         if name == "A-macro":

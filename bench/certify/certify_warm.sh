@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# certify_warm.sh — the WARM tier of the Certificate of Optimality (ADR-352 rung 2.5).
+# certify_warm.sh — the WARM tier of the Dominance-and-Fit Certificate (ADR-352 rung 2.5).
 #
 # The macroscopic Layer A race in certify.sh times gist COLD: a fresh process per
 # query that reloads the index and reads candidates — the same regime csearch and

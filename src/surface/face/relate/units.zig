@@ -579,10 +579,16 @@ pub const Fault = fault.Pattern || fault.Resource;
 fn dieCompile(e: Fault) noreturn {
     switch (e) {
         error.Unsupported => die("--matching: a pattern is outside gist's linear-time regex syntax (use -F for a literal, or simplify)\n", .{}),
+        error.BadPattern => die("--matching: a pattern is not valid regex syntax (use -F to match it literally)\n", .{}),
         error.TooManyPatterns => die("--matching: too many patterns (max {d})\n", .{candidates.max_patterns}),
         // The rest have no bespoke guidance to give, so naming the fault is the
         // honest report — listed, never `else`-caught.
-        error.PowersetCapHit, error.NeedleTooShort, error.OutOfMemory, error.TimedOut => die("--matching: {s}\n", .{@errorName(e)}),
+        error.PowersetCapHit,
+        error.NeedleTooShort,
+        error.OutOfMemory,
+        error.TimedOut,
+        error.Exhausted,
+        => die("--matching: {s}\n", .{@errorName(e)}),
     }
 }
 

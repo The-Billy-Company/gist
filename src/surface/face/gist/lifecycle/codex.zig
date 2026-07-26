@@ -26,20 +26,16 @@
 
 const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
-const Outcome = @import("../../../cli/outcome.zig").Outcome;
-const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
-const frame = @import("../../../../corpus/index/frame/frame.zig");
+const outcome = @import("../../../cli/outcome.zig");
+const Outcome = outcome.Outcome;
 const shelf_mod = @import("../../../../corpus/index/codex/shelf.zig");
 const assay = @import("../../../../assay/assay.zig");
 const Dir = std.Io.Dir;
 
-const shelf_path = corpus_mod.ArtifactPath("codex.shelf");
-pub fn shelfFile() []const u8 {
-    return shelf_path.get();
-}
+const shelfFile = shelf_mod.shelfFile;
 
 /// Version of the `--json` machine contracts below; bump on breaking change.
-pub const schema_version = 1;
+const schema_version = 1;
 
 fn dieUsage() noreturn {
     assay.diag(
@@ -53,19 +49,6 @@ fn dieUsage() noreturn {
     std.process.exit(2);
 }
 
-/// Build the shelf over an already-loaded corpus and persist it atomically at
-/// `shelfFile()` — the one write seam behind BOTH product faces (`gist codex
-/// build` and `relate index --shelf`; one artifact, one persist path). Returns
-/// blob size + compression rate for the caller's own report line.
-pub fn persistShelf(gpa: std.mem.Allocator, io: std.Io, corpus: *const corpus_mod.Corpus, built_ns: i64) !struct { bytes: usize, bits_per_char: f64 } {
-    var shelf = try shelf_mod.Shelf.build(gpa, corpus.docs, corpus.paths, built_ns, .{});
-    defer shelf.deinit(gpa);
-    const blob = try shelf.save(gpa);
-    defer gpa.free(blob);
-    try frame.writeAtomic(io, shelfFile(), blob);
-    return .{ .bytes = blob.len, .bits_per_char = shelf.cx.stats.bitsPerChar() };
-}
-
 /// `gist codex build` — load the index corpus, build the shelf, persist
 /// atomically. The anchor is captured BEFORE the corpus read (T3 convention)
 /// so a file touched mid-build reports as changed on the next query.
@@ -77,7 +60,7 @@ fn runBuild(gpa: std.mem.Allocator, io: std.Io) !void {
     var corpus = try corpus_mod.load(gpa, io, roots);
     defer corpus.deinit();
 
-    const shelf = try persistShelf(gpa, io, &corpus, built_ns);
+    const shelf = try shelf_mod.persist(gpa, io, corpus.docs, corpus.paths, built_ns);
     const dur = build_run.elapsed().ms();
     build_run.emit("codex: {d} files · {d:.1} MiB corpus → {d:.1} MiB shelf ({d:.2} bits/char) · {d:.0} ms → {s}\n", .{
         corpus.docs.len,
@@ -97,32 +80,11 @@ fn runBuild(gpa: std.mem.Allocator, io: std.Io) !void {
     });
 }
 
-/// Load the persisted shelf, or explain how to get one (exit 2, `die`-shaped).
-/// The blob is checksummed + structurally validated by the codex layers; any
-/// corruption fails closed here rather than answering wrong. `rebuild` names
-/// the command the failure message points at — `pub` because relate's `quote`
-/// reads the same artifact through its own product face.
-pub fn loadShelf(gpa: std.mem.Allocator, io: std.Io, comptime rebuild: []const u8) shelf_mod.Shelf {
-    const blob = Dir.cwd().readFileAlloc(io, shelfFile(), gpa, .unlimited) catch {
-        assay.diag("no codex shelf at {s} — run " ++ rebuild ++ " first\n", .{shelfFile()});
-        std.process.exit(2);
-    };
-    defer gpa.free(blob);
-    return shelf_mod.Shelf.load(gpa, blob) catch {
-        assay.diag("corrupt codex shelf at {s} — run " ++ rebuild ++ " to rebuild\n", .{shelfFile()});
-        std.process.exit(2);
-    };
-}
-
-/// Shelf staleness: the shelf blob carries its anchor but not its roots, so
-/// measure against the corpus a rebuild HERE would cover (`resolveRoots` —
-/// identical to the build roots in the steady state of one corpus per tree).
-/// Errors read as 0: staleness is advisory, never load-bearing. `pub` for the
-/// relate `quote` verb, which reads the same shelf.
-pub fn shelfStaleCount(gpa: std.mem.Allocator, io: std.Io, built_ns: i64) usize {
-    const roots = corpus_mod.resolveRoots(gpa) catch return 0;
-    defer corpus_mod.freeRoots(gpa, roots);
-    return fresh.staleCount(gpa, io, roots, built_ns);
+/// The shelf, or exit 2 naming this face's build command. `relate quote` and
+/// `irregex provenance` read the same artifact and each name their own.
+fn openShelf(gpa: std.mem.Allocator, io: std.Io) shelf_mod.Shelf {
+    return shelf_mod.open(gpa, io) catch |e|
+        outcome.needArtifact(e, "codex shelf", shelfFile(), "`gist codex build`");
 }
 
 const Report = struct {
@@ -137,14 +99,19 @@ const Report = struct {
 /// `count`/`tally` share one collection pass; `top == 0` skips locate entirely
 /// (count never touches the samples — pure backward search).
 fn runQuery(gpa: std.mem.Allocator, io: std.Io, pattern: []const u8, top: ?usize, json: bool) !void {
-    var shelf = loadShelf(gpa, io, "`gist codex build`");
+    var shelf = openShelf(gpa, io);
     defer shelf.deinit(gpa);
     const total = shelf.count(pattern);
-    const stale = shelfStaleCount(gpa, io, shelf.built_ns);
+    const stale = shelf_mod.staleCount(gpa, io, shelf.built_ns);
 
     var tallies: []shelf_mod.DocCount = &.{};
     defer gpa.free(tallies);
-    if (top != null and total > 0) tallies = try shelf.tally(gpa, pattern);
+    // A mark-less shelf still counts; it just cannot say which file. Leaving
+    // `tallies` empty reports zero files rather than aborting the count.
+    if (top != null and total > 0) switch (try shelf.tally(gpa, pattern)) {
+        .declined => {},
+        .got => |t| tallies = t,
+    };
 
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(gpa);
@@ -196,7 +163,7 @@ fn runStatus(gpa: std.mem.Allocator, io: std.Io, json: bool) !void {
         }
         std.process.exit(1);
     };
-    var shelf = loadShelf(gpa, io, "`gist codex build`");
+    var shelf = openShelf(gpa, io);
     defer shelf.deinit(gpa);
     const st = Status{
         .state = .ready,
@@ -204,7 +171,7 @@ fn runStatus(gpa: std.mem.Allocator, io: std.Io, json: bool) !void {
         .files = shelf.paths.len,
         .corpus_bytes = shelf.cx.len(),
         .bits_per_char = shelf.cx.stats.bitsPerChar(),
-        .stale_files = shelfStaleCount(gpa, io, shelf.built_ns),
+        .stale_files = shelf_mod.staleCount(gpa, io, shelf.built_ns),
         .built_unix_ns = shelf.built_ns,
     };
     var out: std.ArrayList(u8) = .empty;

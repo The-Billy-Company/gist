@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# certify.sh — full Certificate of Optimality (Layers A–F).
+# certify.sh — full Dominance-and-Fit Certificate (Layers A–F).
 #
 # Layer A has three lanes: microscopic (`zig build certify` — cycles/byte for the
 # in-process verify kernel; auto-re-runs under sudo when available for PMU),

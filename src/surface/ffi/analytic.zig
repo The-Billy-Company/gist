@@ -185,13 +185,13 @@ fn sweepHits(ctx: *Ctx, p: *const rows.SweepParams) ArmError!void {
     const budget: usize = if (p.top == 0) std.math.maxInt(usize) else p.top;
 
     for (patterns, 0..) |pattern, index| {
-        var cursor = ctx.engine.search(sweepQuery(p, pattern.slice()), .{ .cancel = ctx.cancel }) catch |err| switch (err) {
-            // One unsupported pattern makes the whole ANSWER unsupported: a
-            // partial sweep silently missing a pattern's hits is worse than
-            // declining, because the caller cannot tell the difference from a
-            // pattern that genuinely matched nothing.
-            error.UnsupportedPattern => return error.Decline,
-            error.OutOfMemory => return error.OutOfMemory,
+        // One declined pattern makes the whole ANSWER declined: a partial sweep
+        // silently missing a pattern's hits is worse than declining, because
+        // the caller cannot tell the difference from a pattern that genuinely
+        // matched nothing.
+        var cursor = switch (try ctx.engine.search(sweepQuery(p, pattern.slice()), .{ .cancel = ctx.cancel })) {
+            .declined => return error.Decline,
+            .got => |c| c,
         };
         defer cursor.deinit();
 
@@ -226,9 +226,9 @@ fn sweepCounts(ctx: *Ctx, p: *const rows.SweepParams) ArmError!void {
     defer seen.deinit(ctx.arena);
 
     for (patterns) |pattern| {
-        var cursor = ctx.engine.search(sweepQuery(p, pattern.slice()), .{ .cancel = ctx.cancel }) catch |err| switch (err) {
-            error.UnsupportedPattern => return error.Decline,
-            error.OutOfMemory => return error.OutOfMemory,
+        var cursor = switch (try ctx.engine.search(sweepQuery(p, pattern.slice()), .{ .cancel = ctx.cancel })) {
+            .declined => return error.Decline,
+            .got => |c| c,
         };
         defer cursor.deinit();
 

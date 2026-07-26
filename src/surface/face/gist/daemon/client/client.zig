@@ -89,7 +89,7 @@ fn waitReadable(fd: std.posix.fd_t, timeout_ms: i32) bool {
 }
 
 /// Receive one frame, but never block longer than `client_io_timeout_ms`.
-fn recvFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i32) !protocol.Frame {
+pub fn recvFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i32) !protocol.Frame {
     if (!waitReadable(fd, timeout_ms)) return error.TimedOut;
     return protocol.recvFrame(gpa, fd);
 }
@@ -283,7 +283,7 @@ pub fn consultChanged(gpa: std.mem.Allocator, io: std.Io, a: std.mem.Allocator, 
 
 fn exchangeChanged(gpa: std.mem.Allocator, a: std.mem.Allocator, fd: std.posix.fd_t, since_ns: i64) !?ChangedAnswer {
     // Same HELLO → READY handshake as a query (no transport caps — the answer
-    // is small). A version-skewed daemon would BadOpcode-drop the `changed`
+    // is small). A version-skewed daemon would `UnexpectedFrame`-drop the `changed`
     // frame, so the mismatch bails here first.
     try protocol.sendFrame(gpa, fd, .hello, &.{ protocol.protocol_version, 0 });
     {
@@ -346,7 +346,10 @@ fn emitFd(shm_fd: std.posix.fd_t, length: u64, matched: bool, prior_chunks: usiz
     if (prior_chunks != 0) return .cold; // chunks before a chunk_fd is a protocol violation
     const len: usize = @intCast(length);
     if (len == 0) return .{ .served = if (matched) 0 else 1 }; // empty answer; nothing to map
-    const view = shm.mapReadonly(shm_fd, len) catch return .cold;
+    const view = switch (shm.mapReadonly(shm_fd, len)) {
+        .declined => return .cold, // no mapped view here — re-ask cold, byte-identical
+        .got => |v| v,
+    };
     defer shm.unmap(view);
     // Same soft-cap bound as `emitRaw` — the mapped answer is one buffer, so the
     // guard is applied here at a whole-line boundary (see `writeStdoutCapped`).

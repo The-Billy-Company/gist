@@ -67,20 +67,35 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // Typed `Anchor` (assay): only this producer can mint one, so a monotonic
     // stamp can never reach `writeAnchor`/the persisted generation.
     const built = assay.anchor(io);
+    // `GIST_TRACE=index` splits what the summary can only report as one total.
+    // "The index build got slow" has four unrelated causes — a colder corpus
+    // walk, more trigram postings, a slower disk on publish, or a sidecar
+    // stalling — and one wall-clock number distinguishes none of them.
+    var phase = assay.Span.open(io);
     var corpus = try corpus_mod.load(gpa, io, roots);
     defer corpus.deinit();
+    assay.trace(.index, "index phase: corpus load {d:.1} ms · {d} docs · {d:.1} MiB\n", .{
+        phase.lap(io).ms(), corpus.docs.len, @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20),
+    });
     var idx = try Index.build(gpa, corpus.docs);
     defer idx.deinit();
+    assay.trace(.index, "index phase: trigram build {d:.1} ms\n", .{phase.lap(io).ms()});
     // Crest sidecar (the class-run sieve, research/crest/): one parallel pass
     // over the already-loaded docs. Best-effort — an OOM here costs only the
     // sieve, never the index build.
     const crest_vectors: ?[]const @import("../../../../kernel/primitives/crest.zig").Vector =
         crest_sidecar.build(gpa, corpus.docs) catch null;
     defer if (crest_vectors) |cv| gpa.free(cv);
+    assay.trace(.index, "index phase: crest sieve {d:.1} ms · {s}\n", .{
+        phase.lap(io).ms(), if (crest_vectors == null) "declined" else "built",
+    });
 
     // Generation-atomic publish: all blobs stage under gens/<id>/, then
     // pair.gen flips — concurrent loaders never see a mixed old/new set.
     const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths, roots, crest_vectors, built.ns());
+    assay.trace(.index, "index phase: publish {d:.1} ms · {d:.1} MiB\n", .{
+        phase.lap(io).ms(), @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
+    });
     try fresh.writeAnchor(io, built); // T3 freshness anchor
     if (jtok) |t| fresh.writeJournalToken(io, t); // journal since-token (best-effort)
     // Phantom tree.map (self-anchored, whole-CWD corpora only): best-effort —
@@ -99,6 +114,9 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // vouches for the old tree's snapshot and shard. Best-effort — an
     // unwritable binding costs the warm tiers, never a wrong answer.
     frame.publishBinding(io, frame.treeRootFile());
+    // The accelerator sidecars as one segment: each is individually best-effort
+    // (`fault.spare`), so what matters here is what they cost together.
+    assay.trace(.index, "index phase: sidecars {d:.1} ms · anchor+journal+treemap+shard+binding\n", .{phase.lap(io).ms()});
 
     const dur = span.read(io).ms();
     assay.summary(gpa, false, "indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{

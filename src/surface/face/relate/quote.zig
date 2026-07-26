@@ -23,7 +23,9 @@
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const codex_face = @import("../gist/lifecycle/codex.zig");
+const shelf_mod = @import("../../../corpus/index/codex/shelf.zig");
+const outcome = @import("../../cli/outcome.zig");
+const lifecycle = @import("lifecycle.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
 const assay = @import("../../../assay/assay.zig");
 const cento = @import("../../../corpus/index/codex/cento.zig");
@@ -48,7 +50,12 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     if (query.len == 0) die("relate quote: empty query\n", .{});
 
     var run = assay.Run.open(gpa, io, json);
-    var shelf = codex_face.loadShelf(gpa, io, "`relate index --shelf` (or `gist codex build`)");
+    var shelf = shelf_mod.open(gpa, io) catch |e| outcome.needArtifact(
+        e,
+        "codex shelf",
+        shelf_mod.shelfFile(),
+        "`relate index --shelf` (or `gist codex build`)",
+    );
     defer shelf.deinit(gpa);
     const load_dur = run.lap();
 
@@ -66,7 +73,7 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     defer out.deinit(gpa);
     if (json) {
         out.print(gpa, "{{\"schema_version\":{d},\"bits\":{d:.1},\"bits_per_byte\":{d:.3},\"phrases\":{d},\"escapes\":{d},\"quoted_bytes\":{d},\"query_bytes\":{d}}}\n", .{
-            codex_face.schema_version, parsed.bits, parsed.bitsPerByte(query.len), parsed.phrases.len, escapes, quoted, query.len,
+            lifecycle.schema_version, parsed.bits, parsed.bitsPerByte(query.len), parsed.phrases.len, escapes, quoted, query.len,
         }) catch oom();
     } else {
         out.print(gpa, "{d:.1} bits · {d:.3} bits/byte · {d} phrase(s), {d} escape(s) · {d}/{d} bytes quoted\n", .{
@@ -78,7 +85,10 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
         // Attribute one exemplar occurrence (single-row locate). A shelf is
         // always built with locate marks; an escape has nowhere to point.
         const source: ?[]const u8 = if (ph.width == 0) null else blk: {
-            const pos = shelf.cx.posOf(ph.row) catch break :blk null;
+            const pos = switch (shelf.cx.posOf(ph.row)) {
+                .declined => break :blk null,
+                .got => |p| p,
+            };
             break :blk shelf.paths[shelf.docOf(pos)];
         };
         if (json) {
@@ -97,7 +107,7 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
     const parse_dur = run.elapsed(); // parse + attribution, before the freshness walk
     corpus_mod.emitStdout(out.items);
 
-    const stale = codex_face.shelfStaleCount(gpa, io, shelf.built_ns);
+    const stale = shelf_mod.staleCount(gpa, io, shelf.built_ns);
     if (stale > 0)
         assay.diag("quote: {d} file(s) changed since the shelf was built — `relate index --shelf` refreshes\n", .{stale});
     run.emit("quote: {d} files in shelf · load {d:.0} ms · parse {d:.2} ms\n", .{

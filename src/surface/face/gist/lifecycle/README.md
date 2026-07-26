@@ -7,12 +7,19 @@ doc_radar:
         - "persist.persistIndexAndPaths"
         - "fresh.writeAnchor"
         - "Index.build"
-    - description: "codex verb group persists + queries the self-index shelf"
+    - description: "codex verb group drives the shared shelf plane rather than owning it"
       file: pkg/kernels/irregex/src/surface/face/gist/lifecycle/codex.zig
       contains:
-        - "codex.shelf"
-        - "Shelf.build"
-        - "fresh.changedSince"
+        - "shelf_mod.persist"
+        - "shelf_mod.open"
+        - "shelf_mod.staleCount"
+    - description: "the shelf artifact's whole lifecycle lives below every face, in one writer"
+      file: pkg/kernels/irregex/src/corpus/index/codex/shelf.zig
+      contains:
+        - "pub fn shelfFile"
+        - "pub fn persist"
+        - "pub fn open"
+        - "pub fn staleCount"
 ---
 
 # surface/face/gist/lifecycle — `gist index` · `gist codex`
@@ -62,13 +69,20 @@ See [`../status/`](../status) for the matching read-only verb.
 
 ## `gist codex` — the exact existence/count tier
 
-`codex.zig` owns the verb group over the compressed self-index shelf
-([`src/corpus/index/codex/shelf.zig`](../../../../corpus/index/codex/README.md)): `build` loads the
-same index corpus, builds the FM-index shelf, and writes `codex.shelf`
-atomically (temp-then-rename); `count` / `tally` / `status` are read-only
-queries against it. Where the trigram index nominates _candidate_ files
-(false positives possible; a read verifies), the codex _answers_: `count == 0`
-with a clean freshness walk is a proof of absence across the corpus with
-zero corpus I/O. The shelf carries its own build anchor; every query verb
-stat-walks the roots against it (`fresh.changedSince`) and reports how many
-files changed since the build. `relate quote` reads the same artifact.
+`codex.zig` owns the verb group, not the artifact. The shelf's whole lifecycle
+— its path, its atomic write, its fail-closed read, its staleness walk — lives
+one tier down in
+[`src/corpus/index/codex/shelf.zig`](../../../../corpus/index/codex/README.md),
+because three faces read it: `gist codex`, `relate quote`/`relate index
+--shelf`, and `irregex provenance`. Whichever face happens to build it first
+must not become the module the other two import; an artifact with two writers
+is an artifact with two formats a version apart. So `build` here loads the
+index corpus and calls `shelf_mod.persist`; `count` / `tally` / `status` call
+`shelf_mod.open` and name **this** face's rebuild command in the failure
+sentence.
+
+Where the trigram index nominates _candidate_ files (false positives possible;
+a read verifies), the codex _answers_: `count == 0` with a clean freshness walk
+is a proof of absence across the corpus with zero corpus I/O. The shelf carries
+its own build anchor; every query verb stat-walks the roots against it
+(`shelf_mod.staleCount`) and reports how many files changed since the build.

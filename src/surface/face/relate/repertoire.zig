@@ -122,6 +122,7 @@ pub const face = manifest.Face{
                 no_index,
             },
             .run = probe.runSimilar,
+            .keeps = true,
         },
         .{
             .name = "echoes",
@@ -152,6 +153,7 @@ pub const face = manifest.Face{
                 no_index,
             },
             .run = repeat.runEchoes,
+            .keeps = true,
         },
         .{
             .name = "pack",
@@ -169,6 +171,7 @@ pub const face = manifest.Face{
                 json("NDJSON {rank, path, marginal_bits, coverage} rows in pick order; narrowed rows add patterns[]"),
             },
             .run = pack.runPack,
+            .keeps = true,
         },
         .{
             .name = "quote",
@@ -179,6 +182,7 @@ pub const face = manifest.Face{
             .args = &.{.{ .name = "text", .required = true, .doc = "the query text" }},
             .flags = &.{json("summary object then NDJSON {text, occurrences, bits, source} phrase rows")},
             .run = quote.runQuote,
+            .keeps = true,
         },
         .{
             .name = "patterns",
@@ -198,6 +202,7 @@ pub const face = manifest.Face{
                 json("NDJSON rows ({path, line, pattern_id, pattern}) or groups ({label, count})"),
             },
             .run = attribute.runPatterns,
+            .keeps = true,
         },
         .{
             .name = "index",

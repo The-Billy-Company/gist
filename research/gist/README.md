@@ -55,7 +55,7 @@ stand in for novelty and benchmark speed does not stand in for correctness.
 | `src/corpus/index/trigrams/` + `src/corpus/index/crest/` | candidate filters (trigrams + crest sidecar)                               |
 | `src/kernel/rank/`                                       | definition-biased `--rank` view                                            |
 | `src/surface/exec/session/`                              | fail-open resident UDS session                                             |
-| `bench/gates/` + `bench/rgsuite/` + `bench/certify/`     | correctness-before-speed gates, mined rg parity, Certificate of Optimality |
+| `bench/gates/` + `bench/rgsuite/` + `bench/certify/`     | correctness-before-speed gates, mined rg parity, Dominance-and-Fit Certificate |
 
 Novel math that rides inside gist (forced-class-run pruning) is documented
 separately in [`../crest/`](../crest/PROOF.md) — not duplicated here.

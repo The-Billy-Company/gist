@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# certify_crest.sh — Layer E of the Certificate of Optimality: the crest sieve.
+# certify_crest.sh — Layer E of the Dominance-and-Fit Certificate: the crest sieve.
 #
 # The one place gist's index math is new rather than borrowed. The trigram index
 # (and every trigram-family peer) prunes 0% on literal-free class repetitions —

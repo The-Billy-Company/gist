@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mint ledger — the certificate's history, so a re-mint is never silent.
 
-The Certificate of Optimality is a *rewritten* artifact: ``zig build certify``
+The Dominance-and-Fit Certificate is a *rewritten* artifact: ``zig build certify``
 regenerates the whole file, and each of Layers B–G is spliced back afterward by
 its own reporter. That design is honest per-mint but amnesiac across mints —
 nothing in the tree remembered what the previous certificate said, so a re-mint
@@ -416,7 +416,7 @@ def backfill(root: Path, limit: int) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Record and inspect the history of the Certificate of Optimality."""
+    """Record and inspect the history of the Dominance-and-Fit Certificate."""
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )

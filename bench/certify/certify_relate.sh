@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# certify_relate.sh — Layer G of the Certificate of Optimality (the relate face).
+# certify_relate.sh — Layer G of the Dominance-and-Fit Certificate (the relate face).
 #
 # relate answers a question exact search CANNOT: "which files would DESCRIBE this
 # text most cheaply?" — retrieval by conditional description length, not pattern

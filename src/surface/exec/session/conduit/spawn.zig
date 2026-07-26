@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const fault = @import("../../../../fault.zig");
 
 /// Only these targets have the fork+exec (+ `flock`/kqueue/inotify) machinery
 /// the daemons rely on; everywhere else the query just runs its fallback (no-op).
@@ -38,7 +39,7 @@ pub fn detach(gpa: std.mem.Allocator, io: std.Io, verb: [:0]const u8) !void {
     const child_argv = [_:null]?[*:0]const u8{ exe_z.ptr, verb.ptr, null };
 
     const pid = fork();
-    if (pid < 0) return error.ForkFailed;
+    if (pid < 0) return fault.Resource.Exhausted;
     if (pid > 0) return; // parent — the daemon warms while this query runs cold
 
     // ── child ──: detach from the CLI's session + stdio, then become the daemon.

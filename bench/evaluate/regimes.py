@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Measurement lanes for the gist evaluation matrix — the OPERATIONAL ENVELOPE.
 
-Cold/warm query dominance and rg drop-in correctness are the Certificate of
-Optimality's job (bench/certify/ + session/ + rgsuite/); this module deliberately
+Cold/warm query dominance and rg drop-in correctness are the Dominance-and-Fit
+Certificate's job (bench/certify/ + session/ + rgsuite/); this module deliberately
 does NOT re-time them. It measures only what the certificate does not: index
 lifecycle cost, resource footprint, scaling shape, and concurrent-load behavior.
 

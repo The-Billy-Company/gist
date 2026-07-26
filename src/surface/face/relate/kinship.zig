@@ -25,10 +25,11 @@ const trigram_persist = @import("../../../corpus/index/trigrams/persist.zig");
 const cli_args = @import("../../exec/cold/argv/args.zig");
 const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
+const fingerprint = @import("../../../kernel/kinship/metric/fingerprint.zig");
 const pairs = @import("../../../kernel/kinship/cluster/pairs.zig");
-const parallel = @import("../../../kernel/primitives/parallel.zig");
 const flags = @import("../../cli/flags.zig");
 const grade = @import("../../cli/grade.zig");
+const assay = @import("../../../assay/assay.zig");
 
 const oom = cli_args.oom;
 pub const Sketch = sketch.Sketch;
@@ -50,46 +51,13 @@ pub fn buildSilhouettes(gpa: std.mem.Allocator, docs: []const []const u8) []Silh
     return buildAll(Silhouette, silhouette_mod.build, gpa, docs);
 }
 
-/// The shared parallel per-doc builder behind both channels: `T` needs an
-/// `empty` decl (the maximally-far degrade value) and `buildFn(gpa, bytes) !T`.
+/// The shared parallel per-doc builder behind both channels. The pass itself
+/// lives beside the records in `kernel/kinship/metric/fingerprint.zig` — the
+/// atlas freshness fold needs the same one — so this rung supplies only the
+/// allocation and the operator-facing degrade report.
 fn buildAll(comptime T: type, comptime buildFn: anytype, gpa: std.mem.Allocator, docs: []const []const u8) []T {
     const out = gpa.alloc(T, docs.len) catch oom();
-    var total: usize = 0;
-    for (docs) |d| total += d.len;
-
-    const ncpu = std.Thread.getCpuCount() catch 1;
-    const nthr = @min(@max(@as(usize, 1), total / (4 << 20)), ncpu);
-
-    const Shard = struct {
-        docs: []const []const u8,
-        out: []T,
-        failed: usize = 0,
-
-        fn run(sh: *@This()) void {
-            // Each worker allocates its own scratch from the page allocator —
-            // no cross-thread contention on the caller's gpa.
-            for (sh.docs, sh.out) |d, *s| s.* = buildFn(std.heap.page_allocator, d) catch blk: {
-                sh.failed += 1;
-                break :blk .empty;
-            };
-        }
-    };
-
-    // Byte-greedy shard boundaries (the shared parallel floor).
-    const bounds = gpa.alloc(usize, nthr + 1) catch oom();
-    defer gpa.free(bounds);
-    parallel.greedyBounds([]const u8, docs, {}, parallel.sliceLen, total, bounds);
-
-    const shards = gpa.alloc(Shard, nthr) catch oom();
-    defer gpa.free(shards);
-    const threads = gpa.alloc(std.Thread, nthr) catch oom();
-    defer gpa.free(threads);
-    for (0..nthr) |s|
-        shards[s] = .{ .docs = docs[bounds[s]..bounds[s + 1]], .out = out[bounds[s]..bounds[s + 1]] };
-    // A shard whose thread never spawned still needs its slice filled.
-    parallel.fanOut(Shard, shards, threads, Shard.run);
-    var failed: usize = 0;
-    for (shards) |sh| failed += sh.failed;
+    const failed = fingerprint.fill(T, buildFn, gpa, docs, out) catch oom();
     if (failed != 0) std.debug.print("relate: {d} file(s) failed to fingerprint (skipped)\n", .{failed});
     return out;
 }
@@ -165,8 +133,16 @@ fn preferScopedLive(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u
 pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no_index: bool, wants: Wants) !View {
     atlas: {
         if (no_index) break :atlas;
+        // Prologue split under the `query` lens. `resolve` is the same work for
+        // every kinship question over one tree, so whether its cost sits in the
+        // artifact load or in the freshness fold decides what a resident tier
+        // could actually elide — a load is paid once and held, a fold is paid
+        // per changed file and must be driven by a watcher.
+        var phase = assay.Span.open(io);
         if (preferScopedLive(gpa, io, roots)) break :atlas;
+        assay.trace(.query, "resolve phase: scope-probe {d:.1} ms\n", .{phase.lap(io).ms()});
         var atl = atlas_mod.loadQuiet(gpa, io) orelse break :atlas;
+        assay.trace(.query, "resolve phase: atlas-load {d:.1} ms\n", .{phase.lap(io).ms()});
         // Every queried root must sit inside the roots the atlas was BUILT
         // over (persisted in the blob) — an out-of-corpus root has no
         // fingerprints to elide and needs the live read below.
@@ -186,6 +162,7 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
             break :atlas;
         };
         errdefer folded.deinit();
+        assay.trace(.query, "resolve phase: fold {d:.1} ms ({d} refreshed)\n", .{ phase.lap(io).ms(), folded.refreshed });
 
         var view = View{
             .paths = folded.paths.items,

@@ -61,8 +61,8 @@ pub const Status = enum(i32) {
     /// clean run.
     pub fn ofFault(f: fault.Fault) Status {
         return switch (f) {
-            error.OutOfMemory, error.TimedOut => .out_of_memory,
-            error.Unsupported, error.TooManyPatterns, error.PowersetCapHit, error.NeedleTooShort => .invalid,
+            error.OutOfMemory, error.TimedOut, error.Exhausted => .out_of_memory,
+            error.BadPattern, error.Unsupported, error.TooManyPatterns, error.PowersetCapHit, error.NeedleTooShort => .invalid,
             error.FileNotFound,
             error.AccessDenied,
             error.NotDir,
@@ -73,6 +73,7 @@ pub const Status = enum(i32) {
             error.NonCanonical,
             error.VersionMismatch,
             error.GenerationMismatch,
+            error.Oversized,
             error.ConnClosed,
             error.UnexpectedFrame,
             error.StreamTooLong,
@@ -275,11 +276,12 @@ test "each status keeps the channel the contract assigns it" {
 
 test "every fault crosses the seam as a fault — never a result, never a declinature" {
     const all = [_]fault.Fault{
-        error.FileNotFound,    error.AccessDenied,       error.NotDir,        error.SymLinkLoop,
-        error.NameTooLong,     error.Corrupt,            error.Truncated,     error.NonCanonical,
-        error.VersionMismatch, error.GenerationMismatch, error.Unsupported,   error.TooManyPatterns,
-        error.PowersetCapHit,  error.NeedleTooShort,     error.OutOfMemory,   error.TimedOut,
-        error.ConnClosed,      error.UnexpectedFrame,    error.StreamTooLong,
+        error.FileNotFound,    error.AccessDenied,       error.NotDir,         error.SymLinkLoop,
+        error.NameTooLong,     error.Corrupt,            error.Truncated,      error.NonCanonical,
+        error.VersionMismatch, error.GenerationMismatch, error.Oversized,      error.BadPattern,
+        error.Unsupported,     error.TooManyPatterns,    error.PowersetCapHit, error.NeedleTooShort,
+        error.OutOfMemory,     error.TimedOut,           error.Exhausted,      error.ConnClosed,
+        error.UnexpectedFrame, error.StreamTooLong,
     };
     // Pinned to the taxonomy's own size, so a new member cannot slip past this
     // loop by simply not being listed (the switch in `ofFault` catches it too).

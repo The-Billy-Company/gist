@@ -14,7 +14,7 @@ doc_radar:
 
 # bench/portcert — Layer B (port-optimality: static bound + measured on this machine)
 
-Layer B of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layers-ag).
+Layer B of gist's [Dominance-and-Fit Certificate](../README.md#dominance-and-fit-certificate-layers-ag).
 Where Layer A proves empirical dominance over ripgrep on the registered
 workloads, Layer B proves _why the hot loop can't be beaten on this instruction sequence_ — in
 two legs: a **static** `llvm-mca` microarchitectural bound (port pressure /

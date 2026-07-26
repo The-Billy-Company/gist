@@ -11,7 +11,7 @@ doc_radar:
 
 # gist/bench/lowerbound — Layer D (algorithmic lower bound)
 
-Layer D of gist's [Certificate of Optimality](../README.md#certificate-of-optimality-layers-ag).
+Layer D of gist's [Dominance-and-Fit Certificate](../README.md#dominance-and-fit-certificate-layers-ag).
 Where Layer A proves empirical dominance over ripgrep on the registered
 workloads and Layer C places its cycles/byte against the _hardware_ ceiling,
 Layer D proves the last thing

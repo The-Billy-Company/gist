@@ -10,7 +10,7 @@ These are **machine-labeled**: `apple-*-darwin-arm64` and `*-linux-x86_64`
 are local to each machine; only the index/corpus footprint ratio and scaling
 shape are compared across them (`evaluate.py compare` / the footprint-consistency
 section of `REPORT.md`). Cold/warm query dominance lives in the
-[Certificate of Optimality](../../certify/), not here.
+[Dominance-and-Fit Certificate](../../certify/), not here.
 
 Regenerate rather than hand-edit: `make gist-evaluate` (measure) →
 `make gist-evaluate-verify` (hermetic contract + claim check, the CI path).

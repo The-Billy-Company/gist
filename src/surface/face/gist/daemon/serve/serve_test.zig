@@ -160,7 +160,7 @@ fn collectLinesFd(gpa: std.mem.Allocator, fd: std.posix.fd_t, arena: std.mem.All
                 defer _ = std.c.close(shm_fd);
                 const len: usize = @intCast(cf.length);
                 if (len > 0) {
-                    const view = try shm.mapReadonly(shm_fd, len);
+                    const view = shm.mapReadonly(shm_fd, len).got;
                     defer shm.unmap(view);
                     try out.appendSlice(arena, view[0..len]);
                 }

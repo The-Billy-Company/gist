@@ -297,13 +297,13 @@ def _num(value: object, suffix: str = "") -> str:
 def render_report(agg: dict, claims: dict[str, object]) -> str:
     """Markdown aggregate report from verified bundles + resolved claims.
 
-    The operational envelope beside the Certificate of Optimality: cold/warm
+    The operational envelope beside the Dominance-and-Fit Certificate: cold/warm
     query dominance is the certificate's, not restated here.
     """
     lines = [
         "# gist evaluation matrix — operational envelope",
         "",
-        "_The operational complement to the [Certificate of Optimality](../certify/) "
+        "_The operational complement to the [Dominance-and-Fit Certificate](../certify/) "
         "(which owns cold/warm dominance + correctness). Absolute build ms, RSS, and "
         "qps are machine-local; only the index/corpus footprint ratio and scaling "
         "shape are compared across machines._",

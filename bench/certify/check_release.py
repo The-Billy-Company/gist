@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Release readiness gate — the Certificate of Optimality on *every* machine.
+"""Release readiness gate — the Dominance-and-Fit Certificate on *every* machine.
 
-A single-machine certificate proves gist is optimal on the box that minted it,
+A single-machine certificate proves gist is dominant on the box that minted it,
 and nothing more (cold-CLI dominance is machine-specific — an M2 mint once
 showed 0 wins where an M4 Max shows 11). So a release is only allowed to claim
 optimality once the certificate has been *freshly re-minted on each supported
@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"OK: certificate attached and valid on all {len(rows)} machine(s).")
         return 0
     print(
-        "FAIL: release requires a valid Certificate of Optimality on every machine "
+        "FAIL: release requires a valid Dominance-and-Fit Certificate on every machine "
         "(Mac + Linux). Re-mint the missing/invalid ones and commit them.",
         file=sys.stderr,
     )

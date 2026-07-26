@@ -11,8 +11,8 @@ doc_radar:
 
 # `bench/evaluate/` — the gist operational-envelope matrix
 
-The [Certificate of Optimality](../certify/) is the deep, narrow proof of how
-good and provably optimal Gist is **at full speed**: cold fresh-process
+The [Dominance-and-Fit Certificate](../certify/) is the deep, narrow proof of how
+good and how measurably bounded Gist is **at full speed**: cold fresh-process
 dominance vs ripgrep, single-thread cycles/byte, the warm resident-daemon tier,
 rg drop-in correctness, and the port/roofline/lower-bound/crest layers. This
 module is its **operational complement** — the envelope the certificate does not

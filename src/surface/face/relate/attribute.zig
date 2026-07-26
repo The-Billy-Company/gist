@@ -32,7 +32,7 @@ const query = @import("../../../kernel/match/query/query.zig");
 const parallel = @import("../../../kernel/primitives/parallel.zig");
 const flags = @import("../../cli/flags.zig");
 const emit = @import("../../cli/emit.zig");
-const grepfile = @import("../../exec/cold/read/grepfile.zig");
+const slurp = @import("../../exec/cold/read/slurp.zig");
 
 const die = cli_args.die;
 const oom = cli_args.oom;
@@ -64,7 +64,7 @@ fn attributeDoc(
     }
 }
 
-const readFileInto = grepfile.readFileInto;
+const readFileInto = slurp.readFileInto;
 
 /// One worker of the index-backed candidate read+attribute pass: its own file
 /// scratch, its own `PatternSet.Scratch` (Pike sim state is not shareable),

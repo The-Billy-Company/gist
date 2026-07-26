@@ -243,9 +243,14 @@ fn rankKin(
     probe: *const Record,
     run: *assay.Run,
 ) !void {
+    // Phase split under the `query` lens — the same prologue/query division
+    // `echoes` reports, so the two verbs' costs are comparable line for line.
+    var phase = assay.Span.open(io);
     var view = try units.resolve(gpa, io, o.ask(roots));
     defer view.deinit();
+    assay.trace(.query, "similar phase: resolve {d:.1} ms\n", .{phase.lap(io).ms()});
     if (o.channel != .shapes) try units.ensureBytes(&view, gpa, participation(o));
+    assay.trace(.query, "similar phase: bytes {d:.1} ms\n", .{phase.lap(io).ms()});
 
     // A probe asks about ONE thing, so generated units stay in the population —
     // "which generated file is closest to this hand-written one" is a real
@@ -269,6 +274,7 @@ fn rankKin(
         .labels = view.labels,
         .stronger = o.channel.polarity() == .stronger,
     }, Scored.less);
+    assay.trace(.query, "similar phase: score+sort {d:.1} ms\n", .{phase.lap(io).ms()});
 
     // Ranking admits nothing on a numeric threshold — the caller asked for the
     // nearest, not for everything under a bar — so only `--min-grade` withholds.

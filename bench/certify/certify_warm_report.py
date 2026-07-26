@@ -205,7 +205,7 @@ def render(
 
 def splice(cert: Path, section: str) -> None:
     """Replace the marked warm block if present, else append it at EOF."""
-    text = cert.read_text() if cert.exists() else "# gist — Certificate of Optimality\n\n"
+    text = cert.read_text() if cert.exists() else "# gist — Dominance-and-Fit Certificate\n\n"
     lo, hi = text.find(START), text.find(END)
     if lo != -1 and hi != -1 and hi > lo:
         text = text[:lo] + section + text[hi + len(END) :].lstrip("\n")

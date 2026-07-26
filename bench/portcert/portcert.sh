@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# portcert.sh — Layer B of the optimality certificate: PORT-OPTIMALITY, static.
+# portcert.sh — Layer B of the dominance-and-fit certificate: PORT-OPTIMALITY, static.
 #
 # Layer A proves empirical dominance over ripgrep on the registered workloads.
 # Layer B proves *why the hot loop can't be beaten on this instruction sequence*:

@@ -253,7 +253,7 @@ def splice_certificate(cert: Path, macro: str) -> None:
         )
         head = text[:idx].rstrip() + "\n\n" if idx != -1 else text.rstrip() + "\n\n"
     else:
-        head = "# gist — Certificate of Optimality\n\n"
+        head = "# gist — Dominance-and-Fit Certificate\n\n"
     cert.write_text(head + macro)
 
 

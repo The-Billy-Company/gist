@@ -87,15 +87,34 @@ pub fn runEchoes(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !
     });
 
     const run = assay.Run.open(gpa, io, o.json);
+    // Phase split under the `query` lens. `echoes` is the package's most
+    // expensive verb, and its cost divides cleanly into a corpus-shaped prologue
+    // (resolve + ensureBytes — the same for every query over one tree) and the
+    // query-shaped survey. Knowing which half dominates is what decides whether
+    // holding the view resident can pay, so the split is measurable rather than
+    // inferred from a total.
+    var phase = assay.Span.open(io);
     var view = try units.resolve(gpa, io, o.ask(roots.items));
     defer view.deinit();
+    assay.trace(.query, "echoes phase: resolve {d:.1} ms\n", .{phase.lap(io).ms()});
 
     // A byte-reading channel over fragments has to go back to the source: the
     // fragment index persists structure only.
     if (o.channel != .shapes) try units.ensureBytes(&view, gpa, o.params());
+    assay.trace(.query, "echoes phase: bytes {d:.1} ms\n", .{phase.lap(io).ms()});
 
     var found = try echoes.survey(gpa, view.table(), o.params());
     defer found.deinit();
+    // The survey's own cost is driven by the two populations it derives, not by
+    // the corpus size the prologue saw: pair admission is quadratic in the
+    // candidates that passed participation, and the shape step is linear in the
+    // edges admitted. Reporting both beside the duration is what makes a slow
+    // survey diagnosable from one trace line — a large candidate set and a large
+    // edge set are different problems with different fixes (`--min-mass` /
+    // `--min-lines` narrows the former, `--max-distance` the latter).
+    assay.trace(.query, "echoes phase: survey {d:.1} ms · {d} candidates · {d} edges\n", .{
+        phase.lap(io).ms(), found.candidates, found.edges,
+    });
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);

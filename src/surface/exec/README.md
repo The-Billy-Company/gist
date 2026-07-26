@@ -27,7 +27,7 @@ imports these engines; an engine never imports a face.
 
 The warm daemon does **not** reimplement matching. Both rungs lower every query
 through the shared `kernel/match/query/query.zig` core, and `session/` reuses `cold/`'s
-own `Emitter` / `grepfile` / file-set machinery, so warm bytes cannot become a
+own `Emitter` / read-plane / file-set machinery, so warm bytes cannot become a
 second opinion:
 
 - **Fail open to cold.** Any warm decline, timeout, TTY, wedged daemon, or

@@ -25,8 +25,8 @@ doc_radar:
 
 # bench/certify
 
-The **macroscopic** half of the Layer-A optimality certificate (see
-`../README.md` § "Certificate of Optimality"). The microscopic half
+The **macroscopic** half of the Layer-A dominance certificate (see
+`../README.md` § "Dominance-and-Fit Certificate"). The microscopic half
 (`zig build certify`, single-threaded cycles/byte) lives in
 [`../harness/`](../harness/README.md); this half proves the _end-to-end_ claim
 a user actually cares about: for every regex class ripgrep supports, gist's
