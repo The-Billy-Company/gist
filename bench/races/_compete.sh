@@ -85,6 +85,30 @@ XDIRS=(node_modules target .venv venv __pycache__ .zig-cache zig-out dist
   .pytest_cache Pods DerivedData .swiftpm vendor .local .cache .parcel-cache
   storybook-static xcuserdata graphify-out .pnpm-store .git .hg .svn)
 
+# gist/rg run under `--no-ignore-vcs` for a deterministic multi-root oracle set
+# (see FAIRNESS above), but that also discards every NESTED `.gitignore` — which
+# silently re-admits ~2.5k build artifacts the root `.gitignore` never names:
+# Elixir `_build`/`deps`/`cover` beam output and Electron `out/`. gist's own
+# indexer prunes those, so they are absent from `paths.list` and therefore from
+# csearch's corpus — racing gist/rg over a strict SUPERSET of the indexed
+# rivals' corpus is not the like-for-like this file claims (measured: +2,488
+# files, all build output, 1.47x on gist's `literal-rare` cell). Re-apply them
+# as the glob equivalent of what XDIRS already gives the other no-gitignore
+# tools. NOT the whole of XDIRS: `vendor` holds 664 tracked Billy files
+# (`scripts/vendor/graphify`), so a bare exclude would push gist BELOW the
+# indexed corpus. Mix output is anchored per `mix.exs` root for the same reason
+# rule-of-five anchors it — `deps`/`doc` are too generic to exclude by name.
+_scope_globs() {
+  local g="--glob=!out/" m
+  while IFS= read -r m; do
+    g+=" --glob=!${m}/_build/ --glob=!${m}/deps/ --glob=!${m}/cover/ --glob=!${m}/doc/"
+  done < <(cd "${CORPUS}" && find "${ROOTS[@]}" -maxdepth 3 -name mix.exs -print 2> /dev/null | while IFS= read -r f; do dirname "${f}"; done)
+  echo "${g}"
+}
+# The ignore scope gist and rg SHARE, resolved once: identical flags on both
+# sides keep the rg-oracle gate honest (verified byte-identical `--files` sets).
+SCOPE="--no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' $(_scope_globs)"
+
 # ── availability ──────────────────────────────────────────────────────────────
 have() { command -v "$1" > /dev/null 2>&1; }
 HAVE_RG=0
@@ -228,14 +252,14 @@ compete_lit_cmd() {
   local tool="${1}" n="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg -F -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- '${n}' ${roots}" ;;
+    rg) echo "rg -F -l --sort none ${SCOPE} -- '${n}' ${roots}" ;;
     ugrep) echo "ugrep -rl -F${xd} -- '${n}' ${roots}" ;;
     ag) echo "ag -l -Q -s --path-to-ignore ${CORPUS}/.gitignore -- '${n}' ${roots}" ;;
     ggrep) echo "ggrep -rIlF${xd} -- '${n}' ${roots}" ;;
     gitgrep) echo "git -C ${CORPUS} grep -F -l -- '${n}' -- ${roots}" ;;
     csearch) echo "env CSEARCHINDEX='${CSEARCH_IDX}' csearch -l '\\Q${n}\\E'" ;;
     zoekt) echo "zoekt -index_dir '${ZOEKT_DIR}' -l '\"${n}\"'" ;;
-    gist) echo "${GIST_BIN} '${n}' -F -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} '${n}' -F -l --sort none ${SCOPE} -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
@@ -244,14 +268,14 @@ compete_rgx_cmd() {
   local tool="${1}" p="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg '${p}' -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
+    rg) echo "rg '${p}' -l --sort none ${SCOPE} -- ${roots}" ;;
     ugrep) echo "ugrep -rl -P${xd} -- '${p}' ${roots}" ;;
     ag) echo "ag -l -s --path-to-ignore ${CORPUS}/.gitignore -- '${p}' ${roots}" ;;
     ggrep) echo "ggrep -rIlP${xd} -- '${p}' ${roots}" ;;
     gitgrep) echo "git -C ${CORPUS} grep -lP -- '${p}' -- ${roots}" ;;
     csearch) echo "env CSEARCHINDEX='${CSEARCH_IDX}' csearch -l '${p}'" ;;
     zoekt) echo "zoekt -index_dir '${ZOEKT_DIR}' -l 'regex:${p}'" ;;
-    gist) echo "${GIST_BIN} '${p}' -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} '${p}' -l --sort none ${SCOPE} -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
@@ -269,12 +293,12 @@ compete_count_cmd() {
   local tool="${1}" n="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg -F -c --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- '${n}' ${roots}" ;;
+    rg) echo "rg -F -c --sort none ${SCOPE} -- '${n}' ${roots}" ;;
     ugrep) echo "ugrep -rc -F${xd} -- '${n}' ${roots}" ;;
     ag) echo "ag -c -Q -s --path-to-ignore ${CORPUS}/.gitignore -- '${n}' ${roots}" ;;
     ggrep) echo "ggrep -rIcF${xd} -- '${n}' ${roots}" ;;
     gitgrep) echo "git -C ${CORPUS} grep -c -F -- '${n}' -- ${roots}" ;;
-    gist) echo "${GIST_BIN} '${n}' -F -c --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} '${n}' -F -c --sort none ${SCOPE} -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }
@@ -305,12 +329,12 @@ compete_pcre_cmd() {
   local tool="${1}" p="${2}" roots="${ROOTS[*]}" xd
   xd="$(_xdir_flags)"
   case "${tool}" in
-    rg) echo "rg -P '${p}' -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
+    rg) echo "rg -P '${p}' -l --sort none ${SCOPE} -- ${roots}" ;;
     ugrep) echo "ugrep -rl -P${xd} -- '${p}' ${roots}" ;;
     ag) echo "ag -l -s --path-to-ignore ${CORPUS}/.gitignore -- '${p}' ${roots}" ;;
     ggrep) echo "ggrep -rIlP${xd} -- '${p}' ${roots}" ;;
     gitgrep) echo "git -C ${CORPUS} grep -lP -- '${p}' -- ${roots}" ;;
-    gist) echo "${GIST_BIN} -P '${p}' -l --sort none --no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' -- ${roots}" ;;
+    gist) echo "${GIST_BIN} -P '${p}' -l --sort none ${SCOPE} -- ${roots}" ;;
     *) echo "false" ;;
   esac
 }

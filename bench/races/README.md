@@ -4,8 +4,10 @@ The multi-tool field races — gist vs the seven-tool field defined in
 [`_compete.sh`](_compete.sh) (see `../README.md` for the tool roster and the
 fairness rules every race honors). `_compete.sh` is **sourced, never
 executed**; it defines the tool registry, the shared `ROOTS`/`XDIRS` scoping,
-and the per-tool invocation helpers (`compete_lit_cmd`, `compete_rgx_cmd`,
-`hf_mean`, …) that every race and gate script in `bench/` builds on.
+the `$SCOPE` ignore contract gist and rg share (identical flags on both sides,
+so the rg-equality oracle stays honest), and the per-tool invocation helpers
+(`compete_lit_cmd`, `compete_rgx_cmd`, `hf_mean`, …) that every race and gate
+script in `bench/` builds on.
 
 | File                      | Race                                                                                                                                                                                                                                                                                                             |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
