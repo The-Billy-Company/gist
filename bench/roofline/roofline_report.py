@@ -28,6 +28,7 @@ It splices a `## Layer C — roofline (hardware ceiling)` section into
 # ruff's ambiguous-unicode rules flag; the glyphs are the certificate's contract,
 # so silence them file-wide (repo precedent: services/ai, taskrunner, entrain all
 # ignore RUF001/002/003 for intentional glyphs).
+# ruff: noqa: RUF001
 
 import argparse
 from dataclasses import dataclass
@@ -145,6 +146,37 @@ def load_compute_ceiling(path: Path, ghz: float) -> ComputeBound | None:
     return None
 
 
+def localize(ladder: list[dict], pure_gbps: float) -> str:
+    """Say what the matched ladder attributes the roof gap to — or that it attributes nothing.
+
+    The ladder only localizes a loss when it brackets the corpus point from
+    above: each stage strips one production concern, so a descent to the corpus
+    scan names the stage that cost the throughput. A corpus scan that outruns
+    every matched stage inverts that reading — the controls are then the slow
+    path, and citing them as the explanation would assert a descent the numbers
+    do not show.
+    """
+    if not ladder:
+        return (
+            "This older artifact predates the matched ladder; remint Layer C to localize "
+            "the gap before making a stronger claim."
+        )
+    top = max(ladder, key=lambda s: float(s.get("gbps", 0.0)))
+    top_gbps = float(top.get("gbps", 0.0))
+    if pure_gbps > top_gbps > 0:
+        return (
+            "The matched ladder is **non-binding here** — the corpus scan outruns its fastest "
+            f"stage ({top.get('name', '?')}, {top_gbps:.1f} GB/s) by {pure_gbps / top_gbps:.2f}×, "
+            "so neither the dual-window load shape nor corpus fragmentation can account for the "
+            "remaining gap. The controls are the slower path and need re-examination before "
+            "Layer C can attribute the headroom to anything."
+        )
+    return (
+        "The matched ladder shows where throughput falls before corpus fragmentation; "
+        "optimize and remeasure those stages before making a stronger claim."
+    )
+
+
 def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> str:
     """Render generated source artifacts."""
     tiers = {t["name"]: float(t["gbps"]) for t in roof["tiers"]}
@@ -249,13 +281,7 @@ def render(roof: dict, pts: list[ClassPoint], compute: ComputeBound | None) -> s
                 "optimality proof."
             )
         else:
-            next_step = (
-                "The matched ladder shows where throughput falls before corpus fragmentation; "
-                "optimize and remeasure those stages before making a stronger claim."
-                if ladder
-                else "This older artifact predates the matched ladder; remint Layer C to localize "
-                "the gap before making a stronger claim."
-            )
+            next_step = localize(ladder, pg)
             verdict = (
                 f"**Verdict — material headroom remains.** The full scan reaches **{pg:.1f} GB/s = "
                 f"{frac:.0f}% of the {dram:.1f} GB/s single-core pure-read roof**. That is below "

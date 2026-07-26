@@ -17,6 +17,12 @@ doc_radar:
     - file: pkg/kernels/irregex/contract/search_api.toml
       contains:
         - 'subprocess = { status = "authoritative"'
+    - description: "canary for the 12-class win range quoted below — a re-mint moves both bounds, and breaking here is the signal to restate them"
+      file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+      contains:
+        - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
+        - "8.93x"
+        - "5.78x"
 ---
 
 # Gist — research map for agent-loop code search
@@ -68,7 +74,7 @@ make bench-gist-certify           # refresh Certificate layers (see TESTING.md)
 ## Measured (committed Certificate artifact)
 
 On the recorded certificate corpus, gist beat ripgrep in all 12 query classes
-by 1.97×–23.57× under fail-closed statistics (lower median **and** Mann–Whitney
+by 5.78×–8.93× under fail-closed statistics (lower median **and** Mann–Whitney
 p < 0.05). Those are measurements from
 [`bench/certify/artifact/CERTIFICATE.md`](../../bench/certify/artifact/CERTIFICATE.md),
 not universal constants. Correctness gates always run before performance gates

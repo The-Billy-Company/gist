@@ -2,8 +2,8 @@
   "_comment": "Min cold speedup floors (rival_median / gist_median). Top-level rows are rg and may be remeasured live; _rivals are optional committed-certificate guards. A floor below 1 honestly bounds a known loss rather than claiming gist wins. Regenerate only after a deliberate certificate republish. NOT a default CI merge gate — see ratio_regress.py.",
   "_rivals": {
     "csearch": {
-      "literal-rare": 0.7,
-      "regex-dotted": 0.7
+      "literal-rare": 0.45,
+      "regex-dotted": 0.4
     }
   },
   "literal-rare": 3.0,

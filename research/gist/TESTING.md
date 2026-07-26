@@ -13,6 +13,9 @@ doc_radar:
         - "CLI-shape matrix parity (matrix.py)"
         - "warm session floors (gate_session.py --committed)"
         - "CLI-shape matrix floors (matrix.py gate)"
+    - description: "canary for the Layer C roofline placement quoted in §6 — a re-mint moves it, and breaking here is the signal to restate it"
+      file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+      contains: "61.6 GB/s = 77% of the 79.8 GB/s single-core pure-read roof"
 ---
 
 # Gist — the evidence story
@@ -196,8 +199,9 @@ Important limits:
 - Layer B bounds the measured instruction sequences and modeled CPUs, not
   every possible implementation.
 - Layer C reports and decomposes distance from a measured ceiling. The
-  committed absent-needle scan is 29.1 GB/s against an 83.9 GB/s DRAM read
-  ceiling (35%); that proves material headroom, not DRAM saturation.
+  committed absent-needle scan is 61.6 GB/s against a 79.8 GB/s DRAM read
+  ceiling (77%); below the pre-registered 80% near-roof threshold, so it
+  proves material headroom, not DRAM saturation.
 - Layer D proves one-pass verification over the candidate set admitted by the
   current filter. It does not prove that this candidate set is globally
   minimal among all possible indexes or that no different search algorithm

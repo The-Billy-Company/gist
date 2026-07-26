@@ -75,7 +75,7 @@ patterns (`})`, `;$`, `\w{3,8}`, a UUID class, the sub-trigram pure-literal
 alternation `panic|0x`) where the trigram prefilter admits _every_ file — the
 cases the competition is built to win.
 
-### The three cold cells csearch/zoekt win, and why they stay won
+## The three cold cells csearch/zoekt win, and why they stay won
 
 The cold macro tier has gist behind csearch on `literal-rare` and `regex-dotted`,
 and level with zoekt on `literal-punct2`. That gap is **the price of live truth,
@@ -84,7 +84,7 @@ against the following:
 
 - **It is not the search kernel.** Layer D certifies gist at the
   information-theoretic floor on all three classes. A query whose index prunes
-  _every_ file still costs ~55 ms / ~250 ms system time; adding the real work of
+  _every_ file still costs ~55 ms / ~170 ms system time; adding the real work of
   scanning 13.8 MiB and returning 546 matches costs **3.5 ms more**. Essentially
   all of it is fixed cost paid before any matching.
 - **It is the freshness metadata, and the walk is already fused.**
@@ -102,7 +102,7 @@ against the following:
   resolved 1,158 changed files in 354 ms. Replay is ~8× _slower_ than the walk it
   would replace, so wiring it into the query path is a pessimization.
 
-csearch spends 22 ms of system time to gist's 257 ms because it never consults
+csearch spends tens of ms of system time to gist's ~170 ms because it never consults
 the filesystem: it answers from its index and goes silently stale. gist's answer
 to the same workload is the **warm tier**, where the resident daemon holds an
 armed watcher, skips the walk without giving up live truth, and beats csearch by
@@ -138,10 +138,10 @@ worktree; do not certify the actively changing coworking tree. The manifest
 hashes detect mutation late, but a benchmark that races file creation/removal
 is already invalid before that gate.
 
-That is why a manifest row is a promise — *these exact bytes produced the timings
-above* — and why the default mint **aborts** when a corpus file vanishes or
+That is why a manifest row is a promise — _these exact bytes produced the timings
+above_ — and why the default mint **aborts** when a corpus file vanishes or
 changes while being hashed. `CERT_ALLOW_DIRTY=1` relaxes only the promise's
-scope, never its honesty: a churned file is *dropped* from the manifest instead
+scope, never its honesty: a churned file is _dropped_ from the manifest instead
 of hashed loosely, counted in `machine.json` as `corpus_unstable_files` (with a
 capped `corpus_unstable` path sample), so the bundle says exactly which bytes it
 cannot vouch for. It stays fail-closed above 1% churn — past that the corpus
