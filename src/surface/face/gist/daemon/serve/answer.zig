@@ -26,7 +26,7 @@
 
 const std = @import("std");
 const resident = @import("../../../../exec/session/warm/resident.zig");
-const protocol = @import("../../../../exec/session/conduit/protocol.zig");
+const protocol = @import("../../../../exec/session/conduit/protocol/protocol.zig");
 const assay = @import("../../../../../assay/assay.zig");
 const fault = @import("../../../../../fault.zig");
 

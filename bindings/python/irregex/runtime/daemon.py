@@ -2,8 +2,9 @@
 """Persistent resident-session client (ADR-352 rung 2.5).
 
 Long-lived Unix-socket connection to a `gist serve` daemon. Same wire protocol
-as `src/surface/exec/session/conduit/protocol.zig` / the Zig CLI. Fail-open: connect miss,
-ineligible request, or `decline` → cold subprocess (`shell.files`/`shell.count`).
+as `src/surface/exec/session/conduit/protocol/protocol.zig` / the Zig CLI.
+Fail-open: connect miss, ineligible request, or `decline` → cold subprocess
+(`shell.files`/`shell.count`).
 """
 
 from __future__ import annotations

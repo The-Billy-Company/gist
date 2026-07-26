@@ -30,4 +30,4 @@ same socket safe.
 
 The in-process sibling for embedding hosts is [`../../../ffi/`](../../../ffi) — same
 session, C ABI, no socket. The wire grammar lives in
-[`exec/session/conduit/protocol.zig`](../../../exec/session/conduit/protocol.zig).
+[`exec/session/conduit/protocol/protocol.zig`](../../../exec/session/conduit/protocol/protocol.zig).

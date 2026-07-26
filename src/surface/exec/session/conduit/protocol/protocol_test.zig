@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const protocol = @import("protocol.zig");
-const request = @import("../answer/request.zig");
+const request = @import("../../answer/request.zig");
 
 const gpa = std.testing.allocator;
 
@@ -121,7 +121,7 @@ test "query v2 round-trips the max_count u64 (lane 4) at 0, 1, and > u32" {
 test "decodeQuery round-trips the invert bit; the flag byte is now fully assigned" {
     // Lane 3b: bit 4 (`-v`) joins `known_flags` — the set-complement makes it
     // warm-eligible, so a set invert bit decodes to `invert = true` (no longer
-    // BadFrame → cold).
+    // UnexpectedFrame → cold).
     const payload = [_]u8{ @intFromEnum(request.Mode.lines), 1 << 4, 'n' };
     const got = try protocol.decodeQuery(&payload);
     try std.testing.expect(got.invert);
@@ -139,13 +139,13 @@ test "decodeQuery round-trips the invert bit; the flag byte is now fully assigne
 }
 
 test "decodeQuery fails closed on a max_count flag with a truncated or pattern-less u64" {
-    // Bit 7 set but < 8 bytes for the u64 ⇒ BadFrame (a truncated frame, not an
+    // Bit 7 set but < 8 bytes for the u64 ⇒ UnexpectedFrame (a truncated frame, not an
     // empty-pattern one). Hand-built: mode, flags=max_count_present, 3 bytes.
     const trunc = [_]u8{ @intFromEnum(request.Mode.files), 1 << 7, 1, 2, 3 };
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&trunc));
-    // A full 8-byte u64 but no pattern after it ⇒ empty-pattern BadFrame.
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeQuery(&trunc));
+    // A full 8-byte u64 but no pattern after it ⇒ empty-pattern UnexpectedFrame.
     const no_pat = [_]u8{ @intFromEnum(request.Mode.files), 1 << 7 } ++ [_]u8{0} ** 8;
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&no_pat));
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeQuery(&no_pat));
 }
 
 test "files result encode/decode yields every path in order" {
@@ -227,7 +227,7 @@ test "lines answer: a no-match reply is zero chunks + a terminal matched=false" 
 }
 
 test "decodeResult(lines) rejects a truncated terminal frame" {
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeResult(&.{@intFromEnum(request.Mode.lines)}));
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeResult(&.{@intFromEnum(request.Mode.lines)}));
 }
 
 test "chunk_fd payload encode/decode preserves length + matched, fails closed short" {
@@ -246,11 +246,11 @@ test "chunk_fd payload encode/decode preserves length + matched, fails closed sh
         try std.testing.expectEqual(c[1], cf.matched);
     }
     // A payload shorter than [u64 length][u8 matched] fails closed.
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeChunkFd(&.{ 0, 0, 0, 0 }));
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeChunkFd(&.{ 0, 0, 0, 0 }));
 }
 
 test "fd-transport capability advertises exactly where the shm path exists" {
-    const shm = @import("shm.zig");
+    const shm = @import("../shm.zig");
     // The advertised set is the fd bit iff this target has the anonymous-shm +
     // SCM_RIGHTS path — a peer on an unsupported target advertises nothing and
     // stays on chunk frames automatically.
@@ -277,31 +277,31 @@ test "ready handshake encode/decode preserves both generations and the index gen
 
 test "parseFrame fails closed on a zero-length or oversized frame" {
     var zero = [_]u8{ 0, 0, 0, 0, 1 }; // len == 0
-    try std.testing.expectError(protocol.WireError.FrameTooLarge, protocol.parseFrame(&zero));
+    try std.testing.expectError(protocol.WireError.StreamTooLong, protocol.parseFrame(&zero));
 
     var huge: [5]u8 = undefined;
     std.mem.writeInt(u32, huge[0..4], protocol.max_frame + 1, .little);
     huge[4] = 1;
-    try std.testing.expectError(protocol.WireError.FrameTooLarge, protocol.parseFrame(&huge));
+    try std.testing.expectError(protocol.WireError.StreamTooLong, protocol.parseFrame(&huge));
 }
 
 test "parseFrame rejects an unknown opcode" {
     var bad = [_]u8{ 1, 0, 0, 0, 250 }; // len 1, opcode 250 ∉ Opcode
-    try std.testing.expectError(protocol.WireError.BadOpcode, protocol.parseFrame(&bad));
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.parseFrame(&bad));
 }
 
 test "decodeQuery / decodeResult reject truncated payloads" {
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&.{})); // < 2 bytes
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeQuery(&.{ @intFromEnum(request.Mode.files), 0 })); // empty pattern
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeResult(&.{})); // no mode byte
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeResult(&.{@intFromEnum(request.Mode.count)})); // count < 9 bytes
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeQuery(&.{})); // < 2 bytes
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeQuery(&.{ @intFromEnum(request.Mode.files), 0 })); // empty pattern
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeResult(&.{})); // no mode byte
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeResult(&.{@intFromEnum(request.Mode.count)})); // count < 9 bytes
 }
 
 test "FileIter fails closed on a truncated path length" {
     // mode=files, n=1, then a path length of 8 with only 2 bytes behind it.
     var payload = [_]u8{ @intFromEnum(request.Mode.files), 1, 0, 0, 0, 8, 0, 0, 0, 'a', 'b' };
     var view = try protocol.decodeResult(&payload);
-    try std.testing.expectError(protocol.WireError.BadFrame, view.files.next());
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, view.files.next());
 }
 
 test "query_ext round-trips the PathFilter and the --rank trailer" {
@@ -414,7 +414,7 @@ test "changed encode/decode round-trips the since instant (negative included)" {
         try std.testing.expectEqual(since, try protocol.decodeChanged(p.payload));
     }
     // Truncated instant fails closed.
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeChanged("short"));
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeChanged("short"));
 }
 
 test "annals encode/decode: vouched answer round-trips prefix + paths losslessly" {
@@ -439,9 +439,9 @@ test "annals encode/decode: decline round-trips as null; malformed payloads fail
     try std.testing.expectEqual(@as(?protocol.AnnalsView, null), try protocol.decodeAnnals(p.payload));
 
     // Empty payload / truncated prefix / truncated count all fail closed.
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeAnnals(""));
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeAnnals(&[_]u8{ 1, 9, 0, 0, 0, 'x' })); // prefix len 9, 1 byte follows
-    try std.testing.expectError(protocol.WireError.BadFrame, protocol.decodeAnnals(&[_]u8{ 1, 1, 0, 0, 0, 'x', 2 })); // count truncated
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeAnnals(""));
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeAnnals(&[_]u8{ 1, 9, 0, 0, 0, 'x' })); // prefix len 9, 1 byte follows
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeAnnals(&[_]u8{ 1, 1, 0, 0, 0, 'x', 2 })); // count truncated
     // A path list shorter than its declared count fails closed at iteration.
     {
         var b2: std.ArrayList(u8) = .empty;
@@ -458,6 +458,6 @@ test "annals encode/decode: decline round-trips as null; malformed payloads fail
         const v = (try protocol.decodeAnnals(mangled)) orelse return error.TestExpectedVouch;
         var it2 = v.paths;
         _ = try it2.next(); // the real path
-        try std.testing.expectError(protocol.WireError.BadFrame, it2.next()); // the phantom one
+        try std.testing.expectError(protocol.WireError.UnexpectedFrame, it2.next()); // the phantom one
     }
 }

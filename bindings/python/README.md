@@ -370,7 +370,8 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 (`irregex.warm_eligible(req)` is `False` for scoped roots, globs/types, context, or
 any rich flag), or a wire hiccup transparently falls back to the byte-identical
 cold subprocess — the daemon is a pure accelerator, never a new failure mode.
-The wire protocol is the same one `src/surface/exec/session/conduit/protocol.zig` defines and the Zig
+The wire protocol is the same one
+`src/surface/exec/session/conduit/protocol/protocol.zig` defines and the Zig
 CLI + Rust clients speak, so all three frame-match against the one daemon.
 `refresh_generation()` reads the daemon's current three-part generation; a
 reconnect, daemon restart, or index publication is visible through

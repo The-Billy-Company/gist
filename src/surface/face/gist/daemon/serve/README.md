@@ -74,6 +74,6 @@ in a hidden `.<socket>.tree` beside the socket
 re-proves it before dialing; a socket bound to another tree reads as no daemon
 at all and the query answers cold.
 
-The wire grammar is [`exec/session/conduit/protocol.zig`](../../../../exec/session/conduit/protocol.zig);
+The wire grammar is [`exec/session/conduit/protocol/protocol.zig`](../../../../exec/session/conduit/protocol/protocol.zig);
 the client that dials it is [`../client`](../client). End-to-end lifecycle is
 pinned in [`serve_test.zig`](serve_test.zig).

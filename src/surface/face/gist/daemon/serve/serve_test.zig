@@ -11,7 +11,7 @@
 const std = @import("std");
 const serve = @import("serve.zig");
 const answer = @import("answer.zig"); // the query answer path owns the in-flight/budget test hooks
-const protocol = @import("../../../../exec/session/conduit/protocol.zig");
+const protocol = @import("../../../../exec/session/conduit/protocol/protocol.zig");
 const request = @import("../../../../exec/session/answer/request.zig");
 const shm = @import("../../../../exec/session/conduit/shm.zig");
 const fault = @import("../../../../../fault.zig");
