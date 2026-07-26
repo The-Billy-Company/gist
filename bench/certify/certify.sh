@@ -233,7 +233,7 @@ hyperfine_bin="$(command -v hyperfine)" || exit 1
 } > "${OUT}/tool-versions.txt.tmp"
 mv "${OUT}/tool-versions.txt.tmp" "${OUT}/tool-versions.txt"
 
-python3 - "${PATHS_LIST}" "${REPO}" "${OUT}/corpus-manifest.tsv" "${OUT}/machine.json" "${RUNS}" "${WARMUP}" "${roots_str}" << 'PY' || exit 1
+python3 - "${PATHS_LIST}" "${REPO}" "${OUT}/corpus-manifest.tsv" "${OUT}/machine.json" "${RUNS}" "${WARMUP}" "${roots_str}" "${CERT_ALLOW_DIRTY:-0}" << 'PY' || exit 1
 import hashlib
 import json
 import os
@@ -241,7 +241,27 @@ import platform
 import subprocess
 import sys
 
-paths_list, repo, manifest, machine_json, runs, warmup, roots = sys.argv[1:8]
+paths_list, repo, manifest, machine_json, runs, warmup, roots, allow_dirty = sys.argv[1:9]
+
+# A manifest row is a promise: these exact bytes produced the timings above. On a
+# clean tree any file that vanishes or moves under us breaks that promise and is
+# fatal. On a coworking tree (CERT_ALLOW_DIRTY=1) ~10 agents edit continuously, so
+# a churned file is expected — losing a half-hour of valid measurement to someone
+# else's `rm` is not integrity, it is brittleness. Such a file is DROPPED from the
+# manifest rather than hashed loosely, and counted in machine.json, so the
+# certificate states exactly which bytes it can and cannot vouch for. Still
+# fail-closed: past CHURN_CEILING the corpus moved too much to certify at all.
+CHURN_CEILING = 0.01
+churn_tolerated = allow_dirty == "1"
+unstable: list[str] = []
+
+
+def churned(pb: bytes, why: str) -> None:
+    if not churn_tolerated:
+        raise SystemExit(f"corpus file {why} while hashing: {os.fsdecode(pb)}")
+    unstable.append(os.fsdecode(pb))
+
+
 n = tot = 0
 raw = open(paths_list, "rb").read()
 manifest_tmp = manifest + ".tmp"
@@ -254,16 +274,26 @@ with open(manifest_tmp, "wb") as mf:
             raise SystemExit(f"manifest cannot encode control characters in path: {pb!r}")
         path = os.path.join(os.fsencode(repo), pb)
         digest = hashlib.sha256()
-        with open(path, "rb") as source:
-            before = os.fstat(source.fileno())
-            for chunk in iter(lambda: source.read(1 << 20), b""):
-                digest.update(chunk)
-            after = os.fstat(source.fileno())
+        try:
+            with open(path, "rb") as source:
+                before = os.fstat(source.fileno())
+                for chunk in iter(lambda: source.read(1 << 20), b""):
+                    digest.update(chunk)
+                after = os.fstat(source.fileno())
+        except (FileNotFoundError, NotADirectoryError):
+            churned(pb, "vanished")
+            continue
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-            raise SystemExit(f"corpus file changed while hashing: {os.fsdecode(pb)}")
+            churned(pb, "changed")
+            continue
         mf.write(pb + f"\t{before.st_size}\t{digest.hexdigest()}\n".encode())
         n += 1
         tot += before.st_size
+if unstable and len(unstable) > CHURN_CEILING * (n + len(unstable)):
+    raise SystemExit(
+        f"corpus churned past the ceiling while hashing: {len(unstable)} of "
+        f"{n + len(unstable)} files (> {CHURN_CEILING:.0%}) — re-mint on a quieter tree"
+    )
 os.replace(manifest_tmp, manifest)
 
 def sysctl(k):
@@ -305,13 +335,23 @@ machine = {
     "git_commit": head(),
     "corpus_file_count": n,
     "corpus_total_bytes": tot,
+    # Count is exact; the path list is capped so one pathological run cannot bloat
+    # the artifact. Both are absent on a clean-tree mint.
+    "corpus_unstable_files": len(unstable),
+    "corpus_unstable": sorted(unstable)[:64],
     "runs": int(runs),
     "warmup": int(warmup),
     "roots": roots,
 }
+if not unstable:
+    del machine["corpus_unstable_files"], machine["corpus_unstable"]
 with open(machine_json, "w") as output:
     output.write(json.dumps(machine, indent=2) + "\n")
 print(f"  machine.json: {machine['cpu_model']} · {machine['cpu_count']} cores · corpus {n} files / {tot} B")
+if unstable:
+    print(f"  corpus churn: {len(unstable)} file(s) changed under the mint, excluded from the manifest")
+    for p in sorted(unstable)[:5]:
+        print(f"    - {p}")
 PY
 
 python3 - "${OUT}/raw" "${OUT}/command-log.txt" << 'PY' || exit 1

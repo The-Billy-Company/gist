@@ -22,6 +22,7 @@ stdlib only. Deterministic: the bootstrap RNG is seeded (shared with certify_sta
 """
 
 import argparse
+import csv
 import json
 from pathlib import Path
 import random
@@ -239,7 +240,11 @@ def main() -> int:
         return 1
 
     splice(args.certificate, section)
-    args.csv.write_text("\n".join(",".join(str(c) for c in row) for row in csv_rows) + "\n")
+    # Real CSV quoting, not a naive join: probe patterns are regexes, and one of
+    # them is `\w{3,8}` — a bare join puts that comma in the middle of a field and
+    # silently shifts every column after it for that row.
+    with args.csv.open("w", newline="") as fh:
+        csv.writer(fh).writerows(csv_rows)
     measured = len(csv_rows) - 1
     print(f"warm tier: {measured} classes · {loss} loss vs rg → {args.certificate}")
     print(f"warm-tier CSV → {args.csv}")
