@@ -155,29 +155,37 @@ python3 "${HERE}/certify_codex_report.py" \
   --zig "${zig_version}" \
   || die "certify_codex_report.py failed (Layer F invariant violated)"
 
-# Completeness gate (layers only — full artifact check stays with certify.sh)
+# Completeness gate (layers only — full artifact check stays with certify.sh).
+# The header list comes from the shared roster (`layers.py`) that the ledger and
+# the reproducibility gate read, so a new layer cannot be spliced here and stay
+# invisible to them. The --rank and relate headers are minted by certify.sh, not
+# this script, so they are excluded from a layers-only run.
+layer_headers="$(python3 "${HERE}/layers.py" headers)" || die "layers.py headers failed"
 missing=0
-for hdr in \
-  "## Layer B — port-optimality" \
-  "## Layer C — roofline" \
-  "## Layer D — algorithmic lower bound" \
-  "## Layer E — crest sieve" \
-  "## Layer F — codex self-index"; do
+while IFS= read -r hdr; do
+  [[ -n "${hdr}" ]] || continue
+  case "${hdr}" in
+    "## Layer A"* | "## Layer G"*) continue ;;
+    *) ;;
+  esac
   if ! grep -qF "${hdr}" "${CERT}"; then
     echo "certify_layers: CERTIFICATE.md missing section: ${hdr}" >&2
     missing=1
   fi
-done
+done <<< "${layer_headers}"
 [[ "${missing}" -eq 0 ]] || die "certificate still incomplete after splice"
 
 # Optional publish into the committed artifact dir (crate-relative).
 if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   pub="${KERNEL}/${CERT_PUBLISH_DIR}"
   mkdir -p "${pub}/raw"
+  # Bundle-wide files first, then every layer side-car the shared roster names —
+  # so a new layer publishes its receipt without a second list to remember.
+  layer_sidecars="$(python3 "${HERE}/layers.py" sidecars)" || die "layers.py sidecars failed"
+  mapfile -t sidecars <<< "${layer_sidecars}"
   for f in CERTIFICATE.md certify.csv certify_macro.csv machine.json \
     tool-versions.txt corpus-manifest.tsv command-log.txt index-sizes.json \
-    portcert.json portcert.csv portbound.json roofline.json lowerbound.csv crest.csv \
-    codex.csv; do
+    portcert.csv portbound.json "${sidecars[@]}"; do
     [[ -f "${OUT}/${f}" ]] && cp -f "${OUT}/${f}" "${pub}/"
   done
   if compgen -G "${OUT}/raw/*.json" > /dev/null; then

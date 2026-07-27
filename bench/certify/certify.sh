@@ -415,12 +415,12 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   cp -f "${CERT}" "${OUT}/certify.csv" "${MACRO_CSV}" "${OUT}/machine.json" \
     "${OUT}/tool-versions.txt" "${OUT}/corpus-manifest.tsv" \
     "${OUT}/command-log.txt" "${OUT}/index-sizes.json" "${pub}/"
-  # Warm-tier + rank-lane CSVs — additive side-cars (present when those lanes ran).
-  [[ -f "${OUT}/certify_warm.csv" ]] && cp -f "${OUT}/certify_warm.csv" "${pub}/"
-  [[ -f "${OUT}/certify_rank.csv" ]] && cp -f "${OUT}/certify_rank.csv" "${pub}/"
-  [[ -f "${OUT}/relate.csv" ]] && cp -f "${OUT}/relate.csv" "${pub}/"
-  # Layer B/C/D/E/F side-cars — the certificate is incomplete without them.
-  for side in portcert.json portcert.csv portbound.json roofline.json lowerbound.csv crest.csv codex.csv; do
+  # Every layer side-car the shared roster names, plus the warm CSV and the two
+  # port-bound files no layer row owns. Driving the list from `layers.py` means a
+  # new layer publishes its receipt without a second list to keep in step.
+  layer_sidecars="$(python3 "${HERE}/layers.py" sidecars)" || exit 1
+  mapfile -t sidecars <<< "${layer_sidecars}"
+  for side in certify_warm.csv portcert.csv portbound.json "${sidecars[@]}"; do
     [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
   done
   cp -f "${OUT}/raw/"*.json "${pub}/raw/" || exit 1
