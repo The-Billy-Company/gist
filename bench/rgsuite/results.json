@@ -798,7 +798,7 @@
    "--stats",
    "Sherlock"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "f411_parallel_search_stats",
@@ -821,7 +821,7 @@
    "--stats",
    "Sherlock"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "f411_parallel_quiet_search_stats",
@@ -833,7 +833,7 @@
    "--stats",
    "Sherlock"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "f416_crlf",
@@ -1849,7 +1849,7 @@
    "--heading",
    "Sherlock"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "inverted",
@@ -2524,7 +2524,7 @@
    "alpha",
    "beta"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "ignore_rgignore_multi_root_order#2",
@@ -2536,7 +2536,7 @@
    "beta",
    "alpha"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "symlink_nofollow",
@@ -3021,7 +3021,7 @@
    "--heading",
    "test"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "r105_part1",
@@ -3952,7 +3952,7 @@
   "argv": [
    "a"
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "r1259_drop_last_byte_nonl#1",
@@ -4672,7 +4672,7 @@
    "foo",
    "."
   ],
-  "detail": ""
+  "detail": "order-agnostic oracle (eqnice_sorted)"
  },
  {
   "name": "r2990_trip_over_trailing_dot#1",

@@ -70,9 +70,14 @@ compares **sorted lines** (`eqnice_sorted!`, `cmp=sort`) exactly where rg's
 parallel dir walk makes its own output genuinely nondeterministic (empirically:
 `rg --files` on those fixtures yields many distinct orders across repeated
 runs). `run.py` scores each case at its oracle's own bar — sorted-line equality
-is a full PASS for a `cmp=sort` case (5 such cases today), while a `cmp=plain`
+is a full PASS for a `cmp=sort` case (17 such cases today), while a `cmp=plain`
 case that matches only after sorting stays ORDER: a real parity hole, and the
-bucket is empty. The parallel engine still streams each hit the instant a
+bucket is empty. A `cmp=sort` case records the **oracle**, never which side of
+the coin one run drew: on `ignore_git_multi_root_order` both tools flip between
+the two root orders across repeated runs (measured over 40 runs each: gist
+24/16, rg 26/14), so whether a given run also happened to match byte-exactly
+says nothing about gist — recording it would only churn a tracked
+`results.json` on every re-run. The parallel engine still streams each hit the instant a
 worker finds it (the same EPIPE-triggered cooperative cancellation ripgrep's
 printer uses, so `gist foo | head` aborts the walk) — wherever rg's own output
 IS deterministic (single-dir walks, `--sort*` modes, `--files` under one root),

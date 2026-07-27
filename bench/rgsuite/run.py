@@ -160,18 +160,21 @@ def _cmp_stdout(rec, rc_g, out_g, err_g, rc_rg, out_rg, err_rg):
         out_g, out_rg = O.norm_time(out_g), O.norm_time(out_rg)
     if "--json" in rec["argv"]:
         out_g, out_rg = O.norm_json(out_g), O.norm_json(out_rg)
-    if out_g == out_rg:
-        return "PASS", ""
-    if O.sort_lines(out_g) == O.sort_lines(out_rg):
+    exact = out_g == out_rg
+    if exact or O.sort_lines(out_g) == O.sort_lines(out_rg):
         # ripgrep's own assertion for this test: `eqnice!` (cmp=plain) pins the
         # exact bytes, `eqnice_sorted!` (cmp=sort) compares sorted lines because
-        # rg's parallel dir walk is genuinely nondeterministic there (empirically:
-        # `rg --files` on these fixtures yields many distinct orders across runs).
+        # rg's parallel dir walk is genuinely nondeterministic there. Measured:
+        # on ignore_git_multi_root_order BOTH tools flip between the two root
+        # orders across runs (gist 24/16, rg 26/14 over 40 runs each), so whether
+        # a given run also happens to match byte-exactly is a coin, not a
+        # property of gist. Record the ORACLE for those cases, never the flip —
+        # otherwise a tracked results.json churns on every re-run.
         # Meeting the oracle's own bar is a PASS; falling short of a plain
         # assertion on order alone is the real parity hole ORDER exists to name.
         if rec.get("cmp") == "sort":
             return "PASS", "order-agnostic oracle (eqnice_sorted)"
-        return "ORDER", "line-order only"
+        return ("PASS", "") if exact else ("ORDER", "line-order only")
 
     # Honest design-boundary re-bucketing — applied ONLY to a case that would
     # otherwise FAIL, and ONLY when the divergence is attributable to a
