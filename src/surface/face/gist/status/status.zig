@@ -72,6 +72,12 @@ pub const Config = struct {
     preferences_in_force: bool = false,
     /// `--no-config` or `GIST_NO_CONFIG` — both layers ignored.
     suppressed: bool = false,
+    /// A persisted file that exists but could not be read. Surfaced here
+    /// because a malformed PREFERENCES file is otherwise invisible to exactly
+    /// the reader who needs to know: it is skipped without complaint off a
+    /// terminal, so a script whose author never sees the terminal message
+    /// would have no way to learn the file is broken.
+    malformed: ?[]const u8 = null,
 };
 
 /// Stable lifecycle/introspection model. Additive fields may be introduced
@@ -97,11 +103,19 @@ pub const Snapshot = struct {
 /// What the two persisted layers are doing right now. Borrowed paths — both
 /// layers cache for the process lifetime, so neither string outlives its owner.
 fn configNow(io: std.Io) Config {
-    if (charter_mod.suppressedNow()) return .{ .suppressed = true };
+    // `inspect`, not `governing`: status reports on the world, and a report
+    // that exits rather than describing a broken file is the least useful
+    // possible response to the question being asked. Suppression is reported
+    // ALONGSIDE the files rather than instead of them, for the same reason —
+    // "there is a charter and this run ignores it" is the answer; "no charter"
+    // would be a lie told at the one moment it matters.
     return .{
-        .charter = if (charter_mod.governing()) |c| c.path else null,
+        .suppressed = charter_mod.suppressedNow(),
+        .charter = if (charter_mod.inspect()) |c| c.path else null,
         .preferences = if (preference.loaded()) |p| p.path else null,
         .preferences_in_force = preference.forThisRun(io).len > 0,
+        .malformed = if (charter_mod.faulted()) |f| f.path //
+        else if (preference.faulted()) |f| f.path else null,
     };
 }
 
@@ -238,6 +252,7 @@ fn renderConfig(gpa: std.mem.Allocator, buf: *std.ArrayList(u8), c: Config) !voi
         path,
         if (c.preferences_in_force) "in force — stdout is a terminal" else "not in force — preferences apply only to an interactive terminal",
     });
+    if (c.malformed) |path| try buf.print(gpa, "  malformed         {s} — `gist config check` says why\n", .{path});
 }
 
 fn renderJson(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
@@ -306,7 +321,7 @@ test "JSON renderer exposes the stable ready contract" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        "{\"schema_version\":1,\"state\":\"ready\",\"index\":{\"path\":\"index.gist\",\"paths_file\":\"paths.list\",\"files_indexed\":2,\"distinct_trigrams\":3,\"postings\":5,\"index_bytes\":8,\"paths_bytes\":13},\"freshness\":{\"anchor_unix_ns\":1000,\"age_seconds\":2.5},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false}}\n",
+        "{\"schema_version\":1,\"state\":\"ready\",\"index\":{\"path\":\"index.gist\",\"paths_file\":\"paths.list\",\"files_indexed\":2,\"distinct_trigrams\":3,\"postings\":5,\"index_bytes\":8,\"paths_bytes\":13},\"freshness\":{\"anchor_unix_ns\":1000,\"age_seconds\":2.5},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false,\"malformed\":null}}\n",
         output,
     );
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, output, .{});
@@ -406,6 +421,17 @@ test "the persisted layers are silent when absent and named when present" {
     const indexless = try renderHuman(t.allocator, none);
     defer t.allocator.free(indexless);
     try t.expect(std.mem.containsAtLeast(u8, indexless, 1, "charter"));
+
+    // A broken preferences file is skipped without complaint off a terminal —
+    // correct, since nothing would have used it, but it would leave the file
+    // invisible to the one reader who has to repair it. Status is where that
+    // reader finds out, and it points at the verb that explains why.
+    var broken = ready;
+    broken.config = .{ .preferences = "~/.config/gist/preferences", .malformed = "~/.config/gist/preferences" };
+    const flagged = try renderHuman(t.allocator, broken);
+    defer t.allocator.free(flagged);
+    try t.expect(std.mem.containsAtLeast(u8, flagged, 1, "malformed"));
+    try t.expect(std.mem.containsAtLeast(u8, flagged, 1, "gist config check"));
 }
 
 test "JSON unavailable state stays valid and null-bearing" {
@@ -418,7 +444,7 @@ test "JSON unavailable state stays valid and null-bearing" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        "{\"schema_version\":1,\"state\":\"unavailable\",\"index\":null,\"freshness\":{\"anchor_unix_ns\":null,\"age_seconds\":null},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false}}\n",
+        "{\"schema_version\":1,\"state\":\"unavailable\",\"index\":null,\"freshness\":{\"anchor_unix_ns\":null,\"age_seconds\":null},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false,\"malformed\":null}}\n",
         output,
     );
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, output, .{});

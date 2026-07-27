@@ -141,8 +141,14 @@ const manifest_hyperlink_tail =
     \\        "source_of_truth": "src/surface/exec/cold/argv/preference.zig"
     \\      }
     \\    ],
-    \\    "suppress": {"flag": "--no-config", "env": "GIST_NO_CONFIG=1", "when": "read from raw argv before either file is opened, and accepted anywhere any verb accepts flags"},
-    \\    "inspect": "gist status names both files, whether each is in force, and why not when it isn't",
+    \\    "suppress": {"flag": "--no-config", "env": "GIST_NO_CONFIG=1", "when": "read from raw argv before either file is opened, and accepted anywhere any verb accepts flags", "affects": "what a search honors, not what a report may describe — gist config and gist status still name both files and mark the run suppressed"},
+    \\    "inspect": {
+    \\      "show": "gist config [--json] — the resolved stack: each layer's path, what it declares, whether it is in force, and the env vars that outrank it",
+    \\      "check": "gist config check — validate both layers without running a search; reports both before exiting, 2 if either is malformed",
+    \\      "init": "gist config init [--write] — write .irregex.toml prefilled from this machine's GIST_ROOTS and skips.list; lifts only asserted facts, never infers a skip from the tree",
+    \\      "also": "gist status names both files and flags a malformed one"
+    \\    },
+    \\    "faults": "located (path:line) and quoted, with a nearest-name suggestion for an unknown charter key or flag; a malformed charter is fatal to a search, a malformed preferences file is fatal only to a run that would have used it",
     \\    "disclosure": "when a persisted flag could have changed the answer, a zero-match run names the file in the hint channel"
     \\  },
     \\  "output_stream": {"results": "stdout", "diagnostics": "stderr"},

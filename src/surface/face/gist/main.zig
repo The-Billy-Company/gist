@@ -4,6 +4,7 @@
 //!
 //!   gist index                        build + persist the trigram index
 //!   gist status [--json]              read-only: is an index ready, how fresh, how big
+//!   gist config [check|init]          read-only: what is steering this run, from which file
 //!   gist codex <build|count|tally|status>  the exact existence/count tier over the
 //!                                     compressed self-index shelf (src/corpus/index/codex/)
 //!
@@ -42,6 +43,7 @@ const gist = @import("irregex");
 const indexer = gist.commands.indexer; // `gist index` — build + persist the trigram index
 const codex_face = gist.commands.codex; // `gist codex` — the exact existence/count tier
 const status = gist.commands.status; // read-only index introspection
+const config = gist.commands.config; // `gist config` — the persisted-configuration stack
 const schema = gist.commands.schema; // `--schema` JSON manifest
 const primer = gist.commands.primer; // `--generate` man page + shell completions
 const search = gist.commands.search; // the unified search engine (bare shorthand + `gist rg`)
@@ -176,6 +178,13 @@ fn usage() void {
         \\aliases:
         \\  gist rg / gist search <pattern> [PATH...]   the same engine, addressed with a verb
         \\
+        \\persisted configuration (optional; neither file is required):
+        \\  gist config             what is steering this run, and from which file
+        \\  gist config check       validate both layers without running a search
+        \\  gist config init        write .irregex.toml, prefilled from this machine's
+        \\                          GIST_ROOTS / skips.list (--write to create it)
+        \\  --no-config             ignore both layers for this run (env: GIST_NO_CONFIG=1)
+        \\
         \\introspection:
         \\  gist --help / -h        this ergonomics guide
         \\  gist --schema           exhaustive JSON surface generated from the live flag catalog
@@ -305,6 +314,15 @@ fn run(init: std.process.Init) !void {
         while (it.next()) |arg| try rest.append(gpa, arg);
         try codex_face.run(gpa, io, rest.items);
         return;
+    }
+    // `gist config [check|init]` — what is steering this run and from which
+    // file. Persisted configuration that cannot be interrogated is the thing
+    // `--no-config` exists to bisect around; this is the direct answer instead.
+    if (std.mem.eql(u8, mode, "config")) {
+        var rest: std.ArrayList([]const u8) = .empty;
+        defer rest.deinit(gpa);
+        while (it.next()) |arg| try rest.append(gpa, arg);
+        return config.run(gpa, io, rest.items);
     }
     if (std.mem.eql(u8, mode, "status")) {
         const arg = it.next();
