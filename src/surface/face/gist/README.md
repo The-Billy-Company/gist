@@ -341,7 +341,10 @@ N)`, and stops. A code locator wants the matches, not a shrug: gist searches
   is that its top row is the one to open. Two shapes refuse every posture,
   including `always`: `--json` records and NUL-framed `-0` lists, where the
   filename's bytes _are_ the payload. So does a filename carrying a control
-  byte — its anchor would span two terminal lines, and rg frames that anyway.
+  byte, where you cannot see where the click target starts and stops — a
+  newline in a name splits the anchor across two terminal lines outright. The
+  URL stays exact either way; it is the text between the escapes that is
+  refused. rg frames those and emits the two-line link.
   Linking 93k matches costs ~5 ms (≈60 ns each) because the URL is split once
   per file into a prebuilt `Waypoint` and a row only writes the digits, and the
   output cap counts results rather than escapes, so turning links on never
