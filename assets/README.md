@@ -9,8 +9,8 @@ doc_radar:
 
 # `assets/` — README / certificate figures
 
-Checked-in PNGs embedded by the package narrative and Certificate of
-Optimality write-ups. **Not** runtime inputs — the engine never opens this
+Checked-in PNGs embedded by the package narrative and Dominance-and-Fit
+Certificate write-ups. **Not** runtime inputs — the engine never opens this
 folder.
 
 | File                        | Typical use                         |

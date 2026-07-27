@@ -178,7 +178,7 @@ fn emitPairs(
             .{ "structure", "d:.4", p.structure },
             .{ "grade", "s", g.label() },
         }, "{d:.4}  (bytes {d:.4} · structure {d:.4})  {s}  {s}\n", .{
-            p.score, p.bytes, p.structure, view.labels[p.i], view.labels[p.j],
+            p.score, p.bytes, p.structure, emit.anchor(gpa, view.labels[p.i]), emit.anchor(gpa, view.labels[p.j]),
         });
     }
 }
@@ -218,12 +218,12 @@ fn emitFamilies(
         if (f.repeated_lines > 0) buf.print(gpa, "  ~{d}L", .{f.repeated_lines}) catch oom();
         buf.print(gpa, "  {s}={d:.4}  [{s}]", .{ o.channel.quantity(), f.edge, g.label() }) catch oom();
         if (o.brief) {
-            buf.print(gpa, "  ·  {s}", .{view.labels[f.members[0]]}) catch oom();
+            buf.print(gpa, "  ·  {s}", .{emit.anchor(gpa, view.labels[f.members[0]])}) catch oom();
             if (f.members.len > 1) buf.print(gpa, "  (+{d} more)", .{f.members.len - 1}) catch oom();
             buf.append(gpa, '\n') catch oom();
         } else {
             buf.append(gpa, '\n') catch oom();
-            for (f.members) |m| buf.print(gpa, "  {s}\n", .{view.labels[m]}) catch oom();
+            for (f.members) |m| buf.print(gpa, "  {s}\n", .{emit.anchor(gpa, view.labels[m])}) catch oom();
         }
     }
 }
@@ -246,13 +246,16 @@ fn emitDistinct(
         if (!view.gate(d.unit)) continue;
         sift.count();
         const nearest = if (d.nearest) |n| view.labels[n] else "—";
+        // The em dash stands for "no nearest unit at all" — a placeholder, not
+        // a path, so it is the one label on this row with nothing to open.
+        const goto = if (d.nearest == null) nearest else emit.anchor(gpa, nearest);
         emit.emitRow(buf, gpa, o.json, .{
             .{ "unit", "s", view.labels[d.unit] },
             .{ "nearest", "s", nearest },
             .{ "bytes", "d:.4", d.bytes },
             .{ "structure", "d:.4", d.structure },
         }, "{s}\n  nearest miss  (bytes {d:.4} · structure {d:.4})  {s}\n", .{
-            view.labels[d.unit], d.bytes, d.structure, nearest,
+            emit.anchor(gpa, view.labels[d.unit]), d.bytes, d.structure, goto,
         });
     }
 }

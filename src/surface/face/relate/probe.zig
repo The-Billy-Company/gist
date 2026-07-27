@@ -291,7 +291,7 @@ fn rankKin(
             .{ o.channel.quantity(), "d:.4", sc.score },
             .{ "grade", "s", g.label() },
             .{ "channel", "s", @tagName(o.channel) },
-        }, "{d:.4}  {s}\n", .{ sc.score, view.labels[sc.idx] });
+        }, "{d:.4}  {s}\n", .{ sc.score, emit.anchor(gpa, view.labels[sc.idx]) });
     }
     corpus_mod.emitStdout(buf.items);
 
@@ -478,7 +478,7 @@ fn emitGain(
         .{ "bits_saved", "d:.1", saved },
         .{ "factors", "d", cost.factors },
         .{ "literals", "d", cost.literals },
-    }, "{d:.4}  {s}\n", .{ gain, label });
+    }, "{d:.4}  {s}\n", .{ gain, emit.anchor(gpa, label) });
 }
 
 // ── tests ────────────────────────────────────────────────────────────────

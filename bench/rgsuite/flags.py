@@ -16,6 +16,11 @@ the ground truth (no hardcoded expected strings):
     pairing them with `--sort path`, so the assertion is byte-exact, not a set;
   * `-j`/`--threads` is proven order-invariant (gist -j1 == gist -jN) and a set
     match against rg (the parallel walk streams in worker-discovery order);
+  * the `--no-messages` / `--no-ignore-messages` **stderr** lane is proven here
+    because the mined suite structurally cannot: rg's own `--no-messages` cases
+    assert on the exit code, which a gist that merely *rejected* the flag would
+    also satisfy (both exit 2). Suppression is only real if stderr goes empty
+    while stdout and the exit class do not move;
   * every non-thread case also asserts the indexed path equals `--no-index`
     (read-elision soundness), and the whole slate runs once per **engine** — the
     parallel work-stealing walk and the serial fallback (`GIST_NO_PARALLEL=1`) —
@@ -103,23 +108,28 @@ def _find_gist() -> str:
 
 @dataclass
 class Out:
-    """One command run: exit code and captured stdout bytes."""
+    """One command run: exit code, stdout bytes, and stderr bytes."""
 
     rc: int
     data: bytes
+    err: bytes = b""
 
 
 def run(bin_: str, args: list[str], cwd: Path, env: dict[str, str] | None = None) -> Out:
-    """Run `bin_ args` in `cwd` (stderr suppressed), capturing stdout + rc."""
+    """Run `bin_ args` in `cwd`, capturing rc + both streams.
+
+    stderr is captured rather than discarded because the message lane
+    (`--no-messages`) is asserted on it; the ordering cases simply ignore it.
+    """
     p = subprocess.run(
         [bin_, *args],
         cwd=str(cwd),
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
         timeout=90,
     )
-    return Out(p.returncode, p.stdout)
+    return Out(p.returncode, p.stdout, p.stderr)
 
 
 def _norm(data: bytes, sort_lines: bool) -> bytes:
@@ -154,6 +164,28 @@ def gen_fixtures(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     (repo / ".git").mkdir(parents=True)  # rg honors gitignore only inside a git repo
     (repo / "keep.txt").write_text("MATCH keep\n")
     (repo / "skip.log").write_text("MATCH skip\n")
+
+    # msg/: one readable file beside a directory the walk cannot enter — the
+    # cheapest reproduction of the per-file lane `--no-messages` governs, and
+    # deliberately one that still yields a MATCH, so the flag is proven to quiet
+    # stderr without touching stdout or the exit class.
+    msg = root / "msg"
+    (msg / "open").mkdir(parents=True)
+    (msg / "open" / "f.txt").write_text("MATCH here\n")
+    locked = msg / "locked"
+    locked.mkdir()
+    (locked / "f.txt").write_text("MATCH hidden\n")
+    locked.chmod(0o000)
+    # Re-open it before the tree is removed; `rmtree(ignore_errors=True)` would
+    # otherwise leave the fixture behind on every run.
+    atexit.register(lambda: locked.chmod(0o755))
+
+    # msg-ns/: an ignore rule that excludes the only content, so the implicit-CWD
+    # walk searches nothing — rg's other exit-2-with-a-message shape.
+    ns = root / "msg-ns"
+    (ns / "x").mkdir(parents=True)
+    (ns / ".ignore").write_text("x/**\n")
+    (ns / "x" / "f.txt").write_text("MATCH buried\n")
 
     base_env = {**os.environ}
     gi_env = {**os.environ, "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1"}
@@ -294,6 +326,88 @@ def _thread_invariance(*, serial: bool) -> list[str]:
     return fails
 
 
+# The message lane, as four postures over three producers. `speaks` is what the
+# lane should do; the exit code is asserted against live rg either way, which is
+# the whole point — ripgrep silences the prose and keeps the verdict.
+_MSG_POSTURES = (
+    ([], True),
+    (["--no-messages"], False),
+    (["--no-ignore-messages"], None),  # None ⇒ quiets the ignore lane and only it
+    (["--no-messages", "--messages"], True),  # last-wins restores the lane
+)
+
+
+def _message_lane(*, serial: bool) -> list[str]:
+    """`--no-messages` / `--no-ignore-messages`: prove the prose goes, the verdict stays.
+
+    Three producers, each a different lane and a different exit class:
+
+      * an unreadable DIRECTORY — the corpus lane, exit 2 even when quiet;
+      * an implicit-CWD walk that admits nothing — the corpus lane again, also
+        exit 2, but produced by gist's own filters rather than the OS;
+      * a named `--ignore-file` that will not open — the ignore lane, exit 0,
+        because rules the user asked for going unenforced is advisory.
+
+    Only PRESENCE of stderr is compared, never its bytes: diagnostic wording is
+    gist's own voice (the same rule `run.py::_score_stderr` applies). Exit codes
+    ARE compared byte-for-byte, because "suppression must not change the verdict"
+    is the half of this feature that a wrong implementation would quietly break.
+    """
+    fails: list[str] = []
+    env = _engine_env({**os.environ}, serial)
+    if os.geteuid() == 0:
+        return ["messages: SKIPPED — running as root, chmod 000 does not deny"]
+
+    # (producer label, argv without the message flags, cwd, does the IGNORE lane
+    # own it?) — the ignore lane is the only one `--no-ignore-messages` quiets.
+    producers = (
+        ("denied-dir", ["MATCH", "."], FIX / "msg", False),
+        ("nothing-searched", ["MATCH"], FIX / "msg-ns", False),
+        # Scoped to `open` so the denied directory cannot also fire: this
+        # producer must exercise the ignore lane ALONE. Their interaction is
+        # asserted separately by the lane-isolation check below.
+        ("absent-ignore-file", ["--ignore-file", "nope.ignore", "MATCH", "open"], FIX / "msg", True),
+    )
+    for label, argv, cwd, ignore_lane in producers:
+        for flags, speaks in _MSG_POSTURES:
+            # `--no-ignore-messages` is the narrow switch: it silences the ignore
+            # lane and leaves every other producer talking.
+            want = (not ignore_lane) if speaks is None else speaks
+            g = run(GIST, [*flags, *argv, "--no-index"], cwd, env)
+            r = run(RG, [*flags, *argv], cwd, {**os.environ})
+            what = f"messages:{label} {' '.join(flags) or '(default)'}"
+            if g.rc != r.rc:
+                fails.append(f"{what}: EXIT gist={g.rc} rg={r.rc}")
+            # rg is the oracle for whether the lane speaks at all; `want` only
+            # states which posture we EXPECTED it to be, so a drift in either
+            # tool is named rather than silently agreed with.
+            for tool, o in (("gist", g), ("rg", r)):
+                if bool(o.err.strip()) is want:
+                    continue
+                fails.append(
+                    f"{what}: {tool} stderr "
+                    f"{'empty, expected a message' if want else 'spoke, expected silence'}"
+                    f"{': ' + o.err.decode('utf-8', 'replace').strip()[:90] if o.err.strip() else ''}"
+                )
+            # A quieted run must not have quieted the ANSWER too.
+            if g.data != r.data:
+                fails.append(f"{what}: STDOUT diverges\n" + _mini_diff(g.data, r.data))
+
+    # Lane isolation: with BOTH producers live at once, `--no-ignore-messages`
+    # must drop the ignore line and keep the walk error. Presence-of-stderr
+    # cannot see this — the walk error alone keeps stderr non-empty either way —
+    # so count the lines naming the ignore file, a token both tools spell the
+    # same. This is the nesting rule's only load-bearing asymmetry.
+    both = ["--no-ignore-messages", "--ignore-file", "nope.ignore", "MATCH", "."]
+    for tool, binary, extra in (("gist", GIST, ["--no-index"]), ("rg", RG, [])):
+        e = run(binary, [*both, *extra], FIX / "msg", env if tool == "gist" else {**os.environ}).err
+        if b"nope.ignore" in e:
+            fails.append(f"messages:lane-isolation: {tool} kept the ignore line under --no-ignore-messages")
+        if b"locked" not in e:
+            fails.append(f"messages:lane-isolation: {tool} dropped the walk error --no-ignore-messages must keep")
+    return fails
+
+
 def do_run(engine: str) -> int:
     """Run the differential slate on the requested engine(s); 1 on any failure."""
     base_env, gi_env = gen_fixtures(FIX)
@@ -307,10 +421,12 @@ def do_run(engine: str) -> int:
     for label, serial in engines:
         fails, idx_fails = _diff_engine(cases, serial=serial)
         fails += _thread_invariance(serial=serial)
-        n = len(cases) + 3
+        msg_cases = len(_MSG_POSTURES) * 3 + 1  # + the lane-isolation case
+        fails += _message_lane(serial=serial)
+        n = len(cases) + 3 + msg_cases
         print(f"\n=== flags differential [{label}]: {n} cases ===")
         if not fails and not idx_fails:
-            print("✓ ALL PASS — gist == rg (stdout + exit) and indexed == --no-index")
+            print("✓ ALL PASS — gist == rg (stdout + exit + message lane), indexed == --no-index")
         else:
             for f in fails:
                 print("✗ " + f)

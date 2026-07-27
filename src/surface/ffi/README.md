@@ -51,17 +51,47 @@ dead process. The cold CLI keeps its fatal shell; this path does not touch it.
 
 ## Shape
 
+Two planes share the session handle. The **exact plane** (ADR-352) streams
+match records through a push callback; the **analytic plane** (ADR-377)
+materializes a kinship/retrieval/composed answer into a pull cursor of
+self-describing rows.
+
+### Exact plane — push callback
+
 | Symbol                                         | Role                                                                           |
 | ---------------------------------------------- | ------------------------------------------------------------------------------ |
 | `irregex_open(roots, nroots, out)`             | stand up a warm session (its own I/O + corpus + index)                         |
 | `irregex_search(s, pattern, len, opts, cb, …)` | execute one complete size-checked shape and stream typed match/context records |
 | `irregex_close(s)`                             | tear down corpus, index, I/O pool, and handle                                  |
 
-The three `export fn` shims live in [`../../root.zig`](../../root.zig).
-`contract.zig` owns stable statuses, flags, options, and `extern` layouts;
-`relay.zig` translates resident records across the callback boundary; and
-`session.zig` owns only handle lifecycle plus request execution. C declarations
-mirror that contract in
+### Analytic plane — pull cursor (ADR-377)
+
+| Symbol                                                    | Role                                                                                         |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `irregex_analytic_open(s, op, params, out)`               | materialize one analytic verb's answer into a cursor; 17 verbs share the entry via op enum    |
+| `irregex_analytic_next(cursor, out)`                      | pull the next self-describing row; rows stay valid until the cursor closes                    |
+| `irregex_analytic_close(cursor)`                          | release the cursor's arena                                                                   |
+
+A verb this build cannot answer in-process returns `IRREGEX_STALE` — the same
+fail-open declinature as the exact plane. Bindings shell the CLI for that verb
+unchanged, and graduate verb by verb without re-plumbing transport.
+
+### Files
+
+The three `export fn` shims for the exact plane live in [`../../root.zig`](../../root.zig).
+
+| File              | Owns                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `session.zig`     | Handle lifecycle + exact-plane request execution                                                      |
+| `contract.zig`    | Stable statuses, flags, options, and `extern` layouts for the exact plane                             |
+| `relay.zig`       | Translates resident match records across the exact-plane callback boundary                            |
+| `cursor.zig`      | The exact-plane's pull cursor (materializes a search into a positioned iterator)                      |
+| `analytic.zig`    | Analytic-plane C-ABI dispatch — one entry per op, materializes into a pull cursor of `rows.Row`s      |
+| `rows.zig`        | Stable C-ABI data contract for analytic rows — one self-describing layout for all 17 verbs            |
+| `schema.gen.zig`  | Generated schema tables (from [`pkg/kernels/irregex/tools/build_schema_tables.py`](../../../tools/build_schema_tables.py) via `contract/search_api.toml`) |
+| `oom_test.zig`    | Adverse allocation-failure suite — drives entry points under a failing allocator                       |
+
+C declarations mirror the contract in
 [`../../../include/irregex.h`](../../../include/irregex.h), exercised by
 the C-ABI smoke test in [`../../../build.zig`](../../../build.zig).
 

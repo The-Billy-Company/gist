@@ -43,6 +43,7 @@ const protocol = @import("../../../../exec/session/conduit/protocol/protocol.zig
 const shm = @import("../../../../exec/session/conduit/shm.zig");
 const corpus = @import("../../../../../corpus/tree/corpus.zig");
 const frame = @import("../../../../../corpus/index/frame/frame.zig");
+const beacon = @import("../../../../cli/beacon.zig");
 const run = @import("../../../../exec/cold/engine/serial.zig");
 const assay = @import("../../../../../assay/assay.zig");
 const net = std.Io.net;
@@ -147,6 +148,10 @@ fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const
     // daemon's piped-frame envelope — the certified path owns the terminal.
     // Same detection cold's `--color auto` resolution uses (run.zig).
     if (std.Io.File.stdout().isTty(io) catch false) return .cold;
+    // Clickable rows are cold's too, for the same reason: the daemon renders a
+    // frame with no beacon in it. The TTY test above already covers every
+    // hyperlink posture but one — `GIST_HYPERLINK=always` into a pipe.
+    if (beacon.forcesLinks(gpa)) return .cold;
 
     if (!rendezvousIsOurs(socket_path)) return .cold;
 

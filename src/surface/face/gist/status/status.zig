@@ -21,6 +21,8 @@ const persist = @import("../../../../corpus/index/trigrams/persist.zig");
 const fresh = @import("../../../../corpus/index/trigrams/fresh.zig");
 const frame = @import("../../../../corpus/index/frame/frame.zig");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
+const charter_mod = @import("../../../../corpus/scope/charter.zig");
+const preference = @import("../../../exec/cold/argv/preference.zig");
 const Dir = std.Io.Dir;
 
 /// Version of the `--json` machine contract; bumped only on a breaking field
@@ -53,6 +55,25 @@ pub const Freshness = struct {
     age_seconds: ?f64,
 };
 
+/// The persisted layers in force. This is not index state, but it is the same
+/// question status exists to answer — *what is in force for this tree?* — and
+/// it is what decided the `roots` reported above. A configuration you cannot
+/// interrogate is the actual defect in ripgrep's version of this feature; here
+/// the answer is one blind-safe call away.
+pub const Config = struct {
+    /// The committed `.irregex.toml` governing this directory, if one does.
+    charter: ?[]const u8 = null,
+    /// The personal preferences file that was found and parsed, if any.
+    preferences: ?[]const u8 = null,
+    /// Whether those preferences reach THIS run. False off an interactive
+    /// terminal — the distinction that makes the file safe, and the one a
+    /// reader most needs spelled out when their terminal behaves differently
+    /// from their script.
+    preferences_in_force: bool = false,
+    /// `--no-config` or `GIST_NO_CONFIG` — both layers ignored.
+    suppressed: bool = false,
+};
+
 /// Stable lifecycle/introspection model. Additive fields may be introduced
 /// within a schema version; changing or removing a field requires a bump.
 pub const Snapshot = struct {
@@ -70,7 +91,19 @@ pub const Snapshot = struct {
     /// The tree the artifacts say they were built over, when they say. Naming
     /// it is the difference between a diagnosable state and a silent one.
     built_over: ?[]const u8 = null,
+    config: Config = .{},
 };
+
+/// What the two persisted layers are doing right now. Borrowed paths — both
+/// layers cache for the process lifetime, so neither string outlives its owner.
+fn configNow(io: std.Io) Config {
+    if (charter_mod.suppressedNow()) return .{ .suppressed = true };
+    return .{
+        .charter = if (charter_mod.governing()) |c| c.path else null,
+        .preferences = if (preference.loaded()) |p| p.path else null,
+        .preferences_in_force = preference.forThisRun(io).len > 0,
+    };
+}
 
 /// The on-disk byte size of `path`, or 0 if it can't be stat'd (treated as
 /// absent — this is a report, never a hard failure).
@@ -96,6 +129,7 @@ pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
         .roots = try corpus_mod.resolveRoots(gpa),
         .bound_here = bound,
         .built_over = frame.treeBinding(gpa),
+        .config = configNow(io),
     };
     defer p.deinit();
 
@@ -134,6 +168,7 @@ pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
         .roots = roots,
         .bound_here = bound,
         .built_over = frame.treeBinding(gpa),
+        .config = configNow(io),
     };
 }
 
@@ -142,6 +177,7 @@ fn renderHuman(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
     errdefer buf.deinit(gpa);
     const index = snapshot.index orelse {
         try buf.print(gpa, "no index at {s} — run `gist index` first\n", .{persist.indexFile()});
+        try renderConfig(gpa, &buf, snapshot.config);
         return buf.toOwnedSlice(gpa);
     };
     const avg_per_file: f64 = if (index.files_indexed == 0) 0 else @as(f64, @floatFromInt(index.postings)) / @as(f64, @floatFromInt(index.files_indexed));
@@ -187,7 +223,21 @@ fn renderHuman(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
         else
             try buf.appendSlice(gpa, "  built over        (unrecorded) — these artifacts name no tree; every accelerator stays off until `gist index`\n");
     }
+    try renderConfig(gpa, &buf, snapshot.config);
     return buf.toOwnedSlice(gpa);
+}
+
+/// The persisted layers, and silence when there are none — which is the common
+/// case and must cost the reader nothing. Preferences are reported even when
+/// they are NOT in force, because "I set that and it isn't happening" is the
+/// question the TTY gate creates and therefore the one this line must answer.
+fn renderConfig(gpa: std.mem.Allocator, buf: *std.ArrayList(u8), c: Config) !void {
+    if (c.suppressed) return buf.appendSlice(gpa, "  config            ignored for this run (--no-config)\n");
+    if (c.charter) |path| try buf.print(gpa, "  charter           {s} — roots, skips, and types come from here\n", .{path});
+    if (c.preferences) |path| try buf.print(gpa, "  preferences       {s} ({s})\n", .{
+        path,
+        if (c.preferences_in_force) "in force — stdout is a terminal" else "not in force — preferences apply only to an interactive terminal",
+    });
 }
 
 fn renderJson(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
@@ -256,7 +306,7 @@ test "JSON renderer exposes the stable ready contract" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        "{\"schema_version\":1,\"state\":\"ready\",\"index\":{\"path\":\"index.gist\",\"paths_file\":\"paths.list\",\"files_indexed\":2,\"distinct_trigrams\":3,\"postings\":5,\"index_bytes\":8,\"paths_bytes\":13},\"freshness\":{\"anchor_unix_ns\":1000,\"age_seconds\":2.5},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null}\n",
+        "{\"schema_version\":1,\"state\":\"ready\",\"index\":{\"path\":\"index.gist\",\"paths_file\":\"paths.list\",\"files_indexed\":2,\"distinct_trigrams\":3,\"postings\":5,\"index_bytes\":8,\"paths_bytes\":13},\"freshness\":{\"anchor_unix_ns\":1000,\"age_seconds\":2.5},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false}}\n",
         output,
     );
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, output, .{});
@@ -309,6 +359,55 @@ test "an unbound artifact directory reports which tree it does describe" {
     ));
 }
 
+test "the persisted layers are silent when absent and named when present" {
+    const t = std.testing;
+    const ready: Snapshot = .{
+        .state = .ready,
+        .index = .{
+            .path = "i",
+            .paths_file = "p",
+            .files_indexed = 1,
+            .distinct_trigrams = 1,
+            .postings = 1,
+            .index_bytes = 0,
+            .paths_bytes = 0,
+        },
+        .freshness = .{ .anchor_unix_ns = 1, .age_seconds = 1 },
+        .roots = &.{"."},
+    };
+
+    // Having no configuration is the common case and costs the reader nothing.
+    const bare = try renderHuman(t.allocator, ready);
+    defer t.allocator.free(bare);
+    try t.expect(std.mem.indexOf(u8, bare, "charter") == null);
+    try t.expect(std.mem.indexOf(u8, bare, "preferences") == null);
+
+    // A preferences file that exists but is NOT reaching this run is the state
+    // the TTY gate creates, so it is the one the report must not stay quiet
+    // about — otherwise "I set that and it isn't happening" has no answer.
+    var gated = ready;
+    gated.config = .{ .charter = ".irregex.toml", .preferences = "~/.config/gist/preferences" };
+    const shown = try renderHuman(t.allocator, gated);
+    defer t.allocator.free(shown);
+    try t.expect(std.mem.containsAtLeast(u8, shown, 1, "charter           .irregex.toml"));
+    try t.expect(std.mem.containsAtLeast(u8, shown, 1, "not in force"));
+
+    // Suppression replaces both lines rather than listing files it ignored.
+    var off = ready;
+    off.config = .{ .suppressed = true };
+    const muted = try renderHuman(t.allocator, off);
+    defer t.allocator.free(muted);
+    try t.expect(std.mem.endsWith(u8, muted, "  config            ignored for this run (--no-config)\n"));
+
+    // An unavailable index does not hide the configuration question: roots may
+    // be the very thing a first `gist index` is about to get wrong.
+    var none = gated;
+    none.index = null;
+    const indexless = try renderHuman(t.allocator, none);
+    defer t.allocator.free(indexless);
+    try t.expect(std.mem.containsAtLeast(u8, indexless, 1, "charter"));
+}
+
 test "JSON unavailable state stays valid and null-bearing" {
     const t = std.testing;
     const output = try renderJson(t.allocator, .{
@@ -319,7 +418,7 @@ test "JSON unavailable state stays valid and null-bearing" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        "{\"schema_version\":1,\"state\":\"unavailable\",\"index\":null,\"freshness\":{\"anchor_unix_ns\":null,\"age_seconds\":null},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null}\n",
+        "{\"schema_version\":1,\"state\":\"unavailable\",\"index\":null,\"freshness\":{\"anchor_unix_ns\":null,\"age_seconds\":null},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false}}\n",
         output,
     );
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, output, .{});

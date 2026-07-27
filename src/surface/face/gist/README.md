@@ -104,6 +104,14 @@ trigrams and verifies every candidate against current bytes.
 `gist rg …` and `gist search …` are aliases for the same search engine. The
 canonical form is intentionally verbless.
 
+`make install-gist` also links the [Vim/Neovim plugin](../../../../editor/vim/README.md)
+into any editor already installed, so `:grep` becomes gist and `--vimgrep`
+output streams into the quickfix list while the search is still running. The
+plugin is a client of this CLI and nothing more: it discovers flags from
+`--schema`, file types from `--type-list`, and index state from
+`gist status --json`, so a binary upgrade reaches the editor without a plugin
+release.
+
 ## Ergonomics: keep the reflex, choose the native shape
 
 Gist has two ergonomic lanes. The **muscle-memory lane** lets a person or agent
@@ -185,6 +193,13 @@ ripgrep.
 - **Machine output:** use `--json` for typed records, `-0` for NUL-delimited
   paths, `--null-data` for NUL-delimited input records, and explicit sorting
   when downstream comparison requires deterministic file order.
+- **Who is reading, and how fast:** `-p`/`--pretty` is the human posture in one
+  token (color, heading, line numbers) and `--plain` is its opposite — the
+  piped posture, forced, so a run on a terminal produces the bytes a script
+  would see. Delivery cadence is separate from either: `--line-buffered` when a
+  consumer reacts per line, `--block-buffered` (with `--buffer-size`) when it
+  only wants the bytes cheaply. Left alone, a pipe blocks and a terminal
+  streams by line, which is almost always right.
 - **Agent budgets:** prefer `--rank`, `-l`, `-c`, a narrower path, or `-m N`
   before lifting the soft output guard. `--uncap` or `GIST_UNCAP=1` is the
   deliberate escape hatch; `GIST_HINTS=0` mutes guidance without changing
@@ -193,6 +208,13 @@ ripgrep.
   accelerator; unsupported shapes simply stay cold. The codex is different:
   use it only for exact literal `count`/`tally` questions, and treat absence as
   proven only when `gist codex status` reports a clean shelf.
+- **Persisted defaults:** a committed `.irregex.toml` at the tree root declares
+  the corpus (`roots`, `skip`, `types`); a machine-local
+  `$XDG_CONFIG_HOME/gist/preferences` holds flag lines and applies **only when
+  stdout is an interactive terminal**, so a pipe, a script, `--json`, and the
+  daemon never inherit them. `gist status` reports what is in force, including a
+  preferences file found but gated out; `--no-config` / `GIST_NO_CONFIG=1`
+  ignores both.
 
 This section teaches selection, not a second flag registry. The checked-in
 `flag_catalog` and `gist --schema` remain the exhaustive, versioned answer.
@@ -240,11 +262,12 @@ error, never a convincing empty result.
 
 ### Improvements
 
-Six flags are not bit-identical to ripgrep. Every one is an **improvement** —
-identical-or-superset results that are strictly better in behavior, performance,
-or robustness, never a regression. This is the _only_ category of divergence: if
-gist ever disagrees with ripgrep outside this list it is a bug, not a design
-choice. `gist --schema` reports the same six under the `improvements` bucket.
+Eight flag groups are not bit-identical to ripgrep. Every one is an
+**improvement** — identical-or-superset results that are strictly better in
+behavior, performance, or robustness, never a regression. This is the _only_
+category of divergence: if gist ever disagrees with ripgrep outside this list it
+is a bug, not a design choice. `gist --schema` reports them under the
+`improvements` bucket.
 
 - **`--binary` (and `-uuu`) — searches a NUL-bearing file in full.** ripgrep
   prints one opaque line, `binary file matches (found "\0" byte around offset
@@ -274,6 +297,42 @@ N)`, and stops. A code locator wants the matches, not a shrug: gist searches
   exactly like ripgrep's, with ripgrep's rows byte-identical, plus richer
   definitions and gist-only types. A caller parsing ripgrep's format parses
   gist's; it just sees more.
+- **`--hyperlink` / `--hyperlink-format` — clickable results that are on when
+  they should be.** One axis, three spellings:
+  `--hyperlink[=auto|always|never|<alias>|<format>]`, `--no-hyperlink`, and
+  ripgrep's `--hyperlink-format`. The default is `auto` — links appear when a
+  person is reading in a terminal known to render OSC-8, and vanish the moment
+  the bytes are going somewhere else — where ripgrep defaults to none and, more
+  to the point, **cannot emit a link into a pipe at all**; `--hyperlink=always`
+  can. gist also never ties links to `--color`/`NO_COLOR`: a link is
+  navigation, not paint. Naming a destination on the command line turns links
+  on, because typing `--hyperlink=vscode` and getting silence is the mystery
+  this flag exists to prevent; the standing-preference spelling is
+  `GIST_HYPERLINK`, which may carry a destination alone (probe still decides) or
+  a `WHEN,WHERE` pair like `always,vscode`. The format grammar is ripgrep's, so
+  a format rg accepts gist accepts and one it rejects gist rejects with the same
+  reason — plus aliases rg lacks (zed, windsurf, vscode-remote, cursor-remote),
+  a `link` trace lens that says on one line why a run linked or didn't, and
+  lexical path folding rather than a `realpath(2)` per file, so a click lands in
+  the tree you searched instead of `/private/var`. Linking 93k matches costs
+  ~5 ms (≈60 ns each) because the URL is split once per file into a prebuilt
+  `Waypoint` and a row only writes the digits.
+- **`--line-buffered` — the same promise, a fraction of the syscalls.** Neither
+  implementation ever holds a finished line; ripgrep's `LineWriter` also never
+  writes more than one at a time, and gist emits every finished line already in
+  hand in a single `write(2)`. `-n std src/` here is 1.04 MB of results and the
+  same bytes either way: `rg -j1 --line-buffered` makes 15,782 writes, gist
+  makes 342. The boundary is the run's real terminator, so `--null-data` records
+  flush on NUL — rg's line writer only knows `\n` and holds NUL-delimited output
+  until its buffer fills.
+- **`--block-buffered` — ramped block, and a ceiling you can name.** The first
+  fragment leaves immediately and the threshold then doubles to the ceiling, so
+  `| head -1` answers instantly and a closed pipe is discovered within a
+  kilobyte, while a full dump settles into whole-buffer writes. On the same run
+  ripgrep makes 342 writes (its 8 KiB `BufWriter`, which holds the first byte as
+  long as the last) and gist 23 — 11 at `--buffer-size=1M`, a knob ripgrep does
+  not have. This is gist's default posture into a pipe, and it reaches the
+  reader sooner as well as less often: 5 ms to first byte against ripgrep's 9.
 
 Two adjacent product choices that are _not_ rg-flag divergences: `--mmap`,
 `--no-mmap`, `--colors`, `--dfa-size-limit`, and `--regex-size-limit` are
@@ -307,12 +366,13 @@ eligible cold miss. The request classifier deliberately keeps the warm surface
 small. This table is a readable snapshot; `surface/exec/session/answer/request.zig` remains
 the executable authority:
 
-| warm-eligible CLI shape                    | stays authoritative-cold                                      |
-| ------------------------------------------ | ------------------------------------------------------------- |
-| rootless line output (`-n` / `-N` allowed) | any explicit path, including `.`                              |
-| rootless `-l` / `--files-with-matches`     | stdin or TTY stdout                                           |
-| `-F`, `-i` / `-s` / `-S`, `-w`             | context, JSON, rank, replace, multiline, PCRE2, globs, invert |
-| existence/caps via `-q`, `-m N`            | malformed or unrepresentable flag values                      |
+| warm-eligible CLI shape                    | stays authoritative-cold                                     |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| rootless line output (`-n` / `-N` allowed) | any explicit path, including `.`                             |
+| rootless `-l` / `--files-with-matches`     | stdin or TTY stdout                                          |
+| rootless `--rank[=N]`                      | context, JSON, replace, multiline, PCRE2, globs, invert      |
+| `-F`, `-i` / `-s` / `-S`, `-w`             | malformed or unrepresentable flag values                     |
+| existence/caps via `-q`, `-m N`            |                                                              |
 
 The wire contract also defines a count mode, but CLI `-c` keeps ripgrep's
 per-file layout and stays cold. Warm I/O has a two-second deadline;
@@ -391,9 +451,14 @@ The tracked ripgrep 15.2.0 snapshot contains 446 invocations per walk engine:
   indexed-versus-`--no-index` equality.
 - **PCRE2:** 30/30 adversarial cases pass the same three-way oracle, including
   lookaround, backreferences, Unicode toggles, and resource-limit failures.
-- **Walk and ignore flags:** 26/26 cases pass on each engine. The fixtures make
-  path/time ordering, last-wins negations, worker counts, device boundaries,
-  and global git-ignore state observable.
+- **Walk, ignore, and message flags:** 39/39 cases pass on each engine. The
+  fixtures make path/time ordering, last-wins negations, worker counts, device
+  boundaries, and global git-ignore state observable. The `--no-messages` /
+  `--no-ignore-messages` cases live here rather than in the mined suite because
+  rg's own `--no-messages` tests assert on the exit code, which a gist that
+  merely *rejected* the flag would also satisfy; these assert the real property
+  — stderr goes empty while stdout and the exit class do not move — and pin the
+  nesting asymmetry with both lanes firing at once.
 - **Content transforms:** 22/22 cases pass on each engine across preprocessing,
   binary input, legacy encodings, and the available gzip, bzip2, xz, zstd, lz4,
   and Brotli decoders.

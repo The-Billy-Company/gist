@@ -21,7 +21,7 @@ modules for people changing the binding.
 | `exact/`         | `SearchRequest`, cursor, ranked/aggregate helpers — the exact-match shape            |
 | `runtime/`       | Cold subprocess, UDS daemon client, in-process FFI (`native.py`), decode/errors      |
 | `contract/`      | Mirrored constants + grades from `contract/search_api.toml`                          |
-| `relate/`        | Kinship (`similar` / `pairs` / `families`), retrieval, multi-pattern sweep           |
+| `relate/`        | Kinship (`similar` / `pairs` / `families` / `distinct`), retrieval, multi-pattern sweep |
 | `compose/`       | Composed verbs (`provenance` / `blast`) over exact + compression                     |
 | `index/`         | Atlas / shelf lifecycle                                                              |
 | `agent.py`       | `request_from_tool` — loose agent dict → `SearchRequest`                             |

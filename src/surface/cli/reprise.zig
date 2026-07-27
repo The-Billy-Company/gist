@@ -47,6 +47,12 @@ const scoping_env = [_][]const u8{
     "GIST_UNCAP",
     "GIST_SESSION_SOCK",
     "NO_COLOR",
+    // Only reachable with an explicit `always` — links are otherwise off the
+    // moment stdout is not a terminal, and a terminal is out of the envelope
+    // above. Held here anyway, because a keep whose correctness rests on a
+    // second rule staying true is one edit away from being wrong.
+    "GIST_HYPERLINK",
+    "GIST_HYPERLINK_SCOPE",
 };
 
 /// What `seal` needs to finish the errand, parked here because a verb exits the
@@ -142,6 +148,11 @@ fn recite(gpa: std.mem.Allocator, verb: []const u8, argv: []const []const u8, ep
 /// call finds nothing pending and does nothing. A FATAL exit deliberately
 /// never routes here at all — an error is not an answer.
 pub fn seal(code: u8) void {
+    // Settle the stdout buffering policy first, on every path through here —
+    // not just the keeping one. This is the last seam before a face exits, and
+    // the carbon copy the keep is about to harvest is taken at the syscall, so
+    // held bytes would be missing from BOTH the terminal and the kept answer.
+    corpus.flushStdout();
     const p = pending orelse return;
     pending = null;
     const bytes = corpus.carbonOff() orelse {

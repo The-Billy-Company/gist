@@ -38,8 +38,10 @@ const emit = @import("emit.zig");
 const outcome = @import("outcome.zig");
 const cli_args = @import("../exec/cold/argv/args.zig");
 const corpus_mod = @import("../../corpus/tree/corpus.zig");
+const charter = @import("../../corpus/scope/charter.zig");
 const assay = @import("../../assay/assay.zig");
 const reprise = @import("reprise.zig");
+const beacon = @import("beacon.zig");
 
 const oom = cli_args.oom;
 
@@ -420,14 +422,26 @@ pub fn drive(face: Face, version: []const u8, init: std.process.Init) void {
     reprise.seal(0);
 }
 
+/// argv minus the token `honorNoConfig` already answered. A verb table cannot
+/// carry a flag that is legal in front of every verb, so it is dropped here
+/// rather than added to each repertoire — the same filter gist's face applies.
+fn nextArg(it: *std.process.Args.Iterator) ?[]const u8 {
+    while (it.next()) |a| if (!charter.consumed(a)) return a;
+    return null;
+}
+
 fn steer(face: Face, version: []const u8, init: std.process.Init) !void {
     // Cold CLI diagnostic policy: stderr sink, lens mask + render format read
     // once from `GIST_TRACE`/`GIST_TRACE_FORMAT`.
     assay.install(.{});
+    // Before anything reads the tree: relate and irregex resolve roots and skips
+    // through the same committed charter gist does, so they honor the same
+    // opt-out, and it has to be read from raw argv (see `charter.honorNoConfig`).
+    charter.honorNoConfig(init.minimal.args);
 
     var it = std.process.Args.Iterator.init(init.minimal.args);
     _ = it.skip(); // argv[0]
-    const mode = it.next() orelse return emitUsage(face);
+    const mode = nextArg(&it) orelse return emitUsage(face);
 
     if (spelled(mode, "--help", "-h")) return emitUsage(face);
     if (spelled(mode, "--version", "-V")) return emitVersion(face, version);
@@ -439,7 +453,15 @@ fn steer(face: Face, version: []const u8, init: std.process.Init) !void {
 
     var rest: std.ArrayList([]const u8) = .empty;
     defer rest.deinit(init.gpa);
-    while (it.next()) |arg| try rest.append(init.gpa, arg);
+    while (nextArg(&it)) |arg| try rest.append(init.gpa, arg);
+    // Clickable rows for the two verb-shaped faces. Every row relate and
+    // irregex print names a file the reader's next move is to open, so the
+    // whole layer is worth one call here. They share no flag struct with gist,
+    // so the posture comes from `GIST_HYPERLINK` and the terminal probe alone
+    // and the only thing argv has to say is whether this run prints records.
+    beacon.install(beacon.resolve(init.gpa, .{
+        .reader = if (mentions(rest.items, "--json")) .records else .human,
+    }, init.io, init.environ_map));
     // A corpus-pure verb asks the resident keep first: a hit prints the held
     // answer and exits here, and a miss arms the stdout copy the verb's own
     // exit offers back (`reprise.zig`). Silent and fail-open — an unreachable
@@ -452,6 +474,11 @@ fn steer(face: Face, version: []const u8, init: std.process.Init) !void {
 
 fn spelled(mode: []const u8, long: []const u8, short: []const u8) bool {
     return std.mem.eql(u8, mode, long) or std.mem.eql(u8, mode, short);
+}
+
+fn mentions(argv: []const []const u8, flag: []const u8) bool {
+    for (argv) |a| if (std.mem.eql(u8, a, flag)) return true;
+    return false;
 }
 
 // ── tests ────────────────────────────────────────────────────────────────

@@ -3,10 +3,13 @@
 //! Search compatibility is not prose copied from the parser. The four ripgrep
 //! buckets are rendered directly from `surface/exec/cold/argv/args.zig`'s declarative
 //! catalog, the same rows that build the short- and long-flag dispatch tables.
+//! The hyperlink alias roster is rendered from `cli/beacon.zig`'s table for the
+//! same reason: an agent cannot be told about a destination the parser rejects.
 
 const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const args = @import("../../../exec/cold/argv/args.zig");
+const beacon = @import("../../../cli/beacon.zig");
 const jsonstr = @import("../../../exec/cold/emit/jsonstr.zig");
 const assay = @import("../../../../assay/assay.zig");
 
@@ -71,15 +74,82 @@ const manifest_suffix =
     \\      {"native": "--rank", "type": "int?", "default": 20, "description": "definition-first ranked view over the same regex + PATH scope as the line engine; optional =N caps top-K and requires an index"},
     \\      {"native": "--no-index", "type": "bool", "default": false, "description": "force the pure live walk"},
     \\      {"native": "--index", "type": "bool", "default": false, "description": "re-enable automatic index acceleration after --no-index"},
-    \\      {"native": "--uncap", "type": "bool", "default": false, "description": "lift the ~25k-token (100 KiB) soft output cap for this query; the hard 256 MiB OOM ceiling still applies. Env: GIST_UNCAP=1, GIST_MAX_OUTPUT_TOKENS, GIST_MAX_OUTPUT_BYTES"}
+    \\      {"native": "--uncap", "type": "bool", "default": false, "description": "lift the ~25k-token (100 KiB) soft output cap for this query; the hard 256 MiB OOM ceiling still applies. Env: GIST_UNCAP=1, GIST_MAX_OUTPUT_TOKENS, GIST_MAX_OUTPUT_BYTES"},
+    \\      {"native": "--buffer-size", "type": "size", "default": "64K", "description": "ceiling for --block-buffered, in bytes with an optional K/M/G suffix; 0 restores the default. Implies --block-buffered. rg's block size is a fixed 8 KiB constant"},
+    \\      {"native": "--plain", "type": "bool", "default": false, "description": "pin the answer to what a PIPE would receive even on a terminal: --color never, no long-line elision, block-buffered — so an interactive run reproduces a captured one byte-for-byte"}
     \\    ],
+    \\    "buffering": {
+    \\      "summary": "when result bytes leave the process. Delivery cadence only: the emitted bytes are identical under every setting, and no policy is ever allowed to reorder them.",
+    \\      "spellings": ["--line-buffered", "--block-buffered", "--buffer-size <SIZE>"],
+    \\      "default": "auto — line on a terminal, block on a pipe or file (rg's rule)",
+    \\      "line": "no finished line is held, but every finished line already in hand leaves in ONE write; rg's LineWriter pays one syscall per line. Splits on the run's real terminator, so --null-data records flush on NUL",
+    \\      "block": "ramped: the first fragment is never held and the threshold then doubles from 1 KiB to the ceiling, so `| head -1` answers immediately and a closed pipe is discovered within a kilobyte; rg's BufWriter holds the first byte as long as the last"
+    \\    },
     \\    "alias": "gist rg [flags] <pattern> [PATH...] and gist search <pattern> [PATH...] address the same engine"
+    \\  },
+    \\  "hyperlink": {
+;
+
+// The alias roster is rendered from `beacon.aliases` (the same table the parser
+// resolves against), so an agent reading `--schema` can never be told about a
+// destination the binary does not accept — or miss one it does.
+const manifest_hyperlink_tail =
+    \\    "summary": "OSC-8 click targets on printed locators. Default posture is auto: on when stdout is a terminal known to render OSC-8 and the output is human-shaped, off otherwise — so piped, --json, --vimgrep, and --null output is byte-identical to a run with the feature absent. Independent of --color/NO_COLOR.",
+    \\    "spellings": ["--hyperlink[=auto|always|never|<alias>|<format>]", "--no-hyperlink", "--hyperlink-format <alias|format>", "--hostname-bin <cmd>"],
+    \\    "format_variables": ["{path}", "{line}", "{column}", "{host}", "{wslprefix}"],
+    \\    "format_rules": ["{path} is required", "{column} requires {line}", "the format must begin with a URL scheme", "{{ and }} are literal braces"],
+    \\    "path_value": "absolute and lexically folded ('.'/'..' removed), percent-encoded per RFC 3986 with '/' ':' and bytes >= 0x80 left raw. Never canonicalized: no realpath(2) per matched file, and no symlink rewriting of the path you searched.",
+    \\    "scope": {"default": "prefix", "values": ["path", "prefix", "row"], "env": "GIST_HYPERLINK_SCOPE"},
+    \\    "env": {"GIST_HYPERLINK": "same value grammar as the flag; a preference, so it still respects the auto probe", "GIST_HYPERLINK_SCOPE": "path|prefix|row"},
+    \\    "diagnose": "GIST_TRACE=link prints one line saying whether this run links and why"
+    \\  },
+    \\  "generate": {
+    \\    "summary": "render this same surface for a human: `gist --generate <target>` writes the man page or a shell completion to stdout, from the flag catalog this manifest is built from. Every closed candidate set (221 file types, the WHATWG encoding labels, engines, sort keys, hyperlink aliases) is baked into the script at generation time, so a tab completion costs zero subprocesses.",
+    \\    "targets": ["man", "complete-bash", "complete-zsh", "complete-fish", "complete-powershell"],
+    \\    "spellings": ["--generate <target>", "--generate=<target>"],
+    \\    "determinism": "a pure function of the surface plus --version, so a drift gate can diff the bytes"
+    \\  },
+    \\  "config": {
+    \\    "summary": "two optional persisted layers, split by whether the fact belongs to the repository or to one reader. Every flag row above carries a `reach`, and each layer is ceilinged by it, so a persisted setting can be judged instead of trusted.",
+    \\    "reach_vocabulary": {
+    \\      "corpus": "which files and bytes the engine is allowed to see",
+    \\      "semantics": "which lines count as a match",
+    \\      "presentation": "how a match is rendered",
+    \\      "execution": "only how the answer is computed, never what it is"
+    \\    },
+    \\    "layers": [
+    \\      {
+    \\        "name": "charter",
+    \\        "path": ".irregex.toml",
+    \\        "discovery": "from the working directory upward, stopping at the repository boundary, so a tree never inherits a parent's",
+    \\        "committed": true,
+    \\        "applies_to_you": true,
+    \\        "format": "typed TOML keys, never argv",
+    \\        "keys": {"roots": "string[] — what \"the corpus\" means here", "skip": "string[] — directory basenames the corpus walk never enters", "types": "string[] — --type-add specs applied before argv"},
+    \\        "reach_ceiling": "corpus",
+    \\        "precedence": "below GIST_ROOTS / GIST_SKIP, above the built-in defaults",
+    \\        "source_of_truth": "src/corpus/scope/charter.zig"
+    \\      },
+    \\      {
+    \\        "name": "preferences",
+    \\        "path": "$GIST_PREFERENCES, else $XDG_CONFIG_HOME/gist/preferences, else ~/.config/gist/preferences",
+    \\        "committed": false,
+    \\        "applies_to_you": false,
+    \\        "gate": "interactive terminal only — the same envelope that gates the answer keep, the resident daemon, and color; a pipe, a redirect, --json, a script, CI, and the daemon are all structurally outside it",
+    \\        "format": "one flag per line, shell-tokenized (quotes are quotes), prepended to argv so anything typed still wins; a line that is not a known flag is a fatal error at read time",
+    \\        "reach_ceiling": "semantics",
+    \\        "source_of_truth": "src/surface/exec/cold/argv/preference.zig"
+    \\      }
+    \\    ],
+    \\    "suppress": {"flag": "--no-config", "env": "GIST_NO_CONFIG=1", "when": "read from raw argv before either file is opened, and accepted anywhere any verb accepts flags"},
+    \\    "inspect": "gist status names both files, whether each is in force, and why not when it isn't",
+    \\    "disclosure": "when a persisted flag could have changed the answer, a zero-match run names the file in the hint channel"
     \\  },
     \\  "output_stream": {"results": "stdout", "diagnostics": "stderr"},
     \\  "trace": {
     \\    "summary": "phase-trace diagnostics on stderr, off by default; on a --json run the stderr diagnostic is one NDJSON record, so timing is machine-parseable alongside stdout results",
     \\    "channel": "stderr",
-    \\    "env": {"GIST_TRACE": "comma-separated lenses (amend,journal,reconcile,warm,rank,index,query,session,fault) or 'all'; off when unset", "GIST_TRACE_FORMAT": "text|json; defaults to the run's --json format"}
+    \\    "env": {"GIST_TRACE": "comma-separated lenses (amend,journal,reconcile,warm,rank,index,query,session,fault,link) or 'all'; off when unset", "GIST_TRACE_FORMAT": "text|json; defaults to the run's --json format"}
     \\  },
     \\  "hints": {
     \\    "summary": "structured stderr guidance on notable outcomes: a no-match run gets a 'gist: no matches for ...' summary plus up to three ranked suggestion lines derived from the query's own shape (-i / -U / -F / -uu / scope); a truncated run gets the output-budget notice. Results on stdout are never touched.",
@@ -119,6 +189,10 @@ fn appendSpec(a: std.mem.Allocator, out: *std.ArrayList(u8), spec: args.FlagSpec
         first = false;
     }
     try out.append(a, ']');
+    // How far the flag travels. An agent reading this manifest can tell, without
+    // running anything, which flags could change ITS answer versus only how the
+    // answer looks — and which ones a persisted config is allowed to carry.
+    if (args.reachOf(spec)) |reach| try out.print(a, ",\"reach\":\"{t}\"", .{reach});
     if (spec.note) |note| {
         try out.appendSlice(a, ",\"note\":");
         jsonstr.write(out, a, note);
@@ -148,6 +222,15 @@ fn render(a: std.mem.Allocator, version: []const u8) ![]u8 {
     }
     try out.append(a, '\n');
     try out.appendSlice(a, manifest_suffix);
+    try out.appendSlice(a, "\n    \"aliases\": {");
+    for (beacon.aliases, 0..) |x, i| {
+        if (i > 0) try out.append(a, ',');
+        jsonstr.write(&out, a, x.name);
+        try out.append(a, ':');
+        jsonstr.write(&out, a, if (x.format.len == 0) x.blurb else x.format);
+    }
+    try out.appendSlice(a, "},\n");
+    try out.appendSlice(a, manifest_hyperlink_tail);
     return out.toOwnedSlice(a);
 }
 
@@ -194,4 +277,27 @@ test "--schema is valid JSON derived from the parser catalog" {
     }
     try t.expect(std.mem.indexOf(u8, manifest, "\"source_of_truth\": \"src/surface/exec/cold/argv/args.zig:flag_catalog\"") != null);
     try t.expect(std.mem.indexOf(u8, manifest, "runtime/cold") == null); // no stale pre-move pointer survives
+
+    // Same existence proof for the two config layers the manifest describes: an
+    // agent is told which module decides each one, so relocating either fails
+    // the build rather than leaving the manifest pointing at nothing.
+    comptime {
+        _ = @embedFile("../../../../corpus/scope/charter.zig");
+        _ = @embedFile("../../../exec/cold/argv/preference.zig");
+    }
+    try t.expect(std.mem.indexOf(u8, manifest, "\"src/corpus/scope/charter.zig\"") != null);
+    try t.expect(std.mem.indexOf(u8, manifest, "\"src/surface/exec/cold/argv/preference.zig\"") != null);
+
+    // The preference layer's whole safety argument is that it cannot reach a
+    // non-interactive reader. If that claim is ever softened here, the manifest
+    // would be advertising a promise the code no longer makes.
+    const cfg = parsed.value.object.get("config").?.object;
+    const layers = cfg.get("layers").?.array;
+    try t.expectEqual(@as(usize, 2), layers.items.len);
+    try t.expect(layers.items[0].object.get("applies_to_you").?.bool);
+    try t.expect(!layers.items[1].object.get("applies_to_you").?.bool);
+    // Every reach the flag rows can emit must be defined in the vocabulary an
+    // agent reads them against.
+    const vocab = cfg.get("reach_vocabulary").?.object;
+    inline for (@typeInfo(args.Reach).@"enum".fields) |f| try t.expect(vocab.get(f.name) != null);
 }

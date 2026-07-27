@@ -1,9 +1,13 @@
 # Committed race data (figure source)
 
-Reproducible snapshots of the three `bench/races/*.sh` races, published from the
-gitignored `.local/gist-compete/*.csv`. The `gist_{cold_field,warm_dominance,regex_matrix}.py`
-dataviz figures read these at render time — generated from committed data, not
-transcribed. `check_artifacts.py --dataviz` enforces that.
+Reproducible snapshots for the **three figure-backed** races
+(`coldquery` · `headtohead` · `regex_headtohead`), published from the gitignored
+`.local/gist-compete/*.csv`. The sibling scripts `pcre_headtohead.sh`,
+`searchzip_headtohead.sh`, and `relate_headtohead.sh` race live but do not ship
+CSVs here — no dataviz figure consumes them yet. The
+`gist_{cold_field,warm_dominance,regex_matrix}.py` figures read these files at
+render time — generated from committed data, not transcribed.
+`check_artifacts.py --dataviz` enforces that.
 
 | File                    | Race                                                                   | Columns                                   |
 | ----------------------- | ---------------------------------------------------------------------- | ----------------------------------------- |

@@ -101,7 +101,7 @@ pub fn runQuote(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !v
         } else {
             out.print(gpa, "{d:>8}\u{00d7}  ", .{ph.width}) catch oom();
             jsonStr(&out, gpa, text);
-            out.print(gpa, "  {s}\n", .{source orelse "(not in corpus)"}) catch oom();
+            out.print(gpa, "  {s}\n", .{if (source) |s| emit.anchor(gpa, s) else "(not in corpus)"}) catch oom();
         }
     }
     const parse_dur = run.elapsed(); // parse + attribution, before the freshness walk

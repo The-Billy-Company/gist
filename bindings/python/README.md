@@ -148,25 +148,29 @@ places:
 if irregex.similar("pkg/tools/support/scan.py", min_grade="strong"):
     ...                                         # extend it, don't fork it
 
-irregex.dups(max_distance=0.15, roots="clients/web")   # copy-paste pairs
-irregex.clusters(min_size=3)                           # whole fork families
-irregex.echoes(roots="services/backend")               # same skeleton, renamed
-irregex.concepts(roots="services/ai")                  # duplicated *functions*
-irregex.fragments("retry with exponential backoff")    # nearest functions to an idea
+irregex.pairs(channel="copies", max_distance=0.15, roots="clients/web")  # copy-paste pairs
+irregex.families(channel="copies", min_size=3)                           # fork families
+irregex.pairs(roots="services/backend")                                  # same skeleton, renamed (default channel=twins)
+irregex.families(unit="function", channel="shapes", roots="services/ai") # duplicated *functions*
+irregex.similar("retry with exponential backoff")                        # nearest units to an idea (text probe)
 ```
 
-`channel=` picks what "near" means — `copies` compares raw bytes, `shapes`
-compares normalized structure so a renamed twin surfaces, `twins` ranks by how
-much more shape than vocabulary a pair shares, `any` takes whichever sees more.
+**Two questions, not six verbs.** `similar(probe)` is the neighbor question
+(rank the corpus against one thing). `pairs()`/`families()`/`distinct()` are
+the repetition question, controlled by three axes — `channel` (what "near"
+means: `copies`/`twins`/`shapes`/`any`), `unit` (`file`/`function`/`match`),
+and an optional `matching=[…]` exact filter — because repetition is a point
+in that space rather than a family of verbs.
+
 Every result is a `Kin` sequence: it indexes and iterates like a list, and also
 carries the provenance the CLI leaves on stderr — `scored` (the population the
 answer was drawn from), `warm` (atlas-served or live), `elapsed_ms`, and
 `at_least(grade)` for a second filter without a second process.
 
-`concepts`/`fragments` compare **function fragments** rather than files, so one
-duplicated validator inside two otherwise-unrelated modules still surfaces. Their
-members are `Region`s — path plus line span plus headline — and `Region.read()`
-hands back the source text, because a program needs the code, not coordinates.
+`unit="function"` compares **function fragments** rather than whole files, so
+one duplicated validator inside two otherwise-unrelated modules still surfaces.
+Fragment members are `Region`s — path plus line span plus headline — and
+`Region.read()` returns the source text.
 
 ## Retrieval — what would explain this?
 
@@ -198,6 +202,9 @@ The `irregex` face (ADR-367) narrows the corpus with the exact matcher, then run
 compression **only inside that candidate set**. Exact and statistical evidence
 stay in separate fields; there is deliberately no fused relevance number.
 
+Composition is a **modifier**, not a verb family. Most composed questions are
+spelled `matching=[…]` on the relate/kinship functions they already belong to:
+
 ```python
 radius = irregex.blast("WalletService")       # what moves if I change this?
 radius.paths                                  # the edit set, deduped, exact-first
@@ -207,21 +214,19 @@ radius.twins, radius.ripple, radius.comments  # incl. the stale-doc surface
 radius.truncated                              # did --budget trim a tail?
 
 # the reading set among files that actually match some intents
-irregex.context("wallet crediting", ["WalletService", "credit"], roots="services")
+irregex.pack("wallet crediting", matching=["WalletService", "credit"], roots="services")
 
 # which implementations are forks of each other — compared as code, not as files
-report = irregex.family("func.*Retry", echo_min=0.15, roots="services/backend")
-report.families, report.distinct               # two row classes, kept apart
+irregex.families(matching=["func.*Retry"], unit="function", roots="services/backend")
 
 irregex.provenance("pasted snippet")           # citations re-verified against live bytes
 ```
 
 `blast` is the pre-edit question, and `Blast.paths` is the conclusion the six CLI
-sections are evidence for. `family` lifts every exact hit to its **enclosing
-function** before comparing, so two unrelated modules sharing one copy-pasted
-helper finally surface — and it returns families and unaffiliated implementations
-as separate collections instead of one stream to re-sort. `context`/`family`
-require a scope (`roots=` or `corpus_wide=True`), refused in Python rather than
+sections are evidence for. `families(matching=…, unit="function")` lifts every
+exact hit to its **enclosing function** before comparing, so two unrelated
+modules sharing one copy-pasted helper finally surface. `pack(matching=…)` and
+`families(matching=…)` require a scope (`roots=`), refused in Python rather than
 as an opaque exit 2, so a composed query can never silently sweep `vendor/`.
 
 ## Calibration — a distance is not an answer
@@ -237,7 +242,7 @@ is on the row:
 for row in irregex.similar("services/ai/tools/code/workshop.py"):
     print(row.grade, row.distance)     # strong 0.19
 
-irregex.dups(min_grade="strong")                     # withheld engine-side
+irregex.pairs(channel="copies", min_grade="strong")  # withheld engine-side
 irregex.grade_of("twins", 0.31)                      # Grade.MODERATE
 irregex.Grade.MODERATE.meets(irregex.Grade.WEAK)     # True — a floor, not equality
 ```

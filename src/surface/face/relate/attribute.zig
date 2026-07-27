@@ -291,7 +291,7 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
                 shaped.print(gpa, "./{s}", .{r.path}) catch oom();
                 break :blk shaped.items;
             };
-            emit.emitRow(&buf, gpa, json, .{ .{ "path", "s", path }, .{ "line", "d", r.line }, .{ "pattern_id", "d", r.pattern }, .{ "pattern", "s", pats.items[r.pattern] } }, "{s}:{d}\t{s}\n", .{ path, r.line, pats.items[r.pattern] });
+            emit.emitRow(&buf, gpa, json, .{ .{ "path", "s", path }, .{ "line", "d", r.line }, .{ "pattern_id", "d", r.pattern }, .{ "pattern", "s", pats.items[r.pattern] } }, "{s}\t{s}\n", .{ emit.locator(gpa, path, r.line), pats.items[r.pattern] });
         },
         .groups => |gs| for (gs) |g| {
             emit.emitRow(&buf, gpa, json, .{ .{ "label", "s", g.label }, .{ "count", "d", g.count } }, "{d}\t{s}\n", .{ g.count, g.label });

@@ -127,7 +127,7 @@ fn pick(
     pats: []const []const u8,
 ) void {
     if (!o.json) {
-        buf.print(gpa, "+{d:.1} bits  {d:.2}  {s}", .{ marginal_bits, covered, path }) catch oom();
+        buf.print(gpa, "+{d:.1} bits  {d:.2}  {s}", .{ marginal_bits, covered, emit.anchor(gpa, path) }) catch oom();
         var first = true;
         for (answer.aspects, 0..) |aspect, a| {
             if (explains & (@as(u64, 1) << @intCast(a)) == 0) continue;
@@ -251,8 +251,8 @@ fn narrowed(
 
     const dur = run.elapsed().ms();
     run.emit("pack: {d} file(s) · {d} candidate(s) [{s}] · {d} pick(s) explain {d:.1}% of {d:.1} priced bits · {d} glue · {d} foreign aspect(s) · load {d:.0} ms · pack {d:.0} ms\n", .{
-        exact.corpus.docs.len, exact.admitted(),   @tagName(narrow.match), answer.picks,
-        answer.covered * 100.0, answer.total_bits, answer.glue,            answer.foreign,
+        exact.corpus.docs.len,  exact.admitted(),    @tagName(narrow.match), answer.picks,
+        answer.covered * 100.0, answer.total_bits,   answer.glue,            answer.foreign,
         load_dur.ms(),          dur - load_dur.ms(),
     }, .{
         .{ "verb", "s", "pack" },
@@ -301,7 +301,7 @@ fn warm(
 
     const dur = run.elapsed().ms();
     run.emit("pack: {d} files indexed · {d} candidate(s) · {d} read · {d} refreshed · {d} pick(s) explain {d:.1}% of {d:.1} priced bits · {d} glue · {d} foreign aspect(s) · {d:.0} ms\n", .{
-        indexed.indexed_files, indexed.candidates,     indexed.pool, indexed.refreshed,
+        indexed.indexed_files, indexed.candidates,     indexed.pool,      indexed.refreshed,
         answer.picks,          answer.covered * 100.0, answer.total_bits, answer.glue,
         answer.foreign,        dur,
     }, .{
@@ -370,8 +370,8 @@ fn live(
 
     const pack_dur = run.elapsed().ms();
     run.emit("pack: {d} files scanned · {d} pick(s) explain {d:.1}% of {d:.1} priced bits · {d} glue · {d} foreign aspect(s) · measure {d:.0} ms · pack {d:.0} ms\n", .{
-        corpus.docs.len, answer.picks, answer.covered * 100.0, answer.total_bits,
-        answer.glue,     answer.foreign, index_dur.ms(),       pack_dur - index_dur.ms(),
+        corpus.docs.len, answer.picks,   answer.covered * 100.0, answer.total_bits,
+        answer.glue,     answer.foreign, index_dur.ms(),         pack_dur - index_dur.ms(),
     }, .{
         .{ "verb", "s", "pack" },
         .{ "scanned_files", "d", corpus.docs.len },

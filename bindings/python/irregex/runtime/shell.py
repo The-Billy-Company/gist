@@ -435,7 +435,7 @@ def version() -> str:
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
         [binary(), "--version"], capture_output=True, text=True, check=False
     )
-    # `gist 0.1.0` → `0.1.0`. The banner prints via Zig `std.debug.print`
-    # (stderr), so read whichever stream carries it.
+    # `gist 0.1.0` → `0.1.0`. Current binaries answer on stdout (rg parity);
+    # stderr is the fallback for one that predates that, so either is read.
     parts = (proc.stdout or proc.stderr).strip().split()
     return parts[-1] if parts else ""

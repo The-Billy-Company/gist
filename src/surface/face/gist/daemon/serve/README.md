@@ -41,7 +41,7 @@ correctness.
 Each file is one level of abstraction, and only `serve.zig` is reached from
 outside this folder.
 
-[`crew.zig`](crew.zig) is the division of labour: the fixed-slot connection
+[`crew.zig`](crew.zig) is the division of labor: the fixed-slot connection
 table (stable across accept/drop churn, so a worker can hold a slot) and the
 bounded worker pool. [`loop.zig`](loop.zig) is the poll multiplexer over the
 listener, the worker self-pipe, and every idle client — plus the only quiescent

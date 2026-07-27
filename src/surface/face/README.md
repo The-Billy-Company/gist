@@ -29,7 +29,7 @@ index formats. If a decision changes what matches, it belongs under
 | --------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`gist/`](gist)       | `gist`    | Where is this exact pattern? (rg-DEFAULT locator + index/status/serve/codex lifecycle)                                                                  |
 | [`relate/`](relate)   | `relate`  | What is this text like / which files cover it / what forked? (compression-as-search)                                                                    |
-| [`irregex/`](irregex) | `irregex` | The questions that need BOTH engines: exact match narrows a candidate set, compression reasons inside it (`context` · `family` · `provenance`; ADR-367) |
+| [`irregex/`](irregex) | `irregex` | The questions that need BOTH engines and CURRENT bytes: `provenance` (quotation attribution re-verified against live bytes) and `blast` (live blast radius of a symbol — no precomputed graph). The old `context`/`family` verbs became `relate --matching` (ADR-367) |
 
 `gist` and `relate` are the direct faces; `irregex` composes their kernels over
 one loaded corpus and forwards none of their verbs.

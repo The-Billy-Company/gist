@@ -48,13 +48,13 @@ stand in for novelty and benchmark speed does not stand in for correctness.
 
 ## The code (lives with the system, not here)
 
-| where                                                    | what                                                                       |
-| -------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `src/surface/face/gist/`                                 | the product CLI face (search, index, status, serve, codex)                 |
-| `src/surface/exec/cold/`                                 | authoritative cold path: argv → walk → index elision → verify → emit       |
-| `src/corpus/index/trigrams/` + `src/corpus/index/crest/` | candidate filters (trigrams + crest sidecar)                               |
-| `src/kernel/rank/`                                       | definition-biased `--rank` view                                            |
-| `src/surface/exec/session/`                              | fail-open resident UDS session                                             |
+| where                                                    | what                                                                           |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `src/surface/face/gist/`                                 | the product CLI face (search, index, status, serve, codex)                     |
+| `src/surface/exec/cold/`                                 | authoritative cold path: argv → walk → index elision → verify → emit           |
+| `src/corpus/index/trigrams/` + `src/corpus/index/crest/` | candidate filters (trigrams + crest sidecar)                                   |
+| `src/kernel/rank/`                                       | definition-biased `--rank` view                                                |
+| `src/surface/exec/session/`                              | fail-open resident UDS session                                                 |
 | `bench/gates/` + `bench/rgsuite/` + `bench/certify/`     | correctness-before-speed gates, mined rg parity, Dominance-and-Fit Certificate |
 
 Novel math that rides inside gist (forced-class-run pruning) is documented

@@ -51,7 +51,7 @@ file set and diffs — proving the trigram filter has zero false negatives vs
 
 ## `certify` — the microscopic optimality certificate
 
-For each of 11 regex classes (byte-identical to `../certify/certify.sh`'s
+For each of 12 regex classes (byte-identical to `../certify/certify.sh`'s
 probes), times gist's real verify kernel **single-threaded** over the
 RAM-resident corpus and records retired **cycles + instructions per byte**
 (the bridge number Layers B–C of the certificate roadmap bound), `IPC`, and a

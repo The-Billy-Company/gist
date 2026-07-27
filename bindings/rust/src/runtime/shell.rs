@@ -362,8 +362,8 @@ pub fn version() -> Result<String> {
     let mut cmd = Command::new(&bin);
     cmd.arg("--version");
     let out = spawn_with_timeout(cmd, DEFAULT_TIMEOUT)?;
-    // `gist 0.1.0` → `0.1.0`. The banner may print via Zig `std.debug.print`
-    // (stderr), so read whichever stream carries it.
+    // `gist 0.1.0` → `0.1.0`. Current binaries answer on stdout (rg parity);
+    // stderr is the fallback for one that predates that, so either is read.
     let banner = if out.stdout.trim().is_empty() {
         out.stderr
     } else {

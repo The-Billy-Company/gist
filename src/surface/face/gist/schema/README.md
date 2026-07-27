@@ -24,6 +24,7 @@ tables. If a flag is parseable, it appears here; if it appears here, the parser
 honors it. Drift between `--help` prose and the machine surface is impossible
 by construction.
 
-Relate's `similar` / `dups` / `patterns` are listed as `moved` pointers to
-`relate --schema` so a consumer that still asks gist about them gets a
-redirect, not a silent hole.
+Relate and irregex verbs that an agent might look for under `gist` — the
+kinship, retrieval, and composed faces — are listed as `moved` pointers to
+`relate --schema` / `irregex --schema` so a consumer gets a redirect, not a
+silent hole.

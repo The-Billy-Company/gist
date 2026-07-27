@@ -25,9 +25,10 @@
 //! the `search` reflex — so `gist search foo` finds `foo` instead of dying on a
 //! nonexistent path).
 //!
-//! Plus three top-level introspection flags (convention, like `--help`):
+//! Plus four top-level introspection flags (convention, like `--help`):
 //! `--help`, `--version`, `--schema` (a JSON capability manifest for
-//! agents/codegen).
+//! agents/codegen), and `--generate <target>` (the man page and the four shell
+//! completions, rendered from that same flag table for a human at a prompt).
 //!
 //! This is the thin dispatch shell only: every verb's real work lives in the
 //! engine + command modules, reached through the `gist` module (`commands.search`
@@ -42,6 +43,7 @@ const indexer = gist.commands.indexer; // `gist index` — build + persist the t
 const codex_face = gist.commands.codex; // `gist codex` — the exact existence/count tier
 const status = gist.commands.status; // read-only index introspection
 const schema = gist.commands.schema; // `--schema` JSON manifest
+const primer = gist.commands.primer; // `--generate` man page + shell completions
 const search = gist.commands.search; // the unified search engine (bare shorthand + `gist rg`)
 const serve = gist.commands.serve; // `gist serve` — the resident warm daemon
 const client = gist.commands.client; // the warm CLI fast path (daemon dial + cold fallback)
@@ -156,6 +158,10 @@ fn usage() void {
         \\  -a / --binary           treat as text / search binary files in full
         \\  -0 / --null-data        NUL-delimited paths / NUL-delimited input records
         \\  -m0 / -M0               match nothing (exit 1) / disable the long-line cap
+        \\  -p / --plain            the human posture (color + heading + -n) / the piped
+        \\                          posture, forced, so a terminal run is reproducible
+        \\  --line-buffered         never hold a finished line — but write all of them at once
+        \\  --block-buffered        coalesce; --buffer-size sizes it (ramped, so head -1 is cheap)
         \\  -rn                     means --replace=n, not recursive + line numbers; use -n
         \\  no match                read stderr suggestions; stdout remains pipeline-clean
         \\
@@ -173,6 +179,8 @@ fn usage() void {
         \\introspection:
         \\  gist --help / -h        this ergonomics guide
         \\  gist --schema           exhaustive JSON surface generated from the live flag catalog
+        \\  gist --generate TARGET  man | complete-{bash,zsh,fish,powershell} — the same surface
+        \\                          rendered for a human; every menu baked in, no fork per keystroke
         \\  gist --version / -V
         \\
         \\channels & env:
@@ -186,6 +194,31 @@ fn usage() void {
         \\
     );
 }
+
+/// argv, minus the one token answered before dispatch. `--no-config` is legal
+/// in front of every verb, so filtering it here is the difference between one
+/// rule and a copy of that rule inside each verb's argument check — `gist
+/// status --no-config` used to die on "status accepts only --json". Past a `--`
+/// the token is data again and passes through untouched.
+const Argv = struct {
+    inner: std.process.Args.Iterator,
+    literal: bool = false,
+
+    fn init(args: @FieldType(@FieldType(std.process.Init, "minimal"), "args")) Argv {
+        return .{ .inner = std.process.Args.Iterator.init(args) };
+    }
+    fn skip(self: *Argv) bool {
+        return self.inner.skip();
+    }
+    fn next(self: *Argv) ?[]const u8 {
+        while (self.inner.next()) |a| {
+            if (!self.literal and gist.commands.scope.charter.consumed(a)) continue;
+            if (std.mem.eql(u8, a, "--")) self.literal = true;
+            return a;
+        }
+        return null;
+    }
+};
 
 /// `main` takes no error union on purpose: Zig's default handler exits 1 with a
 /// stack trace, and 1 is "no match" under the rg contract. `fatal` exits 2.
@@ -202,7 +235,9 @@ fn run(init: std.process.Init) !void {
     // and render format every summary/trace call site consults.
     gist.assay.install(.{});
 
-    var it = std.process.Args.Iterator.init(init.minimal.args);
+    gist.commands.scope.charter.honorNoConfig(init.minimal.args);
+
+    var it = Argv.init(init.minimal.args);
     _ = it.skip(); // argv[0]
     const mode = it.next() orelse {
         usage();
@@ -224,6 +259,20 @@ fn run(init: std.process.Init) !void {
     }
     if (std.mem.eql(u8, mode, "--schema")) {
         schema.emit(gist.version_string);
+        return;
+    }
+    // `--generate <target>` — the same surface `--schema` describes to a
+    // machine, rendered for a human: the manual, or a completion for one of
+    // four shells. `--generate=man` is accepted too, since half the world
+    // spells a long flag's value that way.
+    if (std.mem.startsWith(u8, mode, "--generate")) {
+        const inl = if (mode.len > "--generate".len and mode["--generate".len] == '=')
+            mode["--generate=".len..]
+        else if (mode.len == "--generate".len) null else {
+            gist.assay.diag("gist: unknown flag {s}\n", .{mode});
+            std.process.exit(2);
+        };
+        primer.emit(gist.version_string, inl orelse it.next());
         return;
     }
 
@@ -324,11 +373,19 @@ fn run(init: std.process.Init) !void {
     const verbed = std.mem.eql(u8, mode, "rg") or std.mem.eql(u8, mode, "search");
     var query: std.ArrayList([]const u8) = .empty;
     defer query.deinit(gpa);
+    // Personal preferences lead, so anything typed on the line overrides them —
+    // last-wins is the grammar's existing rule, and prepending is what turns it
+    // into "the file is a default". `forThisRun` returns nothing unless stdout
+    // is a terminal, so a pipe, a script, and an agent all see bare argv.
+    const persisted = gist.preference.forThisRun(io);
+    try query.appendSlice(gpa, persisted);
     if (!verbed) try query.append(gpa, mode);
     while (it.next()) |arg| try query.append(gpa, arg);
     // A bare `gist search` keeps its literal-word meaning; a bare `gist rg`
-    // stays the empty argv the engine rejects itself.
-    if (query.items.len == 0 and std.mem.eql(u8, mode, "search"))
+    // stays the empty argv the engine rejects itself. Measured against the
+    // preference prefix, not zero, so a preferences file cannot quietly turn
+    // `gist search` into a flags-only invocation with no pattern at all.
+    if (query.items.len == persisted.len and std.mem.eql(u8, mode, "search"))
         try query.append(gpa, mode);
     tryWarm(gpa, io, init.environ_map, query.items);
     try search.run(gpa, io, query.items, init.environ_map);

@@ -23,6 +23,8 @@ and exit code**:
 - `-l` / `--files-with-matches` — sorted path list
 - bare default line search (`gist <pattern> [-n]`) — `path:[line:]text` frames
   the daemon pre-renders through the cold `Emitter` and chunk-streams
+- `--rank[=N]` — the definition-first ranked view; the daemon ranks over
+  resident bytes and streams the rendered top-K on the same transport
 
 File emission order is the deterministic `pathLess` canonicalization of cold's
 parallel worker-discovery order (rgsuite certifies
@@ -44,3 +46,11 @@ best-effort forks a detached `gist serve` so the _next_ query lands warm. The
 current query still runs cold. Opt out with `GIST_NO_AUTOSERVE`. Ten agents
 racing the socket is the normal case: the daemon takes an advisory `flock`, so
 exactly one serve wins.
+
+**Answer keep.** `keep.zig` is the caller's side of the answer-keep protocol.
+A verb whose answer is a pure function of the corpus (relate and irregex
+kinship/composed verbs) runs a three-step errand: ask the daemon whether it
+still holds the answer to this exact question; if not, compute cold; then offer
+the rendered bytes back, stamped with the epoch read before the work began. The
+daemon keeps them only if the corpus has not moved since. Every failure is
+silence — the verb runs as if this module did not exist.
