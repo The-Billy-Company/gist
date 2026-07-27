@@ -209,6 +209,11 @@ fn amend(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !bool {
         // Nothing moved: advance the anchor and stop — the pair never loads.
         fresh.writeAnchor(io, built) catch return false;
         if (jtok) |t| fresh.writeJournalToken(io, t); // re-arm the journal fast path
+        // This path publishes no generation, so it never reaches the retention
+        // that rides a publish. Run it anyway: `gist index` is the maintenance
+        // verb, and a run that finds nothing to index is exactly when there is
+        // time to retire what earlier runs superseded.
+        persist.reclaimSuperseded(io, out_dir, gen);
         const dur = span.read(io).ms();
         assay.summary(gpa, false, "amended 0 docs (fresh) · {d:.1} ms → {s}\n", .{ dur, out_dir }, .{
             .{ "artifact", "s", "index" },
