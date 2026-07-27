@@ -214,9 +214,13 @@ fn run(init: std.process.Init) !void {
         usage();
         return;
     }
+    // A version that was asked for is an answer, not a diagnostic — rg writes
+    // it to stdout, and so does every wrapper that captures only stdout.
     if (std.mem.eql(u8, mode, "--version") or std.mem.eql(u8, mode, "-V")) {
-        gist.assay.diag("gist {s}\n", .{gist.version_string});
-        return;
+        var line: [64]u8 = undefined;
+        return gist.corpus.emitStdout(
+            try std.fmt.bufPrint(&line, "gist {s}\n", .{gist.version_string}),
+        );
     }
     if (std.mem.eql(u8, mode, "--schema")) {
         schema.emit(gist.version_string);

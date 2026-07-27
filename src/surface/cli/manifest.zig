@@ -384,6 +384,14 @@ fn emitUsage(face: Face) void {
     corpus_mod.emitStdout(buf.items);
 }
 
+/// A version that was asked for is an answer, not a diagnostic: rg writes it
+/// to stdout, so `gist --version | read` works, and so does every wrapper that
+/// captures only stdout.
+fn emitVersion(face: Face, version: []const u8) !void {
+    var line: [96]u8 = undefined;
+    corpus_mod.emitStdout(try std.fmt.bufPrint(&line, "{s} {s}\n", .{ face.tool, version }));
+}
+
 fn emitSchema(face: Face, version: []const u8) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
@@ -422,7 +430,7 @@ fn steer(face: Face, version: []const u8, init: std.process.Init) !void {
     const mode = it.next() orelse return emitUsage(face);
 
     if (spelled(mode, "--help", "-h")) return emitUsage(face);
-    if (spelled(mode, "--version", "-V")) return assay.diag("{s} {s}\n", .{ face.tool, version });
+    if (spelled(mode, "--version", "-V")) return emitVersion(face, version);
     if (std.mem.eql(u8, mode, "--schema")) return emitSchema(face, version);
 
     // Same output-budget resolution as the gist CLI (GIST_UNCAP /
