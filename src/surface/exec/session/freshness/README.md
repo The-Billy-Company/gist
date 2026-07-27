@@ -29,8 +29,16 @@ optional accelerator ([`../watch/`](../watch)); the correctness lives here.
 | [`delta.zig`](delta.zig)         | The O(changed) resolver: maps one drained batch of absolute watcher paths into walk-certified verdicts (`file`/`subtree`/`gone`/`skip`/`needs_full`) using the cold walk's **own** `Ignore` machinery, so a scoped reconcile cannot drift from `defaultFileSet`. Ignore-source edits, `.git` topology, and unmappable paths answer `needs_full`; non-ASCII paths ARE scoped through the `realpath` oracle, with the session sweeping its non-ASCII keys via `keyIsCurrent` to retire a stale normalization/case twin.                                                                                                        |
 | [`annals.zig`](annals.zig)       | The journal that hands the watcher's changed set to the session across a restart, stored **repo-relative** so an armed absolute root never leaks into the record. Replayed in the same fail-closed posture: every uncertainty degrades to a full walk.                                                                                                                                                                                                                                                                                                                                                                       |
 
-`freshness_test.zig` sits beside its subject — differential checks against an
-on-disk oracle, concurrency, and the overflow/bound edges.
+Two suites sit beside their subject. `freshness_test.zig` drives the barrier
+through the session's own hooks — differential checks against an on-disk oracle,
+concurrency, and the overflow/bound edges. `vouch_test.zig` removes the
+simulation: it boots the real watcher on whichever exact backend the platform
+ships (kqueue **and** inotify, where `kqueue_test.zig` is macOS-only by
+construction) and grades the premise the answer keep borrows — that two runs
+reading the same epoch saw the same bytes. It asserts that a backend which arms
+exact actually vouches an epoch, that one epoch never spans two different
+corpora, and that both ways coverage ends (lost, and deliberately shed) retire
+whatever was held under the stream that vouched for it.
 
 ## Fail-closed is the design, not the error handling
 

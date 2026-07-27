@@ -47,6 +47,7 @@ const shard = @import("../../../../corpus/index/content/shard.zig");
 const Index = @import("../../../../corpus/index/trigrams/trigram.zig").Index;
 const assay = @import("../../../../assay/assay.zig");
 const fault = @import("../../../../fault.zig");
+const portal = @import("../../../../portal.zig");
 
 /// Refresh the persisted index: amend incrementally when the base admits it,
 /// else build + persist the full pair.
@@ -318,8 +319,8 @@ fn annalsChanged(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     // repo), so equality with OUR realpath'd CWD proves both identity and
     // whole-tree coverage — a daemon scoped to a subtree fails this check.
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const cwd_abs = std.c.realpath(".", &path_buf) orelse return false;
-    if (!std.mem.eql(u8, std.mem.span(cwd_abs), ans.prefix)) return false;
+    const cwd_abs = portal.realpath(".", &path_buf) orelse return false;
+    if (!std.mem.eql(u8, cwd_abs, ans.prefix)) return false;
 
     // Same confirm + admission pipeline the journal replay's answer runs, so
     // a daemon answer and a walk answer describe the same corpus surface

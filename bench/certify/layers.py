@@ -62,6 +62,36 @@ ROSTER: tuple[Layer, ...] = (
     ),
     Layer("F", "Layer F — codex self-index", "## Layer F — codex self-index", "codex.csv"),
     Layer("G", "Layer G — relate", "## Layer G — relate", "relate.csv"),
+    Layer(
+        "H",
+        "Layer H — portability",
+        "## Layer H — portability (target matrix, executed)",
+        "portable.json",
+    ),
+    Layer(
+        "I",
+        "Layer I — scanner mode + ripgrep conformance",
+        "## Layer I — scanner mode + ripgrep conformance (no index)",
+        "scanner.csv",
+    ),
+    Layer(
+        "J",
+        "Layer J — positional + substring index tiers",
+        "## Layer J — positional + substring index tiers at scale (vs zoekt)",
+        "scale.csv",
+    ),
+    Layer(
+        "K",
+        "Layer K — multi-pattern",
+        "## Layer K — multi-pattern simultaneous matching (vs Hyperscan/Vectorscan)",
+        "multipattern.csv",
+    ),
+    Layer(
+        "L",
+        "Layer L — index quality",
+        "## Layer L — index quality head-to-head (vs csearch)",
+        "indexq.csv",
+    ),
 )
 
 #: Ledger view: key → the header substring that proves the layer was spliced.

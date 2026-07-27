@@ -42,7 +42,14 @@ const query_budget_ms_default: i64 = 30_000;
 /// the per-query budget in NANOSECONDS, so a unit test can drive the abort path
 /// deterministically without a giant corpus. `-1` (the default) defers to
 /// `GIST_QUERY_BUDGET_MS` / `query_budget_ms_default`.
-pub var query_budget_ns_override: std.atomic.Value(i64) = .init(-1);
+///
+/// Pointer-width (an atomic may not exceed the target's largest atomic, 4 bytes
+/// on 32-bit; `isize` is `i64` on every 64-bit target). The hook exists to force
+/// a *tiny* budget so the abort path fires without a giant corpus, so the 32-bit
+/// range — ±2.1 s expressed in nanoseconds — covers every use of it. Production
+/// budgets never pass through here: `GIST_QUERY_BUDGET_MS` is parsed as `i64`
+/// milliseconds and widened to `i128` nanoseconds below, untouched by this.
+pub var query_budget_ns_override: std.atomic.Value(isize) = .init(-1);
 
 /// Test hook: when non-null, every query handler blocks on this event before
 /// answering, so a test can pin a query "in flight" on its worker and prove the

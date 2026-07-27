@@ -42,6 +42,7 @@ const charter = @import("../../corpus/scope/charter.zig");
 const assay = @import("../../assay/assay.zig");
 const reprise = @import("reprise.zig");
 const beacon = @import("beacon.zig");
+const portal = @import("../../portal.zig");
 
 const oom = cli_args.oom;
 
@@ -437,9 +438,9 @@ fn steer(face: Face, version: []const u8, init: std.process.Init) !void {
     // Before anything reads the tree: relate and irregex resolve roots and skips
     // through the same committed charter gist does, so they honor the same
     // opt-out, and it has to be read from raw argv (see `charter.honorNoConfig`).
-    charter.honorNoConfig(init.minimal.args);
+    charter.honorNoConfig(init.gpa, init.minimal.args);
 
-    var it = std.process.Args.Iterator.init(init.minimal.args);
+    var it = try portal.argsIterator(init.minimal.args, init.gpa);
     _ = it.skip(); // argv[0]
     const mode = nextArg(&it) orelse return emitUsage(face);
 

@@ -46,6 +46,7 @@ const frame = @import("../../../../../corpus/index/frame/frame.zig");
 const beacon = @import("../../../../cli/beacon.zig");
 const run = @import("../../../../exec/cold/engine/serial.zig");
 const assay = @import("../../../../../assay/assay.zig");
+const portal = @import("../../../../../portal.zig");
 const net = std.Io.net;
 
 /// Transport capabilities this client advertises in HELLO — `caps_supported`
@@ -82,11 +83,7 @@ pub const Outcome = union(enum) {
 /// `SO_RCVTIMEO`: the latter's `timeval` ABI is easy to get wrong across libc
 /// cuts, and a silent setsockopt failure used to leave the CLI blocked forever.
 fn waitReadable(fd: std.posix.fd_t, timeout_ms: i32) bool {
-    var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
-    const n = std.posix.poll(&pfd, timeout_ms) catch return false;
-    // Only IN means "bytes ready". HUP/ERR alone must not look like a READY
-    // frame — that would skip the deadline and race a closing peer to cold.
-    return n > 0 and (pfd[0].revents & std.posix.POLL.IN) != 0;
+    return portal.readable(fd, timeout_ms);
 }
 
 /// Receive one frame, but never block longer than `client_io_timeout_ms`.

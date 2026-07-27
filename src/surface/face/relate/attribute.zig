@@ -14,10 +14,26 @@
 //! read is index-elided when every pattern has a sound trigram prefilter, and
 //! each row keeps its pattern id.
 //!
-//! Corpus policy: the shared index corpus (every non-binary, non-gitignored file
-//! under the roots, plus corpus-only VCS/build pruning), with exactly gist's
-//! ignore parser and precedence. Diagnostics (timing) go to stderr; results to
-//! stdout, rg-style.
+//! Corpus policy: the rg-parity file set — byte-for-byte the population `gist
+//! -l` answers over, because this verb's whole contract is to replace N `gist
+//! -l` runs. It walks through `quarry/walk.zig`'s `defaultFileSet`, the same
+//! enumerator the single-pattern engine uses, so ignore parsing, hidden-file
+//! precedence, and root scoping are not merely equivalent but literally the
+//! same code.
+//!
+//! That is a deliberate split from the kinship verbs. `similar`/`echoes`/`pack`
+//! answer over the INDEX corpus, which additionally prunes the generic
+//! VCS/build/vendor basenames (`haystack.isSkipDir`) — right for them, since a
+//! vendored tree should not dominate compression statistics. It is wrong here:
+//! an EXACT verb that silently drops 76% of a literal's real hits (measured:
+//! 145 of 615 files for `graphify`, every one of the 470 missing under
+//! `scripts/vendor`) is a trap, not a policy. So the index is demoted to what
+//! it is for the search engine — a read-ELISION oracle, never the population.
+//! A file absent from the index therefore cannot be elided: it misses the
+//! `IndexedPaths` lookup and gets a live read, which is exactly why `gist`,
+//! `gist --no-index`, and `rg` already agree.
+//!
+//! Diagnostics (timing) go to stderr; results to stdout, rg-style.
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
@@ -28,6 +44,9 @@ const assay = @import("../../../assay/assay.zig");
 const scope = @import("../../../corpus/scope/glob.zig");
 const patterns_mod = @import("../../../kernel/batch/patterns.zig");
 const loom = @import("../../../kernel/batch/loom.zig");
+const elide = @import("../../exec/cold/quarry/elide.zig");
+const walk = @import("../../exec/cold/quarry/walk.zig");
+const ignore = @import("../../../corpus/tree/ignore.zig");
 const query = @import("../../../kernel/match/query/query.zig");
 const parallel = @import("../../../kernel/primitives/parallel.zig");
 const flags = @import("../../cli/flags.zig");
@@ -70,8 +89,11 @@ const readFileInto = slurp.readFileInto;
 /// scratch, its own `PatternSet.Scratch` (Pike sim state is not shareable),
 /// its own row list. An allocation failure abandons the shard's remainder
 /// (same degrade-to-fewer-results posture as `rankShard`).
+/// Reads `disk` (the openable path) and attributes under `rel` (the path rg
+/// prints), the same pairing the single-pattern engine uses — so an explicit
+/// root spells its rows exactly as `gist -l` would.
 const AttrShard = struct {
-    paths: []const []const u8,
+    files: []const walk.Candidate,
     ids: []const u32,
     set: *const patterns_mod.PatternSet,
     gpa: std.mem.Allocator,
@@ -85,9 +107,17 @@ const AttrShard = struct {
         var hits: std.ArrayList(u32) = .empty;
         defer hits.deinit(sh.gpa);
         for (sh.ids) |d| {
-            if (d >= sh.paths.len) continue;
-            const n = readFileInto(sh.paths[d], scratch_buf) orelse continue;
-            attributeDoc(sh.gpa, sh.set, &sc, scratch_buf[0..n], sh.paths[d], &hits, &sh.rows) catch return;
+            if (d >= sh.files.len) continue;
+            const f = sh.files[d];
+            const n = readFileInto(f.disk, scratch_buf) orelse continue;
+            const body = scratch_buf[0..n];
+            // The same membership rule the `-l` renderer applies (`emit/render.zig`)
+            // and `corpus.readMember` shares: an empty or binary file is not a
+            // corpus member, so attributing one would report a file `gist -l`
+            // never lists. Caught by `bench/gates/patterns_corpus_parity.sh`,
+            // which failed on `cfg` matching inside an .mp4 and a .pt.
+            if (body.len == 0 or corpus_mod.isBinary(body)) continue;
+            attributeDoc(sh.gpa, sh.set, &sc, body, f.rel, &hits, &sh.rows) catch return;
         }
     }
 };
@@ -99,10 +129,11 @@ const AttrShard = struct {
 fn attributeCandidates(
     gpa: std.mem.Allocator,
     set: *const patterns_mod.PatternSet,
-    paths: []const []const u8,
+    files: []const walk.Candidate,
     ids: []const u32,
     rows: *std.ArrayList(loom.Row),
 ) !void {
+    if (ids.len == 0) return;
     const ncpu = std.Thread.getCpuCount() catch 8;
     const nshards = if (ids.len < 64) 1 else @min(ids.len, ncpu);
     const shards = try gpa.alloc(AttrShard, nshards);
@@ -113,7 +144,7 @@ fn attributeCandidates(
     const per = (ids.len + nshards - 1) / nshards;
     for (shards, 0..) |*sh, k| {
         const lo = @min(k * per, ids.len);
-        sh.* = .{ .paths = paths, .ids = ids[lo..@min(lo + per, ids.len)], .set = set, .gpa = gpa };
+        sh.* = .{ .files = files, .ids = ids[lo..@min(lo + per, ids.len)], .set = set, .gpa = gpa };
     }
     parallel.fanOut(AttrShard, shards, threads, AttrShard.run);
     for (shards) |sh| try rows.appendSlice(gpa, sh.rows.items);
@@ -184,11 +215,13 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
     };
     defer set.deinit(gpa);
 
-    // Candidate source. When every pattern yields a sound trigram prefilter,
-    // the search covers the default roots, and a persisted index is loadable,
-    // read ONLY the union of per-pattern candidates (the same index-elision
-    // the single-pattern engine rides); anything else falls back to the full
-    // corpus read — never a different answer, only more bytes touched.
+    // Population first, elision second — the order that keeps this verb exact.
+    // The rg-parity walk decides WHICH files are in scope; a persisted index
+    // then only decides which of those need their bytes read. When every
+    // pattern yields a sound trigram prefilter and the index covers the roots,
+    // an indexed non-candidate whose bytes provably predate the build anchor is
+    // skipped; everything else — including every file the index never saw — is
+    // read. Never a different answer, only fewer bytes touched.
     var rows: std.ArrayList(loom.Row) = .empty;
     defer rows.deinit(gpa);
     var read_files: usize = 0;
@@ -199,61 +232,84 @@ pub fn runPatterns(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8)
     // NEW-file paths to `persisted.paths`, and rows borrow those slices.
     var cand: ?fresh.Candidates = null;
     defer if (cand) |*c| c.deinit();
-    var corpus: ?corpus_mod.Corpus = null;
-    defer if (corpus) |*c| c.deinit();
 
-    indexed: {
+    // The population, decided before any index is consulted: the rg-parity
+    // walk, root-scoped by the walk itself (no post-hoc scope gate needed) and
+    // costing paths only — no file bytes are read here.
+    var walk_arena = std.heap.ArenaAllocator.init(gpa);
+    defer walk_arena.deinit();
+    const wa = walk_arena.allocator();
+    const rr = try flags.rootsOf(gpa, roots.items);
+    defer rr.deinit(gpa);
+    // A lone "." IS the default corpus, and gist spells that walk with an empty
+    // prefix (`gather`'s `roots.len == 0` branch), so its rows read `a/b.zig`
+    // and not `./a/b.zig`. Hand `gather` the same empty root list, so the path
+    // spelling — and therefore both the index lookup and the printed row — is
+    // byte-identical to `gist -l`'s.
+    const walk_roots: []const []const u8 =
+        if (rr.items.len == 1 and std.mem.eql(u8, rr.items[0], ".")) &.{} else rr.items;
+    var files: std.ArrayList(walk.Candidate) = .empty;
+    {
+        const o: cli_args.Opts = .{};
+        var ig = ignore.Ignore.init(wa, io, ignore.Options.from(o), walk_roots) catch oom();
+        _ = walk.gather(wa, io, walk_roots, o, &ig, &files, null) catch oom();
+    }
+    total_files = files.items.len;
+
+    // Read set = every walked file, minus those an index proves both unchanged
+    // since its anchor and free of some pattern's required trigrams. A file the
+    // index never saw misses the lookup and is read — the property that makes
+    // this exact.
+    var to_read: std.ArrayList(u32) = .empty;
+    defer to_read.deinit(gpa);
+    var elided: usize = 0;
+    var armed = false; // did the index actually decide the read set?
+    elision: {
         var filters: std.ArrayList([]const u8) = .empty;
         defer filters.deinit(gpa);
         for (0..set.len()) |pi| {
             var one: [1][]const u8 = undefined;
             const lits = set.prefilter(pi, &one);
-            if (lits.len == 0) break :indexed; // this pattern implicates every doc
+            if (lits.len == 0) break :elision; // this pattern implicates every doc
             try filters.appendSlice(gpa, lits);
         }
-        persisted = (persist.loadQuiet(gpa, io) catch null) orelse break :indexed;
+        persisted = (persist.loadQuiet(gpa, io) catch null) orelse break :elision;
         const p = &persisted.?;
-        // Explicit roots still ride the index when they sit INSIDE the roots
-        // it was built over (persisted beside it); a root outside them has no
-        // candidates to elide and needs the live read.
+        // Explicit roots still ride the index when they sit INSIDE the roots it
+        // was built over; a root outside them has nothing to elide.
         for (roots.items) |r| {
-            if (!flags.underAnyRoot(r, p.roots.items)) break :indexed;
+            if (!flags.underAnyRoot(r, p.roots.items)) break :elision;
         }
+        // Snapshot before freshness widens `p.paths` with NEW files: only
+        // originally-indexed paths are elision-eligible (intake.zig's lesson).
+        const n_indexed = p.paths.items.len;
         cand = try fresh.candidates(gpa, io, p, &p.paths, filters.items, if (roots.items.len > 0) roots.items else p.roots.items);
-        total_files = p.paths.items.len;
-
-        // Root-scope gate before the read (rank.zig's lesson): without it a
-        // `relate patterns … services/ai` would read + attribute the whole
-        // indexed corpus and answer out of scope.
-        var scoped: std.ArrayList(u32) = .empty;
-        defer scoped.deinit(gpa);
-        if (roots.items.len == 0) {
-            try scoped.appendSlice(gpa, cand.?.ids);
-        } else {
-            try scoped.ensureTotalCapacity(gpa, cand.?.ids.len);
-            for (cand.?.ids) |d| {
-                if (d >= p.paths.items.len) continue;
-                if (flags.underAnyRoot(p.paths.items[d], roots.items)) scoped.appendAssumeCapacity(d);
-            }
+        // Without a trustworthy anchor no indexed non-candidate is provably
+        // unchanged, so nothing may be elided.
+        if (!cand.?.anchored) break :elision;
+        var candidates = try std.DynamicBitSet.initEmpty(gpa, p.paths.items.len);
+        defer candidates.deinit();
+        for (cand.?.ids) |d| if (d < p.paths.items.len) candidates.set(d);
+        const known = p.paths.items[0..n_indexed];
+        var indexed = try elide.IndexedPaths.init(gpa, known);
+        defer indexed.deinit();
+        try to_read.ensureTotalCapacity(gpa, files.items.len);
+        for (files.items, 0..) |f, k| {
+            if (indexed.get(known, f.rel)) |doc| if (!candidates.isSet(doc)) {
+                elided += 1;
+                continue;
+            };
+            to_read.appendAssumeCapacity(@intCast(k));
         }
-        read_files = scoped.items.len;
-        try attributeCandidates(gpa, &set, p.paths.items, scoped.items, &rows);
-        break :indexed;
+        armed = true;
+        break :elision;
     }
-    if (persisted == null) {
-        const rr = try flags.rootsOf(gpa, roots.items);
-        defer rr.deinit(gpa);
-        corpus = try corpus_mod.load(gpa, io, rr.items);
-        const c = &corpus.?;
-        total_files = c.docs.len;
-        read_files = c.docs.len;
-        var sc = set.scratch(gpa) catch oom();
-        defer sc.deinit(gpa);
-        var hits: std.ArrayList(u32) = .empty;
-        defer hits.deinit(gpa);
-        for (c.docs, c.paths) |doc, path|
-            try attributeDoc(gpa, &set, &sc, doc, path, &hits, &rows);
+    if (!armed) {
+        try to_read.ensureTotalCapacity(gpa, files.items.len);
+        for (0..files.items.len) |k| to_read.appendAssumeCapacity(@intCast(k));
     }
+    read_files = to_read.items.len;
+    try attributeCandidates(gpa, &set, files.items, to_read.items, &rows);
 
     var result = try loom.execute(gpa, .{
         .filter_glob = under,

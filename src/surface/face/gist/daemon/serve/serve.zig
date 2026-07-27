@@ -56,6 +56,7 @@ const corpus = @import("../../../../../corpus/tree/corpus.zig");
 // `frame` is taken by the protocol frames threaded through the daemon.
 const frame_mod = @import("../../../../../corpus/index/frame/frame.zig");
 const fault = @import("../../../../../fault.zig");
+const portal = @import("../../../../../portal.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
@@ -70,6 +71,15 @@ extern "c" fn pipe(fds: *[2]std.posix.fd_t) c_int;
 /// lifetime. Returns immediately (no-op) if another daemon already holds the
 /// single-instance lock, so it is safe to auto-spawn or run twice.
 pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket_path: []const u8) !void {
+    // A platform without unix sockets has no resident tier at all, and the warm
+    // tier is an optimization the cold path never depends on. Declining here —
+    // rather than at the socket call — keeps the whole listener graph out of
+    // semantic analysis on such a target instead of half-porting it.
+    if (comptime portal.resident_sessions) return serveResident(gpa, io, roots, socket_path);
+    crew.note("gist serve: no resident tier on this platform — queries answer cold\n", .{});
+}
+
+fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket_path: []const u8) !void {
     // Singleton FIRST — before any socket mutation — so a losing racer never
     // unlinks the winner's live socket during the stale-socket cleanup below.
     const lock_fd = acquireSingleton(io, socket_path) orelse {
@@ -167,6 +177,15 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
 /// or `null` if another daemon owns it or the lock file can't be opened (in
 /// which case the caller declines to start rather than fight over the socket).
 fn acquireSingleton(io: std.Io, socket_path: []const u8) ?std.posix.fd_t {
+    // Single-daemon arbitration is `flock(2)`, which Windows does not have, and a
+    // platform that cannot host a resident session has no singleton to acquire
+    // (`portal.resident_sessions`). Null is already "someone else holds it, stand
+    // down" — the caller declines to serve, which is the correct outcome here too.
+    if (comptime portal.resident_sessions) return acquireSingletonPosix(io, socket_path);
+    return null;
+}
+
+fn acquireSingletonPosix(io: std.Io, socket_path: []const u8) ?std.posix.fd_t {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const lock_path = std.fmt.bufPrint(&buf, "{s}.lock", .{socket_path}) catch return null;
     // Best-effort for the same reason as the socket directory: the `openat`

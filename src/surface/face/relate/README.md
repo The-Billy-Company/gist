@@ -425,14 +425,16 @@ under the name that now carries it:
 
 The proof strength is intentionally uneven and visible:
 
-| claim                                  | authority                                 | status                           |
-| -------------------------------------- | ----------------------------------------- | -------------------------------- |
-| `patterns` equals N solo Gist runs     | `patterns_test.zig` with prefilter on/off | gated                            |
-| warm atlas equals `--no-index`         | atlas fold/deletion tests                 | gated                            |
-| quote scale and bit separation         | `zig build codex-scale` + codex tables    | committed measurement            |
-| compression versus semantic embeddings | `zig build relate-knn`                    | rerunnable comparative harness   |
-| warm latency                           | local comparison only                     | no committed timing artifact     |
-| echo ranking quality                   | heuristic + unit properties               | no checked-in labeled evaluation |
+| claim                                   | authority                                  | status                                |
+| --------------------------------------- | ------------------------------------------ | ------------------------------------- |
+| `patterns` equals N solo Gist runs      | `patterns_test.zig` with prefilter on/off  | gated                                 |
+| both prefilter tiers equal that oracle  | `trawl_test.zig` + arm 1 forcing each tier | gated (dragnet and trawl, at every N) |
+| `patterns` answers the `gist -l` corpus | `bench/gates/patterns_corpus_parity.sh`    | gated (index armed and stripped)      |
+| warm atlas equals `--no-index`          | atlas fold/deletion tests                  | gated                                 |
+| quote scale and bit separation          | `zig build codex-scale` + codex tables     | committed measurement                 |
+| compression versus semantic embeddings  | `zig build relate-knn`                     | rerunnable comparative harness        |
+| warm latency                            | local comparison only                      | no committed timing artifact          |
+| echo ranking quality                    | heuristic + unit properties                | no checked-in labeled evaluation      |
 
 The durable test inventory is
 [`research/relate/TESTING.md`](../../../../research/relate/TESTING.md). Numbers

@@ -74,7 +74,10 @@ Mann-Whitney `p<0.05`; every class is shown, losses and the indexed-twin
 `../races/`, the probe classes here deliberately include the **saturating**
 patterns (`})`, `;$`, `\w{3,8}`, a UUID class, the sub-trigram pure-literal
 alternation `panic|0x`) where the trigram prefilter admits _every_ file — the
-cases the competition is built to win.
+cases the competition is built to win. Two of those saturating classes no longer
+saturate: the sliver tier (Layer J) brings `})` to 49.18% and `panic|0x` to
+37.42% of corpus bytes, so the trigram directory is no longer the whole story for
+a sub-trigram needle. `;$`, `\w{3,8}`, and the UUID class still admit every file.
 
 ## The three cold cells csearch/zoekt win, and why they stay won
 

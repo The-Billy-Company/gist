@@ -15,6 +15,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const fault = @import("../../../../fault.zig");
+const portal = @import("../../../../portal.zig");
 
 /// Refused before allocation — dwarfs any real response, caps a hostile peer.
 pub const max_frame: u32 = 16 << 20;
@@ -74,6 +75,11 @@ fn armNoSigpipe(fd: std.posix.fd_t) void {
 /// Write all of `bytes` to `fd`, retrying short writes; false on a dead peer.
 /// Never raises SIGPIPE (see `armNoSigpipe`).
 pub fn writeAll(fd: std.posix.fd_t, bytes: []const u8) bool {
+    if (comptime !portal.resident_sessions) return false;
+    return writeAllPosix(fd, bytes);
+}
+
+fn writeAllPosix(fd: std.posix.fd_t, bytes: []const u8) bool {
     armNoSigpipe(fd);
     var off: usize = 0;
     while (off < bytes.len) {
@@ -189,6 +195,15 @@ fn cmsgHdrConst(ctrl: *align(cmsg_align) const [cmsg_space]u8) *const cmsghdr {
 /// first send finishes plain (`writeAll`) with the fd already across. Same
 /// SIGPIPE guard as `writeAll`. `false` on a dead peer.
 pub fn sendWithFd(fd: std.posix.fd_t, bytes: []const u8, pass_fd: std.posix.fd_t) bool {
+    // Without unix-socket fd passing there is no SCM_RIGHTS handshake to complete
+    // and no resident session to complete it with (`portal.resident_sessions`).
+    // `false` is the same answer the caller already handles when a peer declines
+    // fd transport, so the degradation needs no new path on its side.
+    if (comptime portal.resident_sessions) return sendWithFdPosix(fd, bytes, pass_fd);
+    return false;
+}
+
+fn sendWithFdPosix(fd: std.posix.fd_t, bytes: []const u8, pass_fd: std.posix.fd_t) bool {
     armNoSigpipe(fd);
     var iov = [_]std.posix.iovec_const{.{ .base = bytes.ptr, .len = bytes.len }};
     var ctrl: [cmsg_space]u8 align(cmsg_align) = undefined;
@@ -234,6 +249,11 @@ pub fn recvFrameWithFd(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!FdF
 /// Read exactly `dst.len` bytes via `recvmsg`, capturing the first SCM_RIGHTS fd
 /// seen into `out_fd`. False on EOF/short read.
 fn recvExactMsg(fd: std.posix.fd_t, dst: []u8, out_fd: *?std.posix.fd_t) bool {
+    if (comptime !portal.resident_sessions) return false;
+    return recvExactMsgPosix(fd, dst, out_fd);
+}
+
+fn recvExactMsgPosix(fd: std.posix.fd_t, dst: []u8, out_fd: *?std.posix.fd_t) bool {
     var off: usize = 0;
     while (off < dst.len) {
         var iov = [_]std.posix.iovec{.{ .base = dst.ptr + off, .len = dst.len - off }};

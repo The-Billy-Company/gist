@@ -1,7 +1,7 @@
 ---
 doc_radar:
   occurrences:
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 409}
+    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
     - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
   sentinels:
     - file: pkg/kernels/irregex/src/surface/exec/cold/engine/serial.zig

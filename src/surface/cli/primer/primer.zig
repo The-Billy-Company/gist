@@ -41,6 +41,7 @@ const oom = @import("../outcome.zig").oom;
 const page = @import("page.zig");
 const shell = @import("shell.zig");
 const zsh = @import("zsh.zig");
+const portal = @import("../../../portal.zig");
 
 // ── the vocabulary a face describes itself in ────────────────────────────
 
@@ -292,14 +293,12 @@ pub const Stamp = struct {
         return at(pinned orelse now(), version, buf);
     }
 
-    /// Wall-clock seconds off the raw libc clock, floored at the epoch. A
+    /// Wall-clock seconds off the platform clock, floored at the epoch. A
     /// machine whose clock refuses to answer still mints a page — dated
     /// 1970-01-01, which reads as "this build had no clock" rather than
     /// aborting a packaging run over a date field.
     fn now() u64 {
-        var ts: std.c.timespec = undefined;
-        if (std.c.clock_gettime(.REALTIME, &ts) != 0) return 0;
-        return @intCast(@max(0, ts.sec));
+        return portal.wallSeconds();
     }
 
     /// The stamp for a given Unix second. Pure.

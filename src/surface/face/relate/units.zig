@@ -34,6 +34,7 @@ const patterns_mod = @import("../../../kernel/batch/patterns.zig");
 const echoes = @import("../../../kernel/kinship/cluster/echoes.zig");
 const sketch_mod = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
+const fingerprint = @import("../../../kernel/kinship/metric/fingerprint.zig");
 const fault = @import("../../../fault.zig");
 const flags = @import("../../cli/flags.zig");
 const kinship = @import("kinship.zig");
@@ -197,6 +198,17 @@ pub const View = struct {
         const out = try self.gpa.alloc(Sketch, self.labels.len);
         errdefer self.gpa.free(out);
         for (out) |*s| s.* = Sketch.empty;
+
+        // Resolve every participant's bytes first, then fingerprint the whole
+        // batch in one parallel pass. Building inline while walking made a
+        // `--unit function` byte channel a single-threaded LZ78 march over
+        // thousands of fragments with the other fifteen cores idle — and the
+        // read-once cache is what forces the walk to be serial, so the two
+        // concerns have to be separated rather than merged.
+        var slices: std.ArrayList([]const u8) = .empty;
+        defer slices.deinit(self.gpa);
+        var owners: std.ArrayList(u32) = .empty;
+        defer owners.deinit(self.gpa);
         for (wanted, 0..) |want, i| {
             if (!want) continue;
             const gop = try cache.getOrPut(a, self.paths[i]);
@@ -211,8 +223,15 @@ pub const View = struct {
                 if (s.byte_end > bytes.len or s.byte_start > s.byte_end) continue;
                 break :blk bytes[s.byte_start..s.byte_end];
             } else bytes;
-            out[i] = sketch_mod.build(self.gpa, slice) catch Sketch.empty;
+            try slices.append(self.gpa, slice);
+            try owners.append(self.gpa, @intCast(i));
         }
+
+        const built = try self.gpa.alloc(Sketch, slices.items.len);
+        defer self.gpa.free(built);
+        _ = try fingerprint.fill(Sketch, sketch_mod.build, self.gpa, slices.items, built);
+        for (owners.items, built) |i, s| out[i] = s;
+
         if (self.owned_sketches) |old| self.gpa.free(old);
         self.owned_sketches = out;
         self.sketches = out;

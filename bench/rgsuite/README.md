@@ -27,13 +27,13 @@ mines one case per command), replayed against **both** engines:
 
 | Bucket    | parallel (`pipeline.zig`) | serial (`run.zig`) | Meaning                                                                         |
 | --------- | ------------------------: | -----------------: | ------------------------------------------------------------------------------- |
-| **PASS**  |                       409 |                409 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)     |
+| **PASS**  |                       411 |                411 | `gist rg` stdout == `rg` stdout **at the mined test's own bar** (see below)     |
 | **ORDER** |                         0 |                  0 | a byte-exact (`eqnice!`) case differing only in line order — a real hole        |
 | **FAIL**  |                         0 |                  0 | a supported-surface divergence, each phase-tracked in `coverage_manifest.toml`  |
 | NA        |                        16 |                 16 | unsupported **by design** (see boundaries below)                                |
 | SKIP      |                        21 |                 21 | not replayable as one argv — each mapped to a companion proof / upstream reason |
 
-**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 409/409 = 100.0%
+**Supported-surface parity = (PASS+ORDER) / (PASS+ORDER+FAIL) = 411/411 = 100.0%
 on both engines** — identical on whichever engine a given case dispatches to.
 There are zero FAILs and zero deferred divergences: every supported-surface case
 is replayed and matches ripgrep byte-for-byte. Together the 446 mined obligations
@@ -47,8 +47,8 @@ The 446 mined `rgtest!` obligations split into what the harness can drive agains
 live `rg` as one argv, and what it accounts for out-of-band in
 `coverage_manifest.toml` (`tomllib`-parsed, gate-enforced):
 
-- **409 replayed** — executed against real ripgrep and bucketed above
-  (409 PASS + 0 FAIL); NA (16) are replayed too but fall outside the parity
+- **411 replayed** — executed against real ripgrep and bucketed above
+  (411 PASS + 0 FAIL); NA (14) are replayed too but fall outside the parity
   denominator as announced design refusals.
 - **21 SKIP, each claimed once** by a manifest entry: **companion** (the miner
   couldn't lower a control-flow `rgtest!` to one argv, but a sibling proof —
@@ -366,6 +366,63 @@ unit test in `pipeline.zig`, not that wall-clock number. The `../races/searchzip
 race adds ugrep to the `-z` field (gist beats both rg and ugrep on the in-process
 formats; bzip2 and the external-codec tail have no in-process Zig decoder).
 
+## Surface companion (`surface.py`) — conformance with ripgrep's own denominator
+
+Every lane above measures a set someone curated: the cases ripgrep chose to
+write, the flags this harness chose to hand-author. "How mature is gist?"
+deserves a denominator gist does not pick. `surface.py` reads ripgrep's
+**documented** flag surface at run time — the long flags from `rg --generate
+complete-bash`, the shorts plus their value grammar and short↔long pairing from
+its man page — exercises each one on a fixed miniature tree, and compares both
+binaries' stdout and exit code byte-for-byte:
+
+```bash
+python3 surface.py                        # human table (losses only)
+python3 surface.py --json OUT.json        # machine record (Layer I)
+python3 surface.py --only no-hidden -v    # one flag, every row
+```
+
+Four outcomes, and only two of them earn a point. `identical` is byte-equal
+stdout and exit code. `boundary` differs for a **declared** reason — gist naming
+itself, gist's superset type registry, gist's own palette — and each carries a
+_residual check_ re-verified on the same run, so a boundary that has quietly
+become a bug is scored as one. `divergent` (differs for no declared reason) and
+`rejected` (gist exits 2 where rg accepts — a hole) both cost a point.
+Conformance is `(identical + boundary) / documented`. Currently **186 of 186 =
+100.0%** (177 identical, 9 declared boundaries, 0 divergent, 0 rejected).
+
+A separate **undo-pair** lane covers the half a per-flag probe structurally
+cannot see: most negations name the default, so a negation that silently no-ops
+looks correct in isolation. Each pair places the negation _after_ the positive
+flag it undoes, on a fixture where the two answers differ — `-uu --no-hidden`
+must stop finding the hidden file. 27/27 agree with rg.
+
+## Fuzz companion (`fuzz.py`) — invocations nobody wrote down
+
+The third lane generates rather than curates: a random pattern (corpus literals,
+generated regexes, and known catastrophic-backtracking traps), a random
+composable flag set, and one of six corpora built to be hostile — invalid UTF-8
+and lone continuation bytes, CRLF and lone CR, a missing trailing newline, NUL
+bearers and an ELF header, a 4 MiB single line, a 100k-line file, an empty file,
+24 levels of nesting, a symlink cycle, a dangling symlink, and a mode-000 file.
+Then it demands byte-identical stdout and an equal exit code from live `rg`.
+
+```bash
+python3 fuzz.py --iterations 2000 --seed 1 --json OUT.json
+python3 fuzz.py --corpus hostile --verbose        # one corpus, every row
+python3 fuzz.py --iterations 50 --keep /tmp/tree  # persist the corpus to reproduce
+```
+
+There is no expected-output table in the file, so there is nothing to bandaid: a
+divergence is resolved by changing gist, or by proving it is one of the two
+declared non-divergences (`declined` — gist's linear engine refusing a construct
+outside its guaranteed-linear syntax and pointing at `-P`, the same judgment
+`run.py` scores NA; `both_reject` — a pattern invalid for both engines, where
+agreeing on a rejection is agreement). **Robustness is measured in the same
+pass**, because that is what a maturity claim actually rests on: every child gets
+a hard timeout, and crash / hang / peak-RSS are recorded per iteration rather
+than hoped for.
+
 ## Files
 
 | File            | Role                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -376,5 +433,7 @@ formats; bzip2 and the external-codec tail have no in-process Zig decoder).
 | `modes.py`      | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers)                                                                                                                                                                                                                                                                                                                                                 |
 | `flags.py`      | hand-authored differential proof for what the mined suite can't pin: the walk/order/ignore flags (`--sort`/`--sortr`/`--sort-files`, `-j`/`--threads`, `--one-file-system`, `--no-ignore-global`, negation last-wins — timestamp/device/thread/global-config dependent), the `--no-messages`/`--no-ignore-messages` **stderr** lane, and `\A`/`\z` haystack anchors under `-U` across three tail shapes × seven frames |
 | `transforms.py` | hand-authored `-z`/`--pre`/`-E`/`--binary` content-transform differential proof + the `-z` pipeline-vs-serial-vs-rg speed floor (the flags `run.py` can't mine from plain source)                                                                                                                                                                                                                                      |
+| `surface.py`    | conformance over ripgrep's **own** documented flag surface, read from `rg --generate` + its man page at run time; scores identical / declared-boundary / divergent / rejected, plus the adverse undo-pair lane. Feeds Layer I of the certificate                                                                                                                                                                       |
+| `fuzz.py`       | differential fuzzer — random (pattern × flags × hostile corpus) triples against live rg, with crash / hang / peak-RSS measured in the same pass                                                                                                                                                                                                                                                                        |
 | `dbg.py`        | single-test side-by-side inspector                                                                                                                                                                                                                                                                                                                                                                                     |
 | `results.json`  | last `run.py` per-test verdicts (regenerated each run)                                                                                                                                                                                                                                                                                                                                                                 |

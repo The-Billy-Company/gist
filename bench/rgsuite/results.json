@@ -1177,13 +1177,13 @@
  {
   "name": "f1155_auto_hybrid_regex",
   "file": "feature.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--no-pcre2",
    "--auto-hybrid-regex",
    "(?<=the )Sherlock"
   ],
-  "detail": "unknown flag --no-pcre2\n"
+  "detail": ""
  },
  {
   "name": "f1207_auto_encoding",
@@ -3875,13 +3875,13 @@
  {
   "name": "r1164#2",
   "file": "regression.rs",
-  "bucket": "NA",
+  "bucket": "PASS",
   "argv": [
    "--ignore-file-case-insensitive",
    "test",
    "--no-ignore-file-case-insensitive"
   ],
-  "detail": "unknown flag --no-ignore-file-case-insensitive\n"
+  "detail": ""
  },
  {
   "name": "r1173",
