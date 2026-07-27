@@ -49,6 +49,7 @@ this certificate even when their correctness is proved elsewhere.
 
 | File                         | Role                                                                                                                                                                                                     |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `layers.py`                  | the **layer roster** — one row per layer (ledger probe · strict header · side-car), read by `ledger.py`, `check_artifacts.py`, and `certify_layers.sh` so adding a layer is one row, not three copies    |
 | `certify.sh`                 | full A–G mint: Layer A micro (+ optional sudo PMU) + macroscopic field race + warm tier + `--rank` lane + relate (Layer G), auto-calls `certify_layers.sh`                                               |
 | `certify_layers.sh`          | Layers B/B′/C/D/E/F — build lab bins, measure, splice; the half that used to be a manual checklist. `make bench-gist-certify` default                                                                    |
 | `certify_stats.py`           | a stdlib mirror of `../harness/stats.zig` — per-class bootstrap-CI median + Mann-Whitney verdict, splices the table into `.local/gist-verify/CERTIFICATE.md`                                             |

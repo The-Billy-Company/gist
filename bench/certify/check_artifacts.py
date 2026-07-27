@@ -32,6 +32,13 @@ import json
 from pathlib import Path
 import re
 
+# Side-cars and headers that prove each layer was minted, not merely named in
+# the header. Every narrower surface the header promises (codex space, the
+# --rank lane, the relate face) ships its own fail-closed sidecar — no claim
+# without a receipt. Both views come from the shared roster, so a new layer
+# widens this gate, the ledger, and the shell completeness check from one row.
+from layers import REQUIRED_LAYER_FILES, REQUIRED_LAYER_HEADERS
+
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[4]  # ... -> repo root
@@ -45,27 +52,6 @@ REQUIRED_FILES = (
     "corpus-manifest.tsv",
     "command-log.txt",
     "index-sizes.json",
-)
-# Side-cars that prove Layers B–G were minted, not merely named in the header.
-# Every narrower surface the header promises (codex space, the --rank lane, the
-# relate face) ships its own fail-closed sidecar — no claim without a receipt.
-REQUIRED_LAYER_FILES = (
-    "portcert.json",
-    "roofline.json",
-    "lowerbound.csv",
-    "crest.csv",
-    "codex.csv",
-    "certify_rank.csv",
-    "relate.csv",
-)
-REQUIRED_LAYER_HEADERS = (
-    "## Layer B — port-optimality",
-    "## Layer C — roofline (measured headroom)",
-    "## Layer D — algorithmic lower bound",
-    "## Layer E — crest sieve (the trigram blind spot, measured)",
-    "## Layer F — codex self-index",
-    "## Layer G — relate",
-    "## Layer A — the `--rank` lane",
 )
 FORBIDDEN_LAYER_C_CLAIMS = (
     "cycles/byte sits on the hardware ceiling",

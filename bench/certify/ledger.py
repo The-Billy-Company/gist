@@ -58,29 +58,19 @@ import subprocess
 import sys
 from typing import TypedDict
 
+# The layers a complete mint carries, in certificate order, keyed by the header
+# substring that proves each one was spliced. A layer absent from this roster's
+# match is a layer the mint dropped — the regression this ledger exists to catch.
+# The roster is shared with the reproducibility gate and the shell completeness
+# check, so adding a layer is one row there rather than three copies here.
+from layers import LAYERS
+
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[4]  # bench/certify -> bench -> irregex -> kernels -> libs -> repo
 LEDGER = HERE / "ledger.jsonl"
 RENDER = HERE / "LEDGER.md"
 CERTIFICATE = "CERTIFICATE.md"
-
-# The layers a complete mint carries, in certificate order, keyed by the header
-# substring that proves each one was spliced. A layer absent from this roster's
-# match is a layer the mint dropped — the regression this ledger exists to catch.
-LAYERS: dict[str, str] = {
-    "A-micro": "Layer A — empirical, microscopic",
-    "A-macro": "Layer A — macroscopic dominance",
-    "A-warm": "Layer A — warm tier",
-    "A-rank": "Layer A — the `--rank` lane",
-    "B": "Layer B — port-optimality",
-    "B'": "Layer B′ — port bound, measured",
-    "C": "Layer C — roofline",
-    "D": "Layer D — algorithmic lower bound",
-    "E": "Layer E — crest sieve",
-    "F": "Layer F — codex self-index",
-    "G": "Layer G — relate",
-}
 
 CORPUS_RE = re.compile(r"corpus:?\s+\*{0,2}(\d+)\*{0,2} files · ([\d.]+) MiB")
 CREST_RE = re.compile(r"\*\*([\d.]+)× geomean end-to-end speedup\*\*")
