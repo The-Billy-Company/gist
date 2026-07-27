@@ -1,0 +1,412 @@
+*gist.txt*   Indexed code search in the quickfix list          *gist* *gist.vim*
+
+                                 gist.vim~
+                   the gist code locator, wired into Vim~
+
+==============================================================================
+CONTENTS                                                      *gist-contents*
+
+    1. Introduction ........................... |gist-intro|
+    2. Getting started ........................ |gist-install|
+    3. Commands ............................... |gist-commands|
+    4. Mappings ............................... |gist-mappings|
+    5. Options ................................ |gist-options|
+    6. Hints and retries ...................... |gist-hints|
+    7. Hooks .................................. |gist-hooks|
+    8. Recipes ................................ |gist-recipes|
+    9. Compared with :grep and ripgrep ........ |gist-vs-grep|
+   10. Troubleshooting ........................ |gist-health|
+
+==============================================================================
+1. INTRODUCTION                                                  *gist-intro*
+
+`gist` is an indexed code locator: ripgrep's default behavior and flags over a
+persisted trigram index, plus a definition-first |:GistRank| view that ordinary
+grep has no way to express. This plugin is the Vim end of it.
+
+Three things it insists on:
+
+  Searching never blocks.	Results stream into the quickfix list while the
+			search is still running, and the window opens on
+			the first batch instead of the last. |:GistStop|
+			cancels whatever is in flight.
+
+  stdout and stderr keep	Matches are results; gist's coaching ("try -i")
+  their jobs.		is not. A hint never becomes a phantom quickfix
+			entry, and a miss can still explain itself and
+			offer the fix. |gist-hints|
+
+  Nothing is hardcoded.	Completion asks the installed binary for its flag
+			and type lists, so <Tab> can never drift from the
+			gist you actually have. |gist-options|
+
+==============================================================================
+2. GETTING STARTED                                            *gist-install*
+
+`make install-gist` links this plugin into the |packages| directory of every
+editor it finds — Vim, Neovim, or both — so if you had Vim installed when you
+installed gist, you are already done: open a file and press <Leader>gg on a
+word. Nothing was added to a vimrc, and `git pull` in the checkout updates the
+plugin. Set GIST_VIM_INSTALL=0 in the environment to decline that.
+
+To do it by hand, a symlink is the whole install: >
+
+	ln -s /path/to/pkg/kernels/irregex/editor/vim \
+	      ~/.vim/pack/gist/start/gist                       " Vim
+	ln -s /path/to/pkg/kernels/irregex/editor/vim \
+	      ~/.local/share/nvim/site/pack/gist/start/gist     " Neovim
+<
+or point a plugin manager at that directory. The plugin generates its own
+|:helptags| on first load, so `:help gist` works immediately.
+
+The binary itself comes from `make install-gist`, which puts `gist`, `relate`
+and `irregex` on your $PATH. Run |:GistHealth| to confirm all of it.
+
+Requirements: Vim 8.0+ or Neovim for streaming results; anything older still
+works, one blocking search at a time.
+
+==============================================================================
+3. COMMANDS                                                   *gist-commands*
+
+                                                                      *:Gist*
+:Gist[!] {args}		Search and fill the |quickfix| list. {args} reach
+			gist as an argv list — nothing rewrites them on
+			the way, so `|`, `$`, `&` and `*` need no shell
+			escaping and `%` and `#` are not expanded into
+			file names the way |cmdline-special| expands them
+			for |:grep|. Quotes and backslashes still group
+			the way your fingers expect: >
+				:Gist WalletService services/backend
+				:Gist 'fn \w+\(' -t rust
+				:Gist -F 'a|b' --hidden
+				:Gist -F gist#job#start
+<			That last one is `:grep`'s sharpest edge: there,
+			an unescaped `#` becomes the alternate file name
+			(E194 with no alternate file), so any autoload
+			function, CSS id, or `#{}` interpolation has to be
+			written `\#`. Here it is just a character.
+
+			With [!] the list is filled but the cursor stays
+			where it is, as with |:grep!|. With no {args} at
+			all, the word under the cursor is searched as a
+			literal word.
+
+                                                                  *:GistRank*
+:GistRank[!] {args}	Same query, ranked view: the definition first, call
+			sites after, generated files demoted. There is no
+			ripgrep equivalent — reach for it when you want the
+			one right hit rather than every hit.
+
+                                                                     *:Grank*
+:Grank[!] {args}	Short alias for |:GistRank|.
+
+                                                                 *:GistFiles*
+:GistFiles[!] {args}	List the files that contain the pattern (`-l`), one
+			quickfix entry each.
+
+                                                                     *:LGist*
+:LGist[!] {args}	As |:Gist|, into the window's |location-list| instead
+			of the quickfix list.
+
+                                                                 *:GistRetry*
+:GistRetry [N]		Re-run the last query. With [N], apply gist's Nth
+			suggestion first — see |gist-hints|.
+
+                                                                  *:GistStop*
+:GistStop		Cancel the search in flight.
+
+                                                                 *:GistIndex*
+:GistIndex[!]		Refresh the trigram index. Bare, this is the
+			drift-gated incremental fold: a no-op in
+			milliseconds when nothing changed, and safe to run
+			at any time. With [!] the index is rebuilt from
+			scratch. Searching works without an index; it is an
+			accelerator, never the source of truth.
+
+                                                                *:GistStatus*
+:GistStatus		Report whether an index is ready, how fresh, how big.
+
+                                                                 *:GistBlast*
+:GistBlast [symbol] [flags]
+			The live blast radius of a symbol, read from the
+			files as they are on disk right now: its definition,
+			the sites that use it, what it depends on, its
+			structural twins, the ripple through the same
+			language, and the comments that name it. All of it
+			lands in the quickfix list, so |:cnext| walks a
+			change's consequences the way it walks matches.
+			Without [symbol], the word under the cursor.
+			Needs the `irregex` binary. >
+				:GistBlast
+				:GistBlast SearchRequest --budget 60
+<
+                                                               *:GistSimilar*
+:GistSimilar [file] [flags]
+			The compression-nearest files to this one, closest
+			first — the check worth running before writing a
+			helper that may already exist twice. Without [file],
+			the current buffer. Needs the `relate` binary. >
+				:GistSimilar
+				:GistSimilar % --top 20
+<
+                                                                *:GistHealth*
+:GistHealth		Report what is and is not wired up: binary, version,
+			index freshness, siblings, async, 'grepprg',
+			mappings, help tags. In Neovim this is also
+			`:checkhealth gist`.
+
+==============================================================================
+4. MAPPINGS                                                   *gist-mappings*
+
+Every action is a |<Plug>| mapping. Bind them however you like: >
+
+	nmap <F4> <Plug>(gist-rank)
+<
+			                                       *gist-plugs*
+	<Plug>(gist-cword)	search the word under the cursor
+	<Plug>(gist-rank)	ranked search of the word under the cursor
+	<Plug>(gist-cword-loc)	as (gist-cword), into the location list
+	<Plug>(gist-selection)	search the visual selection (x mode)
+	<Plug>(gist-operator)	search the text a motion covers
+	<Plug>(gist-blast)	|:GistBlast| on the word under the cursor
+	<Plug>(gist-similar)	|:GistSimilar| on this buffer
+	<Plug>(gist-stop)	|:GistStop|
+
+						      *gist-multiline*
+A selection or a motion that crosses line breaks is searched as one string
+(gist's `-U`), so `<Leader>goip` finds every other copy of this paragraph and
+a visual `V}` finds that block of code wherever it was pasted. The text is
+matched literally, whatever it contains, and your unnamed register and cursor
+position are left as they were.
+
+                                                     *gist-default-mappings*
+Unless |g:gist_default_mappings| is 0, these are suggested at load — and only
+claimed if you have not mapped the <Plug> yourself and the key is still free,
+so an existing binding of yours always wins:
+
+	<Leader>gg	<Plug>(gist-cword)      (and the selection, in visual)
+	<Leader>gr	<Plug>(gist-rank)
+	<Leader>go	<Plug>(gist-operator)   e.g. <Leader>goiw, <Leader>goi"
+	<Leader>gb	<Plug>(gist-blast)
+	<Leader>gs	<Plug>(gist-similar)
+
+Change the prefix with |g:gist_map_prefix|.
+
+==============================================================================
+5. OPTIONS                                                     *gist-options*
+
+Every option is read when it is used, so `:let` takes effect on the next
+search — no reload. A buffer-local `b:` twin always beats the global, which
+makes an |ftplugin| a per-filetype search policy: >
+
+	" ~/.vim/after/ftplugin/go.vim
+	let b:gist_flags = ['-t', 'go']
+<
+					                        *g:gist_binary*
+g:gist_binary		The executable. Default: "gist".
+
+					                         *g:gist_flags*
+g:gist_flags		|List| of flags added to every search.
+			Default: [] — e.g. ['--smart-case'].
+
+					                       *g:gist_grepprg*
+g:gist_grepprg		Whether to point 'grepprg' (and therefore |:grep|,
+			|:lgrep|, and every plugin built on them) at gist.
+			  "auto"    claim it only while it still holds a
+			            value the editor chose for you: Vim's
+			            built-in grep, or the ripgrep line
+			            Neovim writes for itself when rg is on
+			            $PATH. A 'grepprg' you set yourself is a
+			            decision, not a gap. This is the default.
+			  "always"  take it regardless.
+			  "never"   leave it alone.
+			0 and 1 are accepted for "never" and "always".
+
+					                         *g:gist_async*
+g:gist_async		Stream results from a background job. Default: 1.
+			Set to 0 to force one blocking search at a time.
+
+					                 *g:gist_open_quickfix*
+g:gist_open_quickfix	Open the list window on the first results.
+			Default: 1.
+
+					                     *g:gist_qf_height*
+g:gist_qf_height	Height of that window. Default: 10.
+
+					                 *g:gist_jump_to_first*
+g:gist_jump_to_first	Jump to the first match, as |:grep| does. Default: 1.
+			[!] on any command overrides this for one search.
+
+					                         *g:gist_hints*
+g:gist_hints		Surface gist's stderr coaching. Default: 1.
+
+					                   *g:gist_hint_prompt*
+g:gist_hint_prompt	On a miss, offer the suggestions as a numbered
+			prompt. Default: 1, and it stands itself down when a
+			keystroke is already pending. With 0 they are always
+			printed, and |:GistRetry| still applies them.
+
+					                         *g:gist_uncap*
+g:gist_uncap		Pass `--uncap`. Default: 1. gist caps its output by
+			default to protect an agent's context window; an
+			editor wants the whole answer, and a silently
+			truncated quickfix list is worse than a long one.
+
+					              *g:gist_default_mappings*
+g:gist_default_mappings	Suggest the default keys. Default: 1.
+
+					                    *g:gist_map_prefix*
+g:gist_map_prefix	Prefix for them. Default: "<Leader>g".
+
+					                *g:gist_relate_binary*
+					               *g:gist_irregex_binary*
+g:gist_relate_binary	The sibling binaries |:GistSimilar| and |:GistBlast|
+g:gist_irregex_binary	call. Defaults: "relate" and "irregex".
+
+==============================================================================
+6. HINTS AND RETRIES                                             *gist-hints*
+
+gist writes results to stdout and coaching to stderr. When a search misses, it
+says why and what would probably fix it: >
+
+	gist: no matches for 'Widget' · scope: src
+	gist: try -i — the pattern has uppercase; retry case-insensitive
+	gist: try -uu — gitignored and hidden files were excluded
+<
+The plugin keeps that channel out of the quickfix list and turns the
+re-runnable part into an offer: >
+
+	1. retry with -i — the pattern has uppercase; retry case-insensitive
+	2. retry with -uu — gitignored and hidden files were excluded
+	Type number and <Enter> (q or empty cancels):
+<
+Pick one and the same query runs again with that flag in front. The offers
+survive the prompt, so `:GistRetry 2` works later too, and a bare |:GistRetry|
+just re-asks the last question — useful after editing files.
+
+A search finishes when it finishes, which may be after you have moved on. If a
+keystroke is already waiting when the offer would appear, it was meant for the
+buffer, not for a menu that just covered it: the prompt stands down and prints
+itself instead, naming the command that takes each offer: >
+
+	gist: no matches for 'Widget' | :GistRetry 1 → -i (the pattern has
+	uppercase) | :GistRetry 2 → -uu (gitignored and hidden files were
+	excluded)
+<
+That printed form is also what |g:gist_hint_prompt| 0 gives you always.
+
+==============================================================================
+7. HOOKS                                                         *gist-hooks*
+
+                                                    *GistPre* *GistPost*
+Two |User| autocommands fire around every search, so you can drive your own
+window layout without patching the plugin: >
+
+	autocmd User GistPost call MyResultsWindow()
+<
+|QuickFixCmdPost| also fires with "grep" (or "lgrep" for |:LGist|) once the
+list is complete, which is what quickfix plugins already listen for.
+
+                                                          *gist#statusline()*
+For 'statusline', gist#statusline() is "[gist…]" while a search runs and
+empty otherwise: >
+
+	set statusline+=%{gist#statusline()}
+<
+                                                                *gist#last()*
+gist#last() returns the last run as a |Dictionary| — argv, exit code, entry
+count, elapsed time, and the parsed hints — for scripting or debugging.
+
+==============================================================================
+8. RECIPES                                                     *gist-recipes*
+
+Act on every match (|:cdo|): >
+	:Gist! OldName
+	:cdo s/OldName/NewName/gc | update
+<
+Search only this file, or only this directory: >
+	:Gist -F TODO %
+	:Gist -F TODO %:h
+<
+Search the whole project from wherever you are. gist scopes itself by its PATH
+arguments, exactly as |:grep| does, so a root is one more argument rather than
+a mode — which keeps |:Gist| and |:grep| answering the same question: >
+	command! -nargs=+ GistRepo execute 'Gist' <q-args>
+	      \ fnameescape(finddir('.git/..', expand('%:p:h') . ';'))
+<
+fzf.vim live search, gist as the engine: >
+	command! -nargs=* GistFzf call fzf#vim#grep(
+	      \ 'gist --column --line-number --color=always --uncap '
+	      \ . shellescape(<q-args>), 1, fzf#vim#with_preview())
+<
+Telescope (Neovim) live_grep: >
+	require('telescope').setup{ defaults = { vimgrep_arguments = {
+	  'gist', '--vimgrep', '--uncap', '--smart-case' } } }
+<
+Keep the index warm without thinking about it: >
+	autocmd BufWritePost * silent! GistIndex
+<
+==============================================================================
+9. COMPARED WITH :grep AND RIPGREP                            *gist-vs-grep*
+
+`set grepprg=rg\ --vimgrep` is the whole of the usual ripgrep integration, and
+it leaves five rough edges this plugin does not have:
+
+  |:grep| blocks.	A search over a large tree freezes the editor until
+			it finishes. Here results stream and |:GistStop|
+			cancels.
+
+  Vim edits the line	Before your 'grepprg' runs, |cmdline-special| turns
+  before you do.	`%` into the current file and `#` into the alternate
+			one — so `:grep gist#job#start` fails with E194
+			rather than searching. |:Gist| takes the line as
+			written.
+
+  The shell is in	`:grep foo|bar` and `:grep 'a b'` need escaping that
+  the way.		depends on your 'shell'. Arguments here go straight
+			to the binary as argv.
+
+  stderr lands in	A catch-all `%f` in 'grepformat' turns any stray
+  the list.		line into a quickfix entry pointing at a file that
+			does not exist. Each output shape is parsed for
+			what it actually is. |gist-hints|
+
+  A miss is silent.	ripgrep exits 1 and says nothing. gist explains and
+			suggests; the plugin makes the suggestion clickable.
+
+gist itself keeps ripgrep's flags, defaults, output bytes and exit codes, so
+existing muscle memory and existing 'grepformat' knowledge still apply. The
+additions are |:GistRank|, |:GistBlast|, |:GistSimilar| and |gist-multiline|
+selections — the questions a line-at-a-time exact pattern cannot ask.
+
+==============================================================================
+10. TROUBLESHOOTING                                             *gist-health*
+
+Run |:GistHealth| first (`:checkhealth gist` in Neovim). It answers the four
+questions that account for nearly every problem:
+
+  "gist not found"	The binary is not on $PATH. `make install-gist`, or
+			set |g:gist_binary| to the full path.
+
+  "no trigram index"	Searches still answer correctly, just without the
+			accelerator. |:GistIndex|.
+
+  "'grepprg' is yours"	Another plugin or your vimrc owns it, so |:grep|
+			is not running gist. |:Gist| still is. Set
+			|g:gist_grepprg| to "always" to take it.
+
+  "async unavailable"	This Vim has no job control, so searches block.
+			Upgrade to Vim 8, or accept it — everything else
+			behaves identically.
+
+Nothing here is required for correctness: with no index, no jobs and no
+'grepprg', |:Gist| still returns exactly the same matches.
+
+==============================================================================
+ABOUT                                                            *gist-about*
+
+Part of the irregex package (Apache-2.0). The engine, its flag surface, and
+the evidence behind the performance claims live in the package README; the
+sibling faces `relate` and `irregex` are documented there too.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:

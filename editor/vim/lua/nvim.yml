@@ -1,0 +1,66 @@
+---
+# nvim — selene standard-library YAML for the Neovim Lua runtime.
+#
+# Loaded by the folder-local `selene.toml` next to this file as
+# `std = "lua51+nvim"`. It exists because this tree's ROOT Lua runtime is the
+# Redis 5.1 sandbox (`redis.yml`), where `vim` is undefined and `require` is
+# explicitly stripped — exactly the two things a Neovim plugin's Lua leg needs.
+# Without this file the health shim lints as two `undefined_variable` errors.
+#
+# Scope is deliberately narrow: `lua/gist/health.lua` is the ONLY Lua in the
+# plugin, because the plugin is Vimscript-first so that plain Vim and Neovim
+# can never disagree about what gist reports. Modeling the whole Neovim API
+# here would trade the one thing a std file buys — typo detection — for
+# coverage of calls nothing makes. When the Lua leg reaches for a new `vim.*`
+# entry point, declare it here; an undeclared one is supposed to fail.
+#
+# Reference for the surface modeled below:
+#   • https://neovim.io/doc/user/health.html (vim.health, Nvim 0.10+)
+#   • https://neovim.io/doc/user/lua.html#vim.fn
+#
+# `lua_versions: [lua51]` matches LuaJIT 2.1, which is what Neovim embeds:
+# 5.1 syntax plus `goto`. A 5.2+ `<close>` attribute or floor-division `//`
+# would fail at load time in the editor, so it fails here first.
+
+name: nvim
+base: lua51
+
+lua_versions:
+  - lua51
+
+globals:
+  # ── vim.health — the :checkhealth reporting API (Nvim 0.10+) ──────────
+  # Declared as a property as well as a function set: the shim reads
+  # `vim.health or require('health')` as a VALUE to stay compatible with
+  # older Neovim, which is a plain field access selene must know about.
+  vim.health:
+    property: read-only
+  vim.health.start:
+    args:
+      - type: string # section name shown in the :checkhealth buffer
+  vim.health.ok:
+    args:
+      - type: string
+  vim.health.warn:
+    args:
+      - type: string
+      - type: table # advice lines
+        required: false
+  vim.health.error:
+    args:
+      - type: string
+      - type: table
+        required: false
+  vim.health.info:
+    args:
+      - type: string
+
+  # ── vim.fn — the Vimscript bridge ─────────────────────────────────────
+  # Indexed by function name (`vim.fn['gist#health#report']`) because the
+  # autoload `#` is not a valid Lua identifier. Every key is a call into
+  # Vimscript, so the members are `any` by construction — the names are
+  # checked by Vim at call time, not by selene.
+  vim.fn:
+    property: read-only
+  "vim.fn.*":
+    any: true
