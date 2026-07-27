@@ -7,6 +7,9 @@ doc_radar:
     - description: "status JSON remains discoverable through the CLI"
       file: pkg/kernels/irregex/src/surface/face/gist/main.zig
       contains: 'std.mem.eql(u8, value, "--json")'
+    - description: "the warm tier's silent failure is reported, not merely detected"
+      file: pkg/kernels/irregex/src/surface/face/gist/status/status.zig
+      contains: ["resident: Residency = .none", "fn renderResident"]
 ---
 
 # surface/face/gist/status — `gist status`
@@ -46,7 +49,8 @@ stdout or stderr. The v1 shape is:
   },
   "roots": ["services", "libs", "clients", "contracts", "scripts", "quality"],
   "bound_here": true,
-  "built_over": "/Users/you/billy"
+  "built_over": "/Users/you/billy",
+  "resident": "ours"
 }
 ```
 
@@ -76,5 +80,19 @@ Note that `freshness` is what the directory RECORDS, not what a query may
 trust: it stays populated for a foreign directory precisely so the anchor reads
 as what it is (built then, over there) rather than as an index that never had
 one.
+
+## Which build is answering?
+
+`resident` is the same question one layer up, about the other accelerator. A
+daemon from a superseded build frames identically to this one and would answer
+from an engine this binary no longer shares, so the client declines it and
+every eligible query quietly runs cold — with nothing in the numbers above, or
+in the answers themselves, to say why. Three states: `none` (nothing listening;
+the next eligible query forks one), `ours` (this build, on this wire version,
+over this tree — warm is live), and `foreign` (something is listening that this
+binary will not use). Probing is read-only: `status` never spawns a daemon and
+never retires one, so running it twice cannot change what it reports. Retiring
+a superseded daemon is the *query* path's job, one cold answer later
+(`../daemon/client/`).
 
 The matching mutating verb is [`../lifecycle/`](../lifecycle).

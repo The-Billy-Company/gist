@@ -57,7 +57,17 @@ const annals = @import("annals.zig");
 /// only reports whether the corpus has moved since a caller last answered one.
 /// Same fail-open bump as v5/v6/v7 — a stale peer is sent cold by READY before
 /// it can meet the new frames.
-pub const protocol_version: u8 = 8;
+///
+/// v9 grew the READY `[u64 image]` field, and it is the one bump here that adds
+/// no frame and no verb. Every version above says two peers FRAME alike; none
+/// of them could say the peers ANSWER alike, because a correctness fix that
+/// changes what a warm answer IS moves no byte on the wire and so earns no
+/// bump — and a daemon started before that fix keeps serving freshly-rebuilt
+/// clients for as long as it stays resident. v9 closes that by making the
+/// daemon name its own build (`conduit/image.zig`), so a client running a
+/// different one declines to cold instead of trusting an engine it no longer
+/// shares. The bump itself is the last time this problem needs one.
+pub const protocol_version: u8 = 9;
 
 /// Session/transport capabilities the peers agree on in the HELLO frame. NOT
 /// query flags — the flags byte is fully assigned; this is a separate handshake
@@ -71,28 +81,38 @@ pub const cap_fd_transport: u8 = 1 << 0; // client can receive a shm fd for a la
 /// on `chunk` frames automatically.
 pub const caps_supported: u8 = if (shm.supported) cap_fd_transport else 0;
 
-pub fn encodeReady(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, daemon_gen: u64, session_gen: u64, index_gen: []const u8) !void {
+/// `image` is the daemon's executable identity, latched at ITS boot rather than
+/// read here — the whole value is that it predates any rebuild that happened
+/// while this daemon stayed resident. `conduit/image.unknown` (0) means the
+/// daemon could not identify itself, which clients read as "cannot judge".
+pub fn encodeReady(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, daemon_gen: u64, session_gen: u64, image: u64, index_gen: []const u8) !void {
     var body: std.ArrayList(u8) = .empty;
     defer body.deinit(gpa);
     try body.append(gpa, protocol_version);
     try wire.appendInt(u64, &body, gpa, daemon_gen);
     try wire.appendInt(u64, &body, gpa, session_gen);
+    try wire.appendInt(u64, &body, gpa, image);
     try wire.appendInt(u32, &body, gpa, @intCast(index_gen.len));
     try body.appendSlice(gpa, index_gen);
     try frame.writeFrame(buf, gpa, .ready, body.items);
 }
 
-pub const Ready = struct { proto: u8, daemon_gen: u64, session_gen: u64, index_gen: []const u8 };
+pub const Ready = struct { proto: u8, daemon_gen: u64, session_gen: u64, image: u64, index_gen: []const u8 };
+
+/// Every fixed field sits ahead of the one variable-length tail, so the header
+/// is a constant 29 bytes: `[u8 proto][u64 daemon_gen][u64 session_gen][u64 image][u32 n]`.
+const ready_header = 29;
 
 pub fn decodeReady(payload: []const u8) WireError!Ready {
-    if (payload.len < 21) return WireError.UnexpectedFrame;
-    const n = std.mem.readInt(u32, payload[17..21], .little);
-    if (payload.len < 21 + @as(usize, n)) return WireError.UnexpectedFrame;
+    if (payload.len < ready_header) return WireError.UnexpectedFrame;
+    const n = std.mem.readInt(u32, payload[25..29], .little);
+    if (payload.len < ready_header + @as(usize, n)) return WireError.UnexpectedFrame;
     return .{
         .proto = payload[0],
         .daemon_gen = std.mem.readInt(u64, payload[1..9], .little),
         .session_gen = std.mem.readInt(u64, payload[9..17], .little),
-        .index_gen = payload[21 .. 21 + n],
+        .image = std.mem.readInt(u64, payload[17..25], .little),
+        .index_gen = payload[ready_header .. ready_header + n],
     };
 }
 

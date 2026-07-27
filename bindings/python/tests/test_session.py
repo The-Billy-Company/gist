@@ -88,9 +88,20 @@ def test_warm_eligible_rejects_rich_requests(req: SearchRequest) -> None:
 
 
 def test_ready_frame_decodes_all_generations() -> None:
-    payload = bytes([PROTOCOL_VERSION]) + struct.pack("<QQI", 7, 42, len(b"gen-abc")) + b"gen-abc"
-    assert _decode_ready(payload) == SessionGeneration(7, 42, "gen-abc")
+    payload = (
+        bytes([PROTOCOL_VERSION]) + struct.pack("<QQQI", 7, 42, 99, len(b"gen-abc")) + b"gen-abc"
+    )
+    assert _decode_ready(payload) == SessionGeneration(7, 42, "gen-abc", image=99)
     assert _decode_ready(payload[:-1]) is None
+
+
+def test_ready_frame_refuses_a_pre_v9_payload() -> None:
+    # A v8 daemon's READY has no image field, so its 21-byte header would place
+    # the index gen where the image sits. The version byte refuses it first —
+    # the fail-open skew check that keeps a stale daemon from being parsed at
+    # all, rather than parsed wrongly.
+    v8 = bytes([8]) + struct.pack("<QQI", 7, 42, len(b"gen-abc")) + b"gen-abc"
+    assert _decode_ready(v8) is None
 
 
 # ─────────────────────────── fail-open (no daemon) ───────────────────────────

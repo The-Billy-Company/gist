@@ -116,6 +116,14 @@ fn exchangeOffer(
 /// HELLO → READY, returning whether the peer speaks this exact protocol. No
 /// transport capabilities are advertised: these frames are small by
 /// construction (a key) or one-way (an answer), so neither wants an shm fd.
+///
+/// Deliberately NOT gated on READY's build stamp, unlike the query path. The
+/// callers here are `relate` and `irregex` as often as `gist`, and three
+/// binaries from one build are three different files — comparing them would
+/// disable the keep for two products out of three. It is safe to skip because
+/// the daemon never renders a kept answer: the CALLER computed it, and
+/// `cli/reprise.zig` already folds the caller's own build into the key, so a
+/// rebuilt binary asks a question its predecessor's answer cannot satisfy.
 fn shakeHands(gpa: std.mem.Allocator, fd: std.posix.fd_t) !bool {
     try protocol.sendFrame(gpa, fd, .hello, &.{ protocol.protocol_version, 0 });
     var ready = try client.recvFrameDeadline(gpa, fd, timeout_ms);

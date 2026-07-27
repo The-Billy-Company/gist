@@ -47,6 +47,7 @@
 
 const std = @import("std");
 const resident = @import("../../../../exec/session/warm/resident.zig");
+const image = @import("../../../../exec/session/conduit/image.zig");
 const watch = @import("../../../../exec/session/watch/watch.zig");
 const keep_mod = @import("../../../../exec/session/answer/keep.zig");
 const answer = @import("answer.zig");
@@ -91,6 +92,11 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     var session = try ResidentSession.init(gpa, io, roots);
     defer session.deinit();
     session.daemon_gen = @bitCast(@as(i64, @truncate(std.Io.Clock.now(.real, io).nanoseconds)));
+    // Latch the build NOW, while the file on disk is still the one we were
+    // exec'd from. A daemon outlives rebuilds; asking at handshake time would
+    // report whichever binary a coworker last installed and vouch for a build
+    // this process has never run.
+    session.image = image.stamp(gpa, io);
     // Only the daemon arms a budget; embedders/FFI/tests keep the unbudgeted
     // default so their behavior — and the fast path's zero clock reads — is
     // unchanged. Survives an index-reload (config, not per-index data).

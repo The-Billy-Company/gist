@@ -20,7 +20,7 @@ pub const WireError = wire.WireError;
 
 pub const Opcode = enum(u8) {
     hello = 1, // C→S: [u8 proto_version]
-    ready = 2, // S→C: [u8 proto][u64 daemon_gen][u64 session_gen][u32 n][gen bytes]
+    ready = 2, // S→C: [u8 proto][u64 daemon_gen][u64 session_gen][u64 image][u32 n][gen bytes]
     query = 3, // C→S: [u8 mode][u8 flags][if flags&max_count_present: u64 LE][pattern bytes]
     result = 4, // S→C: [u8 mode] then files/count/lines body
     decline = 5, // S→C: (no payload) — answer this request cold

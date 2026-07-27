@@ -17,6 +17,7 @@ const std = @import("std");
 const resident = @import("../../../../exec/session/warm/resident.zig");
 const annals_mod = @import("../../../../exec/session/freshness/annals.zig");
 const protocol = @import("../../../../exec/session/conduit/protocol/protocol.zig");
+const image = @import("../../../../exec/session/conduit/image.zig");
 const watch = @import("../../../../exec/session/watch/watch.zig");
 const answer = @import("answer.zig");
 const crew = @import("crew.zig");
@@ -62,12 +63,23 @@ pub fn frame(server: *crew.Server, slot: u16) Route {
         // HELLO carries an optional caps byte after the version — latch it for
         // this connection so its queries can use fd-transport (`status` is a
         // re-handshake that never advertises, so it leaves caps untouched).
+        //
+        // It is also the moment to ask whether this daemon should still exist.
+        // A new client dialing in is exactly when a rebuild has plausibly just
+        // happened, and `image.replaced` answers it against the filesystem
+        // rather than against the peer: if the executable this process is
+        // running has been rewritten, the bytes it would answer from are gone.
+        // Answer READY honestly first — the stamp is the boot-time one, so the
+        // client declines and runs cold — then stop, freeing the socket for a
+        // daemon spawned from what is on disk now. Retirement therefore needs
+        // no comparison between peers, which is what keeps two live builds at
+        // one rendezvous from taking turns killing each other.
         .hello => {
             defer f.deinit();
             const p = f.payload();
             c.caps = if (p.len >= 2) p[1] else 0;
             sendReady(server.session, server.gpa, fd, c.gen) catch return .drop;
-            return .keep;
+            return if (image.replaced(server.gpa, server.io)) .stop else .keep;
         },
         .status => {
             defer f.deinit();
@@ -185,6 +197,6 @@ fn sendReady(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
     defer buf.deinit(gpa);
     const gen = try session.indexGenDup(gpa);
     defer gpa.free(gen);
-    try protocol.encodeReady(&buf, gpa, session.daemon_gen, session_gen, gen);
+    try protocol.encodeReady(&buf, gpa, session.daemon_gen, session_gen, session.image, gen);
     if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
 }

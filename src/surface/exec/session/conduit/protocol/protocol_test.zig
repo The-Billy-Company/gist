@@ -261,10 +261,10 @@ test "fd-transport capability advertises exactly where the shm path exists" {
     try std.testing.expect(protocol.fd_transport_floor > 0);
 }
 
-test "ready handshake encode/decode preserves both generations and the index gen" {
+test "ready handshake encode/decode preserves both generations, the image, and the index gen" {
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
-    try protocol.encodeReady(&buf, gpa, 7, 42, "gen-abc123");
+    try protocol.encodeReady(&buf, gpa, 7, 42, 0xDEADBEEFCAFEF00D, "gen-abc123");
 
     const p = try roundTrip(&buf);
     try std.testing.expectEqual(protocol.Opcode.ready, p.op);
@@ -272,7 +272,22 @@ test "ready handshake encode/decode preserves both generations and the index gen
     try std.testing.expectEqual(protocol.protocol_version, r.proto);
     try std.testing.expectEqual(@as(u64, 7), r.daemon_gen);
     try std.testing.expectEqual(@as(u64, 42), r.session_gen);
+    try std.testing.expectEqual(@as(u64, 0xDEADBEEFCAFEF00D), r.image);
     try std.testing.expectEqualStrings("gen-abc123", r.index_gen);
+}
+
+test "ready decode fails closed on a v8-shaped payload (no image field)" {
+    // The exact bytes a pre-v9 daemon would send for `(7, 42, "gen-abc123")`:
+    // 21 header bytes instead of 29. It must not silently reinterpret the index
+    // gen's length prefix as an image — a mis-parse here is how a stale daemon
+    // would slip past the very check this field exists to make.
+    var v8: std.ArrayList(u8) = .empty;
+    defer v8.deinit(gpa);
+    try v8.append(gpa, 8);
+    try v8.appendNTimes(gpa, 0, 16); // daemon_gen + session_gen
+    try v8.appendSlice(gpa, &.{ 10, 0, 0, 0 }); // u32 len = 10
+    try v8.appendSlice(gpa, "gen-abc123");
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeReady(v8.items));
 }
 
 test "parseFrame fails closed on a zero-length or oversized frame" {

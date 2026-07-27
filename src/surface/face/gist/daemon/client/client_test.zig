@@ -7,6 +7,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const client = @import("client.zig");
+const protocol = @import("../../../../exec/session/conduit/protocol/protocol.zig");
 const fault = @import("../../../../../fault.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
@@ -107,4 +108,77 @@ test "client: wedged daemon times out to cold" {
     const outcome = client.test_api.attemptWithin(gpa, io, &.{ "needle", "-l" }, socket, test_timeout_ms);
 
     try std.testing.expect(outcome == .cold);
+}
+
+// ── skew: who retires whom ──────────────────────────────────────────────────
+//
+// A daemon on another protocol version answers correctly-framed nonsense, so
+// the client runs cold. The question these tests pin is what it does on the way
+// out — because "decline and say nothing" would strand the warm tier (the idle
+// TTL wants ten CONTINUOUS minutes of quiet, which this repo never has), while
+// "always retire" would let two live builds kill each other's daemons all
+// afternoon. Only the strictly newer peer writes the frame, and the version is
+// the one thing here that genuinely counts up.
+//
+// BUILD skew has no such order (a stamp is an mtime, and Zig's install
+// preserves the cache artifact's, so it can move backwards between two cached
+// builds). The client only declines; the daemon stands itself down when its own
+// executable is replaced — proved end to end in `serve/serve_test.zig`.
+
+/// A connected local pair, the cheapest stand-in for "a daemon is on the other
+/// end" — no listener, no filesystem, nothing to race.
+fn duplex() ![2]std.posix.fd_t {
+    var fds: [2]std.posix.fd_t = undefined;
+    if (std.c.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds) != 0) return error.SkipZigTest;
+    return fds;
+}
+
+/// Read whatever landed on the peer end without blocking. Returns an empty
+/// slice when nothing was written — the assertion the anti-thrash tests need.
+fn peerBytes(fd: std.posix.fd_t, buf: []u8) []u8 {
+    var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
+    const n = std.posix.poll(&pfd, 200) catch return buf[0..0];
+    if (n == 0 or (pfd[0].revents & std.posix.POLL.IN) == 0) return buf[0..0];
+    const got = std.c.read(fd, buf.ptr, buf.len);
+    return if (got > 0) buf[0..@intCast(got)] else buf[0..0];
+}
+
+test "skew: the newer peer retires the resident daemon it has obsoleted" {
+    const pair = try duplex();
+    defer _ = std.c.close(pair[0]);
+    defer _ = std.c.close(pair[1]);
+
+    client.test_api.retireOn(std.testing.allocator, pair[0], true);
+
+    var buf: [64]u8 = undefined;
+    const got = peerBytes(pair[1], &buf);
+    // `[u32 len][u8 opcode]` — one shutdown frame, nothing more.
+    try std.testing.expectEqual(@as(usize, 5), got.len);
+    try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, got[0..4], .little));
+    try std.testing.expectEqual(protocol.Opcode.shutdown, @as(protocol.Opcode, @enumFromInt(got[4])));
+}
+
+test "skew: a peer that is not strictly newer leaves the daemon alone" {
+    const pair = try duplex();
+    defer _ = std.c.close(pair[0]);
+    defer _ = std.c.close(pair[1]);
+
+    client.test_api.retireOn(std.testing.allocator, pair[0], false);
+
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 0), peerBytes(pair[1], &buf).len);
+}
+
+test "skew: the version byte is read before the layout that may not parse" {
+    // A pre-v9 READY has a 21-byte header, so `decodeReady` cannot speak for it
+    // — yet its version byte is in the same place it has always been, and that
+    // is what makes an old daemon retirable rather than merely declined. Read
+    // it off the wire directly; every past and future version agrees on byte 0.
+    const v8 = [_]u8{8} ++ [_]u8{0} ** 20;
+    try std.testing.expectEqual(@as(?u8, 8), client.test_api.peerProtocolOf(&v8));
+    try std.testing.expect(protocol.decodeReady(&v8) catch null == null);
+    try std.testing.expect(8 < protocol.protocol_version); // hence: superseded
+
+    // A peer that says nothing at all is not one we get to judge.
+    try std.testing.expectEqual(@as(?u8, null), client.test_api.peerProtocolOf(""));
 }

@@ -4,10 +4,16 @@
 //! search fast, and how fresh is what I'd search?* Before an agent commits to a
 //! query it can ask `gist status` and learn whether an index exists, how much it
 //! covers (files, distinct trigrams, postings), what it costs on disk, how long
-//! ago it was built (vs the freshness anchor the cold path reads), and which
-//! roots it spans — all without running a single trigram query or reading a
-//! candidate file. A missing index is reported as an actionable state (run
-//! `index`), never an error, so this is safe to call blind.
+//! ago it was built (vs the freshness anchor the cold path reads), which
+//! roots it spans, and which build is answering at the rendezvous — all without
+//! running a single trigram query or reading a candidate file. A missing index
+//! is reported as an actionable state (run `index`), never an error, so this is
+//! safe to call blind.
+//!
+//! Both accelerators report the same way: the numbers stay true while the
+//! acceleration is off, so every state where nothing is warm gets a line of its
+//! own — `bound_here` for artifacts built over another tree, `resident` for a
+//! daemon this binary refuses to trust.
 //!
 //! Everything here is derived from the same two mmap'd artifacts the query path
 //! loads (`persist.loadQuiet`) plus the freshness anchor as recorded
@@ -23,7 +29,13 @@ const frame = @import("../../../../corpus/index/frame/frame.zig");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const charter_mod = @import("../../../../corpus/scope/charter.zig");
 const preference = @import("../../../exec/cold/argv/preference.zig");
+const client = @import("../daemon/client/client.zig");
 const Dir = std.Io.Dir;
+
+/// Which build is answering at the rendezvous — `client.Residency`, re-exported
+/// so a caller of status binds to status's contract rather than reaching into
+/// the daemon client for a type it only ever reads.
+pub const Residency = client.Residency;
 
 /// Version of the `--json` machine contract; bumped only on a breaking field
 /// change (see `Snapshot`).
@@ -98,6 +110,12 @@ pub const Snapshot = struct {
     /// it is the difference between a diagnosable state and a silent one.
     built_over: ?[]const u8 = null,
     config: Config = .{},
+    /// Whether the daemon at the rendezvous is one this binary will use. A
+    /// foreign build frames identically and answers from an engine this binary
+    /// no longer shares, so a skew costs every eligible query its warm path
+    /// while changing nothing in the numbers above — the same invisibility
+    /// `bound_here` exists to break, one layer up.
+    resident: Residency = .none,
 };
 
 /// What the two persisted layers are doing right now. Borrowed paths — both
@@ -134,8 +152,11 @@ fn mib(bytes: u64) f64 {
 /// `roots` in the returned snapshot are owned by `gpa` — release with
 /// `corpus_mod.freeRoots` (a ready index reports the roots it was BUILT over;
 /// an unavailable one reports what a build here WOULD cover).
-pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
+pub fn collect(gpa: std.mem.Allocator, io: std.Io, socket_path: ?[]const u8) !Snapshot {
     const bound = frame.boundHere();
+    // The warm tier is the other half of "am I ready to search fast", and the
+    // only half whose failure is silent. Probed once, before either return.
+    const resident = if (socket_path) |s| client.residency(gpa, io, s) else .none;
     var p = (try persist.loadQuiet(gpa, io)) orelse return .{
         .state = .unavailable,
         .index = null,
@@ -144,6 +165,7 @@ pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
         .bound_here = bound,
         .built_over = frame.treeBinding(gpa),
         .config = configNow(io),
+        .resident = resident,
     };
     defer p.deinit();
 
@@ -183,6 +205,7 @@ pub fn collect(gpa: std.mem.Allocator, io: std.Io) !Snapshot {
         .bound_here = bound,
         .built_over = frame.treeBinding(gpa),
         .config = configNow(io),
+        .resident = resident,
     };
 }
 
@@ -237,8 +260,22 @@ fn renderHuman(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
         else
             try buf.appendSlice(gpa, "  built over        (unrecorded) — these artifacts name no tree; every accelerator stays off until `gist index`\n");
     }
+    try renderResident(gpa, &buf, snapshot.resident);
     try renderConfig(gpa, &buf, snapshot.config);
     return buf.toOwnedSlice(gpa);
+}
+
+/// The resident daemon, and silence when there is none — a tree whose first
+/// query has yet to fork one is the ordinary state, not a finding. The skew
+/// line is the point of this whole report field: a foreign build answers the
+/// handshake, declines every query, and leaves nothing in the output to say
+/// why the warm tier went quiet.
+fn renderResident(gpa: std.mem.Allocator, buf: *std.ArrayList(u8), r: Residency) !void {
+    try buf.appendSlice(gpa, switch (r) {
+        .none => return,
+        .ours => "  resident          this build — eligible queries answer warm\n",
+        .foreign => "  resident          another build is answering — eligible queries run cold until the next one retires it\n",
+    });
 }
 
 /// The persisted layers, and silence when there are none — which is the common
@@ -265,8 +302,8 @@ fn renderJson(gpa: std.mem.Allocator, snapshot: Snapshot) ![]u8 {
 
 /// Emit status to stdout. JSON is compact, newline-terminated, and contains no
 /// human diagnostics, including when the index is unavailable.
-pub fn run(gpa: std.mem.Allocator, io: std.Io, json: bool) !void {
-    const snapshot = try collect(gpa, io);
+pub fn run(gpa: std.mem.Allocator, io: std.Io, json: bool, socket_path: ?[]const u8) !void {
+    const snapshot = try collect(gpa, io, socket_path);
     defer corpus_mod.freeRoots(gpa, snapshot.roots);
     defer if (snapshot.built_over) |t| gpa.free(t);
     const output = if (json) try renderJson(gpa, snapshot) else try renderHuman(gpa, snapshot);
@@ -321,7 +358,7 @@ test "JSON renderer exposes the stable ready contract" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        "{\"schema_version\":1,\"state\":\"ready\",\"index\":{\"path\":\"index.gist\",\"paths_file\":\"paths.list\",\"files_indexed\":2,\"distinct_trigrams\":3,\"postings\":5,\"index_bytes\":8,\"paths_bytes\":13},\"freshness\":{\"anchor_unix_ns\":1000,\"age_seconds\":2.5},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false,\"malformed\":null}}\n",
+        "{\"schema_version\":1,\"state\":\"ready\",\"index\":{\"path\":\"index.gist\",\"paths_file\":\"paths.list\",\"files_indexed\":2,\"distinct_trigrams\":3,\"postings\":5,\"index_bytes\":8,\"paths_bytes\":13},\"freshness\":{\"anchor_unix_ns\":1000,\"age_seconds\":2.5},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false,\"malformed\":null},\"resident\":\"none\"}\n",
         output,
     );
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, output, .{});
@@ -434,6 +471,45 @@ test "the persisted layers are silent when absent and named when present" {
     try t.expect(std.mem.containsAtLeast(u8, flagged, 1, "gist config check"));
 }
 
+test "a skewed resident is named, and an absent one costs the reader nothing" {
+    const t = std.testing;
+    const ready: Snapshot = .{
+        .state = .ready,
+        .index = .{
+            .path = "i",
+            .paths_file = "p",
+            .files_indexed = 1,
+            .distinct_trigrams = 1,
+            .postings = 1,
+            .index_bytes = 0,
+            .paths_bytes = 0,
+        },
+        .freshness = .{ .anchor_unix_ns = 1, .age_seconds = 1 },
+        .roots = &.{"."},
+    };
+
+    // No daemon is the ordinary state of a tree whose first query hasn't run.
+    const quiet = try renderHuman(t.allocator, ready);
+    defer t.allocator.free(quiet);
+    try t.expect(std.mem.indexOf(u8, quiet, "resident") == null);
+
+    // The state this field exists for: every number above is real, the index
+    // is fresh, and every eligible query is silently running cold anyway.
+    var skewed = ready;
+    skewed.resident = .foreign;
+    const named = try renderHuman(t.allocator, skewed);
+    defer t.allocator.free(named);
+    try t.expect(std.mem.containsAtLeast(u8, named, 1, "another build is answering"));
+    try t.expect(std.mem.containsAtLeast(u8, named, 1, "run cold"));
+
+    // And the positive answer to the question status exists to answer.
+    var warm = ready;
+    warm.resident = .ours;
+    const healthy = try renderHuman(t.allocator, warm);
+    defer t.allocator.free(healthy);
+    try t.expect(std.mem.containsAtLeast(u8, healthy, 1, "resident          this build"));
+}
+
 test "JSON unavailable state stays valid and null-bearing" {
     const t = std.testing;
     const output = try renderJson(t.allocator, .{
@@ -444,7 +520,7 @@ test "JSON unavailable state stays valid and null-bearing" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        "{\"schema_version\":1,\"state\":\"unavailable\",\"index\":null,\"freshness\":{\"anchor_unix_ns\":null,\"age_seconds\":null},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false,\"malformed\":null}}\n",
+        "{\"schema_version\":1,\"state\":\"unavailable\",\"index\":null,\"freshness\":{\"anchor_unix_ns\":null,\"age_seconds\":null},\"roots\":[\"libs\"],\"bound_here\":true,\"built_over\":null,\"config\":{\"charter\":null,\"preferences\":null,\"preferences_in_force\":false,\"suppressed\":false,\"malformed\":null},\"resident\":\"none\"}\n",
         output,
     );
     const parsed = try std.json.parseFromSlice(std.json.Value, t.allocator, output, .{});

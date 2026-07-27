@@ -7,7 +7,7 @@ doc_radar:
       contains: ["seal surface/exec/session/conduit/protocol through protocol.zig"]
       description: The directory is a sealed deep module, so a caller cannot bind to half the versioned contract
     - file: pkg/kernels/irregex/src/surface/exec/session/conduit/protocol/protocol.zig
-      contains: ["protocol_version: u8 = 8"]
+      contains: ["protocol_version: u8 = 9"]
       absent: ["MONOLITHIC"]
       description: The entry file owns the negotiated version and is no longer a registered monolith
 -->
@@ -23,7 +23,7 @@ directory is **sealed** in
 
 | Module                         | Chapter                                                                                                                                                                                                                                                            |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| [`protocol.zig`](protocol.zig) | The contract's face: `protocol_version` and its version history, the additive HELLO capability byte (`cap_fd_transport`), the READY handshake codec that decides warm-or-cold, and the gathered public surface every caller binds to.                              |
+| [`protocol.zig`](protocol.zig) | The contract's face: `protocol_version` and its version history, the additive HELLO capability byte (`cap_fd_transport`), the READY handshake codec that decides warm-or-cold — including the v9 build stamp that says which _engine_ is answering, not just which grammar — and the gathered public surface every caller binds to. |
 | [`frame.zig`](frame.zig)       | The opcode spine and the typed transport: the `Opcode` enum (each variant documenting its own payload shape), the frame-size budgets, `writeFrame`/`parseFrame`, and `sendFrame`/`recvFrame`/`recvFrameWithFd` over a POSIX fd including the `SCM_RIGHTS` fd pass. |
 | [`query.zig`](query.zig)       | The request codec: the query flags byte, the classic `query`, and the scoped `query_ext` with its length-prefixed pattern, four-list `PathFilter`, and self-describing rank / context / pcre trailers.                                                             |
 | [`result.zig`](result.zig)     | The answer codec: `files`/`count`/`lines` results, the chunk stream, the zero-copy `chunk_fd` handoff, and the zero-copy `ResultView` / `FileIter` readers.                                                                                                        |

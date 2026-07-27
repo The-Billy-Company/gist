@@ -12,6 +12,8 @@ const std = @import("std");
 const serve = @import("serve.zig");
 const answer = @import("answer.zig"); // the query answer path owns the in-flight/budget test hooks
 const protocol = @import("../../../../exec/session/conduit/protocol/protocol.zig");
+const image = @import("../../../../exec/session/conduit/image.zig");
+const client = @import("../client/client.zig"); // the residency probe `gist status` reports through
 const request = @import("../../../../exec/session/answer/request.zig");
 const shm = @import("../../../../exec/session/conduit/shm.zig");
 const fault = @import("../../../../../fault.zig");
@@ -444,6 +446,133 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     }
 
     // Deferred teardown sends SHUTDOWN and joins even if an assertion above fails.
+}
+
+test "serve: READY names the build that is answering" {
+    const gpa = std.testing.allocator;
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const root = try freshRoot(io, a, "image", @intFromPtr(&threaded));
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
+    try putFile(io, a, root, "a.txt", "needle\n");
+
+    const daemon = try spawnDaemon(gpa, io, a, root);
+    defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
+
+    const stream = try dial(io, daemon.socket);
+    defer stream.close(io);
+    const fd = stream.socket.handle;
+
+    try protocol.sendFrame(gpa, fd, .hello, &.{protocol.protocol_version});
+    var ready = try protocol.recvFrame(gpa, fd);
+    defer ready.deinit();
+    try std.testing.expectEqual(protocol.Opcode.ready, ready.op);
+    const r = try protocol.decodeReady(ready.payload());
+
+    // The daemon here IS this test binary, so its boot latch must equal our own
+    // stamp — which proves the whole path (boot → session field → READY encode
+    // → decode) carries a REAL identity rather than the `unknown` that would
+    // silently make every peer agree with everyone.
+    const mine = image.stamp(io);
+    try std.testing.expect(mine != image.unknown);
+    try std.testing.expectEqual(mine, r.image);
+    try std.testing.expect(image.agrees(mine, r.image));
+
+    // And the refusal the field exists for: a peer on any other build is not
+    // served warm, however well it frames.
+    try std.testing.expect(!image.agrees(mine ^ 1, r.image));
+
+    // The same judgement as a REPORT. `gist status` runs this probe so a skew
+    // is visible before it costs anyone an afternoon of cold queries; here the
+    // daemon is this binary, so the honest answer is `ours`.
+    try std.testing.expectEqual(client.Residency.ours, client.residency(gpa, io, daemon.socket));
+}
+
+test "serve: a daemon whose executable was replaced stands itself down" {
+    const gpa = std.testing.allocator;
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const root = try freshRoot(io, a, "retire", @intFromPtr(&threaded));
+    defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
+    try putFile(io, a, root, "a.txt", "needle\n");
+
+    // Stand in for "the binary this daemon is running" — the test cannot
+    // rewrite its own executable, and a live `make install-gist` is exactly the
+    // event being simulated.
+    const exe = try std.fmt.allocPrint(a, "/tmp/gist_retire_exe_{x}", .{@intFromPtr(&threaded)});
+    try Dir.cwd().writeFile(io, .{ .sub_path = exe, .data = "build-1" });
+    defer Dir.cwd().deleteFile(io, exe) catch {};
+    image.test_api.standIn(exe);
+    defer image.test_api.standIn(null);
+    try std.testing.expect(image.stamp(io) != image.unknown);
+
+    const daemon = try spawnDaemon(gpa, io, a, root);
+    defer shutdownAndJoin(gpa, io, daemon.socket, daemon.thread);
+
+    // Intact build: a handshake leaves the daemon serving, which is the half
+    // that would break loudly if the check ever answered on a doubt.
+    {
+        const stream = try dial(io, daemon.socket);
+        defer stream.close(io);
+        try handshake(gpa, stream.socket.handle);
+        try protocol.sendFrame(gpa, stream.socket.handle, .ping, "");
+        var pong = try protocol.recvFrame(gpa, stream.socket.handle);
+        defer pong.deinit();
+        try std.testing.expectEqual(protocol.Opcode.pong, pong.op);
+    }
+
+    // The install lands. Wait out the mtime granularity so the rewrite is
+    // observable rather than a coin flip on the filesystem's clock.
+    try io.sleep(.fromNanoseconds(20 * std.time.ns_per_ms), .real);
+    try Dir.cwd().writeFile(io, .{ .sub_path = exe, .data = "build-2" });
+
+    // The next client's HELLO is the cue. READY still answers — honestly, with
+    // the boot-time stamp, so the client declines and runs cold — and then the
+    // daemon stops, freeing the rendezvous for one spawned from what is on disk
+    // now. No comparison with the peer is involved: the daemon is judging its
+    // own file.
+    {
+        const stream = try dial(io, daemon.socket);
+        defer stream.close(io);
+        try handshake(gpa, stream.socket.handle);
+    }
+    var gone = false;
+    for (0..1000) |_| {
+        const ua = try net.UnixAddress.init(daemon.socket);
+        if (ua.connect(io) catch null) |s| {
+            s.close(io);
+            try io.sleep(.fromNanoseconds(10 * std.time.ns_per_ms), .real);
+        } else {
+            gone = true;
+            break;
+        }
+    }
+    try std.testing.expect(gone);
+}
+
+test "residency: nothing listening is reported as nothing listening" {
+    const gpa = std.testing.allocator;
+    var threaded = std.Io.Threaded.init(gpa, .{});
+    defer threaded.deinit();
+    // A socket path no daemon has ever bound must read as `none`, not as a
+    // foreign resident — status is called blind, and a false alarm about a
+    // daemon that does not exist is worse than saying nothing at all.
+    try std.testing.expectEqual(
+        client.Residency.none,
+        client.residency(gpa, threaded.io(), "/tmp/gist_residency_absent.sock"),
+    );
 }
 
 /// Wait until `fd` is readable, bounded — a regression back to the serial

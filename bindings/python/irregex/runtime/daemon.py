@@ -28,7 +28,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
-PROTOCOL_VERSION = 7  # must match `protocol.protocol_version`
+PROTOCOL_VERSION = 9  # must match `protocol.protocol_version`
+# READY's fixed prefix: [u8 proto][u64 daemon][u64 session][u64 image][u32 n].
+_READY_HEADER = 29
 # `$GIST_SESSION_SOCK`, else `$GIST_DIR/gistd.sock` (default `.local/gist-verify`).
 DEFAULT_OUT_DIR = ".local/gist-verify"
 
@@ -84,6 +86,11 @@ class SessionGeneration:
     daemon: int
     session: int
     index: str
+    #: The daemon's executable build stamp, latched at its boot. Reported for
+    #: observability only: a non-Zig client cannot meaningfully compare itself
+    #: against it, so this binding never refuses a handshake on it. `0` means
+    #: the daemon could not identify its own image.
+    image: int = 0
 
     def same_resident_index(self, other: SessionGeneration) -> bool:
         """Whether two handshakes address the same daemon/index snapshot."""
@@ -478,15 +485,16 @@ def _recv(s: socket.socket) -> tuple[int, bytes]:
 
 
 def _decode_ready(payload: bytes) -> SessionGeneration | None:
-    if len(payload) < 21 or payload[0] != PROTOCOL_VERSION:
+    if len(payload) < _READY_HEADER or payload[0] != PROTOCOL_VERSION:
         return None
-    daemon, session, length = struct.unpack("<QQI", payload[1:21])
-    if len(payload) != 21 + length:
+    daemon, session, image, length = struct.unpack("<QQQI", payload[1:_READY_HEADER])
+    if len(payload) != _READY_HEADER + length:
         return None
     return SessionGeneration(
         daemon=daemon,
         session=session,
-        index=payload[21:].decode(errors="surrogateescape"),
+        index=payload[_READY_HEADER:].decode(errors="surrogateescape"),
+        image=image,
     )
 
 

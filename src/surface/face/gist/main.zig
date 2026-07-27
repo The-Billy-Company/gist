@@ -377,7 +377,12 @@ fn run(init: std.process.Init) !void {
             gist.assay.diag("gist: status accepts only --json\n", .{});
             std.process.exit(2);
         }
-        try status.run(gpa, io, json);
+        // The rendezvous is resolved here, where the environment is, so status
+        // can report which build is answering there without learning how a
+        // socket path is spelled. Unresolvable ⇒ nothing to probe, not an error.
+        const sock: ?[]u8 = serve.socketPath(gpa, init.environ_map) catch null;
+        defer if (sock) |s| gpa.free(s);
+        try status.run(gpa, io, json, sock);
         return;
     }
     // `gist serve [ROOT...]` — run the resident daemon: keep the corpus + index
