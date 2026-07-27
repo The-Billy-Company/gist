@@ -53,7 +53,7 @@ all three are answered.
 ## Two traps worth knowing
 
 **A zsh caption may not contain a colon.** `_next_label` splits
-`label:description` at the *last* colon, so a colon in a group title silently
+`label:description` at the _last_ colon, so a colon in a group title silently
 moves the tag — and every `ignored-patterns` lookup for that group misses,
 leaving a beautifully captioned copy of the entire option table under each
 heading. Titles use an em dash, `wordy` strips colons defensively, and both a
@@ -66,7 +66,7 @@ or `'` is prefixed `\&` so roff does not read prose as a request.
 
 ## When to edit
 
-A new flag group, value kind, or completion target. The face that *owns* the
+A new flag group, value kind, or completion target. The face that _owns_ the
 flag still declares it in that face's repertoire / catalog; this package only
 renders a `Surface` it is handed. The consumer-side proof —
 each shell parsing its own artifact — lives in

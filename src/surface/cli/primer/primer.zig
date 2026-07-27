@@ -308,9 +308,13 @@ pub const Stamp = struct {
         const md = yd.calculateMonthDay();
         return .{
             .version = version,
+            // YYYY-MM-DD always fills exactly 10 bytes — the only error
+            // bufPrint can raise here is NoSpaceLeft, which the size proves away.
             .date = std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}", .{
                 yd.year, md.month.numeric(), md.day_index + 1,
-            }) catch unreachable,
+            }) catch |err| switch (err) {
+                error.NoSpaceLeft => unreachable,
+            },
         };
     }
 };

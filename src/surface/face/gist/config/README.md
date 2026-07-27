@@ -23,11 +23,11 @@ diagnostic, because introspection does not exist.
 
 Persisted configuration earns that introspection or it should not be persisted.
 
-| Command | Answers |
-|---|---|
-| `gist config` | What is in force right now, from which file, and whether it can change the answer or only its rendering. `--json` for the machine-readable stack. |
-| `gist config check` | Is what I wrote valid — **without** running a search. Reports *both* layers before exiting, because someone fixing their configuration wants the whole list, not one item per run. Exit 2 if either is malformed. |
-| `gist config init` | Write the charter, prefilled from what this machine is already carrying. `--write` creates it; without that it prints to stdout. |
+| Command             | Answers                                                                                                                                                                                                           |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gist config`       | What is in force right now, from which file, and whether it can change the answer or only its rendering. `--json` for the machine-readable stack.                                                                 |
+| `gist config check` | Is what I wrote valid — **without** running a search. Reports _both_ layers before exiting, because someone fixing their configuration wants the whole list, not one item per run. Exit 2 if either is malformed. |
+| `gist config init`  | Write the charter, prefilled from what this machine is already carrying. `--write` creates it; without that it prints to stdout.                                                                                  |
 
 ## Why `init` exists
 
@@ -53,7 +53,7 @@ ceilinged at `corpus` reach. Preferences
 interactive terminal.
 
 The report always names the environment variables that outrank the committed
-file, whether or not a charter exists: *"my charter is being ignored"* and *"I
-have no charter but roots are set anyway"* are the same confusion approached
+file, whether or not a charter exists: _"my charter is being ignored"_ and _"I
+have no charter but roots are set anyway"_ are the same confusion approached
 from opposite directions, and both are a `GIST_ROOTS` someone exported months
 ago.

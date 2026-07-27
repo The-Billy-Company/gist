@@ -26,8 +26,8 @@ prerequisite is absent. Run with `uv run pytest` from `bindings/python/`.
   matches, no binary) + integration cases asserting `summary` agrees with the
   flat `search` it derives from.
 - `test_rank.py` — the engine's `--rank` view. Pure row-grammar parse (no binary)
-  + integration cases that build a throwaway index and assert the engine's own
-  `def`/`use`/`gen` classification round-trips.
+  - integration cases that build a throwaway index and assert the engine's own
+    `def`/`use`/`gen` classification round-trips.
 - `test_kinship.py` — the two kinship questions (`similar`, `pairs`/`families`/
   `distinct`) and the multi-pattern sweep (`patterns`/`pattern_counts`), over a
   throwaway corpus. Oracles are independent of the verb's own output.

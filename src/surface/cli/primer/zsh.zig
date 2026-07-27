@@ -11,7 +11,7 @@
 //! **1. The option menu is grouped and captioned.** `_arguments` files every
 //! option under one flat `options` tag, which is why `rg -<TAB>` is a wall of
 //! ~90 undifferentiated flags. zsh's own answer is documented — split one tag
-//! into labelled groups with `tag-order` and give each label an
+//! into labeled groups with `tag-order` and give each label an
 //! `ignored-patterns` — and it is generated here from the same functional-reach
 //! groups the man page is organized by, so `gist -<TAB>` arrives as captioned
 //! sections: which bytes are searched, what counts as a match, how it is shown.

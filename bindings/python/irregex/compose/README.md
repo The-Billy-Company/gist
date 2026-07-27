@@ -11,10 +11,10 @@ spelled `matching=[…]` on the relate/kinship functions they already belong to
 `similar(probe, matching=[…])`). What remains here are the two verbs that are
 a different _act_, not a narrowing of an existing question:
 
-| Module      | Concern                                                                                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------------------ |
+| Module      | Concern                                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------------------- |
 | `verbs.py`  | `provenance` — quotation attribution re-verified against each source file's **current** bytes, not a shelf snapshot |
-| `radius.py` | `blast` — the live blast radius of a symbol: dependents, dependencies, twins, ripple, and mentions                 |
+| `radius.py` | `blast` — the live blast radius of a symbol: dependents, dependencies, twins, ripple, and mentions                  |
 
 `provenance` is the sharp one: `relate quote` attributes phrases against a
 snapshot shelf, while `provenance` re-checks each phrase against the source

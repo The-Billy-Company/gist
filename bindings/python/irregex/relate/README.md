@@ -3,12 +3,12 @@
 The questions a regex cannot ask. Everything here is priced in **bits**: how
 cheaply would this file describe that one, or this corpus describe your text.
 
-| Module         | Concern                                                                                                                           |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `corpus.py`    | the shared scope/argv vocabulary and the graded result container every kinship verb returns                                       |
+| Module         | Concern                                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `corpus.py`    | the shared scope/argv vocabulary and the graded result container every kinship verb returns                                           |
 | `kinship.py`   | the two questions — `similar` (neighbors of one probe) · `pairs` / `families` / `distinct` (what repeats, on `channel` × `unit` axes) |
-| `retrieval.py` | retrieval — `recall` (rank by describability) · `pack` (the anti-redundant reading set) · `quote` (the text as corpus quotations) |
-| `sweep.py`     | `patterns` / `pattern_counts` — N patterns, one walk, exact per-pattern attribution                                               |
+| `retrieval.py` | retrieval — `recall` (rank by describability) · `pack` (the anti-redundant reading set) · `quote` (the text as corpus quotations)     |
+| `sweep.py`     | `patterns` / `pattern_counts` — N patterns, one walk, exact per-pattern attribution                                                   |
 
 Two things to keep in mind when reading results here:
 

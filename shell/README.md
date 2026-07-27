@@ -28,13 +28,13 @@ GIST_SHELL_INSTALL=0 …     # decline just this part
 gist --generate man        # or mint one artifact yourself
 ```
 
-| Target                | Lands in                                  | Wiring needed |
-| --------------------- | ----------------------------------------- | ------------- |
-| `man`                 | `$XDG_DATA_HOME/man/man1/gist.1`          | none if that is on `manpath` |
-| `complete-zsh`        | the first writable `*/site-functions` on `$fpath` | none |
-| `complete-bash`       | `$XDG_DATA_HOME/bash-completion/completions/gist` | none (bash-completion 2.x) |
-| `complete-fish`       | `$XDG_CONFIG_HOME/fish/completions/gist.fish` | none |
-| `complete-powershell` | `$XDG_DATA_HOME/gist/gist.ps1`            | dot-source it from `$PROFILE` |
+| Target                | Lands in                                          | Wiring needed                 |
+| --------------------- | ------------------------------------------------- | ----------------------------- |
+| `man`                 | `$XDG_DATA_HOME/man/man1/gist.1`                  | none if that is on `manpath`  |
+| `complete-zsh`        | the first writable `*/site-functions` on `$fpath` | none                          |
+| `complete-bash`       | `$XDG_DATA_HOME/bash-completion/completions/gist` | none (bash-completion 2.x)    |
+| `complete-fish`       | `$XDG_CONFIG_HOME/fish/completions/gist.fish`     | none                          |
+| `complete-powershell` | `$XDG_DATA_HOME/gist/gist.ps1`                    | dot-source it from `$PROFILE` |
 
 Artifacts are written once under `zig-out/share/` and **symlinked** into place,
 so one rebuild refreshes every install site. An existing real file is never
@@ -57,7 +57,7 @@ the category, and spends the saved effort on three things:
   candidates each arrive with that type's globs attached, where rg discards
   them and offers 224 bare names.
 - **A grouped menu.** `gist -<TAB>` offers its 282 candidates under five
-  captions naming what a flag *changes* — corpus, semantics, presentation,
+  captions naming what a flag _changes_ — corpus, semantics, presentation,
   execution, configuration — rather than one alphabetical wall. The man page is
   sectioned the same way, off the same `Reach` the parser already records.
 - **Derived mutual exclusion.** `-i`/`-s`/`-S` rule each other out because they

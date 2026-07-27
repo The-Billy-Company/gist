@@ -118,7 +118,7 @@ completions](../../../../shell/README.md), rendered by
 [`cli/primer/`](../../cli/primer/README.md) from this face's own flag catalog:
 `man gist` answers, and `gist -<TAB>` offers a menu captioned by what each flag
 changes, with every closed value set — 239 file types with their globs, 233
-encodings, the engines, sort keys, colour postures and hyperlink aliases —
+encodings, the engines, sort keys, color postures and hyperlink aliases —
 baked in, so no tab ever forks a process.
 
 ## Ergonomics: keep the reflex, choose the native shape
@@ -333,9 +333,15 @@ N)`, and stops. A code locator wants the matches, not a shrug: gist searches
   a `WHEN,WHERE` pair like `always,vscode`. The format grammar is ripgrep's, so
   a format rg accepts gist accepts and one it rejects gist rejects with the same
   reason — plus aliases rg lacks (zed, windsurf, vscode-remote, cursor-remote),
-  a `link` trace lens that says on one line why a run linked or didn't, and
-  lexical path folding rather than a `realpath(2)` per file, so a click lands in
-  the tree you searched instead of `/private/var`. Every shape that prints a
+  a `link` trace lens that says on one line why a run linked or didn't — and
+  always says it, naming the posture (`turned off`), the reader (`output is a
+byte protocol`, `machine-shaped output`), or the terminal (`stdout is not a
+terminal`, `terminal does not advertise OSC-8`), because a diagnostic that
+  goes quiet reads as "nothing to report". Lighting the lens is enough to keep
+  a run off the warm path, which has no beacon to explain. Plus lexical path
+  folding rather than a `realpath(2)` per file, so a click lands in the tree
+  you searched: from `/tmp/x` gist emits `file:///tmp/x`, rg `/private/tmp/x`,
+  which resolves outside the workspace folder your editor has open. Every shape that prints a
   filename is clickable — match rows, headings, `-l`/`--files` lists sorted or
   not, `-c` counts, the binary notice, and the `--rank` view, whose whole point
   is that its top row is the one to open. Two shapes refuse every posture,

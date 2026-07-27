@@ -15,16 +15,16 @@ Implementation of `import irregex` (distribution name `billy-irregex`). Parent
 [`../README.md`](../README.md) is the user-facing guide; this README maps the
 modules for people changing the binding.
 
-| Module / package | Job                                                                                  |
-| ---------------- | ------------------------------------------------------------------------------------ |
-| `__init__.py`    | Public surface: `search` / `files` / `count` / `run` / `rank` / `summary` / `status` |
-| `exact/`         | `SearchRequest`, cursor, ranked/aggregate helpers — the exact-match shape            |
-| `runtime/`       | Cold subprocess, UDS daemon client, in-process FFI (`native.py`), decode/errors      |
-| `contract/`      | Mirrored constants + grades from `contract/search_api.toml`                          |
+| Module / package | Job                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------- |
+| `__init__.py`    | Public surface: `search` / `files` / `count` / `run` / `rank` / `summary` / `status`    |
+| `exact/`         | `SearchRequest`, cursor, ranked/aggregate helpers — the exact-match shape               |
+| `runtime/`       | Cold subprocess, UDS daemon client, in-process FFI (`native.py`), decode/errors         |
+| `contract/`      | Mirrored constants + grades from `contract/search_api.toml`                             |
 | `relate/`        | Kinship (`similar` / `pairs` / `families` / `distinct`), retrieval, multi-pattern sweep |
-| `compose/`       | Composed verbs (`provenance` / `blast`) over exact + compression                     |
-| `index/`         | Atlas / shelf lifecycle                                                              |
-| `agent.py`       | `request_from_tool` — loose agent dict → `SearchRequest`                             |
+| `compose/`       | Composed verbs (`provenance` / `blast`) over exact + compression                        |
+| `index/`         | Atlas / shelf lifecycle                                                                 |
+| `agent.py`       | `request_from_tool` — loose agent dict → `SearchRequest`                                |
 
 ## Transport rule
 
