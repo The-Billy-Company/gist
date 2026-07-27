@@ -1,9 +1,9 @@
 ---
 doc_radar:
   counts:
-    - description: "thin CLI face keeps its four command packages"
+    - description: "thin CLI face keeps its five command packages"
       glob: pkg/kernels/irregex/src/surface/face/gist/*/
-      equals: 4
+      equals: 5
       unit: dirs
   sentinels:
     - description: "entrypoint still exposes search, index, codex, status, and resident service"
@@ -95,6 +95,7 @@ gist codex status
 
 gist --help
 gist --schema                        # machine-readable flags and compatibility
+gist --generate man                  # gist(1); also complete-{bash,zsh,fish,powershell}
 ```
 
 No index is required. Without one, `gist` scans the live tree. With a covering
@@ -111,6 +112,14 @@ plugin is a client of this CLI and nothing more: it discovers flags from
 `--schema`, file types from `--type-list`, and index state from
 `gist status --json`, so a binary upgrade reaches the editor without a plugin
 release.
+
+The same install places [`gist(1)` and the shell
+completions](../../../../shell/README.md), rendered by
+[`cli/primer/`](../../cli/primer/README.md) from this face's own flag catalog:
+`man gist` answers, and `gist -<TAB>` offers a menu captioned by what each flag
+changes, with every closed value set — 239 file types with their globs, 233
+encodings, the engines, sort keys, colour postures and hyperlink aliases —
+baked in, so no tab ever forks a process.
 
 ## Ergonomics: keep the reflex, choose the native shape
 
@@ -131,6 +140,7 @@ codex. Start in the first lane; cross over only when the question changes.
 | Avoid repeated startup                         | external wrapper or server                   | do nothing; eligible searches transparently use the resident session |
 | Count an exact literal without source-file I/O | scan the tree                                | `gist codex count LITERAL` on a clean shelf                          |
 | Ask what this binary supports                  | prose or remembered flags                    | `gist --schema`, generated from the live flag catalog                |
+| Read the manual, or tab-complete a flag        | `man rg`, hand-written completions           | `gist --generate …`, rendered from that same catalog                 |
 
 ### The default move
 
@@ -198,8 +208,9 @@ ripgrep.
   piped posture, forced, so a run on a terminal produces the bytes a script
   would see. Delivery cadence is separate from either: `--line-buffered` when a
   consumer reacts per line, `--block-buffered` (with `--buffer-size`) when it
-  only wants the bytes cheaply. Left alone, a pipe blocks and a terminal
-  streams by line, which is almost always right.
+  only wants the bytes cheaply, `--buffer-size=0` when nothing may be held at
+  all. Left alone, a pipe blocks and a terminal streams by line, which is
+  almost always right.
 - **Agent budgets:** prefer `--rank`, `-l`, `-c`, a narrower path, or `-m N`
   before lifting the soft output guard. `--uncap` or `GIST_UNCAP=1` is the
   deliberate escape hatch; `GIST_HINTS=0` mutes guidance without changing
@@ -212,9 +223,11 @@ ripgrep.
   the corpus (`roots`, `skip`, `types`); a machine-local
   `$XDG_CONFIG_HOME/gist/preferences` holds flag lines and applies **only when
   stdout is an interactive terminal**, so a pipe, a script, `--json`, and the
-  daemon never inherit them. `gist status` reports what is in force, including a
-  preferences file found but gated out; `--no-config` / `GIST_NO_CONFIG=1`
-  ignores both.
+  daemon never inherit them — nor do they open the file, so a typo in one
+  person's preferences cannot fail anybody else's run. `gist config` reports the
+  resolved stack, `gist config check` validates both layers without searching,
+  and `gist config init` writes a charter prefilled from this machine's
+  `GIST_ROOTS` / `skips.list`. `--no-config` / `GIST_NO_CONFIG=1` ignores both.
 
 This section teaches selection, not a second flag registry. The checked-in
 `flag_catalog` and `gist --schema` remain the exhaustive, versioned answer.
@@ -302,10 +315,18 @@ N)`, and stops. A code locator wants the matches, not a shrug: gist searches
   `--hyperlink[=auto|always|never|<alias>|<format>]`, `--no-hyperlink`, and
   ripgrep's `--hyperlink-format`. The default is `auto` — links appear when a
   person is reading in a terminal known to render OSC-8, and vanish the moment
-  the bytes are going somewhere else — where ripgrep defaults to none and, more
-  to the point, **cannot emit a link into a pipe at all**; `--hyperlink=always`
-  can. gist also never ties links to `--color`/`NO_COLOR`: a link is
-  navigation, not paint. Naming a destination on the command line turns links
+  the bytes are going somewhere else — where ripgrep defaults to none. The
+  deeper difference is that **ripgrep's links are a property of its color
+  layer**: by its own help, "hyperlinks are only written when a path is also in
+  the output and colors are enabled". So a link into a pipe costs
+  `--color=always`, which also forces color into that pipe, and rg's documented
+  escape hatch (`--colors path:none --colors line:none …`) still wraps every
+  field in `ESC[0m` resets — there is no rg invocation that yields clean text
+  plus links. `gist --hyperlink=always` is that invocation. Nor does gist need
+  a path in the output to have something to click: where rg drops the link
+  entirely when the filename isn't printed (one explicit file argument, say),
+  gist anchors the line number instead. A link is navigation, not paint, and
+  `NO_COLOR` has no opinion about it. Naming a destination on the command line turns links
   on, because typing `--hyperlink=vscode` and getting silence is the mystery
   this flag exists to prevent; the standing-preference spelling is
   `GIST_HYPERLINK`, which may carry a destination alone (probe still decides) or
@@ -314,9 +335,17 @@ N)`, and stops. A code locator wants the matches, not a shrug: gist searches
   reason — plus aliases rg lacks (zed, windsurf, vscode-remote, cursor-remote),
   a `link` trace lens that says on one line why a run linked or didn't, and
   lexical path folding rather than a `realpath(2)` per file, so a click lands in
-  the tree you searched instead of `/private/var`. Linking 93k matches costs
-  ~5 ms (≈60 ns each) because the URL is split once per file into a prebuilt
-  `Waypoint` and a row only writes the digits.
+  the tree you searched instead of `/private/var`. Every shape that prints a
+  filename is clickable — match rows, headings, `-l`/`--files` lists sorted or
+  not, `-c` counts, the binary notice, and the `--rank` view, whose whole point
+  is that its top row is the one to open. Two shapes refuse every posture,
+  including `always`: `--json` records and NUL-framed `-0` lists, where the
+  filename's bytes _are_ the payload. So does a filename carrying a control
+  byte — its anchor would span two terminal lines, and rg frames that anyway.
+  Linking 93k matches costs ~5 ms (≈60 ns each) because the URL is split once
+  per file into a prebuilt `Waypoint` and a row only writes the digits, and the
+  output cap counts results rather than escapes, so turning links on never
+  costs you a row.
 - **`--line-buffered` — the same promise, a fraction of the syscalls.** Neither
   implementation ever holds a finished line; ripgrep's `LineWriter` also never
   writes more than one at a time, and gist emits every finished line already in
@@ -334,11 +363,21 @@ N)`, and stops. A code locator wants the matches, not a shrug: gist searches
   not have. This is gist's default posture into a pipe, and it reaches the
   reader sooner as well as less often: 5 ms to first byte against ripgrep's 9.
 
+- **`--colors` restyles one element at a time**, in ripgrep's own spec grammar
+  (`{type}:none` or `{type}:{fg|bg|style}:{value}`, over path/line/column/match,
+  with named colors, 0-255, and `r,g,b`). A spec merges into gist's palette the
+  way rg's merge into its own, so naming a hue keeps the default's bold, and
+  `match:none` unstyles matches while leaving path color alone — the thing
+  `--color=never` cannot say, since it is all-or-nothing. gist renders one SGR
+  sequence per element where rg emits a separate escape per attribute, and
+  paints column numbers only when a spec asks it to. A malformed spec exits 2,
+  as it does under rg.
+
 Two adjacent product choices that are _not_ rg-flag divergences: `--mmap`,
-`--no-mmap`, `--colors`, `--dfa-size-limit`, and `--regex-size-limit` are
-accepted compatibility no-ops (color uses gist's own palette), and agent-facing
-output has a soft budget of roughly 25k tokens / 100 KiB and a hard 256 MiB
-ceiling that `--uncap` or `GIST_UNCAP=1` lifts.
+`--no-mmap`, `--dfa-size-limit`, and `--regex-size-limit` are accepted
+compatibility no-ops, and agent-facing output has a soft budget of roughly 25k
+tokens / 100 KiB and a hard 256 MiB ceiling that `--uncap` or `GIST_UNCAP=1`
+lifts.
 
 For an exact, versioned answer about a flag, inspect `gist --schema` rather
 than relying on a prose list.
@@ -366,13 +405,13 @@ eligible cold miss. The request classifier deliberately keeps the warm surface
 small. This table is a readable snapshot; `surface/exec/session/answer/request.zig` remains
 the executable authority:
 
-| warm-eligible CLI shape                    | stays authoritative-cold                                     |
-| ------------------------------------------ | ------------------------------------------------------------ |
-| rootless line output (`-n` / `-N` allowed) | any explicit path, including `.`                             |
-| rootless `-l` / `--files-with-matches`     | stdin or TTY stdout                                          |
-| rootless `--rank[=N]`                      | context, JSON, replace, multiline, PCRE2, globs, invert      |
-| `-F`, `-i` / `-s` / `-S`, `-w`             | malformed or unrepresentable flag values                     |
-| existence/caps via `-q`, `-m N`            |                                                              |
+| warm-eligible CLI shape                    | stays authoritative-cold                                |
+| ------------------------------------------ | ------------------------------------------------------- |
+| rootless line output (`-n` / `-N` allowed) | any explicit path, including `.`                        |
+| rootless `-l` / `--files-with-matches`     | stdin or TTY stdout                                     |
+| rootless `--rank[=N]`                      | context, JSON, replace, multiline, PCRE2, globs, invert |
+| `-F`, `-i` / `-s` / `-S`, `-w`             | malformed or unrepresentable flag values                |
+| existence/caps via `-q`, `-m N`            |                                                         |
 
 The wire contract also defines a count mode, but CLI `-c` keeps ripgrep's
 per-file layout and stays cold. Warm I/O has a two-second deadline;
@@ -456,7 +495,7 @@ The tracked ripgrep 15.2.0 snapshot contains 446 invocations per walk engine:
   boundaries, and global git-ignore state observable. The `--no-messages` /
   `--no-ignore-messages` cases live here rather than in the mined suite because
   rg's own `--no-messages` tests assert on the exit code, which a gist that
-  merely *rejected* the flag would also satisfy; these assert the real property
+  merely _rejected_ the flag would also satisfy; these assert the real property
   — stderr goes empty while stdout and the exit class do not move — and pin the
   nesting asymmetry with both lanes firing at once.
 - **Content transforms:** 22/22 cases pass on each engine across preprocessing,
@@ -604,6 +643,8 @@ harness, and the committed certificate are authoritative.
 - [`lifecycle/`](lifecycle) owns trigram-index and codex lifecycle commands.
 - [`status/`](status) owns read-only index introspection.
 - [`schema/`](schema) renders the capability manifest from the flag catalog.
+- [`config/`](config) reports, validates, and derives the two persisted
+  configuration layers.
 
 This `main.zig` is only the dispatch shell. The kernel-level map is in
 [`src/README.md`](../../README.md), and the freshly built CLI can be run with

@@ -162,8 +162,9 @@ fn usage() void {
         \\  -m0 / -M0               match nothing (exit 1) / disable the long-line cap
         \\  -p / --plain            the human posture (color + heading + -n) / the piped
         \\                          posture, forced, so a terminal run is reproducible
-        \\  --line-buffered         never hold a finished line — but write all of them at once
-        \\  --block-buffered        coalesce; --buffer-size sizes it (ramped, so head -1 is cheap)
+        \\  --line-buffered         hand each line off the moment it is found (live tail)
+        \\  --block-buffered        coalesce into few writes; ramped, so head -1 is instant
+        \\  --buffer-size=SIZE      size that block (K/M suffixes); 0 writes straight through
         \\  -rn                     means --replace=n, not recursive + line numbers; use -n
         \\  no match                read stderr suggestions; stdout remains pipeline-clean
         \\

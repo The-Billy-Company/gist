@@ -265,14 +265,17 @@ pipeline deliberately does not, to protect its 30/30 parity — so a _common_
 lazy-dotstar (`[\s\S]*?`, "import block") query trails rg's lazy-DFA. Parallelizing
 the `-U` emit path is the tracked follow-up; correctness is not affected.
 
-## Flags companion (`flags.py`) — the `--sort`/`-j`/`--one-file-system`/global-ignore proof
+## Flags companion (`flags.py`) — the walk/order/ignore, stderr, and haystack-anchor proof
 
 `run.py` mines ripgrep's suite, but almost nothing there pins the walk/order/
 ignore flags gist brought online: their answers depend on file **timestamps**,
 **device ids**, worker **thread counts**, and a user's **global git config** —
-none of which a self-contained mined replay can freeze. `flags.py` is the
-hand-authored companion for exactly those, same philosophy as `modes.py` (rg the
-oracle, generated fixtures, nothing large tracked):
+none of which a self-contained mined replay can freeze. Two further lanes are
+unminable for a different reason: one asserts on **stderr**, which the mined
+harness never reads, and one needs a **body shape** the repo's own source can't
+supply. `flags.py` is the hand-authored companion for all of them, same
+philosophy as `modes.py` (rg the oracle, generated fixtures, nothing large
+tracked):
 
 ```bash
 python3 flags.py run                    # both engines (parallel + serial)
@@ -294,6 +297,25 @@ python3 flags.py bench                   # parity-at-speed over services/backend
 - **`--no-ignore-global`** runs against a fixture `$HOME/.gitconfig` naming a
   `core.excludesFile`: honored by default, disabled by the flag, byte-parity with
   `rg` under the same env.
+- **`--no-messages` / `--no-ignore-messages`** are asserted on **stderr**, which
+  is the only place the flags exist. rg's own mined cases for them check the exit
+  code — a gist that merely _rejected_ the flag would pass that, since rejection
+  and suppression both exit 2. So this lane pins the whole triple: stderr goes
+  empty while stdout and the exit class stay put. It crosses the unreadable-file
+  and malformed-ignore
+  producers with rg's nesting rule (`--no-messages` subsumes the ignore class)
+  and last-wins re-enabling, plus a lane-isolation case proving one producer
+  can't leak into the other's channel.
+- **`\A`/`\z` haystack anchors under `-U`** are crossed over three tail shapes —
+  terminated, unterminated, and a single unterminated line — with seven output
+  frames. The mined suite has only r1878's four `\Abaz` cases on one body, and
+  they ask one question: did `-U` pick rg's whole-buffer searcher? The answer is
+  invisible in the plain frame but surfaces as a match tally under `-c`, a column
+  under `--vimgrep`, and a line set under `-v`, so the frames are the point. Two
+  shapes are **named as still short of rg** rather than dropped: a nullable `\A`
+  pattern (rg's searcher re-slices at every resume, so `\A` re-anchors and the
+  whole file frames as one block) and an empty match at an unterminated EOF in a
+  span frame (rg's printer discards it, then prints the block verbatim anyway).
 
 Every non-thread case also asserts the indexed path equals `--no-index`
 (read-elision soundness), and the whole slate runs once per engine — so an
@@ -341,13 +363,13 @@ formats; bzip2 and the external-codec tail have no in-process Zig decoder).
 
 ## Files
 
-| File            | Role                                                                                                                                                                                                                                                              |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `spec.json`     | frozen, self-contained mined spec (446 `rgtest!` invocations)                                                                                                                                                                                                     |
-| `mine.py`       | regenerates `spec.json` from a ripgrep checkout                                                                                                                                                                                                                   |
-| `run.py`        | differential runner + honest scoreboard (the gate)                                                                                                                                                                                                                |
-| `modes.py`      | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers)                                                                                                                                                                                            |
-| `flags.py`      | hand-authored walk/order/ignore-flag differential proof (`--sort`/`--sortr`/`--sort-files`, `-j`/`--threads`, `--one-file-system`, `--no-ignore-global`, negation last-wins) — timestamp/device/thread/global-config dependent, so the mined suite can't pin them |
-| `transforms.py` | hand-authored `-z`/`--pre`/`-E`/`--binary` content-transform differential proof + the `-z` pipeline-vs-serial-vs-rg speed floor (the flags `run.py` can't mine from plain source)                                                                                 |
-| `dbg.py`        | single-test side-by-side inspector                                                                                                                                                                                                                                |
-| `results.json`  | last `run.py` per-test verdicts (regenerated each run)                                                                                                                                                                                                            |
+| File            | Role                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spec.json`     | frozen, self-contained mined spec (446 `rgtest!` invocations)                                                                                                                                                                                                                                                                                                                                                          |
+| `mine.py`       | regenerates `spec.json` from a ripgrep checkout                                                                                                                                                                                                                                                                                                                                                                        |
+| `run.py`        | differential runner + honest scoreboard (the gate)                                                                                                                                                                                                                                                                                                                                                                     |
+| `modes.py`      | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers)                                                                                                                                                                                                                                                                                                                                                 |
+| `flags.py`      | hand-authored differential proof for what the mined suite can't pin: the walk/order/ignore flags (`--sort`/`--sortr`/`--sort-files`, `-j`/`--threads`, `--one-file-system`, `--no-ignore-global`, negation last-wins — timestamp/device/thread/global-config dependent), the `--no-messages`/`--no-ignore-messages` **stderr** lane, and `\A`/`\z` haystack anchors under `-U` across three tail shapes × seven frames |
+| `transforms.py` | hand-authored `-z`/`--pre`/`-E`/`--binary` content-transform differential proof + the `-z` pipeline-vs-serial-vs-rg speed floor (the flags `run.py` can't mine from plain source)                                                                                                                                                                                                                                      |
+| `dbg.py`        | single-test side-by-side inspector                                                                                                                                                                                                                                                                                                                                                                                     |
+| `results.json`  | last `run.py` per-test verdicts (regenerated each run)                                                                                                                                                                                                                                                                                                                                                                 |

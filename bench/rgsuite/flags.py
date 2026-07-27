@@ -16,6 +16,15 @@ the ground truth (no hardcoded expected strings):
     pairing them with `--sort path`, so the assertion is byte-exact, not a set;
   * `-j`/`--threads` is proven order-invariant (gist -j1 == gist -jN) and a set
     match against rg (the parallel walk streams in worker-discovery order);
+  * the `\\A`/`\\z` **haystack-anchor** lane is proven here across every output
+    frame at once. The mined suite carries only r1878's four `\\Abaz` cases, and
+    they answer one question — did `-U` pick rg's whole-buffer searcher? — on one
+    body shape. What actually breaks is broader: the model choice is invisible in
+    the plain frame but shows up as a match tally in `-c`, a column in
+    `--vimgrep`, and a line set in `-v`, and `\\z` additionally turns on whether
+    the body's last line is terminated. So this lane crosses three tail shapes
+    with seven frames, and names the two shapes still short of rg rather than
+    omitting them (`_ANCHOR_NULLABLE_HELD_OUT`, `_ANCHOR_EMPTY_AT_EOF`);
   * the `--no-messages` / `--no-ignore-messages` **stderr** lane is proven here
     because the mined suite structurally cannot: rg's own `--no-messages` cases
     assert on the exit code, which a gist that merely *rejected* the flag would
@@ -139,6 +148,14 @@ def _norm(data: bytes, sort_lines: bool) -> bytes:
 
 # ───────────────────────── fixtures ─────────────────────────
 
+# The three tail shapes a haystack anchor discriminates between. `\A` cares
+# about the first byte, `\z` about whether a terminator sits before the end.
+ANCHOR_BODIES = {
+    "term": b"a\nbaz\nabc\n",  # terminated: `\z` lands on a line that is not there
+    "bare": b"xx\nyy",  # unterminated: the last line runs flush to `\z`
+    "solo": b"aaa",  # one unterminated line, no terminator at all
+}
+
 
 def gen_fixtures(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     """Build the tree/, repo/ + home/ fixtures; return (base_env, global_ignore_env).
@@ -179,6 +196,13 @@ def gen_fixtures(root: Path) -> tuple[dict[str, str], dict[str, str]]:
     # Re-open it before the tree is removed; `rmtree(ignore_errors=True)` would
     # otherwise leave the fixture behind on every run.
     atexit.register(lambda: locked.chmod(0o755))
+
+    # anchor/: the three tail shapes `\A`/`\z` discriminate between under `-U`.
+    # Written as bytes so the unterminated ones stay unterminated.
+    anchor = root / "anchor"
+    anchor.mkdir()
+    for name, body in ANCHOR_BODIES.items():
+        (anchor / name).write_bytes(body)
 
     # msg-ns/: an ignore rule that excludes the only content, so the implicit-CWD
     # walk searches nothing — rg's other exit-2-with-a-message shape.
@@ -251,6 +275,81 @@ def _cases(base_env: dict[str, str], gi_env: dict[str, str]) -> list[Case]:
     repo("global:absent", ["--sort", "path", "-n", "MATCH"], base_env)
 
     return cs
+
+
+# Patterns that put `-U` on rg's whole-buffer searcher for a reason the line
+# terminator alone cannot explain: they anchor the HAYSTACK. rg forces the
+# multi-line path for these by claiming `\n` on their behalf (grep-regex
+# `non_matching.rs`, `Look::Start | Look::End`, under a standing FIXME, and
+# again in `ConfiguredHIR::line_terminator` via `contains_anchor_haystack` —
+# ripgrep#2260). Miss that and the line searcher hands `\A` a fresh haystack
+# per line, silently demoting it to `^`: `\Abaz` then matches line 2 of
+# `a\nbaz\nabc\n`, which is exactly what r1878#5/#6 catch.
+_ANCHOR_PATTERNS = [
+    "\\Abaz",  # the r1878 case: must NOT match a mid-file line
+    "\\Aa",  # must claim line 1 only, not every line starting with `a`
+    "\\Aa|b",  # mixed: the `-c` tally tells the whole-buffer model from the line one
+    "abc\\z",  # a terminated body has no line flush against `\z`
+    "y\\z",  # …an unterminated one does
+    "\\z",  # the bare phantom question
+    "\\Aa.*\\z",  # both ends at once
+]
+
+# One representative per output frame that derives from the model differently:
+# the plain frame, the two count tallies, the two span frames, the boolean, and
+# the inverted walk.
+_ANCHOR_MODES = [
+    ("plain", ["-n"]),
+    ("count", ["-c"]),
+    ("countm", ["--count-matches"]),
+    ("only", ["-o", "-b"]),
+    ("vimgrep", ["--vimgrep"]),
+    ("files", ["-l"]),
+    ("invert", ["-v", "-n"]),
+]
+
+# A nullable haystack anchor is the one shape still short of rg. rg's multiline
+# searcher re-slices on every resume (`MultiLine::find` searches
+# `&slice[pos..]`), so `\A` becomes true again at each resume point; a pattern
+# that also matches empty therefore claims a line at every byte and rg frames
+# the WHOLE file. Its printer re-runs over that block, where `\A` is true once —
+# which is why only the plain frame diverges and `-c`/`-o`/`--vimgrep` agree.
+# Reproducing it needs rg's two layers (a claim walk over suffixes, a render
+# walk over the block) rather than gist's single span list, so these are held
+# out deliberately rather than silently passing.
+_ANCHOR_NULLABLE_HELD_OUT = ["\\A", "\\Ax*", "\\Ax?"]
+
+# The second held-out shape, and a sibling of the first: an EMPTY match landing
+# on an unterminated EOF, in a frame that needs a span to draw. rg's printer
+# re-derives per-block matches with `find_iter_at_in_context`, which rejects any
+# match starting at or past the block's end — so this one is discarded, the
+# block's match list goes empty, and `StandardImpl::sink` falls through to
+# `sink_fast_multi_line`: the block's lines print verbatim, with no column and
+# no per-match rows. `rg -U -o -b '\z'` over `aaa` therefore answers `0:aaa`,
+# not the empty span at 3. Frames that need no span (plain, both counts, `-l`,
+# `-v`) keep the match and already agree here — that is what the rest of this
+# matrix pins. Matching the discard needs the block-oriented printer rg has and
+# gist's span-oriented renderers do not, so it is named rather than passed over.
+_ANCHOR_SPAN_FRAMES = {"only", "vimgrep"}
+_ANCHOR_EMPTY_AT_EOF = {"\\z"}
+_ANCHOR_TERMINATED = {name for name, body in ANCHOR_BODIES.items() if body.endswith(b"\n")}
+
+
+def _anchor_cases() -> list[Case]:
+    """`\\A`/`\\z` under `-U`: the model choice, across every output frame."""
+    env = {**os.environ}
+    cwd = FIX / "anchor"
+    return [
+        Case(f"anchor:{mode}:{pat}:{body}", ["-U", *flags, pat], body, cwd, env=env)
+        for body in ANCHOR_BODIES
+        for mode, flags in _ANCHOR_MODES
+        for pat in _ANCHOR_PATTERNS
+        if not (
+            pat in _ANCHOR_EMPTY_AT_EOF
+            and mode in _ANCHOR_SPAN_FRAMES
+            and body not in _ANCHOR_TERMINATED
+        )
+    ]
 
 
 def _repo_cases() -> list[Case]:
@@ -366,7 +465,12 @@ def _message_lane(*, serial: bool) -> list[str]:
         # Scoped to `open` so the denied directory cannot also fire: this
         # producer must exercise the ignore lane ALONE. Their interaction is
         # asserted separately by the lane-isolation check below.
-        ("absent-ignore-file", ["--ignore-file", "nope.ignore", "MATCH", "open"], FIX / "msg", True),
+        (
+            "absent-ignore-file",
+            ["--ignore-file", "nope.ignore", "MATCH", "open"],
+            FIX / "msg",
+            True,
+        ),
     )
     for label, argv, cwd, ignore_lane in producers:
         for flags, speaks in _MSG_POSTURES:
@@ -402,16 +506,20 @@ def _message_lane(*, serial: bool) -> list[str]:
     for tool, binary, extra in (("gist", GIST, ["--no-index"]), ("rg", RG, [])):
         e = run(binary, [*both, *extra], FIX / "msg", env if tool == "gist" else {**os.environ}).err
         if b"nope.ignore" in e:
-            fails.append(f"messages:lane-isolation: {tool} kept the ignore line under --no-ignore-messages")
+            fails.append(
+                f"messages:lane-isolation: {tool} kept the ignore line under --no-ignore-messages"
+            )
         if b"locked" not in e:
-            fails.append(f"messages:lane-isolation: {tool} dropped the walk error --no-ignore-messages must keep")
+            fails.append(
+                f"messages:lane-isolation: {tool} dropped the walk error --no-ignore-messages must keep"
+            )
     return fails
 
 
 def do_run(engine: str) -> int:
     """Run the differential slate on the requested engine(s); 1 on any failure."""
     base_env, gi_env = gen_fixtures(FIX)
-    cases = _cases(base_env, gi_env) + _repo_cases()
+    cases = _cases(base_env, gi_env) + _anchor_cases() + _repo_cases()
     engines = (
         [("parallel", False), ("serial", True)]
         if engine == "both"

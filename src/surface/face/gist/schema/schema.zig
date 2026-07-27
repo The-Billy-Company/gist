@@ -75,8 +75,8 @@ const manifest_suffix =
     \\      {"native": "--no-index", "type": "bool", "default": false, "description": "force the pure live walk"},
     \\      {"native": "--index", "type": "bool", "default": false, "description": "re-enable automatic index acceleration after --no-index"},
     \\      {"native": "--uncap", "type": "bool", "default": false, "description": "lift the ~25k-token (100 KiB) soft output cap for this query; the hard 256 MiB OOM ceiling still applies. Env: GIST_UNCAP=1, GIST_MAX_OUTPUT_TOKENS, GIST_MAX_OUTPUT_BYTES"},
-    \\      {"native": "--buffer-size", "type": "size", "default": "64K", "description": "ceiling for --block-buffered, in bytes with an optional K/M/G suffix; 0 restores the default. Implies --block-buffered. rg's block size is a fixed 8 KiB constant"},
-    \\      {"native": "--plain", "type": "bool", "default": false, "description": "pin the answer to what a PIPE would receive even on a terminal: --color never, no long-line elision, block-buffered — so an interactive run reproduces a captured one byte-for-byte"}
+    \\      {"native": "--buffer-size", "type": "size", "default": "64K", "description": "ceiling for the bytes the drain may hold, with an optional K/M/G suffix. Implies --block-buffered when no cadence was named, and sizes the line policy's tail when one was; 0 holds nothing, so every fragment is its own write. rg's block size is a fixed 8 KiB constant with no knob"},
+    \\      {"native": "--plain", "type": "bool", "default": false, "description": "pin the answer to what a PIPE would receive even on a terminal: --color never, no long-line elision, block-buffered — so a terminal run and a redirected one differ in nothing the destination decides. Walk order is not one of those things: pin it with --sort path, as a piped run must"}
     \\    ],
     \\    "buffering": {
     \\      "summary": "when result bytes leave the process. Delivery cadence only: the emitted bytes are identical under every setting, and no policy is ever allowed to reorder them.",
@@ -94,13 +94,13 @@ const manifest_suffix =
 // resolves against), so an agent reading `--schema` can never be told about a
 // destination the binary does not accept — or miss one it does.
 const manifest_hyperlink_tail =
-    \\    "summary": "OSC-8 click targets on printed locators. Default posture is auto: on when stdout is a terminal known to render OSC-8 and the output is human-shaped, off otherwise — so piped, --json, --vimgrep, and --null output is byte-identical to a run with the feature absent. Independent of --color/NO_COLOR.",
+    \\    "summary": "OSC-8 click targets on printed locators. Default posture is auto: on when stdout is a terminal known to render OSC-8 and the output is human-shaped, off otherwise — so piped and redirected output is byte-identical to a run with the feature absent. --json and --null are byte protocols and never link under any posture; --vimgrep declines under auto but an explicit always is honored. Independent of --color/NO_COLOR.",
     \\    "spellings": ["--hyperlink[=auto|always|never|<alias>|<format>]", "--no-hyperlink", "--hyperlink-format <alias|format>", "--hostname-bin <cmd>"],
     \\    "format_variables": ["{path}", "{line}", "{column}", "{host}", "{wslprefix}"],
     \\    "format_rules": ["{path} is required", "{column} requires {line}", "the format must begin with a URL scheme", "{{ and }} are literal braces"],
     \\    "path_value": "absolute and lexically folded ('.'/'..' removed), percent-encoded per RFC 3986 with '/' ':' and bytes >= 0x80 left raw. Never canonicalized: no realpath(2) per matched file, and no symlink rewriting of the path you searched.",
     \\    "scope": {"default": "prefix", "values": ["path", "prefix", "row"], "env": "GIST_HYPERLINK_SCOPE"},
-    \\    "env": {"GIST_HYPERLINK": "same value grammar as the flag; a preference, so it still respects the auto probe", "GIST_HYPERLINK_SCOPE": "path|prefix|row"},
+    \\    "env": {"GIST_HYPERLINK": "auto|always|never, an alias, a format, or a WHEN,WHERE pair such as 'always,vscode'. A preference rather than an act: naming only a destination here says WHERE and leaves the auto probe to say WHETHER (the flag turns links on). Honored by relate and irregex too.", "GIST_HYPERLINK_SCOPE": "path|prefix|row"},
     \\    "diagnose": "GIST_TRACE=link prints one line saying whether this run links and why"
     \\  },
     \\  "generate": {
