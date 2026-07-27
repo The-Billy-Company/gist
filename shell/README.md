@@ -17,8 +17,10 @@ doc_radar:
 The shell end of [`gist`](../src/surface/face/gist/README.md), the way
 [`editor/`](../editor/) is the Vim end. Nothing here is written by hand: every
 artifact is minted by `gist --generate` from the same flag table
+[`catalog.zig`](../src/surface/exec/cold/argv/catalog.zig) declares and
 [`grammar.zig`](../src/surface/exec/cold/argv/grammar.zig) dispatches argv on,
-so a flag cannot exist in the parser and be missing from a menu.
+rendered by [`cli/primer/`](../src/surface/cli/primer/README.md). A flag cannot
+exist in the parser and be missing from a menu.
 
 ```bash
 make install-gist          # builds, links the binaries, then runs this
@@ -49,13 +51,19 @@ the category, and spends the saved effort on three things:
 
 - **Zero forks per keystroke.** `_rg_types` answers `-t<TAB>` by running
   `rg --type-list` and re-parsing it, every time. gist's menu is an array
-  written into the file at generation: **~0.06 ms against ripgrep's ~7 ms**, and
-  it arrives with each type's globs attached, which rg discards by default.
-- **A grouped menu.** `gist -<TAB>` is captioned by what a flag *changes* —
-  corpus, semantics, presentation, execution — rather than one alphabetical
-  wall of ~280 flags.
+  written into the file at generation: **~0.065 ms against ripgrep's ~5 ms,
+  about 77×** (both sinks stubbed alike, so only the gather is timed; a busier
+  machine puts rg nearer 9 ms and moves gist's side hardly at all). Its 239
+  candidates each arrive with that type's globs attached, where rg discards
+  them and offers 224 bare names.
+- **A grouped menu.** `gist -<TAB>` offers its 282 candidates under five
+  captions naming what a flag *changes* — corpus, semantics, presentation,
+  execution, configuration — rather than one alphabetical wall. The man page is
+  sectioned the same way, off the same `Reach` the parser already records.
 - **Derived mutual exclusion.** `-i`/`-s`/`-S` rule each other out because they
   write the same field in the parser, not because someone remembered.
 
-Measure it yourself with `make test-gist-shell`, which also parses each
-generated script with the shell it targets.
+`make test-gist-shell` is the standing proof: each shell parses its own
+artifact, mandoc lints the page, every flag is shown to be filed in exactly one
+caption, and the suite fails if any generated file would run a program at tab
+time.

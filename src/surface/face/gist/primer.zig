@@ -93,6 +93,24 @@ const postures = variants(beacon.When, struct {
     }
 }.g);
 
+/// What `--generate` can mint, glossed — the menu for the flag that writes the
+/// menus. Derived from `primer.Target`, the same enum `--generate` parses its
+/// argument with, so the offer and the acceptance cannot disagree and a sixth
+/// target is a compile error here until it is explained. ripgrep's zsh
+/// completion spells these five out by hand and its fish completion repeats the
+/// flag's own sentence five times.
+const generate_targets = variants(primer.Target, struct {
+    fn g(target: primer.Target) []const u8 {
+        return switch (target) {
+            .man => "the gist(1) manual, in roff",
+            .@"complete-bash" => "bash completion (bash-completion 2.x autoloads it)",
+            .@"complete-zsh" => "zsh completion, grouped by what a flag changes",
+            .@"complete-fish" => "fish completion",
+            .@"complete-powershell" => "PowerShell completion, to dot-source from $PROFILE",
+        };
+    }
+}.g);
+
 /// `--hyperlink` spans one axis in three spellings, so its menu is the posture
 /// vocabulary and the editor roster in one list — which is the whole reason it
 /// is one flag here and two flags plus a memorized alias in ripgrep.
@@ -246,6 +264,7 @@ const groups = [_]primer.Group{
     .{ .key = "presentation", .title = "Presentation — how the answer is shown", .blurb = "How the matches are written out. The match set itself is untouched." },
     .{ .key = "execution", .title = "Execution — how it is computed", .blurb = "Nothing about the answer — only how many cores, syscalls, or elided reads it takes to produce it." },
     .{ .key = "config", .title = "Configuration — read before the run", .blurb = "Honored before argv parsing begins, so they can suppress what would otherwise have supplied flags." },
+    .{ .key = "about", .title = "About — ask the binary instead of searching", .blurb = "These replace the search rather than shaping it: each one answers a question about gist itself and exits." },
 };
 
 /// The section `spec` is filed under: the `Reach` the parser already records.
@@ -255,7 +274,49 @@ fn groupOf(spec: catalog.FlagSpec) []const u8 {
     return if (catalog.reachOf(spec)) |r| @tagName(r) else "config";
 }
 
+// ── prose the flag table cannot hold ─────────────────────────────────────
+
+/// Two subjects an option list is the wrong shape for.
+///
+/// Configuration earns a section because `--no-config` is otherwise the only
+/// mention of two files it suppresses, which a reader finds only by already
+/// knowing to look. Completion earns one because a manual that was itself minted
+/// by `--generate` should say how to install its siblings.
+///
+/// Automatic filtering deliberately gets no section, though ripgrep devotes one
+/// to it: those flags are already collected under "Corpus" with a blurb saying
+/// what the section is for. rg needs the prose because its options are
+/// alphabetical, so the filtering story is scattered across the page.
+const sections = [_]primer.Section{
+    .{ .title = "CONFIGURATION FILES", .paragraphs = &.{
+        "Two files, split along a line ripgrep's .ripgreprc does not draw: what the tree IS, versus what one reader likes to look at. Neither is required, and --no-config (or GIST_NO_CONFIG=1) ignores both.",
+        ".irregex.toml, committed at the tree root, holds facts about the repository every clone should agree on. It carries no argv, only typed keys — roots, skip, and types — and all three faces honor it. Discovery climbs from the working directory and stops at the repository boundary, so a tree without its own declaration never inherits a parent directory's. It is ceilinged at corpus reach: a shared file may say what the repository is, and may never quietly change what matches for the people who clone it.",
+        "$XDG_CONFIG_HOME/gist/preferences is machine-local and never committed ($GIST_PREFERENCES overrides the path). It is flag lines, one per line, prepended to argv, so anything typed still wins. Lines are tokenized with shell quoting — ripgrep's are verbatim argv elements, which is why a quoted glob there arrives with its quotes and matches nothing — every flag is checked against the catalog as the file is read, and a line not starting with a flag is refused, because a stray bare word in a persisted argv file is the search pattern for every invocation forever.",
+        "Preferences apply only when stdout is an interactive terminal. That is the same envelope gist already draws for the answer keep, the resident session, and color resolution, which puts a pipe, a redirect, --json, a script, CI, and every agent structurally outside their reach — so none of them ever needs --no-config to be sure what it will get.",
+    } },
+    .{ .title = "SHELL COMPLETION", .paragraphs = &.{
+        "This page and the completions for bash, zsh, fish, and PowerShell are all minted by gist --generate, each a rendering of the same table the parser dispatches argv on. A flag therefore cannot exist in the binary and be missing from a menu.",
+        "Every closed value set — the file-type registry behind -t, the WHATWG labels behind -E, the sort keys, the engines, the hyperlink aliases — is written into the completion when it is generated. A tab costs no subprocess, where ripgrep's zsh function answers -t by running rg --type-list and re-parsing it on every keystroke. The zsh completion additionally groups its candidates by what a flag changes and withholds the flags a chosen flag rules out, both derived rather than hand-kept.",
+        "Regenerate after upgrading gist, since the menus are a snapshot of the binary that wrote them: make install-gist does this and installs all five artifacts under the XDG directories.",
+    } },
+};
+
 // ── the surface ──────────────────────────────────────────────────────────
+
+/// The four that never reach the parse table.
+///
+/// `main.zig` answers these before `flag_catalog` is consulted, because each one
+/// replaces the search instead of configuring it. That makes this the one place
+/// in the surface not derived from the catalog — so it is written out rather
+/// than inferred, and `lifecycleIsExhaustive` holds it to what `main` accepts.
+/// The alternative, filing them in the catalog as actions the grammar never
+/// dispatches, would put a lie in the table every other derivation reads.
+const lifecycle = [_]Opt{
+    .{ .short = 'h', .longs = &.{"help"}, .group = "about", .doc = "print the usage summary and exit" },
+    .{ .short = 'V', .longs = &.{"version"}, .group = "about", .doc = "print the version and exit" },
+    .{ .longs = &.{"schema"}, .group = "about", .native = true, .doc = "the exhaustive JSON surface manifest, for an agent or a codegen step", .note = "Machine-readable sibling of this manual: every flag, its value kind, and its ripgrep compatibility, rendered from the same table." },
+    .{ .longs = &.{"generate"}, .group = "about", .native = true, .doc = "mint the manual or a shell completion, and exit", .value = .{ .name = "TARGET", .of = .{ .listed = generate_targets } }, .note = "Every artifact is a rendering of this same surface, so a flag cannot exist in the parser and be missing from a menu. Each closed value set is baked in at generation, so a tab costs no subprocess." },
+};
 
 fn options(gpa: std.mem.Allocator) []const Opt {
     const baked = Baked{
@@ -274,6 +335,7 @@ fn options(gpa: std.mem.Allocator) []const Opt {
         .rival = rivalOf(spec),
         .native = spec.compatibility == .native,
     }) catch oom();
+    out.appendSlice(gpa, &lifecycle) catch oom();
     return out.items;
 }
 
@@ -311,6 +373,7 @@ pub fn surface(gpa: std.mem.Allocator) primer.Surface {
             .{ .name = "search", .doc = "the ordinary search, addressed with a verb" },
             .{ .name = "rg", .doc = "the same engine under the name an alias would give it" },
         },
+        .sections = &sections,
         .env = &.{
             .{ .word = "GIST_DIR", .doc = "artifact home for the index and the atlas (default .local/gist-verify)" },
             .{ .word = "GIST_ROOTS", .doc = "the roots to index when none are given" },
@@ -356,7 +419,8 @@ test "every flag in the parser's table reaches the surface, exactly once" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const s = surface(arena.allocator());
-    try t.expectEqual(catalog.flag_catalog.len, s.opts.len);
+    // The catalog, plus the four `main` answers before the catalog is read.
+    try t.expectEqual(catalog.flag_catalog.len + lifecycle.len, s.opts.len);
     // Every option is filed under a group that exists, so none is silently
     // dropped by a renderer iterating the declared sections.
     var filed: usize = 0;
@@ -455,7 +519,7 @@ test "every artifact renders, and no completion shells out to build a menu" {
     const s = surface(gpa);
     inline for (@typeInfo(primer.Target).@"enum".fields) |f| {
         var buf: std.ArrayList(u8) = .empty;
-        primer.render(&buf, gpa, s, "9.9.9", @field(primer.Target, f.name));
+        primer.render(&buf, gpa, s, .{ .version = "9.9.9", .date = "2001-02-03" }, @field(primer.Target, f.name));
         try t.expect(buf.items.len > 4096);
         // The performance claim, checked rather than asserted. ripgrep's zsh
         // completion answers `-t<TAB>` by running `rg --type-list` and
@@ -465,5 +529,34 @@ test "every artifact renders, and no completion shells out to build a menu" {
         // substitution — see its own test.)
         try t.expect(std.mem.indexOf(u8, buf.items, "$(gist") == null);
         try t.expect(std.mem.indexOf(u8, buf.items, "(gist ") == null);
+    }
+}
+
+test "the four flags handled before the catalog are the four main dispatches on" {
+    // `lifecycle` is the surface's only hand-written row, so it is the only one
+    // that can drift. Read `main.zig`'s bytes and require each advertised
+    // spelling to appear there: a menu may not offer a flag the binary would
+    // reject. (The reverse direction — a new lifecycle flag in `main` that
+    // nobody advertised — is what `--generate`'s own menu, derived from
+    // `primer.Target`, makes impossible for the one flag that takes a value.)
+    const src = @embedFile("main.zig");
+    for (lifecycle) |o| {
+        for (o.longs) |long| {
+            var quoted: [64]u8 = undefined;
+            const needle = try std.fmt.bufPrint(&quoted, "\"--{s}\"", .{long});
+            t.expect(std.mem.indexOf(u8, src, needle) != null) catch |e| {
+                std.debug.print("primer advertises --{s}, which main.zig never tests for\n", .{long});
+                return e;
+            };
+        }
+    }
+    // And the one that takes a value offers exactly what it parses.
+    const gen = lifecycle[lifecycle.len - 1];
+    try t.expectEqualStrings("generate", gen.longs[0]);
+    try t.expectEqual(@typeInfo(primer.Target).@"enum".fields.len, gen.set().?.len);
+    inline for (@typeInfo(primer.Target).@"enum".fields, gen.set().?) |f, choice| {
+        try t.expectEqualStrings(f.name, choice.word);
+        try t.expect(choice.doc.len > 0);
+        try t.expect(primer.Target.parse(choice.word) != null);
     }
 }

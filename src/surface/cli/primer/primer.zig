@@ -140,6 +140,19 @@ pub const Verb = struct { name: []const u8, doc: []const u8, sub: []const Choice
 pub const Exit = struct { code: u8, means: []const u8 };
 pub const Example = struct { cmd: []const u8, doc: []const u8 };
 
+/// A prose section of the manual, printed after OPTIONS.
+///
+/// One field instead of one field per heading. A manual's remaining sections —
+/// CONFIGURATION FILES, AUTOMATIC FILTERING, CAVEATS, REGEX SYNTAX — are all
+/// the same shape (a title and paragraphs), differ per face, and are read by no
+/// renderer but this one. Giving each its own `Surface` field would grow the
+/// vocabulary once per thing a face wants to say, which is how a description
+/// language turns into a template.
+///
+/// Prose only. Anything a completion could act on — a flag, a value set, a verb
+/// — belongs in `opts` or `verbs`, where all five renderers can see it.
+pub const Section = struct { title: []const u8, paragraphs: []const []const u8 };
+
 /// Everything a face is, in the shape the renderers read. One value per binary.
 pub const Surface = struct {
     tool: []const u8,
@@ -152,6 +165,8 @@ pub const Surface = struct {
     groups: []const Group,
     opts: []const Opt,
     verbs: []const Verb = &.{},
+    /// Prose sections printed after OPTIONS, in declaration order.
+    sections: []const Section = &.{},
     env: []const Choice = &.{},
     examples: []const Example = &.{},
     exits: []const Exit,
@@ -251,11 +266,60 @@ pub const Target = enum {
     }
 };
 
+/// Which build of the tool a rendering came from. Only the manual prints it,
+/// but it travels with every render so no renderer has to reach for a clock.
+///
+/// `.TH` wants a real date, and mandoc warns about anything it cannot parse as
+/// one — yet a page carrying today's date is a diff on every rebuild, which
+/// makes a byte-for-byte drift gate worthless. `SOURCE_DATE_EPOCH` is the
+/// reproducible-builds answer to exactly this, so `of` honors it: a gate or a
+/// distro build exports it and gets identical bytes, and a human running
+/// `gist --generate man` gets a page dated the day it was minted. Resolved
+/// once, here, rather than at each call site.
+pub const Stamp = struct {
+    version: []const u8,
+    /// ISO 8601 `YYYY-MM-DD`.
+    date: []const u8,
+
+    /// Resolve the stamp for this process: `SOURCE_DATE_EPOCH` when it holds a
+    /// number, otherwise the wall clock. The only impure step, kept to one line
+    /// so `at` below can be tested without touching the environment.
+    pub fn of(version: []const u8, buf: *[10]u8) Stamp {
+        const pinned: ?u64 = if (assay.envSpan("SOURCE_DATE_EPOCH")) |raw|
+            std.fmt.parseInt(u64, std.mem.trim(u8, raw, " \t\r\n"), 10) catch null
+        else
+            null;
+        return at(pinned orelse now(), version, buf);
+    }
+
+    /// Wall-clock seconds off the raw libc clock, floored at the epoch. A
+    /// machine whose clock refuses to answer still mints a page — dated
+    /// 1970-01-01, which reads as "this build had no clock" rather than
+    /// aborting a packaging run over a date field.
+    fn now() u64 {
+        var ts: std.c.timespec = undefined;
+        if (std.c.clock_gettime(.REALTIME, &ts) != 0) return 0;
+        return @intCast(@max(0, ts.sec));
+    }
+
+    /// The stamp for a given Unix second. Pure.
+    pub fn at(secs: u64, version: []const u8, buf: *[10]u8) Stamp {
+        const yd = (std.time.epoch.EpochSeconds{ .secs = secs }).getEpochDay().calculateYearDay();
+        const md = yd.calculateMonthDay();
+        return .{
+            .version = version,
+            .date = std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2}", .{
+                yd.year, md.month.numeric(), md.day_index + 1,
+            }) catch unreachable,
+        };
+    }
+};
+
 /// Render one target into `buf`. Pure — the tests read the bytes rather than
 /// the process's stdout, which is why every renderer takes a buffer.
-pub fn render(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface, version: []const u8, target: Target) void {
+pub fn render(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface, stamp: Stamp, target: Target) void {
     switch (target) {
-        .man => page.write(buf, gpa, s, version),
+        .man => page.write(buf, gpa, s, stamp),
         .@"complete-bash" => shell.bash(buf, gpa, s),
         .@"complete-zsh" => zsh.write(buf, gpa, s),
         .@"complete-fish" => shell.fish(buf, gpa, s),
@@ -273,8 +337,9 @@ pub fn emit(s: Surface, version: []const u8, word: ?[]const u8) void {
     const gpa = arena.allocator();
 
     const target = if (word) |w| Target.parse(w) orelse unknown(s.tool, w) else unknown(s.tool, null);
+    var date: [10]u8 = undefined;
     var buf: std.ArrayList(u8) = .empty;
-    render(&buf, gpa, s, version, target);
+    render(&buf, gpa, s, Stamp.of(version, &date), target);
     corpus_mod.emitStdout(buf.items);
 }
 
@@ -338,7 +403,7 @@ test "every target renders every flag — the whole point of one table" {
     const gpa = arena.allocator();
     inline for (@typeInfo(Target).@"enum".fields) |f| {
         var buf: std.ArrayList(u8) = .empty;
-        render(&buf, gpa, sample, "9.9.9", @field(Target, f.name));
+        render(&buf, gpa, sample, .{ .version = "9.9.9", .date = "2001-02-03" }, @field(Target, f.name));
         try t.expect(buf.items.len > 200);
         try t.expect(std.mem.indexOf(u8, buf.items, "demo") != null);
         // roff escapes every hyphen (`\-`) so a flag survives a copy-paste out

@@ -127,13 +127,27 @@ fn styles(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface) void {
     // `options` once per group, then let each label ignore everything that is
     // not its own. Every spelling appears exactly once across the patterns, so
     // this costs one pass over the option table, not one per group.
+    //
+    // The value tags come FIRST, and that ordering is load-bearing. At `-t<TAB>`
+    // zsh can either finish the glued value or keep completing option names, and
+    // it offers the earliest tag-order entry that produces anything. With the
+    // option groups first, `gist -t<TAB>` answered with the flag list while
+    // `gist -t <TAB>` answered with file types — the same keystroke count, two
+    // different menus. Naming the value tags ahead of the groups puts the answer
+    // the caller is mid-way through typing before the list they have left.
     buf.print(gpa,
         \\
         \\# Split the flat `options` tag into the same functional groups the man
         \\# page is organized by, so `{s} -<TAB>` arrives captioned instead of as
-        \\# one undifferentiated wall of flags.
+        \\# one undifferentiated wall of flags. Value tags lead, so a half-typed
+        \\# `-t<TAB>` completes the type rather than re-offering every flag.
         \\_{s}_style '{s}' tag-order '
     , .{ s.tool, s.tool, ctx }) catch oom();
+    buf.appendSlice(gpa, "\n ") catch oom();
+    for (primer.distinctSets(gpa, s, "").items) |e| buf.print(gpa, " {s}", .{tag(gpa, e.name)}) catch oom();
+    // The tags zsh's own actions file their candidates under, for the values no
+    // closed set can express.
+    buf.appendSlice(gpa, " files directories commands") catch oom();
     for (s.groups) |g| {
         buf.print(gpa, "\n  options:-{s}:", .{tag(gpa, g.key)}) catch oom();
         wordy(buf, gpa, g.title);
@@ -386,6 +400,30 @@ test "the option menu is split into captioned groups" {
     try t.expect(std.mem.indexOf(u8, out, "group-name ''") != null);
 }
 
+test "value tags outrank the option groups, so a half-typed -t completes a type" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const out = rendered(gpa);
+    const order = out[std.mem.indexOf(u8, out, "tag-order '").? + "tag-order '".len ..];
+    const body = order[0..std.mem.indexOfScalar(u8, order, '\'').?];
+
+    // zsh offers the first tag-order entry that yields anything. At `-t<TAB>`
+    // both "finish the glued value" and "keep naming options" are live, so
+    // whichever is named first decides the menu — and the caller is mid-value.
+    const first_group = std.mem.indexOf(u8, body, "options:-").?;
+    for (primer.distinctSets(gpa, primer.sample, "").items) |e| {
+        const at = std.mem.indexOf(u8, body, tag(gpa, e.name)) orelse {
+            std.debug.print("value tag '{s}' is missing from tag-order\n", .{e.name});
+            return error.TagMissing;
+        };
+        try t.expect(at < first_group);
+    }
+    // The open-ended values zsh's own actions file elsewhere.
+    for ([_][]const u8{ "files", "directories", "commands" }) |name|
+        try t.expect(std.mem.indexOf(u8, body, name).? < first_group);
+}
+
 test "no caption smuggles a colon into the tag name" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
@@ -403,15 +441,24 @@ test "no caption smuggles a colon into the tag name" {
     };
     write(&buf, gpa, surf);
     const order = buf.items[std.mem.indexOf(u8, buf.items, "tag-order '").?..];
-    const body = order["tag-order '".len..][0 .. std.mem.indexOfScalar(u8, order["tag-order '".len..], '\'').?];
+    const body = order["tag-order '".len..][0..std.mem.indexOfScalar(u8, order["tag-order '".len..], '\'').?];
     try t.expect(std.mem.indexOf(u8, body, "options:-match:Match-\\ what\\ counts") != null);
-    // Two colons per line and no more: the tag/label cut and the label/caption
-    // cut. A third is the bug.
+    // Two colons per relabel line and no more: the tag/label cut and the
+    // label/caption cut. A third is the bug. The leading value-tag line is a
+    // bare tag list and carries none, which is why this looks for the relabels
+    // rather than asserting over every line.
     var lines = std.mem.tokenizeScalar(u8, body, '\n');
+    var relabels: usize = 0;
     while (lines.next()) |line| {
-        if (std.mem.trim(u8, line, " ").len == 0) continue;
-        try t.expectEqual(@as(usize, 2), std.mem.count(u8, line, ":"));
+        const trimmed = std.mem.trim(u8, line, " ");
+        if (!std.mem.startsWith(u8, trimmed, "options:-")) {
+            try t.expectEqual(@as(usize, 0), std.mem.count(u8, trimmed, ":"));
+            continue;
+        }
+        relabels += 1;
+        try t.expectEqual(@as(usize, 2), std.mem.count(u8, trimmed, ":"));
     }
+    try t.expectEqual(surf.groups.len, relabels);
 }
 
 test "rivals exclude each other; a lone flag only excludes its own aliases" {

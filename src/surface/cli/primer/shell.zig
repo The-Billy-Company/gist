@@ -116,7 +116,15 @@ pub fn bash(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface) void {
 
     buf.print(gpa,
         \\
-        \\_{s}_words() {{ COMPREPLY=( $(compgen -W "$1" -- "$2") ); }}
+        \\# A baked menu is filtered in-process. `compgen -W` would be shorter and
+        \\# would fork a subshell for every keystroke to do the same prefix test
+        \\# the shell can do itself; the candidates are single words by
+        \\# construction, so the loop is exact.
+        \\_{s}_words() {{
+        \\  local w
+        \\  COMPREPLY=()
+        \\  for w in $1; do [[ $w == "$2"* ]] && COMPREPLY+=("$w"); done
+        \\}}
         \\# A count or a free-text value: offer nothing rather than a directory
         \\# listing, which is what a generator that cannot read its own flag
         \\# table falls back to.
@@ -144,6 +152,17 @@ pub fn bash(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface) void {
         \\    return 0
         \\  fi
         \\  _{s}_value "$prev" "$cur" && return 0
+        \\  # A short flag may carry its value glued on (`-tzig`), which bash hands
+        \\  # over as a single word. Split it and re-offer the value with the flag
+        \\  # still on the front, so a half-typed `-t` menus file types instead of
+        \\  # dead-ending. A glued switch (`-w`) falls through to the flag list.
+        \\  if [[ $cur == -[!-]* ]]; then
+        \\    local glued=${{cur:0:2}} i
+        \\    if _{s}_value "$glued" "${{cur:2}}"; then
+        \\      for i in "${{!COMPREPLY[@]}}"; do COMPREPLY[i]=$glued${{COMPREPLY[i]}}; done
+        \\      return 0
+        \\    fi
+        \\  fi
         \\  if [[ $cur == --no* ]]; then
         \\    _{s}_words "$_{s}_opts $_{s}_undo" "$cur"
         \\    return 0
@@ -153,7 +172,7 @@ pub fn bash(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface) void {
         \\    return 0
         \\  fi
         \\
-    , .{ s.tool, s.tool, s.tool, s.tool, s.tool, s.tool, s.tool, s.tool }) catch oom();
+    , .{ s.tool, s.tool, s.tool, s.tool, s.tool, s.tool, s.tool, s.tool, s.tool }) catch oom();
     if (s.verbs.len > 0) buf.print(gpa,
         \\  if (( COMP_CWORD == 1 )); then
         \\    _{s}_words "$_{s}_verbs" "$cur"
@@ -224,8 +243,14 @@ pub fn fish(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface) void {
         buf.appendSlice(gpa, "        ''\nend\n\n") catch oom();
     }
 
+    // `__fish_is_first_arg`, not fish's usual `__fish_use_subcommand`. The
+    // latter is written for git, where `git -C dir status` runs the verb, so it
+    // skips leading flags — here the verb is argv[1] or it is the pattern, and
+    // `gist -w index` searches for "index". Offering a verb there is a menu that
+    // lies: it advertises "build and persist the index" for a word that will be
+    // read as a regex.
     for (s.verbs) |v| {
-        buf.print(gpa, "complete -c {s} -n __fish_use_subcommand -a '", .{s.tool}) catch oom();
+        buf.print(gpa, "complete -c {s} -n __fish_is_first_arg -a '", .{s.tool}) catch oom();
         fq(buf, gpa, v.name);
         buf.appendSlice(gpa, "' -d '") catch oom();
         fq(buf, gpa, v.doc);
@@ -312,6 +337,38 @@ pub fn powershell(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface) v
     }
     buf.appendSlice(gpa,
         \\  }
+        \\
+    ) catch oom();
+    // A verb is argv[1] or it is not a verb, the same rule bash spells as
+    // `COMP_CWORD == 1`. PowerShell counts the word under the cursor as an
+    // element once it has a character, so the tokens BEFORE it are one fewer
+    // than the element count — without that adjustment `gist foo <TAB>` would
+    // offer verbs in place of a path.
+    if (s.verbs.len > 0) {
+        buf.appendSlice(gpa,
+            \\  $typed = if ($wordToComplete) { $elements.Count - 1 } else { $elements.Count }
+            \\  if ($typed -eq 1) {
+            \\    $verbs = @(
+            \\
+        ) catch oom();
+        for (s.verbs) |v| {
+            buf.appendSlice(gpa, "      [CompletionResult]::new('") catch oom();
+            pq(buf, gpa, v.name);
+            buf.appendSlice(gpa, "', '") catch oom();
+            pq(buf, gpa, v.name);
+            buf.appendSlice(gpa, "', [CompletionResultType]::Command, '") catch oom();
+            pq(buf, gpa, v.doc);
+            buf.appendSlice(gpa, "')\n") catch oom();
+        }
+        buf.appendSlice(gpa,
+            \\    )
+            \\    $hit = $verbs | Where-Object { $_.CompletionText -like "$wordToComplete*" }
+            \\    if ($hit) { return $hit }
+            \\  }
+            \\
+        ) catch oom();
+    }
+    buf.appendSlice(gpa,
         \\  @(
         \\
     ) catch oom();
@@ -368,12 +425,58 @@ test "bash bakes the option list at source time, not per keystroke" {
     try t.expect(std.mem.indexOf(u8, out, "complete -F _demo") != null);
 }
 
+test "bash splits a glued short value before it falls back to the flag list" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const out = render(arena.allocator(), bash);
+    const glued = std.mem.indexOf(u8, out, "$cur == -[!-]*").?;
+    // Order is the whole trick: `-tzig` also matches the plain `-*` arm, so the
+    // split has to be tried first or the value is never reached. ripgrep's
+    // generated bash has no such arm and dead-ends on `-t<TAB>`.
+    try t.expect(glued < std.mem.indexOf(u8, out, "$cur == -*").?);
+    // The flag stays on the front of each candidate; replacing the whole word
+    // with a bare value would rewrite `-tzig` to `zig`.
+    try t.expect(std.mem.indexOf(u8, out, "COMPREPLY[i]=$glued${COMPREPLY[i]}") != null);
+}
+
 test "bash holds the undo spellings back until --no is typed" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const out = render(arena.allocator(), bash);
     try t.expect(std.mem.indexOf(u8, out, "$cur == --no*") != null);
     try t.expect(std.mem.indexOf(u8, out, "_demo_undo=") != null);
+}
+
+test "a verb is offered at argv[1] and nowhere else, in all three shells" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    // `gist -w index` searches for "index"; it does not run the index verb. A
+    // completion that offers the verb after a flag advertises a behavior the
+    // parser will not perform, which is worse than offering nothing.
+    //
+    // fish's own `__fish_use_subcommand` is the git rule (`git -C dir status`
+    // runs the verb) and skips leading flags, so naming it here would be the
+    // bug. Each shell states the same rule in its own dialect.
+    const fish_out = render(gpa, fish);
+    try t.expect(std.mem.indexOf(u8, fish_out, "-n __fish_is_first_arg -a 'index'") != null);
+    try t.expect(std.mem.indexOf(u8, fish_out, "__fish_use_subcommand") == null);
+
+    try t.expect(std.mem.indexOf(u8, render(gpa, bash), "(( COMP_CWORD == 1 ))") != null);
+    try t.expect(std.mem.indexOf(u8, render(gpa, powershell), "if ($typed -eq 1) {") != null);
+}
+
+test "powershell counts the word under the cursor before deciding it is argv[1]" {
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const out = render(arena.allocator(), powershell);
+    // Without the adjustment, `gist foo <TAB>` (two elements, empty word) and
+    // `gist in<TAB>` (two elements, one being typed) are indistinguishable, and
+    // the first would offer verbs where a path belongs.
+    try t.expect(std.mem.indexOf(u8, out, "if ($wordToComplete) { $elements.Count - 1 } else { $elements.Count }") != null);
+    // The verb list is filtered and returned only on a hit, so a non-verb first
+    // word still falls through to the flag list rather than dead-ending.
+    try t.expect(std.mem.indexOf(u8, out, "if ($hit) { return $hit }") != null);
 }
 
 test "fish ships a gloss beside every baked candidate" {

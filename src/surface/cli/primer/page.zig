@@ -161,16 +161,16 @@ fn heading(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, macro: []const u8, t
     buf.print(gpa, "{s} \"{s}\"\n", .{ macro, title }) catch oom();
 }
 
-/// Render the whole manual for `s`, stamped with `version`.
-pub fn write(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface, version: []const u8) void {
+/// Render the whole manual for `s`, carrying `stamp` into the `.TH` line.
+pub fn write(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface, stamp: primer.Stamp) void {
     var upper: [32]u8 = undefined;
     const name = std.ascii.upperString(upper[0..@min(upper.len, s.tool.len)], s.tool);
-    // The version stands where the date goes. The manual is a pure function of
-    // the surface plus the version, so a drift gate can diff it byte for byte;
-    // a build timestamp would make every rebuild a diff and the gate worthless,
-    // and an empty field is a mandoc warning. The version is the honest answer
-    // to "how current is this page" anyway.
-    buf.print(gpa, ".TH {s} 1 \"{s}\" \"{s}\" \"{s} Manual\"\n", .{ name, version, s.tool, s.tool }) catch oom();
+    // Date, then tool and version as the source, then the manual — ripgrep's
+    // layout and the one mandoc parses without complaint. `Stamp` decides what
+    // the date IS (see its doc comment); this stays a pure function of what it
+    // is handed, so a drift gate that pins `SOURCE_DATE_EPOCH` gets identical
+    // bytes from identical inputs.
+    buf.print(gpa, ".TH {s} 1 {s} \"{s} {s}\" \"User Commands\"\n", .{ name, stamp.date, s.tool, stamp.version }) catch oom();
     // Left-align and never hyphenate: a manual whose flags break across a line
     // is a manual you cannot copy a flag out of.
     buf.appendSlice(gpa, ".nh\n.ad l\n") catch oom();
@@ -220,6 +220,15 @@ pub fn write(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface, versio
         for (rows.items) |o| entry(buf, gpa, o);
     }
 
+    // The face's own prose, between the flags and the environment they read.
+    for (s.sections) |sec| {
+        heading(buf, gpa, ".SH", sec.title);
+        for (sec.paragraphs, 0..) |p, i| {
+            if (i > 0) buf.appendSlice(gpa, ".PP\n") catch oom();
+            line(buf, gpa, p);
+        }
+    }
+
     if (s.env.len > 0) {
         heading(buf, gpa, ".SH", "ENVIRONMENT");
         for (s.env) |e| {
@@ -260,21 +269,47 @@ pub fn write(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface, versio
 
 const t = std.testing;
 
+const fixed: primer.Stamp = .{ .version = "9.9.9", .date = "2001-02-03" };
+
 fn renderSample(gpa: std.mem.Allocator) []const u8 {
     var buf: std.ArrayList(u8) = .empty;
-    write(&buf, gpa, primer.sample, "9.9.9");
+    write(&buf, gpa, primer.sample, fixed);
     return buf.items;
 }
 
-test "the manual opens with a dateless .TH so a drift gate can diff it" {
+test "the .TH line is one mandoc parses, and is a function of its inputs alone" {
     var arena = std.heap.ArenaAllocator.init(t.allocator);
     defer arena.deinit();
     const out = renderSample(arena.allocator());
-    try t.expect(std.mem.startsWith(u8, out, ".TH DEMO 1 \"9.9.9\" \"demo\" \"demo Manual\""));
+    // Date in the date field. mandoc warns on anything it cannot parse as one,
+    // and the version in that slot was exactly that warning.
+    try t.expect(std.mem.startsWith(u8, out, ".TH DEMO 1 2001-02-03 \"demo 9.9.9\" \"User Commands\""));
     // Rendering twice must produce the same bytes — no clock, no allocator
-    // address, nothing a rebuild can move.
+    // address, nothing a rebuild can move. The date arrives as an argument
+    // precisely so this stays true.
     const again = renderSample(arena.allocator());
     try t.expectEqualStrings(out, again);
+}
+
+test "a pinned epoch renders the date mandoc expects" {
+    var buf: [10]u8 = undefined;
+    try t.expectEqualStrings("1970-01-01", primer.Stamp.at(0, "9.9.9", &buf).date);
+    // A leading-zero day and a two-digit month, the two shapes bufPrint can
+    // silently get wrong: 2026-07-06, and the last second before it.
+    try t.expectEqualStrings("2026-07-06", primer.Stamp.at(1783296000, "9.9.9", &buf).date);
+    try t.expectEqualStrings("2026-07-05", primer.Stamp.at(1783295999, "9.9.9", &buf).date);
+    // A whole rendering with a pinned stamp is byte-identical to itself, which
+    // is the property `SOURCE_DATE_EPOCH` exists to buy a packager.
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    const gpa = arena.allocator();
+    const stamp = primer.Stamp.at(1783296000, "9.9.9", &buf);
+    var a: std.ArrayList(u8) = .empty;
+    var b: std.ArrayList(u8) = .empty;
+    write(&a, gpa, primer.sample, stamp);
+    write(&b, gpa, primer.sample, stamp);
+    try t.expectEqualStrings(a.items, b.items);
+    try t.expect(std.mem.indexOf(u8, a.items, "2026-07-06") != null);
 }
 
 test "hyphens are escaped so a reader can copy a flag back into a shell" {
@@ -317,7 +352,7 @@ test "the page is pure ASCII roff, folded where mandoc measures it" {
     var buf: std.ArrayList(u8) = .empty;
     var surf = primer.sample;
     surf.description = &.{"An em dash — like this one — is spelled as an escape, because a manual gets read through a groff in a C locale as often as through mandoc, and one raw multi-byte character is the difference between a dash and mojibake."};
-    write(&buf, arena.allocator(), surf, "9.9.9");
+    write(&buf, arena.allocator(), surf, fixed);
     try t.expect(std.mem.indexOf(u8, buf.items, "\\[u2014]") != null);
     for (buf.items) |c| try t.expect(c < 0x80);
     // Folded at the width mandoc counts in — escaped bytes, not codepoints.

@@ -12,7 +12,15 @@
 # skips the whole thing.
 set -uo pipefail
 
-[[ ${GIST_SHELL_INSTALL:-1} == 0 ]] && exit 0
+warn() { printf '\033[0;33m!\033[0m  %s\n' "${1}"; }
+note() { printf '\033[0;32m✓\033[0m  %s\n' "${1}"; }
+
+# Announced rather than silent: this runs inside `make install-gist`, where an
+# inherited opt-out would otherwise look identical to the feature not existing.
+if [[ ${GIST_SHELL_INSTALL:-1} == 0 ]]; then
+  warn "GIST_SHELL_INSTALL=0 — leaving the manual and completions uninstalled"
+  exit 0
+fi
 
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 gist="${here}/zig-out/bin/gist"
@@ -21,9 +29,6 @@ share="${here}/zig-out/share"
 
 data="${XDG_DATA_HOME:-${HOME}/.local/share}"
 conf="${XDG_CONFIG_HOME:-${HOME}/.config}"
-
-warn() { printf '\033[0;33m!\033[0m  %s\n' "${1}"; }
-note() { printf '\033[0;32m✓\033[0m  %s\n' "${1}"; }
 
 # $1 --generate target · $2 path under zig-out/share
 mint() {
@@ -65,9 +70,14 @@ if command -v zsh > /dev/null 2>&1 && mint complete-zsh zsh/site-functions/_gist
   if place zsh/site-functions/_gist "${dest}/_gist"; then
     note "zsh: grouped completion → ${dest}/_gist"
     [[ -n ${advise} ]] || warn "  add it yourself: fpath=(${dest} \$fpath) before compinit"
-    # compinit caches the #compdef line, not the body, and ln bumps the
-    # directory mtime — but a dump older than this second can still miss it.
-    rm -f "${HOME}"/.zcompdump* 2> /dev/null
+    # compinit caches which #compdef tags exist, not the function body, so a
+    # dump written before this link would not know _gist is there. The dump is
+    # pure cache — the next shell rebuilds it — but drop it out loud rather
+    # than silently deleting a file in someone's home directory.
+    if compgen -G "${HOME}/.zcompdump*" > /dev/null; then
+      rm -f "${HOME}"/.zcompdump*
+      note "  cleared ~/.zcompdump so compinit sees it (rebuilt on next shell)"
+    fi
   fi
 fi
 
