@@ -40,6 +40,8 @@
 const std = @import("std");
 const gist = @import("irregex");
 
+const portal = gist.portal;
+
 const indexer = gist.commands.indexer; // `gist index` — build + persist the trigram index
 const codex_face = gist.commands.codex; // `gist codex` — the exact existence/count tier
 const status = gist.commands.status; // read-only index introspection
@@ -160,6 +162,8 @@ fn usage() void {
         \\  -a / --binary           treat as text / search binary files in full
         \\  -0 / --null-data        NUL-delimited paths / NUL-delimited input records
         \\  -m0 / -M0               match nothing (exit 1) / disable the long-line cap
+        \\  --heading / -n          on by default on a terminal (rg's layout); --no-heading
+        \\                          / -N decline, and a pipe never had them
         \\  -p / --plain            the human posture (color + heading + -n) / the piped
         \\                          posture, forced, so a terminal run is reproducible
         \\  --line-buffered         hand each line off the moment it is found (live tail)
@@ -214,8 +218,8 @@ const Argv = struct {
     inner: std.process.Args.Iterator,
     literal: bool = false,
 
-    fn init(args: @FieldType(@FieldType(std.process.Init, "minimal"), "args")) Argv {
-        return .{ .inner = std.process.Args.Iterator.init(args) };
+    fn init(args: std.process.Args, gpa: std.mem.Allocator) !Argv {
+        return .{ .inner = try portal.argsIterator(args, gpa) };
     }
     fn skip(self: *Argv) bool {
         return self.inner.skip();
@@ -229,6 +233,47 @@ const Argv = struct {
         return null;
     }
 };
+
+/// Answer a lifecycle flag appearing INSIDE the `rg`/`search` verb's argv, where
+/// the top-level scan can no longer see it. True when the run was an answer
+/// about gist rather than a search, so the caller returns without dispatching.
+///
+/// Scanning stops at `--` for the same reason the parser does: past the
+/// terminator a `--version` is a pattern, not a question.
+fn lifecycleAnswer(args: []const []const u8) !bool {
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--")) return false;
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            usage();
+            return true;
+        }
+        if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+            var line: [64]u8 = undefined;
+            gist.corpus.emitStdout(try std.fmt.bufPrint(&line, "gist {s}\n", .{gist.version_string}));
+            return true;
+        }
+        // rg's phrasing, gist's build: the vendored PCRE2 is always present and
+        // always JIT-compiled, so there is no "not available" branch to report.
+        if (std.mem.eql(u8, arg, "--pcre2-version")) {
+            gist.corpus.emitStdout("PCRE2 " ++ gist.pcre2_version_string ++ " is available (JIT is available)\n");
+            return true;
+        }
+        if (std.mem.eql(u8, arg, "--generate") or std.mem.startsWith(u8, arg, "--generate=")) {
+            const inl = if (arg.len > "--generate".len) arg["--generate=".len..] else null;
+            primer.emit(gist.version_string, inl orelse nextAfter(args, arg));
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The argument following `needle` in `args`, or null when it is the last one.
+/// Compared by identity of position rather than by value: the same spelling can
+/// legitimately appear twice, and only the first one is the flag being answered.
+fn nextAfter(args: []const []const u8, needle: []const u8) ?[]const u8 {
+    for (args, 0..) |a, i| if (a.ptr == needle.ptr) return if (i + 1 < args.len) args[i + 1] else null;
+    return null;
+}
 
 /// `main` takes no error union on purpose: Zig's default handler exits 1 with a
 /// stack trace, and 1 is "no match" under the rg contract. `fatal` exits 2.
@@ -245,9 +290,9 @@ fn run(init: std.process.Init) !void {
     // and render format every summary/trace call site consults.
     gist.assay.install(.{});
 
-    gist.commands.scope.charter.honorNoConfig(init.minimal.args);
+    gist.commands.scope.charter.honorNoConfig(gpa, init.minimal.args);
 
-    var it = Argv.init(init.minimal.args);
+    var it = try Argv.init(init.minimal.args, gpa);
     _ = it.skip(); // argv[0]
     const mode = it.next() orelse {
         usage();
@@ -406,6 +451,15 @@ fn run(init: std.process.Init) !void {
     // `gist search` into a flags-only invocation with no pattern at all.
     if (query.items.len == persisted.len and std.mem.eql(u8, mode, "search"))
         try query.append(gpa, mode);
+    // A drop-in has to answer the four questions a caller asks the BINARY
+    // rather than the corpus, in the position ripgrep accepts them: `rg
+    // --version` puts the flag where gist's own top-level scan (above) has
+    // already moved past. Without this, `gist rg --version` was an unknown
+    // flag — measured as four of the 35 surface rejections by
+    // `bench/rgsuite/surface.py`. Each answers with gist's own identity; the
+    // point of parity here is the shape of the exchange (stdout, exit 0),
+    // never a pretense of being ripgrep.
+    if (verbed) if (try lifecycleAnswer(query.items)) return;
     tryWarm(gpa, io, init.environ_map, query.items);
     try search.run(gpa, io, query.items, init.environ_map);
 }

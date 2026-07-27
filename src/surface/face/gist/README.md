@@ -203,10 +203,15 @@ ripgrep.
 - **Machine output:** use `--json` for typed records, `-0` for NUL-delimited
   paths, `--null-data` for NUL-delimited input records, and explicit sorting
   when downstream comparison requires deterministic file order.
-- **Who is reading, and how fast:** `-p`/`--pretty` is the human posture in one
-  token (color, heading, line numbers) and `--plain` is its opposite — the
-  piped posture, forced, so a run on a terminal produces the bytes a script
-  would see. Delivery cadence is separate from either: `--line-buffered` when a
+- **Who is reading, and how fast:** most of the human posture is already the
+  default a terminal gets — matches grouped under a filename title and the rows
+  numbered beneath it, exactly as ripgrep lays them out — while a pipe keeps the
+  `path:line:` prefix and ripgrep's bytes. `-p`/`--pretty` adds the remaining
+  piece (color, unconditionally) and `--plain` is the opposite pole: the piped
+  posture forced onto a terminal, so an interactive run reproduces the bytes a
+  script would see. Decline either half on its own with `--no-heading` / `-N`,
+  or request it into a pipe with `--heading` / `-n`. Delivery cadence is
+  separate from all of it: `--line-buffered` when a
   consumer reacts per line, `--block-buffered` (with `--buffer-size`) when it
   only wants the bytes cheaply, `--buffer-size=0` when nothing may be held at
   all. Left alone, a pipe blocks and a terminal streams by line, which is
@@ -242,6 +247,21 @@ better — faster, more robust, or better for code search — never a regression
 accepted no-ops, and unknown flags that fail with exit 2. Where gist differs from
 ripgrep it is an improvement, or it is a bug; there is no third category. I do
 **not** claim every option ripgrep ever shipped.
+
+That claim is measured rather than asserted, against a denominator ripgrep owns:
+`bench/rgsuite/surface.py` reads rg's documented flag surface at run time (longs
+from `rg --generate complete-bash`, shorts and value grammar from its man page)
+and compares both binaries byte-for-byte on stdout and exit code. **186 of 186
+documented flags conform** — 177 byte-identical, 9 differing only at a declared
+boundary whose residual check is re-verified on every run — with 0 rejected and
+0 undeclared divergences, alongside **411/411** of ripgrep's mined integration
+cases and 27/27 adverse undo pairs (a negation must actually undo, on a fixture
+where the two answers differ). A third lane, `bench/rgsuite/fuzz.py`, generates
+what nobody curated: a random pattern × flag set × a hostile corpus (invalid
+UTF-8, NUL bytes, a 4 MiB line, a symlink cycle, an unreadable file,
+catastrophic-backtracking patterns), demanding byte-identical agreement while
+measuring crash, hang, and peak RSS. Every divergence it has found was fixed in
+gist, never excluded from the suite.
 
 The implemented surface includes:
 

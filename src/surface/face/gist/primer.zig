@@ -179,7 +179,7 @@ const Baked = struct { types: []const Choice, encodings: []const Choice, links: 
 /// this is the one place that knowledge is read.
 fn valueOf(spec: catalog.FlagSpec, baked: Baked) ?Value {
     return switch (spec.action) {
-        .set, .unset, .set_many, .filename, .case, .locate, .boundary, .mode, .passthru, .sort_files, .glob_ci, .no_ctxsep, .pretty, .plain, .engine_is, .buffered, .noop, .no_config, .unsupported => null,
+        .set, .unset, .set_many, .filename, .case, .locate, .boundary, .mode, .mode_off, .passthru, .sort_files, .glob_ci, .no_ctxsep, .pretty, .plain, .engine_is, .encoding_is, .pre_off, .buffered, .noop, .no_config, .unsupported => null,
         // `-u`/`-uu`/`-uuu` is a tier counted by repetition, not a value.
         .unrestrict => null,
         .set_num, .num_set, .ctx_at => .{ .name = "NUM", .of = .number },
@@ -196,6 +196,7 @@ fn valueOf(spec: catalog.FlagSpec, baked: Baked) ?Value {
         .replace => .{ .name = "TEXT" },
         .file, .ignore_file => .{ .name = "FILE", .of = .file, .many = true },
         .type_add => .{ .name = "TYPESPEC", .many = true },
+        .type_clear => .{ .name = "TYPE", .of = .{ .listed = baked.types }, .many = true },
         .color => .{ .name = "WHEN", .of = .{ .listed = when } },
         // A bare `--hyperlink` is legal and must not eat the next word — that
         // word is the pattern. `--hyperlink-format` is rg's spelling and takes
@@ -237,8 +238,9 @@ fn rivalOf(spec: catalog.FlagSpec) []const u8 {
         .locate => |l| switch (l) {
             .line_on, .line_off => "line_num",
             .column_on, .column_off => "column",
+            .heading_on, .heading_off => "heading",
         },
-        .mode => "mode",
+        .mode, .mode_off => "mode",
         .sort, .sort_files => "sort_key",
         .maxfsize => "max_filesize",
         .no_ctxsep => "ctx_sep",
@@ -248,11 +250,14 @@ fn rivalOf(spec: catalog.FlagSpec) []const u8 {
         // a rival of `--color`, which is documented to win when spelled after.
         .pretty, .plain => "posture",
         .hyperlink => "hyperlink",
-        .encoding => "encoding",
+        .encoding, .encoding_is => "encoding",
         .engine, .engine_is => "engine",
         .buffered => "buffering",
         .rank => "rank",
-        .set_many, .unrestrict, .passthru, .ctx_at, .glob_ci, .regexp, .typ, .glob, .file, .ignore_file, .type_add, .pre_glob, .bufsize, .colors, .noop, .noop_val, .no_config, .unsupported => "",
+        // `--no-pre` is `--pre`'s rival even though `--pre` is a `.set_str` row:
+        // both write `pre`, and the tag name is how that rivalry is spelled.
+        .pre_off => "pre",
+        .set_many, .unrestrict, .passthru, .ctx_at, .glob_ci, .regexp, .typ, .glob, .file, .ignore_file, .type_add, .type_clear, .pre_glob, .bufsize, .colors, .noop, .noop_val, .no_config, .unsupported => "",
     };
 }
 
@@ -474,12 +479,27 @@ test "closed sets are baked whole, and shared between the flags that offer them"
         }
     }
     try t.expectEqual(@as(usize, 2), by_name);
-    // `-t` and `-T` offer the same registry, so it is written down once.
+    // More than one flag takes a TYPE — `-t`, `-T`, and `--type-clear` — and the
+    // 221-row registry is written down ONCE for all of them. That sharing is the
+    // invariant, so assert it directly rather than counting the flags: a count
+    // fails every time a fourth flag legitimately joins, while saying nothing
+    // about the thing that would actually be broken.
+    const typed = for (sets.items) |e| {
+        if (std.mem.eql(u8, e.name, "type")) break e.choices;
+    } else return error.TypeSetNotBaked;
     var offering: usize = 0;
-    for (s.opts) |o| if (sets.find(o)) |name| {
-        if (std.mem.eql(u8, name, "type")) offering += 1;
+    for (s.opts) |o| if (o.set()) |set| if (set.ptr == typed.ptr) {
+        offering += 1;
+        try t.expectEqual(typed.len, set.len);
     };
-    try t.expectEqual(@as(usize, 2), offering);
+    try t.expect(offering > 1);
+    // …and nobody kept a private copy beside it. `distinctSets` keys on the
+    // slice POINTER, so a flag that grew its own copy of the rows would surface
+    // as a second entry (`type2`) holding the same table — the regression this
+    // test exists to catch.
+    for (sets.items) |e| if (e.choices.ptr != typed.ptr)
+        try t.expect(e.choices.len != typed.len or
+            !std.mem.eql(u8, e.choices[0].word, typed[0].word));
 }
 
 test "rivalries fall out of the state a flag writes" {
