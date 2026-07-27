@@ -102,7 +102,10 @@ _scope_globs() {
   local g="--glob=!out/" m
   while IFS= read -r m; do
     g+=" --glob=!${m}/_build/ --glob=!${m}/deps/ --glob=!${m}/cover/ --glob=!${m}/doc/"
-  done < <(cd "${CORPUS}" && find "${ROOTS[@]}" -maxdepth 3 -name mix.exs -print 2> /dev/null | while IFS= read -r f; do dirname "${f}"; done)
+  done < <(
+    # shellcheck disable=SC2312 # discovery loop over optional mix.exs roots — an empty result (no Elixir projects) is a valid, non-error outcome
+    cd "${CORPUS}" && find "${ROOTS[@]}" -maxdepth 3 -name mix.exs -print 2> /dev/null | while IFS= read -r f; do dirname "${f}"; done
+  )
   echo "${g}"
 }
 # The ignore scope gist and rg SHARE, resolved once: identical flags on both
