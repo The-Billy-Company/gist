@@ -28,10 +28,10 @@ doc_radar:
         - 'uds = { status = "operational-accelerator"'
         - 'ffi = { status = "operational-accelerator"'
     - description: "the committed fail-closed certificate exists and is fail-closed"
-      file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
       contains: ["Mann-Whitney significance test", "**fail-closed**"]
     - description: "the certificate still carries the live ripgrep macro comparison (a re-mint may move every number, but never drop the section)"
-      file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
       contains:
         - "## Layer A — macroscopic dominance over ripgrep"
         - "gist vs ripgrep across 12 classes"
@@ -171,7 +171,8 @@ ripgrep.
 - **Case and character semantics:** `-i`, `-s`, and `-S` are last-wins.
   Unicode folding, classes, properties, and word boundaries are the default;
   `--no-unicode` or a leading `(?-u)` deliberately selects byte/ASCII
-  semantics. Under PCRE2, `--pcre2-unicode` and
+  semantics. The fold is **simple** (`C+S`), matching ripgrep exactly — `ß` is
+  not `SS` on either tool. Under PCRE2, `--pcre2-unicode` and
   `--no-pcre2-unicode` control that backend separately.
 - **Literal, word, line, and inverse matching:** use `-F` when punctuation
   should not become regex, `-w` for a whole Unicode word, `-x` for a whole
@@ -249,30 +250,43 @@ ripgrep it is an improvement, or it is a bug; there is no third category. I do
 **not** claim every option ripgrep ever shipped.
 
 That claim is measured rather than asserted, against a denominator ripgrep owns:
-`bench/rgsuite/surface.py` reads rg's documented flag surface at run time (longs
-from `rg --generate complete-bash`, shorts and value grammar from its man page)
-and compares both binaries byte-for-byte on stdout and exit code. **186 of 186
-documented flags conform** — 177 byte-identical, 9 differing only at a declared
-boundary whose residual check is re-verified on every run — with 0 rejected and
-0 undeclared divergences, alongside **411/411** of ripgrep's mined integration
-cases and 27/27 adverse undo pairs (a negation must actually undo, on a fixture
-where the two answers differ). A third lane, `bench/rgsuite/fuzz.py`, generates
-what nobody curated: a random pattern × flag set × a hostile corpus (invalid
-UTF-8, NUL bytes, a 4 MiB line, a symlink cycle, an unreadable file,
+`bench/conformance/rgsuite/surface.py` reads rg's documented flag surface at run
+time (longs from `rg --generate complete-bash`, shorts and value grammar from its
+man page) and compares both binaries byte-for-byte on stdout and exit code. **186
+of 186 documented flags conform** — 176 byte-identical, 10 differing only at a
+declared boundary whose residual check is re-verified on every run — with 0
+rejected and 0 undeclared divergences, alongside **411/411** of ripgrep's mined
+integration cases and 27/27 adverse undo pairs (a negation must actually undo, on
+a fixture where the two answers differ).
+
+Both of those denominators are ripgrep's own, which is their ceiling as well as
+their authority. So a third lane,
+[`bench/conformance/rgsuite/fuzz.py`](../../../../bench/conformance/rgsuite/fuzz.py),
+generates what nobody curated: a random pattern × flag set × a hostile corpus
+(invalid UTF-8, NUL bytes, a 4 MiB line, a symlink cycle, an unreadable file,
 catastrophic-backtracking patterns), demanding byte-identical agreement while
-measuring crash, hang, and peak RSS. Every divergence it has found was fixed in
-gist, never excluded from the suite.
+measuring crash, hang, and peak RSS. It is the only lane that still finds
+anything, and it does — a low-single-digit tail per 6,000 iterations, in corners
+where ripgrep's own three printers do not agree with each other (an empty match
+at the end of a file with no final newline is counted by `--count-matches`,
+dropped by `-o --json`, and rendered as the whole line by `-o`). That tail is
+**published, not excluded**: classified by root cause in `fuzz_baseline.json` and
+in Layer I of the certificate, ratcheted shrink-only, and a missing fuzz record
+refuses the mint outright.
 
 The implemented surface includes:
 
 - regular, fixed (`-F`), smart-case (`-S`), case-insensitive (`-i`), whole-word
   (`-w`), inverted (`-v`), and multiple (`-e`/`-f`) patterns;
 - Unicode-by-default case folding, character classes, properties, and word
-  boundaries, with `(?-u)` or `--no-unicode` for byte/ASCII semantics;
+  boundaries, with `(?-u)` or `--no-unicode` for byte/ASCII semantics. The fold
+  is **simple** (Unicode `C+S`), which is ripgrep's posture rather than a
+  shortfall against it: `café` ⇄ `CAFÉ` matches on both, `ß` ⇄ `SS` on neither,
+  because full (`F`) folding is one-to-many and neither engine performs it;
 - the linear RE2/Pike engine, vendored PCRE2 10.47 with JIT (`-P`), and
   `--engine auto` escalation;
 - native multiline search (`-U`, `--multiline-dotall`);
-- path, type, glob, hidden-file, symlink, depth, size, filesystem, and the full
+- path, type, glob, hidden-file, symlink, depth, size, filesystem, and the fullxj
   `.gitignore`/`.ignore`/`.rgignore` control family;
 - context, only-match, count, replacement, heading, column, byte-offset,
   vimgrep, JSON Lines, null-delimited, sorted, and stats output;
@@ -315,7 +329,7 @@ N)`, and stops. A code locator wants the matches, not a shrug: gist searches
   the whole tree. Same answers, fewer bytes read. (The gist-native `--rank` is
   linear-only.)
 - **`-z` / `--search-zip` — in-process decompression.** Results are identical to
-  ripgrep across every codec (verified byte-for-byte in `bench/rgsuite`), but
+  ripgrep across every codec (verified byte-for-byte in `bench/conformance/rgsuite`), but
   gzip, zlib, zstd, and xz decode _in-process_ via `std.compress` — no
   `gzip -dc` fork per file, the single biggest speed edge on compressed corpora.
   bzip2, lz4, Brotli, lzma, and `.Z` shell the standard external tool exactly as
@@ -513,8 +527,8 @@ handling, streams, and resident-versus-cold answers.
 
 The tracked ripgrep 15.2.0 snapshot contains 446 invocations per walk engine:
 
-- **Mined upstream suite:** 409 PASS, 0 ORDER, 0 FAIL, 16 NA, and 21 SKIP.
-  Supported-surface parity is **409/409 = 100%**; every supported-surface case
+- **Mined upstream suite:** 411 PASS, 0 ORDER, 0 FAIL, 14 NA, and 21 SKIP.
+  Supported-surface parity is **411/411 = 100%**; every supported-surface case
   matches ripgrep, with zero deferred divergences.
 - **Multiline:** 30/30 adversarial cases pass for stdout, exit code, and
   indexed-versus-`--no-index` equality.
@@ -532,6 +546,16 @@ The tracked ripgrep 15.2.0 snapshot contains 446 invocations per walk engine:
   binary input, legacy encodings, and the available gzip, bzip2, xz, zstd, lz4,
   and Brotli decoders.
 
+Every count above shares one denominator ripgrep chose — the tests it wrote and
+the flags it documents — so each of those 100%s is scoped to cases someone
+already thought of. The differential fuzzer is the lane with no such ceiling: it
+generates invocations nobody wrote down, over corpora built to be hostile, and
+it is the only one that still finds anything. It does, a handful per 6,000
+iterations, and that tail is published per root-cause class in
+`fuzz_baseline.json` and in Layer I of the certificate rather than left out of
+the scoreboard. A missing fuzz record refuses the mint outright, and the tail is
+ratcheted shrink-only, so it can fall but never quietly grow.
+
 Parallel and serial results are reported separately because they share a
 contract but not an implementation path; they are not added together to
 inflate the case count. NA is a deliberate product boundary. SKIP is an
@@ -540,7 +564,7 @@ pass, and with zero FAIL rows the strict `check_results.py` gate is green
 without `--allow-fail`.
 
 Reproduce the cited results from
-[`bench/rgsuite`](../../../../bench/rgsuite/README.md):
+[`bench/conformance/rgsuite`](../../../../bench/conformance/rgsuite/README.md):
 
 ```bash
 python3 run.py
@@ -548,6 +572,7 @@ python3 modes.py run --mode multiline
 python3 modes.py run --mode pcre
 python3 flags.py run
 python3 transforms.py run
+python3 fuzz.py --iterations 6000 --seed 20260727   # the residual lane
 ```
 
 The permanent integration order is documented in

@@ -21,16 +21,27 @@ def _write(directory: str, name: str, payload: dict) -> Path:
 
 
 def _fuzz(residual: dict[str, int], **over) -> dict:
+    """A record shaped like `fuzz.py --json`, with the buckets kept consistent.
+
+    `agree` is the STRICT count (byte-identical stdout and exit code), so it is
+    what remains after the declared boundaries, the engine declines, the mutual
+    rejections, and the residual are taken out. Deriving it here rather than
+    hardcoding it keeps the fixture from asserting 6000/6000 agreement while
+    also carrying twenty cases that were not byte-identical.
+    """
+    declared, declined, both_reject = 17, 0, 3
+    total = sum(residual.values())
     return {
         "iterations": 6000,
         "seed": 20260727,
         "corpora": 6,
-        "declared": 17,
-        "declined": 0,
-        "both_reject": 3,
+        "declared": declared,
+        "declined": declined,
+        "both_reject": both_reject,
         "crashes": 0,
+        "agree": 6000 - declared - declined - both_reject - total,
         "residual": residual,
-        "residual_total": sum(residual.values()),
+        "residual_total": total,
         **over,
     }
 
@@ -80,11 +91,40 @@ class ResidualRatchetTest(unittest.TestCase):
             missing = Path(tmp) / "absent.json"
             self.assertEqual(report.residual_ratchet(_fuzz({"line-count": 1}), missing), 1)
 
-    def test_timeouts_and_crashes_are_inside_the_residual(self) -> None:
+    def test_gist_side_timeouts_and_crashes_are_ratcheted(self) -> None:
         """`divergences` alone would under-report the tail it is supposed to bound."""
-        got = _fuzz({"timeout-rg": 2})
+        got = _fuzz({"timeout-gist": 2})
         self.assertEqual(got["residual_total"], 2)
         self.assertEqual(report.residual_ratchet(got, None), 1)
+
+    def test_an_oracle_side_timeout_alone_does_not_refuse_the_mint(self) -> None:
+        """rg hitting the wall where gist answered is not a gist failure.
+
+        With no baseline the strict rule refuses ANY gist-attributable residual,
+        so this asserts the partition itself: a run whose only residual is the
+        oracle's own timeout is still mintable.
+        """
+        self.assertEqual(report.residual_ratchet(_fuzz({"timeout-rg": 2}), None), 0)
+
+    def test_an_oracle_side_class_may_grow_without_refusing(self) -> None:
+        """It is load-dependent, so ratcheting it would make the gate flaky."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _write(tmp, "b.json", _fuzz({"line-count": 4, "timeout-rg": 1}))
+            got = _fuzz({"line-count": 4, "timeout-rg": 9})
+            self.assertEqual(report.residual_ratchet(got, base), 0)
+
+    def test_an_oracle_side_class_is_not_laundered_out_of_the_report(self) -> None:
+        """Excluded from the FLOOR is not excluded from the certificate."""
+        text = "\n".join(report.fuzz_block(_fuzz({"line-count": 4, "timeout-rg": 2})))
+        self.assertIn("`timeout-rg`", text)
+        self.assertIn("not** ratcheted", text)
+        self.assertIn("6 unresolved", text)
+
+    def test_a_gist_side_class_still_refuses_beside_an_oracle_side_one(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = _write(tmp, "b.json", _fuzz({"timeout-rg": 1}))
+            got = _fuzz({"timeout-rg": 1, "line-content": 3})
+            self.assertEqual(report.residual_ratchet(got, base), 2)
 
 
 class FuzzBlockTest(unittest.TestCase):
@@ -94,13 +134,25 @@ class FuzzBlockTest(unittest.TestCase):
         self.assertIn("`timeout-rg`", text)
         self.assertIn(report.KLASS_MEANING["line-count"], text)
         self.assertIn("6 unresolved", text)
-        self.assertIn("5994/6000", text)
+        self.assertIn("5974/6000", text)
 
     def test_a_clean_lane_still_reports_itself(self) -> None:
         """The omission this whole change exists to prevent."""
         text = "\n".join(report.fuzz_block(_fuzz({})))
         self.assertIn("differential fuzz", text)
-        self.assertIn("6000/6000 = 100.00% agree", text)
+        self.assertIn("0 unresolved", text)
+        self.assertIn("5980/6000 = 99.67% are byte-identical", text)
+
+    def test_agreement_is_the_strict_count_not_the_non_divergent_one(self) -> None:
+        """The headline may not absorb the boundaries the next sentence explains.
+
+        `iterations - residual` counts the declared boundaries and the mutual
+        rejections as agreement, which reads as a higher parity than was
+        measured; the record's own `agree` is the byte-identical count.
+        """
+        text = "\n".join(report.fuzz_block(_fuzz({"line-count": 4})))
+        self.assertIn("5976/6000", text)
+        self.assertNotIn("5996/6000", text)
 
     def test_every_class_the_harness_can_emit_has_a_meaning(self) -> None:
         """An unlabeled row in the certificate is a number without a claim.

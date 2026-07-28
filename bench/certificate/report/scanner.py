@@ -83,6 +83,26 @@ REPRODUCE_ANCHOR = "<details><summary>reproduce Layer I</summary>"
 VERDICT_GLYPH = {"win": "✅ win", "parity": "≈ parity", "loss": "❌ loss"}
 LANE_LABEL = {"list": "`-l`", "count": "`-c`"}
 
+# Constant, measurement-free, and therefore refreshed by BOTH mint paths. It used
+# to be emitted only by the full mint, which meant the block naming the commands
+# outlived two directory renames and kept citing `bench/rgsuite/` after the tree
+# had moved — a reproduce block that cannot be reproduced. The `--conformance-only`
+# path rewrites it for the same reason it rewrites the evidence above it.
+REPRODUCE_BLOCK = (
+    REPRODUCE_ANCHOR,
+    "",
+    "```bash",
+    'bash bench/dominance/races/scanner.sh                 # SCANNER_LANES="list count"',
+    "python3 bench/conformance/rgsuite/surface.py --json .local/gist-compete/surface.json",
+    "python3 bench/conformance/rgsuite/run.py              # writes rgsuite/results.json",
+    "python3 bench/conformance/rgsuite/fuzz.py --iterations 6000 --seed 20260727 \\",
+    "    --json .local/gist-compete/fuzz.json \\",
+    "    --publish-baseline bench/conformance/rgsuite/fuzz_baseline.json   # the residual above",
+    "```",
+    "",
+    "</details>",
+)
+
 
 def _load(results_dir: Path, cls: str, cell: str) -> list[float]:
     """Per-run times (ms) for one (class, cell), or [] when the cell was not timed."""
@@ -274,6 +294,19 @@ KLASS_MEANING = {
 # `fuzz._klass` suffixes a shape with `+exit` when the exit codes disagree too.
 KLASS_SUFFIX = {"+exit": ", and the exit codes disagree"}
 
+# Oracle-side events: the ORACLE hit the wall or died where gist finished. They
+# are reported, never ratcheted — on two independent grounds. They are not gist
+# conformance failures (gist produced an answer; rg did not), and they are a
+# function of what else this machine was doing, so a floor keyed on them would
+# fail a mint for a load excursion. A gate that flakes gets switched off, and a
+# gate that is off is worse for the certificate than one that is honest about
+# its own denominator.
+ORACLE_SIDE = ("timeout-rg", "crash-rg")
+
+
+def oracle_side(klass: str) -> bool:
+    return klass.startswith(ORACLE_SIDE)
+
 
 def klass_meaning(klass: str) -> str:
     """Prose for one residual class, including the composed `<shape>+exit` forms.
@@ -300,7 +333,12 @@ def fuzz_block(fuzz: dict) -> list[str]:
     total = fuzz.get("residual_total", fuzz.get("divergences", 0))
     iters = fuzz.get("iterations", 0)
     residual = fuzz.get("residual", {})
-    agree_pct = 100.0 * (iters - total) / iters if iters else 0.0
+    # Two different numbers, and conflating them is how a fuzz lane flatters
+    # itself: `agree` is byte-identical stdout AND exit code, while the declared
+    # boundaries and mutual rejections below are merely NOT divergences. Report
+    # the strict one as agreement and let the reader add.
+    agree = fuzz.get("agree", iters - total)
+    agree_pct = 100.0 * agree / iters if iters else 0.0
     lines = [
         "",
         "### differential fuzz vs live ripgrep — and its residual",
@@ -311,21 +349,23 @@ def fuzz_block(fuzz: dict) -> list[str]:
             "(invalid UTF-8, NUL-bearing binary, CRLF, a 4 MiB single line, 100k-line files, "
             "deep nesting, symlink loops, unreadable files). Both binaries run on the same "
             "bytes; stdout and exit code must match after the same normalizations the mined "
-            f"oracle applies. **{iters - total}/{iters} = {agree_pct:.2f}% agree.** "
-            f"{fuzz.get('declared', 0)} iterations exercised a catalogued boundary whose "
-            f"residual check passed this run, {fuzz.get('declined', 0)} hit a documented gist "
-            f"engine decline, and {fuzz.get('both_reject', 0)} a pattern both engines reject; "
-            f"none of those is a divergence. **{total} unresolved**, "
-            f"{fuzz.get('crashes', 0)} abnormal exits._"
+            f"oracle applies. **{agree}/{iters} = {agree_pct:.2f}% are byte-identical.** Of the "
+            f"remainder, {fuzz.get('declared', 0)} exercised a catalogued boundary whose residual "
+            f"check passed this run, {fuzz.get('declined', 0)} hit a documented gist engine "
+            f"decline, and {fuzz.get('both_reject', 0)} used a pattern both engines reject — "
+            f"agreement on a rejection is agreement, so none of those is a divergence. That "
+            f"leaves **{total} unresolved**, with {fuzz.get('crashes', 0)} abnormal exits._"
         ),
     ]
     if residual:
+        oracle = {k: n for k, n in residual.items() if oracle_side(k)}
+        mine = sum(n for k, n in residual.items() if not oracle_side(k))
         lines += [
             "",
-            "| residual class | count | what the disagreement looks like |",
-            "|---|--:|---|",
+            "| residual class | count | ratcheted | what the disagreement looks like |",
+            "|---|--:|:--|---|",
             *(
-                f"| `{k}` | {n} | {klass_meaning(k)} |"
+                f"| `{k}` | {n} | {'—' if oracle_side(k) else 'yes'} | {klass_meaning(k)} |"
                 for k, n in sorted(residual.items(), key=lambda kv: (-kv[1], kv[0]))
             ),
             "",
@@ -336,11 +376,25 @@ def fuzz_block(fuzz: dict) -> list[str]:
                 "denominator can only contain cases someone already thought of. This lane "
                 "generates invocations nobody wrote down, so it is the only one that can still "
                 "find something, and a residual of zero here would mean the generator had "
-                "stopped being adversarial. The number is ratcheted shrink-only per class: it "
-                "may fall, it may not rise, and a class not already in the committed baseline "
-                "fails the mint even when the total went down."
+                f"stopped being adversarial. **{mine}** of these are gist's, and that number is "
+                "ratcheted shrink-only per class: it may fall, it may not rise, and a class not "
+                "already in the committed baseline fails the mint even when the total went down."
             ),
         ]
+        if oracle:
+            named = ", ".join(f"`{k}` ({n})" for k, n in sorted(oracle.items()))
+            lines += [
+                "",
+                (
+                    f"> {named} is **not** ratcheted, and is not a gist failure: the ORACLE hit "
+                    "the per-child wall or died where gist returned an answer. It stays in the "
+                    "table because deleting it would be the same omission this section exists to "
+                    "end, and out of the floor because it measures this machine's load rather "
+                    "than gist's conformance — a gate that fails on a load excursion gets "
+                    "switched off, and a gate that is off is worth less than one that is honest "
+                    "about its own denominator."
+                ),
+            ]
     return lines
 
 
@@ -412,22 +466,7 @@ def render(
 
     conf_lines, bad = conformance_block(surface, mined, fuzz)
     lines += conf_lines
-    lines += [
-        "",
-        "<details><summary>reproduce Layer I</summary>",
-        "",
-        "```bash",
-        'bash bench/dominance/races/scanner.sh                 # SCANNER_LANES="list count"',
-        "python3 bench/conformance/rgsuite/surface.py --json .local/gist-compete/surface.json",
-        "python3 bench/conformance/rgsuite/run.py              # writes rgsuite/results.json",
-        "python3 bench/conformance/rgsuite/fuzz.py --iterations 6000 --seed 20260727 \\",
-        "    --json .local/gist-compete/fuzz.json              # the residual above",
-        "```",
-        "",
-        "</details>",
-        "",
-        END,
-    ]
+    lines += ["", *REPRODUCE_BLOCK, "", END]
     return "\n".join(lines) + "\n", csv_rows, bad + tally["loss"], tally
 
 
@@ -443,17 +482,20 @@ def splice(cert: Path, section: str) -> None:
 
 
 def splice_conformance(cert: Path, lines: list[str]) -> None:
-    """Replace ONLY the maturity evidence, leaving the timed table above it untouched.
+    """Replace the maturity evidence, leaving the timed table above it untouched.
 
     A flag re-probe is minutes and a quiescent timing race is an hour on a machine
     ~10 agents share; re-rendering the whole layer to move a flag count would trade
-    a clean measurement for a noisier one, which is a worse certificate.
+    a clean measurement for a noisier one, which is a worse certificate. The
+    reproduce block below the evidence carries no measurement, so it is rewritten
+    rather than preserved — leaving it pinned is what let it rot past two renames.
     """
     text = cert.read_text()
-    lo, hi = text.find(CONFORMANCE_ANCHOR), text.find(REPRODUCE_ANCHOR)
+    lo, hi = text.find(CONFORMANCE_ANCHOR), text.find(END)
     if lo == -1 or hi == -1 or hi < lo:
         raise SystemExit("certify_scanner_report: no conformance block to refresh — mint Layer I first")
-    cert.write_text(text[:lo] + "\n".join(lines).lstrip("\n") + "\n\n" + text[hi:])
+    body = "\n".join((*lines, "", *REPRODUCE_BLOCK)).lstrip("\n")
+    cert.write_text(text[:lo] + body + "\n\n" + text[hi:])
 
 
 def ratchet(surface: dict | None, baseline: Path | None) -> int:
@@ -476,11 +518,14 @@ def residual_ratchet(fuzz: dict, baseline: Path | None) -> int:
     class carries its own floor and an unlisted class is a refusal on its own —
     a new root cause is news even when the arithmetic improved.
 
+    Oracle-side classes (`ORACLE_SIDE`) are excluded from the arithmetic on both
+    sides, so the floor measures gist and nothing else.
+
     With no committed baseline the rule is the strict one (any residual refuses),
     so the ratchet can only ever be created deliberately, never defaulted into.
     """
-    got = fuzz.get("residual", {})
-    total = fuzz.get("residual_total", fuzz.get("divergences", 0))
+    got = {k: n for k, n in fuzz.get("residual", {}).items() if not oracle_side(k)}
+    total = sum(got.values())
     floor = _read_json(baseline) if baseline else None
     if floor is None:
         if total:
@@ -495,7 +540,8 @@ def residual_ratchet(fuzz: dict, baseline: Path | None) -> int:
             )
         return 1 if total else 0
 
-    want, want_total = floor.get("residual", {}), floor.get("residual_total", 0)
+    want = {k: n for k, n in floor.get("residual", {}).items() if not oracle_side(k)}
+    want_total = sum(want.values())
     bad = 0
     for klass, n in sorted(got.items()):
         allowed = want.get(klass)
@@ -510,7 +556,7 @@ def residual_ratchet(fuzz: dict, baseline: Path | None) -> int:
         bad += 1
     # Shrinkage is not a failure, but an un-refreshed baseline is a ratchet that
     # has stopped ratcheting — say so loudly enough that the floor gets lowered.
-    if not bad and (total < want_total or any(n < want.get(k, 0) for k, n in got.items()) or set(want) - set(got)):
+    if not bad and (total < want_total or set(want) - set(got)):
         print(
             f"certify_scanner_report: residual SHRANK {want_total} → {total} — "
             f"refresh the baseline in this PR so the floor follows the fix"
