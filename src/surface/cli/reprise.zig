@@ -32,9 +32,9 @@
 const std = @import("std");
 const assay = @import("../../assay/assay.zig");
 const corpus = @import("../../corpus/tree/corpus.zig");
-const keep = @import("../face/gist/daemon/client/keep.zig");
+const keep = @import("../../exec/session/daemon/client/keep.zig");
 const paths = @import("../../corpus/scope/paths.zig");
-const serve = @import("../face/gist/daemon/serve/serve.zig");
+const serve = @import("../../exec/session/daemon/serve/serve.zig");
 
 /// Environment knobs that can change WHAT a verb prints. Anything that only
 /// changes how fast it prints it (`GIST_NO_PARALLEL`) or what lands on stderr

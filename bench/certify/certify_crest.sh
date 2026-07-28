@@ -5,7 +5,7 @@
 # (and every trigram-family peer) prunes 0% on literal-free class repetitions —
 # `[0-9a-f]{12}`, `[0-9]{6}` — the Layer A `regex-classcount` hole (cand%=100%).
 # The crest sieve closes it with a sound forced-class-run necessary condition
-# (`src/kernel/primitives/crest.zig`, proof in `research/crest/PROOF.md`).
+# (`src/kernel/math/crest.zig`, proof in `research/crest/PROOF.md`).
 #
 # `zig build crest` links the REAL engine, builds the production crest sidecar,
 # walks the real corpus, and is FAIL-CLOSED: `matched ⇒ ¬pruned` against the

@@ -17,8 +17,8 @@ doc_radar:
 The shell end of [`gist`](../src/surface/face/gist/README.md), the way
 [`editor/`](../editor/) is the Vim end. Nothing here is written by hand: every
 artifact is minted by `gist --generate` from the same flag table
-[`catalog.zig`](../src/surface/exec/cold/argv/catalog.zig) declares and
-[`grammar.zig`](../src/surface/exec/cold/argv/grammar.zig) dispatches argv on,
+[`catalog.zig`](../src/exec/cold/argv/catalog.zig) declares and
+[`grammar.zig`](../src/exec/cold/argv/grammar.zig) dispatches argv on,
 rendered by [`cli/primer/`](../src/surface/cli/primer/README.md). A flag cannot
 exist in the parser and be missing from a menu.
 

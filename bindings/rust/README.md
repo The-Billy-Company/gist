@@ -95,7 +95,7 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 (`gist::warm_eligible(&req)` is `false` for scoped roots, globs/types, context,
 or any rich flag), or a wire hiccup transparently falls back to the
 byte-identical cold subprocess. The wire protocol is the same one
-`src/surface/exec/session/conduit/protocol/protocol.zig` defines and the Zig
+`src/exec/session/conduit/protocol/protocol.zig` defines and the Zig
 CLI + Python clients speak, so all three frame-match against the one daemon.
 
 ## Find, then aggregate
@@ -147,7 +147,7 @@ let authored: Vec<_> = gist::rank("apperr.New", 20)?
 
 Each `Ranked` row carries the engine's own `def`/`use`/`gen` classification
 (`RankKind`) — read straight from `--rank`, **never reclassified in Rust**, so
-"what is generated" can't fork from the engine (`src/rank/signals.zig`). Ranking
+"what is generated" can't fork from the engine (`src/kernel/rank/signals.zig`). Ranking
 reads the persisted index, so it needs one built (`make install-gist`); with no
 index there is nothing to rank and the result is empty. The `limit` caps the rows
 (`0` = the engine default of 20).

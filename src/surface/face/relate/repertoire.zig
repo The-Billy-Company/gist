@@ -14,9 +14,9 @@ const manifest = @import("../../cli/manifest.zig");
 
 const pack = @import("pack.zig");
 const quote = @import("quote.zig");
-const probe = @import("probe.zig");
-const repeat = @import("repeat.zig");
-const attribute = @import("attribute.zig");
+const probe = @import("similar.zig");
+const repeat = @import("echoes.zig");
+const attribute = @import("patterns.zig");
 const lifecycle = @import("lifecycle.zig");
 
 const Verb = manifest.Verb;

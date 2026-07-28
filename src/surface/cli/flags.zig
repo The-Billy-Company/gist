@@ -7,11 +7,10 @@
 //! die` and no face forks the root-boundary rule.
 
 const std = @import("std");
-const cli_args = @import("../exec/cold/argv/args.zig");
 const corpus_mod = @import("../../corpus/tree/corpus.zig");
-const scope = @import("../../corpus/scope/glob.zig");
+const scope = @import("../../corpus/scope/filter.zig");
 
-const die = cli_args.die;
+const die = @import("outcome.zig").die;
 
 /// The value slot after a flag, or `die(msg)` when argv ends first.
 pub fn need(argv: []const []const u8, i: *usize, comptime msg: []const u8) []const u8 {

@@ -7,9 +7,9 @@
 //!      the worst (adversarial) case, examine every byte of that document — an
 //!      unread byte could be the match, or could break it (Knuth-Morris-Pratt
 //!      1977; Boyer-Moore 1977, Ω(n) worst-case reads). gist's fused byte-class
-//!      DFA (`src/kernel/match/regex/linear/dfa/dfa.zig`) touches each candidate byte **exactly
+//!      DFA (`src/kernel/regex/linear/dfa/dfa.zig`) touches each candidate byte **exactly
 //!      once** — a single forward pass, no memchr-then-rescan double traffic;
-//!      its SIMD literal path (`src/kernel/match/scan/simd.zig`) touches **≤** N (vector
+//!      its SIMD literal path (`src/kernel/scan/simd.zig`) touches **≤** N (vector
 //!      skips + early exit). This harness proves both structurally.
 //!
 //!   2. **Trigram-filter sublinearity.** Total work is sublinear in corpus size
@@ -47,7 +47,7 @@ const Regex = gist.regex.Regex;
 const Dfa = gist.regex_dfa.Dfa;
 const Dir = std.Io.Dir;
 const load = corpus_mod.load;
-const out_dir = corpus_mod.default_out_dir;
+const out_dir = gist.home.default_out_dir;
 
 const probes_mod = @import("probes");
 const Kind = probes_mod.Kind;

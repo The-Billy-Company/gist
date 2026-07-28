@@ -36,7 +36,6 @@
 const std = @import("std");
 const emit = @import("emit.zig");
 const outcome = @import("outcome.zig");
-const cli_args = @import("../exec/cold/argv/args.zig");
 const corpus_mod = @import("../../corpus/tree/corpus.zig");
 const charter = @import("../../corpus/scope/charter.zig");
 const assay = @import("../../assay/assay.zig");
@@ -44,7 +43,7 @@ const reprise = @import("reprise.zig");
 const beacon = @import("beacon.zig");
 const portal = @import("../../portal.zig");
 
-const oom = cli_args.oom;
+const oom = @import("outcome.zig").oom;
 
 /// A flag's default, typed so the manifest renders `8` / `0.25` / `false` /
 /// `"any"` / `null` as JSON rather than as prose about them.

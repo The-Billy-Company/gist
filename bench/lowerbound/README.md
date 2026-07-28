@@ -6,7 +6,7 @@ doc_radar:
       contains: ['.class = "literal-rare"', '.class = "regex-litalt"']
     - description: "the generated certificate cites the current production kernels"
       file: pkg/kernels/irregex/bench/lowerbound/lowerbound_report.py
-      contains: ["src/kernel/match/scan/simd.zig", "src/kernel/match/regex/linear/dfa/dfa.zig"]
+      contains: ["src/kernel/scan/simd.zig", "src/kernel/regex/linear/dfa/dfa.zig"]
 ---
 
 # gist/bench/lowerbound — Layer D (algorithmic lower bound)
@@ -53,13 +53,13 @@ not asserted:
    pattern occurs in a candidate document forces you, in the worst (adversarial)
    case, to examine every one of its bytes: an unread byte could _be_ the match,
    or could _break_ one — the adversary sets it after you commit. gist's fused
-   byte-class DFA (`src/kernel/match/regex/linear/dfa/dfa.zig`) reads each candidate
+   byte-class DFA (`src/kernel/regex/linear/dfa/dfa.zig`) reads each candidate
    byte **exactly once** — `passes ≡ 1.0000` for every DFA class — with none of
    the memchr-then-rescan _double_ byte-traffic a per-line matcher pays. The SIMD
-   literal path (`src/kernel/match/scan/simd.zig`) reads **≤ N** through vector
+   literal path (`src/kernel/scan/simd.zig`) reads **≤ N** through vector
    first/last-byte skips and early exit on the first hit. A **dense class**
    (`\w{3,8}`) is served in production by the SIMD class-run kernel
-   (`src/kernel/match/scan/classrun.zig`), which skips DFA construction entirely;
+   (`src/kernel/scan/classrun.zig`), which skips DFA construction entirely;
    Layer D certifies its floor against an independent one-pass DFA reference it
    force-builds for the same pattern, asserting `docMatch` agrees on **every**
    candidate document — so the class-run verdict is pinned to an exact-one-pass
@@ -114,7 +114,7 @@ paper over by weakening the assertion.
   Code Search Worked" (2012), <https://swtch.com/~rsc/regexp/regexp4.html>.**
   The trigram-index prefilter that makes whole-corpus search sublinear for
   selective patterns — gist's direct ancestor (see also `../README.md` and
-  `src/kernel/match/regex/linear/dfa/dfa.zig`, which cites Cox's linear-time NFA/DFA work). The `cand%`
+  `src/kernel/regex/linear/dfa/dfa.zig`, which cites Cox's linear-time NFA/DFA work). The `cand%`
   column is the empirical measure of this pruning.
 - gist's own [`../harness/probes.zig`](../harness/probes.zig) — the shared
   probe-class registry [`certify.zig`](../harness/certify.zig) (Layer A) also

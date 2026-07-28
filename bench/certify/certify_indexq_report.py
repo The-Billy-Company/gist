@@ -384,7 +384,7 @@ def render(
         (
             "> **What is disproven.** The two planners are not the same planner. csearch stops "
             "at 3-byte boundary trigrams and takes ONE window out of a class-punctuated run; "
-            "gist's conjunctive cover (`src/kernel/match/query/cover.zig`) keeps every "
+            "gist's conjunctive cover (`src/kernel/query/cover.zig`) keeps every "
             "mandatory run, reads `x?` as the finite set {ε, x} so a scheme factors into whole "
             "literals, and emits every sound clause so the **cost-ordered evaluator** — which "
             "knows real posting cardinalities — picks and declines. Soundness is the fixed "

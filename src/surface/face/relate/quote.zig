@@ -23,16 +23,15 @@
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const shelf_mod = @import("../../../corpus/index/codex/shelf.zig");
+const shelf_mod = @import("../../../corpus/index/shelf/shelf.zig");
 const outcome = @import("../../cli/outcome.zig");
 const lifecycle = @import("lifecycle.zig");
-const cli_args = @import("../../exec/cold/argv/args.zig");
 const assay = @import("../../../assay/assay.zig");
-const cento = @import("../../../corpus/index/codex/cento.zig");
+const cento = @import("../../../kernel/codex/cento.zig");
 const emit = @import("../../cli/emit.zig");
 
-const die = cli_args.die;
-const oom = cli_args.oom;
+const die = @import("../../cli/outcome.zig").die;
+const oom = @import("../../cli/outcome.zig").oom;
 
 const jsonStr = emit.jsonStr;
 

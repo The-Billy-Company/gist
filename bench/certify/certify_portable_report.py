@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gist certify — Layer H report (portability: the target matrix, executed).
 
-Reads the `portable.json` emitted by `bench/portable/portable.py run` and splices
+Reads the `portable.json` emitted by `bench/targets/portable.py run` and splices
 a self-contained **Layer H** section into CERTIFICATE.md between stable sentinel
 markers, idempotent across re-mints.
 
@@ -170,12 +170,12 @@ def render(d: dict) -> str:
         HEADER,
         "",
         (
-            "_The portability claim, measured rather than argued. `bench/portable/portable.py` "
+            "_The portability claim, measured rather than argued. `bench/targets/portable.py` "
             f"cross-compiles **{len(rows)} targets from this one machine** — a {host['machine']}-"
             f"{host['system']} host with **{host['cross_toolchains_installed']} cross toolchains "
             "installed** — and grades each by what it actually proved. `builds` means an artifact "
             "exists *and* its own ELF/Mach-O/PE header reports the promised architecture, width, and "
-            "endianness (`bench/portable/objfmt.py` reads the bytes, so a build that silently fell "
+            "endianness (`bench/targets/objfmt.py` reads the bytes, so a build that silently fell "
             "back to the host fails instead of passing). `runs` means that artifact executed on a "
             "machine of that architecture and answered a real query — including a PCRE2 lookbehind, "
             "which the linear engine cannot represent, so serving it proves the **vendored C** "
@@ -266,7 +266,7 @@ def render(d: dict) -> str:
             "both the live-scan and the indexed pass — through **Wine's** reimplementation of Win32, "
             "not through a Windows kernel. That is why those rows read `conforms *(wine)*` and are "
             "scored on their own rung strictly below `conforms`: the lane's ceiling is declared in "
-            "`bench/portable/matrix.py` and enforced by the scorer, so a translation-layer pass "
+            "`bench/targets/matrix.py` and enforced by the scorer, so a translation-layer pass "
             "cannot be rounded up no matter how clean its bytes are. **The unqualified claim "
             "\"gist's target matrix strictly dominates ripgrep's\" is therefore true at the "
             f"`builds` tier — {s['rg_covered_at_builds']}/{s['rg_declared']} declared triples plus "
@@ -328,8 +328,8 @@ def render(d: dict) -> str:
         ),
         "",
         (
-            "> Reproduce: `python3 bench/portable/portable.py run` (writes "
-            "`bench/portable/artifact/portable.json`; `status` reads it back, `selftest` checks the "
+            "> Reproduce: `python3 bench/targets/portable.py run` (writes "
+            "`bench/targets/artifact/portable.json`; `status` reads it back, `selftest` checks the "
             "probe slate against `probes.zig` offline). A row at `builds` either has **no execution "
             "lane on this host** — FreeBSD and NetBSD run no Linux container, Docker publishes no "
             "big-endian `linux/ppc64`, and Wine emulates Win32 rather than the CPU so an ARM64 PE "
@@ -461,7 +461,7 @@ def main() -> int:
     """CLI entry point."""
     ap = argparse.ArgumentParser(description="gist Layer H (portability) certificate report")
     ap.add_argument("--certificate", type=Path, required=True)
-    ap.add_argument("--json", type=Path, required=True, help="bench/portable/artifact/portable.json")
+    ap.add_argument("--json", type=Path, required=True, help="bench/targets/artifact/portable.json")
     ap.add_argument("--receipt", type=Path, default=None,
                     help="side-car evidence file (default: <certificate dir>/portable.json)")
     args = ap.parse_args()

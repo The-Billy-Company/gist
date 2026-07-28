@@ -17,7 +17,7 @@ doc_radar:
       file: pkg/kernels/irregex/src/surface/ffi/cursor.zig
       absent: ["std.process.exit", "@panic", "catch unreachable"]
     - description: "ADR-373 rung 1: the cold file-set walk the warm session reuses answers OOM with a value"
-      file: pkg/kernels/irregex/src/surface/exec/cold/quarry/walk.zig
+      file: pkg/kernels/irregex/src/exec/cold/quarry/walk.zig
       contains: ["pub fn defaultFileSetExtras", "Oom!FileSet"]
     - description: "ADR-373 rung 1: the ignore matcher's construction is fallible, not fatal"
       file: pkg/kernels/irregex/src/corpus/tree/ignore.zig
@@ -31,13 +31,13 @@ doc_radar:
 
 The package binding for non-Zig hosts. `session.zig` exposes
 `irregex_open` / `irregex_search` / `irregex_close` so a caller (the Python `cffi` transport in
-`bindings/python/irregex/_ffi.py`, or any C host) can hold one corpus warm **in its
+`bindings/python/irregex/runtime/native.py`, or any C host) can hold one corpus warm **in its
 own process** and stream match records over a callback — no subprocess, Unix
 socket, `stdout`, or `exit`.
 
 It is the in-process sibling of the socket-served resident daemon
-([`../face/gist/daemon/serve`](../face/gist/daemon/serve)) and draws on the same shared
-search core ([`../../kernel/match/query/query.zig`](../../kernel/match/query/query.zig)),
+([`../exec/session/daemon/serve`](../exec/session/daemon/serve)) and draws on the same shared
+search core ([`../../kernel/query/query.zig`](../../kernel/query/query.zig)),
 so an in-process answer is byte-identical to cold `gist --json` and to the UDS
 daemon.
 

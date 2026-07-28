@@ -27,10 +27,9 @@
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const frag = @import("../../../corpus/index/frag/frag.zig");
-const cli_args = @import("../../exec/cold/argv/args.zig");
 const candidates = @import("../../../kernel/compose/candidates.zig");
 const regions = @import("../../../kernel/compose/regions.zig");
-const patterns_mod = @import("../../../kernel/batch/patterns.zig");
+const patterns_mod = @import("../../../kernel/slate/patterns.zig");
 const echoes = @import("../../../kernel/kinship/cluster/echoes.zig");
 const sketch_mod = @import("../../../kernel/kinship/metric/sketch.zig");
 const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
@@ -41,8 +40,8 @@ const kinship = @import("kinship.zig");
 
 const Sketch = sketch_mod.Sketch;
 const Silhouette = silhouette_mod.Silhouette;
-const die = cli_args.die;
-const oom = cli_args.oom;
+const die = @import("../../cli/outcome.zig").die;
+const oom = @import("../../cli/outcome.zig").oom;
 
 /// What one row of the comparison table is.
 pub const Unit = enum {

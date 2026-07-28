@@ -11,7 +11,7 @@
 #
 #   relate similar one pass over a TEXT probe — persisted trigram codebook
 #                  nominates, then a bounded suffix-automaton cross-parse decides
-#                  (src/surface/exec/cold/engine/retrieval.zig)
+#                  (src/exec/retrieval/retrieval.zig)
 #   gist exact     the paraphrase as a literal — must find NOTHING (capability
 #                  line, not a timing lane)
 #   gist tokens    K single-token gist runs + awk count aggregation — today's

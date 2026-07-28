@@ -27,7 +27,7 @@ const pmu = @import("pmu"); // bench/harness/pmu.zig, wired as a module in build
 
 const corpus_mod = gist.corpus;
 const simd = gist.simd;
-const out_dir = corpus_mod.default_out_dir;
+const out_dir = gist.home.default_out_dir;
 const Span = gist.assay.Span; // package instrumentation floor: monotonic Span
 
 // 8×u64 = 64-byte logical vector (lowered to NEON 128-bit loads on aarch64);

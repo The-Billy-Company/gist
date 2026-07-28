@@ -1,10 +1,10 @@
 ---
 doc_radar:
   counts:
-    - description: "thin CLI face keeps its five command packages"
-      glob: pkg/kernels/irregex/src/surface/face/gist/*/
+    - description: "gist lifecycle verbs live flat in one verbs package (config · index · schema · status · codex)"
+      glob: pkg/kernels/irregex/src/surface/face/gist/verbs/*.zig
       equals: 5
-      unit: dirs
+      unit: files
   sentinels:
     - description: "entrypoint still exposes search, index, codex, status, and resident service"
       file: pkg/kernels/irregex/src/surface/face/gist/main.zig
@@ -15,7 +15,7 @@ doc_radar:
         - "const serve = gist.commands.serve;"
         - "const client = gist.commands.client;"
     - description: "the public flag surface still comes from one compatibility catalog"
-      file: pkg/kernels/irregex/src/surface/exec/cold/argv/catalog.zig
+      file: pkg/kernels/irregex/src/exec/cold/argv/catalog.zig
       contains:
         - "pub const flag_catalog"
         - "improvement"
@@ -431,7 +431,7 @@ invariant.
 To stop paying startup costs, `gist serve` holds corpus bytes and a trigram
 index behind a per-repository Unix socket. The CLI may auto-spawn it after an
 eligible cold miss. The request classifier deliberately keeps the warm surface
-small. This table is a readable snapshot; `surface/exec/session/answer/request.zig` remains
+small. This table is a readable snapshot; `exec/session/answer/request.zig` remains
 the executable authority:
 
 | warm-eligible CLI shape                    | stays authoritative-cold                                |
@@ -483,7 +483,8 @@ can count in O(pattern length), locate occurrences, recover the indexed corpus,
 and answer without opening source files. `gist codex count` is a proof of
 absence only when the shelf's freshness report is clean; the command reports
 files changed since the shelf was built rather than hiding that qualification.
-See [`corpus/index/codex`](../../../corpus/index/codex/README.md).
+See [`kernel/codex`](../../../kernel/codex/README.md) (math) and
+[`corpus/index/shelf`](../../../corpus/index/shelf/README.md) (persisted SHLF).
 
 ## Ranked search
 
@@ -641,7 +642,8 @@ graphs, and it is not an LSP, SCIP, or semantic-retrieval engine.
 (`count` / `find` / shelf status). The Shannon–Manzini / FM-index bibliography
 and novelty framing live with `relate` —
 [`research/relate/PRIOR_ART.md`](../../../../research/relate/PRIOR_ART.md) §
-Corpus quotation — and [`corpus/index/codex`](../../../corpus/index/codex/README.md).
+Corpus quotation — and [`kernel/codex`](../../../kernel/codex/README.md) /
+[`corpus/index/shelf`](../../../corpus/index/shelf/README.md).
 
 ### Outside the claim
 
@@ -666,7 +668,7 @@ harness, and the committed certificate are authoritative.
 
 - [`main.zig`](main.zig) dispatches the bare search and lifecycle verbs; the
   authoritative search implementation lives in
-  [`surface/exec/cold/`](../../exec/cold/).
+  [`exec/cold/`](../../exec/cold/).
 - [`daemon/`](daemon) owns UDS serving, client routing, auto-spawn, and cold
   fallback.
 - [`lifecycle/`](lifecycle) owns trigram-index and codex lifecycle commands.

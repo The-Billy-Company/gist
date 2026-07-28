@@ -4,13 +4,13 @@ doc_radar:
     - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
     - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
   sentinels:
-    - file: pkg/kernels/irregex/src/surface/exec/cold/engine/serial.zig
+    - file: pkg/kernels/irregex/src/exec/cold/engine/serial.zig
       contains: ["used purely to ELIDE reads", "never to change the file set"]
-    - file: pkg/kernels/irregex/src/kernel/match/regex/pcre2/literal.zig
+    - file: pkg/kernels/irregex/src/kernel/regex/pcre2/literal.zig
       contains: ["pub fn required"]
     - file: pkg/kernels/irregex/src/kernel/rank/signals.zig
       contains: ["pub fn declarationConfidence", "pub fn shapeFingerprint", "pub fn isGenerated"]
-    - file: pkg/kernels/irregex/src/kernel/primitives/crest.zig
+    - file: pkg/kernels/irregex/src/kernel/math/crest.zig
       contains: ["pub const Vector", "pub fn crest"]
     - file: pkg/kernels/irregex/contract/search_api.toml
       contains:
@@ -30,9 +30,9 @@ doc_radar:
 # Gist — exact code search built for agents
 
 **Status:** shipped product + measured evidence. CLI face:
-`src/surface/face/gist/`. Authoritative cold path: `src/surface/exec/cold/`. Public
+`src/surface/face/gist/`. Authoritative cold path: `src/exec/cold/`. Public
 compatibility contract: `gist --schema` (rendered from
-`src/surface/exec/cold/argv/args.zig` `flag_catalog`). Prior art:
+`src/exec/cold/argv/args.zig` `flag_catalog`). Prior art:
 `PRIOR_ART.md`; evidence inventory: `TESTING.md`. Novel crest math:
 [`../crest/PROOF.md`](../crest/PROOF.md).
 

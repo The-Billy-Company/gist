@@ -5,7 +5,7 @@ doc_radar:
     - pkg/kernels/irregex/contract/search_api.toml
     - pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
   sentinels:
-    - file: pkg/kernels/irregex/src/surface/exec/cold/argv/catalog.zig
+    - file: pkg/kernels/irregex/src/exec/cold/argv/catalog.zig
       contains:
         - "pub const flag_catalog"
         - "unsupported_fail_loud"
@@ -51,10 +51,10 @@ stand in for novelty and benchmark speed does not stand in for correctness.
 | where                                                    | what                                                                           |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `src/surface/face/gist/`                                 | the product CLI face (search, index, status, serve, codex)                     |
-| `src/surface/exec/cold/`                                 | authoritative cold path: argv → walk → index elision → verify → emit           |
+| `src/exec/cold/`                                 | authoritative cold path: argv → walk → index elision → verify → emit           |
 | `src/corpus/index/trigrams/` + `src/corpus/index/crest/` | candidate filters (trigrams + crest sidecar)                                   |
 | `src/kernel/rank/`                                       | definition-biased `--rank` view                                                |
-| `src/surface/exec/session/`                              | fail-open resident UDS session                                                 |
+| `src/exec/session/`                              | fail-open resident UDS session                                                 |
 | `bench/gates/` + `bench/rgsuite/` + `bench/certify/`     | correctness-before-speed gates, mined rg parity, Dominance-and-Fit Certificate |
 
 Novel math that rides inside gist (forced-class-run pruning) is documented

@@ -98,7 +98,7 @@ against the following:
   ~12.5 ms; the timestamps are the rest. There is no second traversal to remove.
 - **It is at the platform floor.** Widening the pool makes it worse, not better
   (measured 8 workers 57 ms · 16 workers 61 ms · 24 workers 120 ms) — VFS
-  contention, the same ceiling `tree/journal.zig`'s header records.
+  contention, the same ceiling `fresh/journal.zig`'s header records.
 - **The journal cannot rescue the cold path _here_.** FSEvents historical replay
   is exact-or-refuse and would let the walk drop to names-only, but on a
   ~10-agent tree it delivered 246 entries before hitting its 75 ms budget with

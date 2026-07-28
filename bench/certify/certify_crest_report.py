@@ -6,7 +6,7 @@ Reads the `crest.csv` emitted by `zig build crest` (the production proof harness
 CERTIFICATE.md between stable sentinel markers, idempotent across re-mints.
 
 Layer E is the one place gist's index math is new rather than borrowed: the
-crest sieve (`src/kernel/primitives/crest.zig`, theorem in
+crest sieve (`src/kernel/math/crest.zig`, theorem in
 `research/crest/PROOF.md`) prunes the literal-free class-repetition patterns
 (`[0-9a-f]{12}`, `[0-9]{6}`) that every trigram-family index concedes — exactly
 the `regex-classcount` row where Layer A measures cand% = 100% (the whole corpus
@@ -70,7 +70,7 @@ def render(rows: list[dict], files: str, mib: str, machine: str, zig: str) -> st
         "",
         (
             "_The one place gist's index math is new rather than borrowed: the **crest "
-            "sieve** (`src/kernel/primitives/crest.zig`, theorem in `research/crest/PROOF.md`). "
+            "sieve** (`src/kernel/math/crest.zig`, theorem in `research/crest/PROOF.md`). "
             "`zig build crest` links the **real** engine, builds the production crest sidecar, "
             "and walks the real corpus. It is **fail-closed**: for every file "
             "`matched ⇒ ¬pruned` against the production `Regex.docMatch`, over the fixed slate "

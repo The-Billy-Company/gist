@@ -9,7 +9,7 @@ a filter. This layer certifies three things, each from its own measured side-car
 
 1. **the substring (sliver) tier** — `zig build scale` → `scale_tiers.tsv`, in Layer
    D's own unit (candidate BYTES delivered to verify), over the certificate corpus;
-2. **scale** — `bench/scale/scale_race.py` → `scale_race.tsv` / `scale_build.tsv` /
+2. **scale** — `bench/sliver/scale_race.py` → `scale_race.tsv` / `scale_build.tsv` /
    `scale_resident.tsv` / `scale_truth.tsv`, racing gist against zoekt and csearch
    over a multi-GB corpus of shallow clones (linux, llvm, go, rust);
 3. **the positional tier, measured and DECLINED** — `positional_pareto.tsv`, the
@@ -608,7 +608,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="gist Layer J (index tiers at scale) report")
     ap.add_argument("--certificate", type=Path, required=True)
     ap.add_argument("--tsv", type=Path, required=True, help="scale_tiers.tsv (`zig build scale`)")
-    ap.add_argument("--race", type=Path, help="scale_race.tsv from bench/scale/scale_race.py")
+    ap.add_argument("--race", type=Path, help="scale_race.tsv from bench/sliver/scale_race.py")
     ap.add_argument("--build", type=Path, help="scale_build.tsv (index build cost)")
     ap.add_argument("--resident", type=Path, help="scale_resident.tsv (query-time peak RSS)")
     ap.add_argument("--pareto", type=Path, help="positional_pareto.tsv (size/benefit surface)")

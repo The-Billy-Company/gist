@@ -61,19 +61,18 @@
 
 const std = @import("std");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const cli_args = @import("../../exec/cold/argv/args.zig");
 const assay = @import("../../../assay/assay.zig");
 const coverage = @import("../../../kernel/kinship/recall/coverage.zig");
 const compose = @import("../../../kernel/compose/context.zig");
-const retrieval = @import("../../exec/cold/engine/retrieval.zig");
+const retrieval = @import("../../../exec/retrieval/retrieval.zig");
 const options = @import("options.zig");
 const units = @import("units.zig");
 const flags = @import("../../cli/flags.zig");
 const emit = @import("../../cli/emit.zig");
 const grade = @import("../../cli/grade.zig");
 
-const die = cli_args.die;
-const oom = cli_args.oom;
+const die = @import("../../cli/outcome.zig").die;
+const oom = @import("../../cli/outcome.zig").oom;
 
 const usage = "usage: relate pack <text> [--matching PAT]... [--match any|all] [-F] [-i] [--min-grade G] [--top N] [--json] [ROOT...]\n";
 

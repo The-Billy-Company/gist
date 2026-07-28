@@ -117,7 +117,7 @@ def render(res: Path, meta: dict, csv_out: Path) -> str:
             "returns **nothing** — the sentence exists in no file — while relate ranks the true "
             "source first. This is not gist losing; it is a different question, and relate is the "
             "only face that answers it. Driver + corpus: `bench/certify/certify_relate.sh`; engine: "
-            "`src/surface/exec/cold/engine/retrieval.zig`."
+            "`src/exec/retrieval/retrieval.zig`."
         ),
         END,
     ]

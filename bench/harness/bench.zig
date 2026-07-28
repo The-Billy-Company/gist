@@ -68,7 +68,7 @@ const regex_templates = [_][]const u8{
 const corpus_mod = gist.corpus;
 const Corpus = corpus_mod.Corpus;
 const load = corpus_mod.load;
-const out_dir = corpus_mod.default_out_dir;
+const out_dir = gist.home.default_out_dir;
 
 // Fixed adversarial slate: rare symbol, dotted ident, trailing-space keyword,
 // 3-byte floor, punctuation grams, guaranteed-absent negatives, a 2-byte needle

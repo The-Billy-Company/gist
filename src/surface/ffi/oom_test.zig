@@ -24,11 +24,11 @@
 const std = @import("std");
 const contract = @import("contract.zig");
 const session = @import("session.zig");
-const api = @import("../../api.zig");
+const api = @import("../api.zig");
 const fault = @import("../../fault.zig");
 const ignore = @import("../../corpus/tree/ignore.zig");
 const loadpar = @import("../../corpus/tree/loadpar.zig");
-const cold = @import("../exec/cold/engine/serial.zig");
+const cold = @import("../../exec/cold/engine/serial.zig");
 const assay = @import("../../assay/assay.zig");
 
 const Dir = std.Io.Dir;

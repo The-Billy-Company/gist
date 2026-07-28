@@ -12,7 +12,7 @@ doc_radar:
 # bench/harness
 
 The native `gist-bench` Zig binary (`build.zig`'s `bench_exe`) — a separate
-executable from the production `gist` CLI (`src/commands/cli/main.zig`),
+executable from the production `gist` CLI (`src/surface/face/gist/main.zig`),
 dispatching three subcommands: `bench`, `verify`, and `certify`.
 
 | File          | Role                                                                                                                                                                                |

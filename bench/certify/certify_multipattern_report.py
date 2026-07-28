@@ -284,7 +284,7 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
             "portable fork **Vectorscan**, NEON/SVE) is the reference for simultaneous "
             "multi-pattern matching with expression-ID attribution: N expressions into one "
             "matcher, bytes walked once, every match reported with which pattern produced it. "
-            "gist's surface is `PatternSet` (`src/kernel/batch/`), shipped as "
+            "gist's surface is `PatternSet` (`src/kernel/slate/`), shipped as "
             "`relate patterns -e P -e P …`. This layer does not claim dominance — it claims a "
             "**boundary**, and publishes the losing side as plainly as the winning one._"
         ),

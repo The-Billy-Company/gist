@@ -23,7 +23,7 @@ doc_radar:
 Thin argv faces over the shared floor. Every binary classifies flags, picks a
 verb, and shapes stdout/stderr — they do **not** own matching, walking, or
 index formats. If a decision changes what matches, it belongs under
-`kernel/`, `corpus/`, or `surface/exec/`.
+`kernel/`, `corpus/`, or `exec/`.
 
 | Face                  | Binary    | Question it answers                                                                                                                                                                                                                                                   |
 | --------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -48,7 +48,7 @@ drift the cold/warm/FFI faces apart the moment one face forks them.
 - Unknown flags fail loud (exit 2), never look like a clean empty hit.
 - Results on stdout; diagnostics / coaching / timing on stderr.
 - Faces stay thin on purpose: cold search re-exports live under
-  `surface/exec/cold/`; warm work lives under `surface/exec/session/`.
+  `exec/cold/`; warm work lives under `exec/session/`.
 - Contract authority for request options and relate verbs:
   [`../../../contract/search_api.toml`](../../../contract/search_api.toml).
 

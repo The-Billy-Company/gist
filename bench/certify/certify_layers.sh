@@ -125,7 +125,7 @@ python3 "${HERE}/../lowerbound/lowerbound_report.py" \
 # violation exits non-zero and aborts the mint; never weaken the sieve to go green.
 note "Layer E — crest sieve production proof (fail-closed)…"
 (cd "${REPO}" && "${CREST}") \
-  || die "crest proof failed (soundness violation) — fix the calculus in src/kernel/primitives/crest.zig, never weaken the sieve"
+  || die "crest proof failed (soundness violation) — fix the calculus in src/kernel/math/crest.zig, never weaken the sieve"
 [[ -s "${CREST_RAW}" ]] || die "crest proof did not emit ${CREST_RAW}"
 cp -f "${CREST_RAW}" "${OUT}/crest.csv"
 if crest_machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else crest_machine="$(uname -m)"; fi

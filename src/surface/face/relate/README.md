@@ -317,9 +317,10 @@ sorting, grading, and the closing verdict are shared through
 only its question. The engines live under
 [`src/kernel/kinship/`](../../../kernel/kinship/README.md)
 (sketch · silhouette · concepts · lexicon · zipper),
-[`src/kernel/batch/`](../../../kernel/batch/README.md)
-(patterns · loom), [`src/corpus/index/codex/`](../../../corpus/index/codex/README.md) (the
-FM-index shelf behind `quote`), and
+[`src/kernel/slate/`](../../../kernel/slate/README.md)
+(patterns · loom), [`src/kernel/codex/`](../../../kernel/codex/README.md) (FM
+math) + [`src/corpus/index/shelf/`](../../../corpus/index/shelf/README.md) (the
+persisted SHLF behind `quote`), and
 [`src/corpus/index/atlas/`](../../../corpus/index/atlas/README.md) (the persisted kinship
 atlas behind the warm verbs).
 
@@ -407,7 +408,7 @@ under the name that now carries it:
   scale table—an **88–94×** separation. Each phrase is attributed to an
   exemplar file, with query work linear in text length
   (`zig build codex-scale`, tables in
-  [`src/corpus/index/codex/README.md`](../../../corpus/index/codex/README.md)).
+  [`src/kernel/codex/README.md`](../../../kernel/codex/README.md)).
 - **the `recall` channel** is the retrieval shape of the same idea, and it lives
   inside `similar` because that is the same request with a query for a probe:
   rank files by how cheaply each would describe the text, two-stage so the exact

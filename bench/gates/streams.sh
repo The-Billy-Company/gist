@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # gist output-stream contract — the permanent guard for the agent-friendly
-# unified engine (`surface/exec/cold/engine/serial.zig` — the sole search engine since the
+# unified engine (`exec/cold/engine/serial.zig` — the sole search engine since the
 # search verb merged into it): query RESULTS (match lines / paths / ranked
 # rows) belong on **stdout**; nothing else does.
 #

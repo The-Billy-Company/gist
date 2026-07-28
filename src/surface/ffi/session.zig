@@ -4,8 +4,8 @@
 //! or any C caller) hold a gist corpus WARM in its own process and stream match
 //! records over a callback — no subprocess, no Unix socket, no `stdout`, no
 //! `exit`. It is the in-process face of the same warm engine the resident
-//! daemon (`surface/exec/session/warm/resident.zig`) serves over a socket, and it draws on the
-//! same shared search core (`kernel/match/query/query.zig`), so an in-process answer is
+//! daemon (`exec/session/warm/resident.zig`) serves over a socket, and it draws on the
+//! same shared search core (`kernel/query/query.zig`), so an in-process answer is
 //! byte-identical to the cold `gist --json` stream and to the UDS daemon.
 //!
 //! ## Why this is the rung the C ABI graduated on
@@ -30,8 +30,8 @@
 const std = @import("std");
 const contract = @import("contract.zig");
 const Relay = @import("relay.zig").Relay;
-const resident = @import("../exec/session/warm/resident.zig");
-const request = @import("../exec/session/answer/request.zig");
+const resident = @import("../../exec/session/warm/resident.zig");
+const request = @import("../../exec/session/answer/request.zig");
 const assay = @import("../../assay/assay.zig");
 
 /// The FFI allocates through the C allocator so a host that already owns the C

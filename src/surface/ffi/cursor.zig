@@ -22,7 +22,7 @@
 //! exactly the discipline the callback path already documents.
 
 const std = @import("std");
-const api = @import("../../api.zig");
+const api = @import("../api.zig");
 const contract = @import("contract.zig");
 
 /// Share the host's C heap so a boxed handle frees without a Zig GPA.

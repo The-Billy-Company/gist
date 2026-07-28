@@ -47,7 +47,7 @@ const simd_probe = @import("probes/simd_contains.zig");
 const dfa_probe = @import("probes/dfa_step.zig");
 
 const Regex = gist.regex.Regex;
-const out_dir = gist.corpus.default_out_dir;
+const out_dir = gist.home.default_out_dir;
 const Span = gist.assay.Span; // package instrumentation floor: monotonic Span
 
 // Best-of-N: interference from coworking agents on this shared box only ever

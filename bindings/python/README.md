@@ -132,7 +132,7 @@ authored = [r for r in irregex.rank("apperr.New") if not r.generated]  # skip co
 
 Each `Ranked` row carries the engine's own `def`/`use`/`gen` classification
 (`RankKind`) — read straight from `--rank`, **never reclassified in Python**, so
-"what is generated" can't fork from the engine (`src/rank/signals.zig`). Ranking
+"what is generated" can't fork from the engine (`src/kernel/rank/signals.zig`). Ranking
 uses the persisted index when available and live-ranks the searched files when
 it is absent or disabled. `limit` caps the rows (default 20).
 
@@ -376,7 +376,7 @@ It is **fail-open by construction**: no daemon listening, an ineligible request
 any rich flag), or a wire hiccup transparently falls back to the byte-identical
 cold subprocess — the daemon is a pure accelerator, never a new failure mode.
 The wire protocol is the same one
-`src/surface/exec/session/conduit/protocol/protocol.zig` defines and the Zig
+`src/exec/session/conduit/protocol/protocol.zig` defines and the Zig
 CLI + Rust clients speak, so all three frame-match against the one daemon.
 `refresh_generation()` reads the daemon's current three-part generation; a
 reconnect, daemon restart, or index publication is visible through

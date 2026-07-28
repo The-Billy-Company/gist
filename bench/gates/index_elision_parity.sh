@@ -3,7 +3,7 @@
 # safety claim: the persisted trigram index is an ACCELERATION structure only,
 # never a semantic one. `gist <pattern>` uses the index solely to elide *reading*
 # files the live walk already found but that provably can't match (see
-# `src/surface/exec/cold/engine/serial.zig` `IndexSkip`); the walk stays the sole
+# `src/exec/cold/engine/serial.zig` `IndexSkip`); the walk stays the sole
 # authority on the file set, ignore semantics, and per-file output. So for every
 # query, the index-accelerated run MUST have the same byte-exact line multiset as
 # `--no-index` (a full live read of every walked file). The parallel engine

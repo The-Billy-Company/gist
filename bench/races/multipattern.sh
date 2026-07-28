@@ -5,7 +5,7 @@
 # fork **Vectorscan**, NEON/SVE) was built for and is the reference on: compile N
 # expressions into one matcher, walk bytes once, and report WHICH expression hit
 # — expression-ID attribution at throughput. gist's surface for it is
-# `PatternSet` (`src/kernel/batch/`), shipped as `relate patterns -e P -e P …`.
+# `PatternSet` (`src/kernel/slate/`), shipped as `relate patterns -e P -e P …`.
 #
 # TWO RACES, because there are two questions and only one of them is the user's:
 #
