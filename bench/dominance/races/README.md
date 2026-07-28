@@ -82,8 +82,39 @@ conformance lanes. One line wires it (the parent owns `certify_layers.sh`; this
 is the invocation it needs):
 
 ```bash
-python3 "${HERE}/certify_scanner_report.py" "${COMPETE_DIR}/scanner" \
+python3 bench/certificate/report/scanner.py "${COMPETE_DIR}/scanner" \
   --certificate "${CERT}" --csv "${ART}/scanner.csv" \
-  --conformance "${COMPETE_DIR}/surface.json" --mined "${HERE}/../rgsuite/results.json" \
-  --fuzz "${COMPETE_DIR}/fuzz.json" --conformance-baseline 100.0
+  --conformance "${COMPETE_DIR}/surface.json" \
+  --mined bench/conformance/rgsuite/results.json \
+  --fuzz "${COMPETE_DIR}/fuzz.json" \
+  --conformance-baseline "${ART}/scanner_conformance.json" \
+  --fuzz-baseline bench/conformance/rgsuite/fuzz_baseline.json
 ```
+
+`--fuzz` is **mandatory**. It was optional while any divergence was an outright
+refusal, and those two rules together left "omit the lane" as the only way a
+real run could mint — the certificate published two 100% figures and printed the
+fuzz command in its own reproduce block without ever carrying that command's
+result. The residual is now reportable and ratcheted shrink-only per class
+(`--fuzz-baseline`), so the honest outcome and the mintable one coincide.
+
+The two halves of Layer I age at very different rates: a flag surface moves
+whenever gist catalogues an improvement (minutes to re-probe), while the timing
+table needs a quiescent machine. So conformance can be re-verified on its own,
+and the timed table is left exactly as minted — re-rendering it from a noisier
+race to move a flag count would trade a clean measurement for a worse one:
+
+```bash
+python3 bench/conformance/rgsuite/surface.py --json "${COMPETE_DIR}/surface.json"
+python3 bench/certificate/report/scanner.py --conformance-only \
+  --certificate "${CERT}" --conformance "${COMPETE_DIR}/surface.json" \
+  --mined bench/conformance/rgsuite/results.json \
+  --fuzz "${COMPETE_DIR}/fuzz.json" \
+  --fuzz-baseline bench/conformance/rgsuite/fuzz_baseline.json
+```
+
+It fails closed on the same evidence the full mint does (any divergence,
+rejection, unprobed value flag, failing undo pair, mined FAIL, a conformance
+percentage under the committed floor, or a fuzz residual that grew in total or
+in any one class — or that holds a class the baseline does not name) and refuses
+outright if no timing table has been minted for it to sit under.

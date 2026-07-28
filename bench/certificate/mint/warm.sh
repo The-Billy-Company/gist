@@ -47,8 +47,8 @@
 # (it calls this script after the cold race); rebuilds the gist bin/index if missing.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../races/_compete.sh
-source "${HERE}/../races/_compete.sh"
+# shellcheck source=../../dominance/races/field.sh
+source "${HERE}/../../dominance/races/field.sh"
 need_hyperfine
 
 RUNS="${RUNS:-30}"
@@ -218,7 +218,7 @@ EOF
 
 echo
 echo "computing bootstrap-CI medians + Mann-Whitney dominance (warm gist vs rg)…"
-python3 "${HERE}/certify_warm_report.py" "${WORK}" \
+python3 "${HERE}/../report/warm.py" "${WORK}" \
   --certificate "${CERT}" \
   --csv "${WARM_CSV}" \
   --order "${WORK}/order.tsv" \

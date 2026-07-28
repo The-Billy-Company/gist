@@ -34,8 +34,8 @@
 # Assumes certify.sh already built the gist index this run (it calls this after warm).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../races/_compete.sh
-source "${HERE}/../races/_compete.sh"
+# shellcheck source=../../dominance/races/field.sh
+source "${HERE}/../../dominance/races/field.sh"
 need_hyperfine
 command -v rg > /dev/null || {
   echo "rank lane needs ripgrep (brew install ripgrep)" >&2
@@ -145,7 +145,7 @@ EOF
 
 echo
 echo "checking set-equality + rank invariants + dominance…"
-python3 "${HERE}/certify_rank_report.py" "${WORK}" \
+python3 "${HERE}/../report/rank.py" "${WORK}" \
   --certificate "${CERT}" \
   --csv "${RANK_CSV}" \
   --probes "${WORK}/probes.tsv" \

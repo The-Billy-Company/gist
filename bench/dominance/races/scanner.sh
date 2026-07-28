@@ -42,8 +42,8 @@
 # Consumed by: bench/certify/certify_scanner_report.py (Layer I).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=_compete.sh
-source "${HERE}/_compete.sh"
+# shellcheck source=field.sh
+source "${HERE}/field.sh"
 
 RUNS="${RUNS:-15}"
 WARMUP="${WARMUP:-2}"

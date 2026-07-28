@@ -1,9 +1,9 @@
 <!--
 doc_radar:
   sentinels:
-    - file: pkg/kernels/irregex/bench/session/session_baseline.json
+    - file: pkg/kernels/irregex/bench/dominance/session/session_baseline.json
       contains: ["armed_geomean_floor"]
-    - file: pkg/kernels/irregex/bench/session/gate_session.py
+    - file: pkg/kernels/irregex/bench/dominance/session/gate_session.py
       contains: ["--committed", "--live", "report-only"]
 -->
 

@@ -31,7 +31,7 @@ import tomllib
 
 
 HERE = Path(__file__).resolve().parent
-KERNEL = HERE.parents[1]
+KERNEL = HERE.parents[2]
 REPO = KERNEL.parents[2]
 CONTRACT = KERNEL / "contract" / "performance_evidence.toml"
 ARTIFACT = HERE / "artifact"

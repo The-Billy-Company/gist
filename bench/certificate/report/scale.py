@@ -256,7 +256,7 @@ def _race_section(
             "agent-context output budget cannot clip a repo-wide result and flatter its own "
             "timing, and every engine answers in files-with-matches mode, the one output shape "
             "all three share. Medians, bootstrap CIs and the Mann-Whitney verdict come from "
-            "`certify_stats.py`; nothing statistical is reimplemented._"
+            "`stats.py`; nothing statistical is reimplemented._"
         ),
         "",
     ]

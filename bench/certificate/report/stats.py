@@ -297,7 +297,7 @@ def main() -> int:
     rng = random.Random(SEED)
     results = collect(args.results_dir, order)
     if not results:
-        print("certify_stats: no gist results found — did certify.sh run hyperfine?")
+        print("stats: no gist results found — did certify.sh run hyperfine?")
         return 1
 
     macro = render(results, meta, rng)

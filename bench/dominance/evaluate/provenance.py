@@ -28,7 +28,7 @@ import re
 import subprocess
 
 
-KERNEL = Path(__file__).resolve().parents[2]  # bench/evaluate/ -> irregex root
+KERNEL = Path(__file__).resolve().parents[3]  # bench/dominance/evaluate/ -> irregex root
 REPO = KERNEL.parents[2]
 
 # Machine-key contract (mirrors performance_evidence.toml [provenance].machine_keys).

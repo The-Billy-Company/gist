@@ -50,7 +50,7 @@ export GIST_UNCAP=1
 
 # ── locations ────────────────────────────────────────────────────────────────
 COMPETE_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL="$(cd "${COMPETE_HERE}/../.." && pwd)" # races/ → bench/ → gist root
+KERNEL="$(cd "${COMPETE_HERE}/../../.." && pwd)" # races/ → dominance/ → bench/ → gist root
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
 # Corpus base: the tree every tool actually SEARCHES. Defaults to the repo, but the
 # evaluator points it at an immutable copy-on-write snapshot (GIST_CORPUS_ROOT) so a

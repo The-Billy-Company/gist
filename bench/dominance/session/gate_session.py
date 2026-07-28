@@ -42,7 +42,7 @@ import subprocess
 
 
 HERE = Path(__file__).resolve().parent
-KERNEL = HERE.parents[1]
+KERNEL = HERE.parents[2]
 MACRO = HERE / "session_macro.csv"
 META = HERE / "session_meta.json"
 BASELINE = HERE / "session_baseline.json"

@@ -9,7 +9,7 @@
 # standard — never inventing cycles when the PMU is unavailable.
 #
 # Usage (from repo root or anywhere):
-#   bash pkg/kernels/irregex/bench/certify/certify_layers.sh
+#   bash pkg/kernels/irregex/bench/certificate/mint/splice.sh
 #
 # Env:
 #   CERT_SUDO=auto|1|0   auto (default): use `sudo -n` when it works;
@@ -19,7 +19,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL="$(cd "${HERE}/../.." && pwd)"
+KERNEL="$(cd "${HERE}/../../.." && pwd)"
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
 OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
 CERT="${OUT}/CERTIFICATE.md"
@@ -96,7 +96,7 @@ fi
 note "Layer B — portcert (static µarch + B′ splice)…"
 llvm_bin="$(brew --prefix llvm 2> /dev/null || true)"
 [[ -n "${llvm_bin}" && -d "${llvm_bin}/bin" ]] && PATH="${llvm_bin}/bin:${PATH:-}"
-bash "${HERE}/../portcert/portcert.sh" || note "portcert skipped/degraded (see above)"
+bash "${HERE}/../../bounds/port/mca.sh" || note "portcert skipped/degraded (see above)"
 
 # Layer C — STREAM ceiling (+ optional root for measured clock)
 set +e
@@ -106,7 +106,7 @@ set -e
 if [[ "${root_rc}" -ne 0 ]]; then
   (cd "${REPO}" && "${ROOFLINE}") || die "gist-roofline failed"
 fi
-python3 "${HERE}/../roofline/roofline_report.py" \
+python3 "${HERE}/../../bounds/roofline/report.py" \
   --out-dir "${OUT}" \
   --certificate "${CERT}" \
   --portcert "${OUT}/portcert.json" \
@@ -115,7 +115,7 @@ python3 "${HERE}/../roofline/roofline_report.py" \
 
 # Layer D — algorithmic floor
 (cd "${REPO}" && "${LOWERBOUND}") || die "gist-lowerbound failed"
-python3 "${HERE}/../lowerbound/lowerbound_report.py" \
+python3 "${HERE}/../../bounds/lowerbound/report.py" \
   --certificate "${CERT}" \
   --csv "${OUT}/lowerbound.csv" \
   || die "lowerbound_report.py failed"
@@ -130,7 +130,7 @@ note "Layer E — crest sieve production proof (fail-closed)…"
 cp -f "${CREST_RAW}" "${OUT}/crest.csv"
 if crest_machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else crest_machine="$(uname -m)"; fi
 zig_version="$(cd "${KERNEL}" && zig version)" || die "zig version unavailable"
-python3 "${HERE}/certify_crest_report.py" \
+python3 "${HERE}/../report/crest.py" \
   --certificate "${CERT}" \
   --csv "${OUT}/crest.csv" \
   --machine "${crest_machine}" \
@@ -144,23 +144,23 @@ note "Layer F — codex self-index proof (fail-closed)…"
 CODEX_WORK="${OUT}/codex"
 rm -rf "${CODEX_WORK}"
 CODEX_OUT="${CODEX_WORK}" CODEX_BIN="${CODEX_SCALE}" \
-  bash "${HERE}/../codex/race.sh" "${CODEX_SIZES:-1,4,16}" \
+  bash "${HERE}/../../bounds/codex/race.sh" "${CODEX_SIZES:-1,4,16}" \
   || die "codex-scale harness failed (correctness violation) — fix src/corpus/index/codex, never weaken the oracle"
-python3 "${HERE}/certify_codex_report.py" \
+python3 "${HERE}/../report/codex.py" \
   --certificate "${CERT}" \
   --scale "${CODEX_WORK}/scale.jsonl" \
   --compressors "${CODEX_WORK}/compressors.jsonl" \
   --csv "${OUT}/codex.csv" \
   --machine "${crest_machine}" \
   --zig "${zig_version}" \
-  || die "certify_codex_report.py failed (Layer F invariant violated)"
+  || die "report/codex.py failed (Layer F invariant violated)"
 
-# Completeness gate (layers only — full artifact check stays with certify.sh).
+# Completeness gate (layers only — full artifact check stays with mint.sh).
 # The header list comes from the shared roster (`layers.py`) that the ledger and
 # the reproducibility gate read, so a new layer cannot be spliced here and stay
 # invisible to them. The --rank and relate headers are minted by certify.sh, not
 # this script, so they are excluded from a layers-only run.
-layer_headers="$(python3 "${HERE}/layers.py" headers)" || die "layers.py headers failed"
+layer_headers="$(python3 "${HERE}/../guard/layers.py" headers)" || die "layers.py headers failed"
 missing=0
 while IFS= read -r hdr; do
   [[ -n "${hdr}" ]] || continue
@@ -181,7 +181,7 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   mkdir -p "${pub}/raw"
   # Bundle-wide files first, then every layer side-car the shared roster names —
   # so a new layer publishes its receipt without a second list to remember.
-  layer_sidecars="$(python3 "${HERE}/layers.py" sidecars)" || die "layers.py sidecars failed"
+  layer_sidecars="$(python3 "${HERE}/../guard/layers.py" sidecars)" || die "layers.py sidecars failed"
   mapfile -t sidecars <<< "${layer_sidecars}"
   for f in CERTIFICATE.md certify.csv certify_macro.csv machine.json \
     tool-versions.txt corpus-manifest.tsv command-log.txt index-sizes.json \
@@ -199,7 +199,7 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   # A layers-only re-splice still rewrites the tracked certificate, so it is a
   # mint like any other and gets a ledger row — that is how a lane discovers a
   # layer went missing before the docs pinned to it start failing.
-  python3 "${HERE}/ledger.py" record --bundle "${pub}" --note "layers-only B–F re-splice" || die "ledger record failed"
+  python3 "${HERE}/../ledger/ledger.py" record --bundle "${pub}" --note "layers-only B–F re-splice" || die "ledger record failed"
 fi
 
 note "Layers B/B′/C/D/E/F spliced into ${CERT}"

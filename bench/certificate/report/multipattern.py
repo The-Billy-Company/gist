@@ -34,7 +34,7 @@ Fail-closed, meaning before speed — any of these refuses the splice:
                    (gist over the stream scanner) must be a real win or the mint
                    aborts.
 
-Statistics come from `certify_stats.py` (medians, bootstrap CI, tie-corrected
+Statistics come from `stats.py` (medians, bootstrap CI, tie-corrected
 Mann-Whitney) — this file computes none of its own.
 
 stdlib only.
@@ -51,7 +51,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from certify_stats import ALPHA, dominance, load_times_ms, median_ci  # noqa: E402
+from stats import ALPHA, dominance, load_times_ms, median_ci  # noqa: E402
 
 START = "<!-- MULTIPATTERN-LAYER-START -->"
 END = "<!-- MULTIPATTERN-LAYER-END -->"
@@ -204,7 +204,7 @@ def check_fail_closed(cells: list[Cell]) -> None:
 
 
 def races(raw: Path, rng: random.Random) -> tuple[dict[str, tuple[float, float, float]], dict[str, object]]:
-    """Arm-2 medians+CI per tool, and gist-vs-each verdicts from `certify_stats`."""
+    """Arm-2 medians+CI per tool, and gist-vs-each verdicts from `stats`."""
     times = {}
     for tool, _ in E2E + E2E_BROAD:
         js = raw / f"e2e-{tool}.json"
@@ -261,8 +261,11 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
             if tool not in stats:
                 continue
             med, lo, hi = stats[tool]
-            v = verdicts.get(tool)
-            note = "baseline" if tool == "gist" else f"{v.verdict} p={v.p:.3g}"  # type: ignore[union-attr]
+            if tool == "gist":
+                note = "baseline"
+            else:
+                v = verdicts[tool]
+                note = f"{v.verdict} p={v.p:.3g}"
             fh.write(f"e2e,{label},{med:.1f},{lo:.1f}-{hi:.1f},,{note},,\n")
         # Same `e2e` arm, labeled rows, no verdict: the adverse band is a bound on
         # the claim, not a contest gist entered.

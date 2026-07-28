@@ -24,7 +24,7 @@ inheriting Layer A's cold-locate dominance:
 Any violation on any probe returns non-zero, aborting the mint. Splices a
 self-contained lane between stable sentinels (idempotent across re-mints).
 
-stdlib only. Deterministic (bootstrap RNG shared with certify_stats).
+stdlib only. Deterministic (bootstrap RNG shared with stats).
 """
 
 import argparse
@@ -36,7 +36,7 @@ import statistics
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from certify_stats import SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
+from stats import SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
 
 START = "<!-- RANK-LANE-START -->"
 END = "<!-- RANK-LANE-END -->"

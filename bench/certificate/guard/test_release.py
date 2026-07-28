@@ -1,4 +1,4 @@
-"""Hermetic tests for the cross-machine release gate (check_release.py).
+"""Hermetic tests for the cross-machine release gate (release.py).
 
 Pins the contracts the single-bundle reproducibility check cannot see:
 **platform coverage** (a release needs one Mac *and* one Linux certificate),
@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-import check_release
+import release
 
 
 def _bundle(
@@ -34,13 +34,13 @@ def _bundle(
 
 class PlatformOfTests(unittest.TestCase):
     def test_darwin_and_linux_tokens(self) -> None:
-        assert check_release.platform_of({"os": "Darwin 25.5.0"}) == "darwin"
-        assert check_release.platform_of({"os": "Linux 6.1.0"}) == "linux"
+        assert release.platform_of({"os": "Darwin 25.5.0"}) == "darwin"
+        assert release.platform_of({"os": "Linux 6.1.0"}) == "linux"
 
     def test_missing_or_empty_is_none(self) -> None:
-        assert check_release.platform_of(None) is None
-        assert check_release.platform_of({}) is None
-        assert check_release.platform_of({"os": ""}) is None
+        assert release.platform_of(None) is None
+        assert release.platform_of({}) is None
+        assert release.platform_of({"os": ""}) is None
 
 
 class DiscoverBundlesTests(unittest.TestCase):
@@ -49,7 +49,7 @@ class DiscoverBundlesTests(unittest.TestCase):
             root = Path(tmp)
             _bundle(root, os_field="Darwin 25.5.0")  # flat = Mac
             _bundle(root / "linux-x86_64", os_field="Linux 6.1.0")
-            found = check_release.discover_bundles(root)
+            found = release.discover_bundles(root)
             assert found["darwin"] == root
             assert found["linux"] == root / "linux-x86_64"
 
@@ -58,7 +58,7 @@ class DiscoverBundlesTests(unittest.TestCase):
             root = Path(tmp)
             _bundle(root, os_field="Darwin 25.5.0")
             _bundle(root / "darwin-arm64", os_field="Darwin 25.5.0")
-            found = check_release.discover_bundles(root)
+            found = release.discover_bundles(root)
             assert found["darwin"] == root / "darwin-arm64"
 
 
@@ -67,13 +67,13 @@ class SpeedsSummaryTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             bundle = _bundle(Path(tmp), os_field="Darwin", verdicts=("win", "win", "loss"))
-            summary = check_release.speeds_summary(bundle)
+            summary = release.speeds_summary(bundle)
             assert "2 win / 0 parity / 1 loss" in summary
 
     def test_missing_csv_is_honest(self) -> None:
 
         with tempfile.TemporaryDirectory() as tmp:
-            assert "unavailable" in check_release.speeds_summary(Path(tmp))
+            assert "unavailable" in release.speeds_summary(Path(tmp))
 
 
 class VerifyReleaseTests(unittest.TestCase):
@@ -87,8 +87,8 @@ class VerifyReleaseTests(unittest.TestCase):
             root = Path(tmp)
             _bundle(root, os_field="Darwin 25.5.0")
             _bundle(root / "linux-x86_64", os_field="Linux 6.1.0")
-            with mock.patch.object(check_release, "check_artifacts", return_value=[]):
-                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
+            with mock.patch.object(release, "check_artifacts", return_value=[]):
+                ok, rows = release.verify_release(root, platforms=self.PLATFORMS)
             assert ok is True
             assert {r["platform"] for r in rows} == {"darwin", "linux"}
             assert all(r["valid"] for r in rows)
@@ -98,8 +98,8 @@ class VerifyReleaseTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             _bundle(root, os_field="Darwin 25.5.0")  # only Mac
-            with mock.patch.object(check_release, "check_artifacts", return_value=[]):
-                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
+            with mock.patch.object(release, "check_artifacts", return_value=[]):
+                ok, rows = release.verify_release(root, platforms=self.PLATFORMS)
             assert ok is False
             linux = next(r for r in rows if r["platform"] == "linux")
             assert linux["present"] is False
@@ -111,9 +111,9 @@ class VerifyReleaseTests(unittest.TestCase):
             _bundle(root, os_field="Darwin 25.5.0")
             _bundle(root / "linux-x86_64", os_field="Linux 6.1.0")
             with mock.patch.object(
-                check_release, "check_artifacts", return_value=["corpus hash mismatch"]
+                release, "check_artifacts", return_value=["corpus hash mismatch"]
             ):
-                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
+                ok, rows = release.verify_release(root, platforms=self.PLATFORMS)
             assert ok is False
             assert all(r["valid"] is False for r in rows)
 
@@ -123,8 +123,8 @@ class VerifyReleaseTests(unittest.TestCase):
             root = Path(tmp)
             _bundle(root, os_field="Darwin 25.5.0", commit=None)
             _bundle(root / "linux-x86_64", os_field="Linux 6.1.0", commit=None)
-            with mock.patch.object(check_release, "check_artifacts", return_value=[]):
-                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
+            with mock.patch.object(release, "check_artifacts", return_value=[]):
+                ok, rows = release.verify_release(root, platforms=self.PLATFORMS)
             assert ok is True
             assert all(r["commit"] == "" for r in rows)
 
@@ -134,8 +134,8 @@ class VerifyReleaseTests(unittest.TestCase):
             root = Path(tmp)
             _bundle(root, os_field="Darwin 25.5.0", commit="f" * 40)
             _bundle(root / "linux-x86_64", os_field="Linux 6.1.0", commit="e" * 40)
-            with mock.patch.object(check_release, "check_artifacts", return_value=[]):
-                ok, rows = check_release.verify_release(root, platforms=self.PLATFORMS)
+            with mock.patch.object(release, "check_artifacts", return_value=[]):
+                ok, rows = release.verify_release(root, platforms=self.PLATFORMS)
             assert ok is True
             assert {r["commit"] for r in rows} == {"f" * 40, "e" * 40}
 

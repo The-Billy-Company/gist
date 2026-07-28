@@ -55,11 +55,11 @@ import sys
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[4]  # bench/certify -> bench -> irregex -> kernels -> libs -> repo
+REPO = HERE.parents[5]  # bench/certificate/guard -> certificate -> bench -> irregex -> kernels -> libs -> repo
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from check_artifacts import check_artifacts  # noqa: E402
+from artifacts import check_artifacts  # noqa: E402
 
 # Platform token (first word of machine.json ``os``, lowered) -> human label.
 # The release requires a fresh, valid certificate for each of these.
@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--artifacts-root", type=Path, default=HERE / "artifact")
+    ap.add_argument("--artifacts-root", type=Path, default=HERE.parent / "artifact")
     ap.add_argument(
         "--platforms",
         default=None,

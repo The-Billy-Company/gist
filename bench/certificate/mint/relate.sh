@@ -29,8 +29,8 @@
 # Usage:  bench/certify/certify_relate.sh   (COUNT=400 by default)
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=../races/_compete.sh
-source "${HERE}/../races/_compete.sh"
+# shellcheck source=../../dominance/races/field.sh
+source "${HERE}/../../dominance/races/field.sh"
 
 COUNT="${RELATE_COUNT:-400}"
 FILES_PER_DIR=16
@@ -134,7 +134,7 @@ EOF
 
 echo
 echo "checking relate quality invariants (fail-closed)…"
-python3 "${HERE}/certify_relate_report.py" "${res}" \
+python3 "${HERE}/../report/relate.py" "${res}" \
   --certificate "${CERT}" \
   --csv "${RELATE_CSV}" \
   --meta "${WORK}/meta.json" || exit 1

@@ -63,11 +63,12 @@ from typing import TypedDict
 # match is a layer the mint dropped — the regression this ledger exists to catch.
 # The roster is shared with the reproducibility gate and the shell completeness
 # check, so adding a layer is one row there rather than three copies here.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "guard"))  # LAYERS roster lives in the sibling guard/
 from layers import LAYERS
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[4]  # bench/certify -> bench -> irregex -> kernels -> libs -> repo
+REPO = HERE.parents[5]  # bench/certificate/ledger -> certificate -> bench -> irregex -> kernels -> libs -> repo
 LEDGER = HERE / "ledger.jsonl"
 RENDER = HERE / "LEDGER.md"
 CERTIFICATE = "CERTIFICATE.md"
@@ -410,7 +411,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--artifacts-root", type=Path, default=HERE / "artifact")
+    ap.add_argument("--artifacts-root", type=Path, default=HERE.parent / "artifact")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     sub = ap.add_subparsers(dest="verb")
 

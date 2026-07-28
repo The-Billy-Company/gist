@@ -15,13 +15,13 @@
 # (wall-clock full-scan vs sieve-survivors, same matcher both sides).
 #
 # Usage (from repo root or anywhere):
-#   bash pkg/kernels/irregex/bench/certify/certify_crest.sh
+#   bash pkg/kernels/irregex/bench/certificate/mint/crest.sh
 # Env:
 #   CERT_OUT=DIR   certificate dir (default: <repo>/.local/gist-verify)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL="$(cd "${HERE}/../.." && pwd)"
+KERNEL="$(cd "${HERE}/../../.." && pwd)"
 REPO="$(cd "${KERNEL}/../../.." && pwd)"
 OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
 CERT="${OUT}/CERTIFICATE.md"
@@ -48,7 +48,7 @@ cp -f "${CREST_RAW}" "${CREST_CSV}"
 if machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else machine="$(uname -m)"; fi
 zig="$(cd "${KERNEL}" && zig version)"
 
-python3 "${HERE}/certify_crest_report.py" \
+python3 "${HERE}/../report/crest.py" \
   --certificate "${CERT}" \
   --csv "${CREST_CSV}" \
   --machine "${machine}" \

@@ -4,7 +4,7 @@
 `certify_warm.sh` drives the resident `gist serve` daemon and dumps one hyperfine
 JSON per (probe class, cell) — cell ∈ {warm, cold, csearch, zoekt, rg}. This reads
 those per-run wall-time samples and renders the warm tier with the SAME statistic
-the cold macroscopic tier uses (`certify_stats.py`): a 95% bootstrap-CI median
+the cold macroscopic tier uses (`stats.py`): a 95% bootstrap-CI median
 (10k resamples) plus a two-sample Mann-Whitney U verdict of **warm gist vs
 ripgrep** — fail-closed. A class is a WIN only when warm gist's median is lower
 AND the difference is significant (p < alpha); overlap is PARITY; significantly
@@ -18,7 +18,7 @@ It splices a self-contained warm section between stable sentinel markers so the
 splice is idempotent across re-mints and survives beside the cold macroscopic
 section rather than replacing it.
 
-stdlib only. Deterministic: the bootstrap RNG is seeded (shared with certify_stats).
+stdlib only. Deterministic: the bootstrap RNG is seeded (shared with stats).
 """
 
 import argparse
@@ -29,7 +29,7 @@ import random
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from certify_stats import ALPHA, SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
+from stats import ALPHA, SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
 
 START = "<!-- WARM-TIER-START -->"
 END = "<!-- WARM-TIER-END -->"

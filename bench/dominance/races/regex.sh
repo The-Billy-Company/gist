@@ -19,8 +19,8 @@
 # the field + fairness scoping. Usage: bench/regex_headtohead.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=_compete.sh
-source "${HERE}/_compete.sh"
+# shellcheck source=field.sh
+source "${HERE}/field.sh"
 need_hyperfine
 
 echo "building gist + persisting the index once…"

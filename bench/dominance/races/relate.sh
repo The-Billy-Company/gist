@@ -29,8 +29,8 @@
 #   COUNT=800 RUNS=12 bench/races/relate_headtohead.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=_compete.sh
-source "${HERE}/_compete.sh"
+# shellcheck source=field.sh
+source "${HERE}/field.sh"
 need_hyperfine
 
 COUNT="${COUNT:-400}"

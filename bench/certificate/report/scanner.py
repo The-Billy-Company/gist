@@ -19,7 +19,7 @@ THE CLAIM THIS LAYER EXISTS TO SETTLE
     "which tool is faster" with "which moment was busier".
 
 THE STATISTIC (identical to Layer A / the warm tier — defined once)
-    `certify_stats.py`: a 95% bootstrap-CI median (10k resamples, seeded) plus a
+    `stats.py`: a 95% bootstrap-CI median (10k resamples, seeded) plus a
     tie-corrected two-sample Mann-Whitney U. A class is a WIN only when the
     scanner's median is lower AND p < alpha; overlap is PARITY; significantly
     slower is a LOSS. Nothing is averaged into a win — every class is printed.
@@ -28,23 +28,38 @@ MATURITY IS MEASURED HERE TOO, NOT ASSERTED
     Three independent conformance denominators fold into the same section, each
     scored against LIVE ripgrep as the oracle:
 
-      flag surface   `bench/rgsuite/surface.py --json` — every flag ripgrep's
-                     own `--generate complete-bash` + man page document, probed
-                     byte-for-byte. Includes the adverse undo-pair lane, where a
-                     negation that silently no-ops is caught.
-      mined suite    `bench/rgsuite/run.py`'s results.json — ripgrep's own
-                     integration tests, replayed against both binaries.
-      differential   `bench/rgsuite/fuzz.py --json` — randomized
+      flag surface   `bench/conformance/rgsuite/surface.py --json` — every flag
+                     ripgrep's own `--generate complete-bash` + man page
+                     document, probed byte-for-byte. Includes the adverse
+                     undo-pair lane, where a negation that silently no-ops is
+                     caught.
+      mined suite    `bench/conformance/rgsuite/run.py`'s results.json —
+                     ripgrep's own integration tests, replayed against both.
+      differential   `bench/conformance/rgsuite/fuzz.py --json` — randomized
       fuzz           (pattern x flags x corpus) triples.
+
+    The first two denominators are ripgrep's, which is their strength and their
+    ceiling: a curated denominator holds only cases someone already thought of.
+    The fuzz lane is the one that can still find something, so it is the one
+    whose result is least safe to omit.
 
 FAIL-CLOSED
     Refuses to splice and exits non-zero on: any class where the scanner is
     significantly slower than rg, any undeclared conformance divergence,
-    rejection, unprobed value-taking flag, failing undo pair, mined FAIL, fuzz
-    divergence, or a conformance percentage below the committed baseline. The
-    certificate cannot record a claim this reporter did not verify this run.
+    rejection, unprobed value-taking flag, failing undo pair, mined FAIL, a
+    conformance percentage below the committed baseline, or a fuzz residual that
+    grew — in total or in any one class — or that holds a class the committed
+    baseline does not name.
 
-stdlib only. Deterministic: the bootstrap RNG is seeded (shared with certify_stats).
+    `--fuzz` is MANDATORY, and that is the point of it. The lane used to be
+    optional while any divergence was an outright refusal, which left "omit the
+    lane" as the only way a real run could mint: the certificate then published
+    two 100% figures and printed the fuzz command in its own reproduce block
+    without ever carrying that command's result. A residual is now reportable,
+    per class and shrink-only, so the honest outcome and the mintable one are
+    the same outcome.
+
+stdlib only. Deterministic: the bootstrap RNG is seeded (shared with stats).
 """
 
 from __future__ import annotations
@@ -58,11 +73,13 @@ import random
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from certify_stats import ALPHA, SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
+from stats import ALPHA, SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
 
 START = "<!-- SCANNER-LAYER-START -->"
 END = "<!-- SCANNER-LAYER-END -->"
 HEADER = "## Layer I — scanner mode + ripgrep conformance (no index)"
+CONFORMANCE_ANCHOR = "### rg flag-surface conformance"
+REPRODUCE_ANCHOR = "<details><summary>reproduce Layer I</summary>"
 VERDICT_GLYPH = {"win": "✅ win", "parity": "≈ parity", "loss": "❌ loss"}
 LANE_LABEL = {"list": "`-l`", "count": "`-c`"}
 
@@ -239,25 +256,92 @@ def conformance_block(surface: dict | None, mined: dict[str, int] | None, fuzz: 
             ),
         ]
     if fuzz:
-        bad += fuzz.get("divergences", 0)
+        lines += fuzz_block(fuzz)
+    return lines, bad
+
+
+# ── the residual: the tail a curated denominator cannot see ───────────────────
+KLASS_MEANING = {
+    "line-count": "one output holds lines the other does not",
+    "line-content": "same number of lines, one line's bytes differ",
+    "trailing-bytes": "lines agree; the trailing terminator does not",
+    "exit-code": "byte-identical output, different exit code",
+    "timeout-gist": "gist hit the per-child wall where rg finished",
+    "timeout-rg": "**rg** hit the wall where gist finished — not a gist failure",
+    "crash-gist": "gist died on a signal",
+    "crash-rg": "rg died on a signal",
+}
+# `fuzz._klass` suffixes a shape with `+exit` when the exit codes disagree too.
+KLASS_SUFFIX = {"+exit": ", and the exit codes disagree"}
+
+
+def klass_meaning(klass: str) -> str:
+    """Prose for one residual class, including the composed `<shape>+exit` forms.
+
+    An unlabeled row in the certificate is a number without a claim, so this
+    resolves the suffix rather than falling through to `unclassified` — the
+    label has to survive the producer composing a new name out of old parts.
+    """
+    for suffix, tail in KLASS_SUFFIX.items():
+        if klass.endswith(suffix):
+            return KLASS_MEANING.get(klass[: -len(suffix)], "unclassified") + tail
+    return KLASS_MEANING.get(klass, "unclassified")
+
+
+def fuzz_block(fuzz: dict) -> list[str]:
+    """Render the differential-fuzz lane INCLUDING its residual taxonomy.
+
+    The certificate's older shape reported this lane only when it was empty,
+    because the gate that read it treated any divergence as a refusal — so the
+    single honest outcome of a lane designed to generate invocations nobody
+    curated was to omit the lane. Reporting the residual, per class, is what
+    makes the two 100% lanes above it readable as the scoped claims they are.
+    """
+    total = fuzz.get("residual_total", fuzz.get("divergences", 0))
+    iters = fuzz.get("iterations", 0)
+    residual = fuzz.get("residual", {})
+    agree_pct = 100.0 * (iters - total) / iters if iters else 0.0
+    lines = [
+        "",
+        "### differential fuzz vs live ripgrep — and its residual",
+        "",
+        (
+            f"_{iters} randomized (pattern x flags x corpus) triples, seed "
+            f"{fuzz.get('seed', '?')}, over {fuzz.get('corpora', '?')} adversarial corpora "
+            "(invalid UTF-8, NUL-bearing binary, CRLF, a 4 MiB single line, 100k-line files, "
+            "deep nesting, symlink loops, unreadable files). Both binaries run on the same "
+            "bytes; stdout and exit code must match after the same normalizations the mined "
+            f"oracle applies. **{iters - total}/{iters} = {agree_pct:.2f}% agree.** "
+            f"{fuzz.get('declared', 0)} iterations exercised a catalogued boundary whose "
+            f"residual check passed this run, {fuzz.get('declined', 0)} hit a documented gist "
+            f"engine decline, and {fuzz.get('both_reject', 0)} a pattern both engines reject; "
+            f"none of those is a divergence. **{total} unresolved**, "
+            f"{fuzz.get('crashes', 0)} abnormal exits._"
+        ),
+    ]
+    if residual:
         lines += [
             "",
-            "### differential fuzz vs live ripgrep",
+            "| residual class | count | what the disagreement looks like |",
+            "|---|--:|---|",
+            *(
+                f"| `{k}` | {n} | {klass_meaning(k)} |"
+                for k, n in sorted(residual.items(), key=lambda kv: (-kv[1], kv[0]))
+            ),
             "",
             (
-                f"_{fuzz.get('iterations', 0)} randomized (pattern x flags x corpus) triples, "
-                f"seed {fuzz.get('seed', '?')}, over {fuzz.get('corpora', '?')} adversarial "
-                "corpora (invalid UTF-8, NUL-bearing binary, CRLF, a 4 MiB single line, deep "
-                "nesting, symlink loops, unreadable files). Both binaries run on the same bytes; "
-                "stdout and exit code must match after the same normalizations the mined oracle "
-                f"applies. **{fuzz.get('divergences', 0)} divergences.** "
-                f"{fuzz.get('declined', 0)} iterations hit a documented gist engine decline and "
-                f"{fuzz.get('both_reject', 0)} a pattern both engines reject; neither is a "
-                "divergence. No crash, no hang: "
-                f"{fuzz.get('timeouts', 0)} timeouts, {fuzz.get('crashes', 0)} abnormal exits._"
+                "> This is the tail, and it is carried here rather than rounded off. The two "
+                "lanes above are 100% against denominators **ripgrep owns** — the flags it "
+                "documents and the tests it wrote — and that is exactly their limit: a curated "
+                "denominator can only contain cases someone already thought of. This lane "
+                "generates invocations nobody wrote down, so it is the only one that can still "
+                "find something, and a residual of zero here would mean the generator had "
+                "stopped being adversarial. The number is ratcheted shrink-only per class: it "
+                "may fall, it may not rise, and a class not already in the committed baseline "
+                "fails the mint even when the total went down."
             ),
         ]
-    return lines, bad
+    return lines
 
 
 def render(
@@ -333,10 +417,11 @@ def render(
         "<details><summary>reproduce Layer I</summary>",
         "",
         "```bash",
-        "bash bench/races/scanner_headtohead.sh                    # SCANNER_LANES=\"list count\"",
-        "python3 bench/rgsuite/surface.py --json .local/gist-compete/surface.json",
-        "python3 bench/rgsuite/run.py                              # writes bench/rgsuite/results.json",
-        "python3 bench/rgsuite/fuzz.py --iterations 2000 --json .local/gist-compete/fuzz.json",
+        'bash bench/dominance/races/scanner.sh                 # SCANNER_LANES="list count"',
+        "python3 bench/conformance/rgsuite/surface.py --json .local/gist-compete/surface.json",
+        "python3 bench/conformance/rgsuite/run.py              # writes rgsuite/results.json",
+        "python3 bench/conformance/rgsuite/fuzz.py --iterations 6000 --seed 20260727 \\",
+        "    --json .local/gist-compete/fuzz.json              # the residual above",
         "```",
         "",
         "</details>",
@@ -357,6 +442,82 @@ def splice(cert: Path, section: str) -> None:
     cert.write_text(text if text.endswith("\n") else text + "\n")
 
 
+def splice_conformance(cert: Path, lines: list[str]) -> None:
+    """Replace ONLY the maturity evidence, leaving the timed table above it untouched.
+
+    A flag re-probe is minutes and a quiescent timing race is an hour on a machine
+    ~10 agents share; re-rendering the whole layer to move a flag count would trade
+    a clean measurement for a noisier one, which is a worse certificate.
+    """
+    text = cert.read_text()
+    lo, hi = text.find(CONFORMANCE_ANCHOR), text.find(REPRODUCE_ANCHOR)
+    if lo == -1 or hi == -1 or hi < lo:
+        raise SystemExit("certify_scanner_report: no conformance block to refresh — mint Layer I first")
+    cert.write_text(text[:lo] + "\n".join(lines).lstrip("\n") + "\n\n" + text[hi:])
+
+
+def ratchet(surface: dict | None, baseline: Path | None) -> int:
+    """The conformance ratchet: a measured percentage may rise and may not fall."""
+    floor = _read_json(baseline) if baseline else None
+    if not (floor and surface):
+        return 0
+    want, got = floor.get("conformance_pct", 0.0), surface["conformance_pct"]
+    if got + 1e-9 < want:
+        print(f"certify_scanner_report: conformance regressed {want:.1f}% → {got:.1f}%")
+        return 1
+    return 0
+
+
+def residual_ratchet(fuzz: dict, baseline: Path | None) -> int:
+    """The residual ratchet: shrink-only, per class, with no new class admitted.
+
+    Ratcheting the TOTAL alone would let a newly-introduced defect ride in under
+    a fix that happened to remove the same number of failures elsewhere, so each
+    class carries its own floor and an unlisted class is a refusal on its own —
+    a new root cause is news even when the arithmetic improved.
+
+    With no committed baseline the rule is the strict one (any residual refuses),
+    so the ratchet can only ever be created deliberately, never defaulted into.
+    """
+    got = fuzz.get("residual", {})
+    total = fuzz.get("residual_total", fuzz.get("divergences", 0))
+    floor = _read_json(baseline) if baseline else None
+    if floor is None:
+        if total:
+            why = (
+                f"the baseline at {baseline} would not read"
+                if baseline
+                else "no committed residual baseline"
+            )
+            print(
+                f"certify_scanner_report: {total} unresolved fuzz failure(s) and {why} — "
+                f"fix them, or record the tail with --fuzz-baseline"
+            )
+        return 1 if total else 0
+
+    want, want_total = floor.get("residual", {}), floor.get("residual_total", 0)
+    bad = 0
+    for klass, n in sorted(got.items()):
+        allowed = want.get(klass)
+        if allowed is None:
+            print(f"certify_scanner_report: NEW residual class `{klass}` ({n}) — not in the baseline")
+            bad += 1
+        elif n > allowed:
+            print(f"certify_scanner_report: residual `{klass}` grew {allowed} → {n}")
+            bad += 1
+    if total > want_total:
+        print(f"certify_scanner_report: residual total grew {want_total} → {total}")
+        bad += 1
+    # Shrinkage is not a failure, but an un-refreshed baseline is a ratchet that
+    # has stopped ratcheting — say so loudly enough that the floor gets lowered.
+    if not bad and (total < want_total or any(n < want.get(k, 0) for k, n in got.items()) or set(want) - set(got)):
+        print(
+            f"certify_scanner_report: residual SHRANK {want_total} → {total} — "
+            f"refresh the baseline in this PR so the floor follows the fix"
+        )
+    return bad
+
+
 def _read_json(path: Path | None) -> dict | None:
     if path is None:
         return None
@@ -370,21 +531,52 @@ def _read_json(path: Path | None) -> dict | None:
 def main() -> int:
     """CLI entry point."""
     ap = argparse.ArgumentParser(description="gist scanner-mode + conformance report (Layer I)")
-    ap.add_argument("results_dir", type=Path, help="dir of ${class}__{noidx,idx,rg}.json")
+    ap.add_argument("results_dir", type=Path, nargs="?", help="dir of ${class}__{noidx,idx,rg}.json")
     ap.add_argument("--certificate", type=Path, required=True)
-    ap.add_argument("--csv", type=Path, required=True)
+    ap.add_argument("--csv", type=Path, help="required unless --conformance-only")
+    ap.add_argument(
+        "--conformance-only",
+        action="store_true",
+        help="re-splice just the flag/mined/fuzz evidence over the last minted timing table",
+    )
     ap.add_argument("--order", type=Path, help="TSV: class<TAB>kind<TAB>pattern (default: <results_dir>/order.tsv)")
     ap.add_argument("--meta", type=Path, help="JSON: runs/warmup/roots (default: <results_dir>/meta.json)")
     ap.add_argument("--conformance", type=Path, help="surface.py --json record")
     ap.add_argument("--mined", type=Path, help="rgsuite run.py results.json")
-    ap.add_argument("--fuzz", type=Path, help="fuzz.py --json record")
+    ap.add_argument("--fuzz", type=Path, required=True, help="fuzz.py --json record (mandatory: see FAIL-CLOSED)")
     ap.add_argument(
         "--conformance-baseline",
         type=Path,
         help="committed floor; a lower conformance_pct is a hard failure (the ratchet)",
     )
+    ap.add_argument(
+        "--fuzz-baseline",
+        type=Path,
+        help="committed residual floor; a grown or new residual class is a hard failure",
+    )
     args = ap.parse_args()
 
+    if args.conformance_only:
+        surface, fuzz = _read_json(args.conformance), _read_json(args.fuzz)
+        mined = _mined(args.mined) if args.mined else None
+        if fuzz is None:
+            print(f"certify_scanner_report: --fuzz {args.fuzz} is unreadable — the lane is mandatory")
+            return 1
+        if not (surface or mined):
+            print("certify_scanner_report: --conformance-only needs at least one curated evidence record")
+            return 1
+        lines, bad = conformance_block(surface, mined, fuzz)
+        bad += ratchet(surface, args.conformance_baseline)
+        bad += residual_ratchet(fuzz, args.fuzz_baseline)
+        if bad:
+            print(f"certify_scanner_report: REFUSING to splice — {bad} conformance/robustness failure(s)")
+            return 1
+        splice_conformance(args.certificate, lines)
+        print(f"scanner conformance re-spliced (timing table untouched) → {args.certificate}")
+        return 0
+
+    if args.results_dir is None or args.csv is None:
+        ap.error("results_dir and --csv are required unless --conformance-only")
     order_path = args.order or args.results_dir / "order.tsv"
     meta_path = args.meta or args.results_dir / "meta.json"
     # order.tsv is append-per-class, so a second race writing the same output dir
@@ -404,6 +596,9 @@ def main() -> int:
     surface = _read_json(args.conformance)
     fuzz = _read_json(args.fuzz)
     mined = _mined(args.mined) if args.mined else None
+    if fuzz is None:
+        print(f"certify_scanner_report: --fuzz {args.fuzz} is unreadable — the lane is mandatory")
+        return 1
 
     rng = random.Random(SEED)
     section, csv_rows, bad, tally = render(args.results_dir, order, meta, rng, surface, mined, fuzz)
@@ -411,13 +606,8 @@ def main() -> int:
         print("certify_scanner_report: no scanner cells — did scanner_headtohead.sh run?")
         return 1
 
-    # The conformance ratchet: a measured percentage may rise and may not fall.
-    floor = _read_json(args.conformance_baseline) if args.conformance_baseline else None
-    if floor and surface:
-        want, got = floor.get("conformance_pct", 0.0), surface["conformance_pct"]
-        if got + 1e-9 < want:
-            print(f"certify_scanner_report: conformance regressed {want:.1f}% → {got:.1f}%")
-            bad += 1
+    bad += ratchet(surface, args.conformance_baseline)
+    bad += residual_ratchet(fuzz, args.fuzz_baseline)
 
     if bad:
         # Name the cells. A gate that refuses without saying WHICH cell lost

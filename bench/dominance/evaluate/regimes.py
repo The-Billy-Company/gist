@@ -44,10 +44,10 @@ import time
 
 
 HERE = Path(__file__).resolve().parent
-KERNEL = HERE.parents[1]
+KERNEL = HERE.parents[2]
 REPO = KERNEL.parents[2]
-COMPETE = KERNEL / "bench" / "races" / "_compete.sh"
-CERTIFY = KERNEL / "bench" / "certify" / "certify_stats.py"
+COMPETE = KERNEL / "bench" / "dominance" / "races" / "field.sh"
+CERTIFY = KERNEL / "bench" / "certificate" / "report" / "stats.py"
 
 
 def _corpus_root() -> Path:

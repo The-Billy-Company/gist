@@ -26,8 +26,8 @@
 #         RUNS=12 WARMUP=3 bench/session/certify_session.sh   # tune rg timing
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=../races/_compete.sh
-source "${HERE}/../races/_compete.sh"
+# shellcheck source=../races/field.sh
+source "${HERE}/../races/field.sh"
 need_hyperfine
 
 RUNS="${RUNS:-10}"

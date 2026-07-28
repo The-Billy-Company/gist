@@ -2,10 +2,10 @@
 doc_radar:
   sentinels:
     - description: "evaluator keeps its closed verb set + contract-bound schema"
-      file: pkg/kernels/irregex/bench/evaluate/evaluate.py
+      file: pkg/kernels/irregex/bench/dominance/evaluate/evaluate.py
       contains: ['sub.add_parser("run"', 'sub.add_parser("verify"', 'sub.add_parser("compare"', 'sub.add_parser("brief"']
     - description: "verifier enforces the parity precondition + fail-closed operational gates"
-      file: pkg/kernels/irregex/bench/evaluate/report.py
+      file: pkg/kernels/irregex/bench/dominance/evaluate/report.py
       contains: ["_verify_parity_gate", "_verify_operational", "verify_claims"]
 ---
 

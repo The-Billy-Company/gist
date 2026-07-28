@@ -38,12 +38,12 @@ import tempfile
 
 
 HERE = Path(__file__).resolve().parent
-ARTIFACT = HERE / "artifact"
+ARTIFACT = HERE.parent / "artifact"
 BASELINE = HERE / "ratio_baseline.json"
-KERNEL = HERE.parents[1]
+KERNEL = HERE.parents[2]
 REPO = KERNEL.parents[2]
 MACRO = ARTIFACT / "certify_macro.csv"
-COMPETE = HERE.parent / "races" / "_compete.sh"
+COMPETE = HERE.parents[1] / "dominance" / "races" / "field.sh"
 
 # Byte-identical to certify.sh / certify.zig probe classes.
 PROBES: tuple[tuple[str, str, str], ...] = (

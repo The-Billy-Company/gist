@@ -43,7 +43,7 @@ import regimes  # noqa: E402
 import report  # noqa: E402
 
 
-KERNEL = HERE.parents[1]
+KERNEL = HERE.parents[2]
 REPO = KERNEL.parents[2]
 RAW_ROOT = REPO / ".local" / "gist-evaluation"
 ARTIFACT = HERE / "artifact"

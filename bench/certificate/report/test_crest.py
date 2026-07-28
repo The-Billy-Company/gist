@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-import certify_crest_report as report
+import crest as report
 
 
 class CrestCertificateSpliceTest(unittest.TestCase):

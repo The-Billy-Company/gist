@@ -43,8 +43,8 @@
 # Env:    MULTIPATTERN_OUT=DIR   where results land (default .local/gist-compete/multipattern)
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=_compete.sh
-source "${HERE}/_compete.sh"
+# shellcheck source=field.sh
+source "${HERE}/field.sh"
 need_hyperfine
 
 # The sweep has to span both tiers and the crossing between them, or it cannot

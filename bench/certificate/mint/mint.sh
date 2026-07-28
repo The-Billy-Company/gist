@@ -22,8 +22,8 @@
 #         make bench-gist-certify             (B–E refresh; CERT_FULL=1 = this)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=../races/_compete.sh
-source "${HERE}/../races/_compete.sh"
+# shellcheck source=../../dominance/races/field.sh
+source "${HERE}/../../dominance/races/field.sh"
 need_hyperfine
 
 # Refuse to mint a certificate whose machine.git_commit could not equal a clean
@@ -179,7 +179,7 @@ EOF
 
 echo
 echo "computing bootstrap-CI medians + Mann-Whitney dominance (gist vs rg)…"
-python3 "${HERE}/certify_stats.py" "${WORK}" \
+python3 "${HERE}/../report/stats.py" "${WORK}" \
   --certificate "${CERT}" \
   --csv "${MACRO_CSV}" \
   --order "${WORK}/order.tsv" \
@@ -374,19 +374,19 @@ out.write_text("\n".join(lines) + "\n")
 print(f"  command-log.txt: {len(lines)} timed commands")
 PY
 
-python3 "${HERE}/../gates/index_size_accounting.py" \
+python3 "${HERE}/../../conformance/gates/oracle/index_size_accounting.py" \
   --index-dir "${OUT}" --csearch "${CSEARCH_IDX}" --zoekt "${ZOEKT_DIR}" || exit 1
 
 # Layers B / B′ / C / D — automatic; never leave a header-only certificate.
 echo "splicing Layers B/B′/C/D…"
-CERT_OUT="${OUT}" bash "${HERE}/certify_layers.sh" || exit 1
+CERT_OUT="${OUT}" bash "${HERE}/splice.sh" || exit 1
 
 # Warm tier — the resident-daemon regime an agent actually drives (ADR-352 rung
 # 2.5). Additive: splices a marked section into CERTIFICATE.md + emits
 # certify_warm.csv. Never blocks the mint (a missing daemon/rival is honestly
 # reported), so the cold Layers A–E stay the reproducibility-gated headline.
 echo "racing the warm tier (resident daemon)…"
-RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/certify_warm.sh" \
+RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/warm.sh" \
   || echo "  warm tier skipped (daemon/rival unavailable) — cold cert unaffected" >&2
 
 # --rank lane — the one output shape rg can't express (Layer A). Fail-closed: the
@@ -394,18 +394,18 @@ RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/certify_warm.sh" \
 # overhead + beats-rg, and any violation aborts the mint. Needs only rg + the
 # index this run already persisted, both guaranteed on a certification machine.
 echo "certifying the --rank lane (fail-closed)…"
-RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/certify_rank.sh" || exit 1
+RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/rank.sh" || exit 1
 
 # Layer G — the relate face (retrieval by description length). Fail-closed on a
 # retrieval-quality contract + boundary proof; not a dominance claim. Needs only
 # the staged relate binary + a deterministic synthetic corpus it mints itself.
 echo "certifying the relate face (Layer G, fail-closed)…"
-bash "${HERE}/certify_relate.sh" || exit 1
+bash "${HERE}/relate.sh" || exit 1
 
 # Structural completeness only — a bundle is judged on its bytes, never on the
 # tree that produced it. Clean-START is the top gate's job; the recorded
 # git_commit is provenance a human can follow, not a condition.
-python3 "${HERE}/check_artifacts.py" --artifacts-dir "${OUT}" --artifacts || exit 1
+python3 "${HERE}/../guard/artifacts.py" --artifacts-dir "${OUT}" --artifacts || exit 1
 
 # Publish a committed snapshot when asked (CERT_PUBLISH_DIR is crate-relative).
 if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
@@ -418,7 +418,7 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   # Every layer side-car the shared roster names, plus the warm CSV and the two
   # port-bound files no layer row owns. Driving the list from `layers.py` means a
   # new layer publishes its receipt without a second list to keep in step.
-  layer_sidecars="$(python3 "${HERE}/layers.py" sidecars)" || exit 1
+  layer_sidecars="$(python3 "${HERE}/../guard/layers.py" sidecars)" || exit 1
   mapfile -t sidecars <<< "${layer_sidecars}"
   for side in certify_warm.csv portcert.csv portbound.json "${sidecars[@]}"; do
     [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
@@ -427,10 +427,10 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   echo "formatting published certificate…"
   (cd "${REPO}" && NODE_NO_WARNINGS=1 PRETTIER_EXPERIMENTAL_CLI=1 \
     pnpm -w exec prettier --write "${pub}/CERTIFICATE.md") || exit 1
-  python3 "${HERE}/check_artifacts.py" --artifacts-dir "${pub}" --artifacts || exit 1
+  python3 "${HERE}/../guard/artifacts.py" --artifacts-dir "${pub}" --artifacts || exit 1
   echo "published reproducible certificate → ${pub}"
   # Log the mint. The certificate is a whole-file rewrite, so without this the
   # tree keeps no memory of what the previous one claimed or which layers it
   # carried — see bench/certify/LEDGER.md.
-  python3 "${HERE}/ledger.py" record --bundle "${pub}" || exit 1
+  python3 "${HERE}/../ledger/ledger.py" record --bundle "${pub}" || exit 1
 fi
