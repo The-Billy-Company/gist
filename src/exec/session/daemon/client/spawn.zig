@@ -21,6 +21,8 @@ const std = @import("std");
 const request = @import("../../answer/request.zig");
 const run = @import("../../../cold/engine/serial.zig");
 const session_spawn = @import("../../conduit/spawn.zig");
+const standdown = @import("../../warden/standdown.zig");
+const ration = @import("../../warden/ration.zig");
 const fault = @import("../../../../fault.zig");
 const net = std.Io.net;
 
@@ -58,6 +60,13 @@ pub fn maybeSpawn(
             return;
         }
     } else |_| return;
+    // A daemon that could not fit this tree in its memory ration left a note
+    // (`warden/standdown.zig`). Honor it: without this the ceiling would just
+    // convert an unbounded daemon into a spawn storm — every query forking a
+    // process that loads part of a mirror, meets the ceiling, and dies. Passing
+    // our own ration is what lets a raised `GIST_MEMORY_MB` take effect at once
+    // instead of waiting out the note's expiry.
+    if (standdown.standing(io, socket_path, ration.ration())) return;
     // No root arg: bare `gist serve` serves the rootless CWD walk the child
     // inherits — exactly the tree this rootless query walks cold (warm==cold
     // parity), and the CWD-relative socket keeps scopes from a differently-rooted

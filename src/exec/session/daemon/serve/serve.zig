@@ -50,6 +50,9 @@ const resident = @import("../../warm/resident.zig");
 const image = @import("../../conduit/image.zig");
 const watch = @import("../../watch/watch.zig");
 const keep_mod = @import("../../answer/keep.zig");
+const ration = @import("../../warden/ration.zig");
+const warden_mod = @import("../../warden/warden.zig");
+const standdown = @import("../../warden/standdown.zig");
 const answer = @import("answer.zig");
 const crew = @import("crew.zig");
 const loop = @import("loop.zig");
@@ -63,6 +66,16 @@ const net = std.Io.net;
 const Dir = std.Io.Dir;
 
 const ResidentSession = resident.ResidentSession;
+const Warden = warden_mod.Warden;
+
+/// What the session surrenders when it meets its memory ration: the whole answer
+/// keep. Called from inside a failing allocation on whichever thread met the
+/// ceiling, so it must not block — `Keep.surrender` tries its lock and reports
+/// zero rather than deadlocking against a `retain` already holding it.
+fn surrenderKeep(ctx: *anyopaque) usize {
+    const k: *keep_mod.Keep = @ptrCast(@alignCast(ctx));
+    return k.surrender();
+}
 
 extern "c" fn flock(fd: std.posix.fd_t, operation: c_int) c_int;
 extern "c" fn close(fd: std.posix.fd_t) c_int;
@@ -90,8 +103,36 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     };
     defer _ = close(lock_fd); // closing releases the advisory flock
 
-    var session = try ResidentSession.init(gpa, io, roots);
+    // Everything below is charged against ONE ration: the session's mirror and
+    // trigram index, the answer keep, the watcher's bookkeeping, and each
+    // worker's per-query arena all build on `mem`. This is the only seam where
+    // that is true — `run` receives a single allocator and threads it into
+    // everything it constructs — which is what lets a wrapper here bound the
+    // whole resident set instead of the parts someone remembered to check.
+    const allowance = ration.ration();
+    if (allowance == 0) {
+        crew.note("gist serve: this machine lends no resident ration — queries answer cold\n", .{});
+        return;
+    }
+    var warden = Warden.init(gpa, allowance);
+    const mem = warden.allocator();
+
+    // Loading the mirror is the largest single claim a session makes, so it is
+    // where an over-large corpus meets the ceiling. Meeting it is a DECLINATURE,
+    // not a fault: cold answers every query correctly, so the daemon stands down
+    // and says so, rather than propagating an OOM that reads like a crash. The
+    // note is what stops the next query re-staging the same doomed load.
+    var session = ResidentSession.init(mem, io, roots) catch |e| {
+        if (e != error.OutOfMemory or warden.turnedAway() == 0) return e;
+        crew.note("gist serve: mirror does not fit the {d} MB ration (held {d} MB) — standing down, queries answer cold\n", .{ allowance >> 20, warden.peak() >> 20 });
+        standdown.mark(io, socket_path, warden.peak(), allowance);
+        return;
+    };
     defer session.deinit();
+    // It DID fit, so withdraw any refusal an earlier daemon left: a corpus that
+    // shrank, a machine that freed memory, or a raised ration all recover here
+    // instead of waiting out the lull.
+    standdown.lift(io, socket_path);
     session.daemon_gen = @bitCast(@as(i64, @truncate(std.Io.Clock.now(.real, io).nanoseconds)));
     // Latch the build NOW, while the file on disk is still the one we were
     // exec'd from. A daemon outlives rebuilds; asking at handshake time would
@@ -103,7 +144,7 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     // unchanged. Survives an index-reload (config, not per-index data).
     session.query_budget_ns = answer.budgetNs();
 
-    var watcher = watch.Watcher(ResidentSession).init(gpa, io, &session);
+    var watcher = watch.Watcher(ResidentSession).init(mem, io, &session);
     watcher.start();
     defer watcher.stop();
     crew.note("gist serve: watcher {s}, exact dirty log {s}\n", .{
@@ -145,9 +186,14 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     // The answer keep outlives every connection and dies with the daemon — its
     // whole soundness argument rests on this watcher's epoch, so it must not
     // survive the watcher that vouched for it.
-    var keep = keep_mod.Keep.init(gpa);
+    var keep = keep_mod.Keep.init(mem);
     defer keep.deinit();
-    var server = crew.Server{ .gpa = gpa, .io = io, .session = &session, .watcher = &watcher, .keep = &keep, .wake_r = wp[0], .wake_w = wp[1] };
+    // The keep is the one thing a session under pressure can give back, and the
+    // reason the ceiling throttles rather than kills: every entry is rendered
+    // output the daemon can recompute, which is what made it cacheable. Spend it
+    // before declining a query (`warden/warden.zig`).
+    warden.attend(.{ .ctx = &keep, .hand = surrenderKeep });
+    var server = crew.Server{ .gpa = mem, .io = io, .session = &session, .watcher = &watcher, .keep = &keep, .wake_r = wp[0], .wake_w = wp[1] };
     // Teardown runs LIFO; register so it unwinds in this order: (1) stop + join
     // the workers — they touch the session, the connections, and the wake pipe,
     // so they must all be quiescent first; (2) close the connections; (3) close
@@ -175,7 +221,11 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
         for (workers[0..nworkers]) |w| w.join();
     }
 
-    crew.note("gist serve: warm on {s} ({d} roots, {d} workers)\n", .{ socket_path, roots.len, nworkers });
+    // Say what the load actually cost, because the load PEAK — not the steady
+    // state — is what a ration has to accommodate, and the two differ by an
+    // order of magnitude here. A daemon reporting a crest near its ration is one
+    // rebuild away from standing down, which is worth knowing before it does.
+    crew.note("gist serve: warm on {s} ({d} roots, {d} workers, held {d} MB of a {d} MB ration, load crest {d} MB)\n", .{ socket_path, roots.len, nworkers, warden.holding() >> 20, allowance >> 20, warden.peak() >> 20 });
     try loop.run(&server, &listener);
 }
 
