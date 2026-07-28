@@ -5,6 +5,10 @@ doc_radar:
       contains:
         - "//go:build cgo"
         - "irregex_analytic_run"
+    - file: native.go
+      description: the cgo preamble owns the weak analytic fallbacks, so a library built before the plane still links
+      contains:
+        - "//go:build cgo"
         - "__attribute__((weak))"
     - file: stub.go
       contains:
@@ -16,7 +20,7 @@ doc_radar:
         - "IRREGEX_NO_FFI"
     - file: row.go
       contains:
-        - "func Assemble(schema uint32, fields []Value) (Row, error)"
+        - "func Assemble(id uint32, values []Value, present uint64) (Row, error)"
         - "func (r *Rows) NextBatch(dst []Row) (int, error)"
         - "func (r *Rows) Stats() Stats"
 -->
@@ -34,7 +38,8 @@ mechanism.
 One verb, two tiers, one answer:
 
 1. **In-process** (`dispatch.go`, `//go:build cgo`) — `irregex_analytic_run`
-   against the static library. Preferred, allocation-lean, cancellable.
+   against the static library, whose cgo preamble, link flags, and status→error
+   mapping live in `native.go`. Preferred, allocation-lean, cancellable.
 2. **Child process** (`cold.go` + `plan.go` + `decode.go`) — the certified
    `gist` / `relate` / `irregex` binary, its NDJSON raised back into rows of the
    same schema.
@@ -48,7 +53,7 @@ anywhere — surfaces as an `error`. `Probe()` reports which tiers this process
 actually has; `IRREGEX_NO_FFI=1` forces the child tier, which is how a host keeps
 working while a drifted library is rebuilt.
 
-Because the analytic exports are additive, `dispatch.go` gives every analytic
+Because the analytic exports are additive, `native.go` gives every analytic
 symbol a **weak definition** in its cgo preamble. A library built before the
 plane still links, and `irregex_schema_digest()` returning `NULL` is the runtime
 probe for "no analytic plane" — an absence, never a failure. When the digest is

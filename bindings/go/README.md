@@ -3,6 +3,7 @@ doc_radar:
   counts:
     - glob: "pkg/kernels/irregex/bindings/go/*/"
       equals: 5
+      unit: dirs
   sentinels:
     - file: contract.go
       contains:

@@ -11,8 +11,8 @@ doc_radar:
       contains: ["protocol_version: u8 = 9", "cap_fd_transport", "caps_supported", "image: u64"]
       description: The negotiated contract head the entry file owns — version, the additive HELLO capability byte, and the READY build stamp
     - file: pkg/kernels/irregex/src/exec/session/conduit/image.zig
-      contains: ["pub fn stamp", "pub fn agrees", "pub fn supersedes", "pub const unknown"]
-      description: The build-identity surface — equality decides warm-or-cold, order decides who may retire whom
+      contains: ["pub fn stamp", "pub fn agrees", "pub fn replaced", "pub fn hosts", "pub const unknown"]
+      description: The build-identity surface — equality decides warm-or-cold, a rewritten executable retires its own daemon, and the stamp order is only the tiebreak for a daemon that cannot observe that
     - file: pkg/kernels/irregex/src/exec/session/conduit/protocol/opcodes.zig
       contains: ["chunk = 11", "chunk_fd = 12", "recall = 17", "retain = 19"]
       description: The opcode spine is one enum in one file, so an opcode byte is minted exactly once
@@ -35,7 +35,7 @@ grammar `protocol/` defines.
 | [`wire.zig`](wire.zig)   | The opcode-agnostic half of that grammar: framing, transport, and the `recvFramed` reader both frame paths share. Also owns `armNoSigpipe`, the single Darwin `SO_NOSIGPIPE` site, so a dead peer can never take the daemon down with a signal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | [`shm.zig`](shm.zig)     | The anonymous shared-memory buffer a large `lines` answer rides instead of the socket — bounded to the exact rendered length on both platforms (Linux `memfd` + seal · macOS `shm_open`→`ftruncate`→`shm_unlink`). Fail-**open**: every fallible call returns an error the caller turns back into byte-identical `chunk` frames.                                                                                                                                                                                                                                                                                                                                                                                                |
 | [`spawn.zig`](spawn.zig) | Detached daemon auto-spawn, shared by both resident CLIs: only the `fork` → detach → `execv` mechanism lives here. Each CLI keeps its own eligibility policy and socket probe, because the warm path only pays off if a daemon is already running and an agent's reflex is a one-shot command.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| [`image.zig`](image.zig) | Which **build** is on each end of the handshake — the executable's mtime, so the stamp carries an order as well as an identity. The daemon latches its own at boot (the answer therefore predates any rebuild that lands while it stays resident) and reports it in READY; a gist client on a different build runs cold, and retires the daemon only if it is strictly newer. Fail-open: a target that cannot name its own executable stamps `unknown`, and `unknown` on either side abstains from both judgments.                                                                                                                                                                                                              |
+| [`image.zig`](image.zig) | Which **build** is on each end of the handshake — the executable's mtime, latched by the daemon at boot so its answer predates any rebuild landing while it stays resident, and reported in READY. That mtime is an **identity, not an order** (Zig's install preserves the cache artifact's timestamp, so switching builds moves it backwards), so a client on another build just runs cold. What retires the obsoleted daemon is `replaced`: it re-stats its own path and stands down once the bytes it runs are gone — `hosts` is only the tiebreak for a daemon that cannot observe that. Fail-open: a target that cannot name its own executable stamps `unknown`, and `unknown` abstains from every judgment.             |
 
 `protocol/protocol_test.zig` sits beside its subject — frame codec round-trips
 plus the adversarial truncation/oversize cases.
@@ -67,19 +67,37 @@ installed, vouching for a build the answering process has never run.
 Declining is only half an answer, though, because nothing would then retire the
 obsolete daemon: the idle TTL wants ten _continuous_ minutes of quiet, which a
 tree with ~10 coworker agents querying it never gets, so one `make install-gist`
-would strand the warm tier for the rest of the day. So the newer peer asks the
-older one to stop on its way to the cold path — **only** the newer, which is why
-both skew tests are strict orders rather than mere difference. Were disagreement
-enough, an old shell and a new one would take turns killing each other's
-daemons; ordered, the exchange converges after exactly one cold query.
+would strand the warm tier for the rest of the day.
 
-There are two of those orders, and they compose. The **version** is read
-straight off READY's byte zero rather than through `decodeReady`, because a
-decoder can only parse the layout it was compiled for while every version this
-protocol has ever had puts the version in the same place — that is precisely
-what lets a v8 daemon be retired by a v9 client instead of merely declined. Only
-once the versions agree does the **build stamp** decide, and mtime is the
-ordering there.
+The temptation is to let the newer peer stop the older one, and for the wire
+**version** that is exactly right — it only ever counts up in source, so it is a
+real order. It is read straight off READY's byte zero rather than through
+`decodeReady`, because a decoder can only parse the layout it was compiled for
+while every version this protocol has ever had puts the version in the same
+place — which is what lets a v8 daemon be retired by a v9 client instead of
+merely declined.
+
+A **build stamp** is not that kind of order. Zig's install copies the cache
+artifact with its timestamp preserved, so reinstalling one build reproduces its
+stamp and switching between two cached builds moves the mtime *backwards*: two
+stamps can only answer "same build?", and a client waiting to be the newer one
+would wait forever. So retirement here is decided against the filesystem instead
+of against a peer. Our HELLO prompts the daemon to re-stat the executable it was
+exec'd from, and a daemon whose own file has been rewritten is superseded as a
+matter of fact — the bytes it is serving from are gone — so it stands down and
+the next query spawns one from whatever is on disk now. Two live builds at one
+rendezvous therefore never fight: each one's file is intact, neither is
+`replaced`, and the loser simply stays cold.
+
+That leaves one daemon self-retirement cannot reach — one exec'd from a
+content-addressed build artifact, whose path embeds a hash of its own bytes and
+so can never be rewritten. Measured: 10 such orphans resident at once, the warm
+tier stranded, every eligible query 6-13x slower than the daemon beside it.
+`hosts` settles that as a **tiebreak** rather than a recency claim: `>` over the
+two stamps, so both sides compute the same winner from the same pair. Symmetry
+is the trap — "we disagree" has an old shell and a new one taking turns killing
+each other's daemons, where a strict order converges after exactly one cold
+query, and the loser stays cold precisely as it does today.
 
 Two peers are deliberately exempt. The **answer keep** never checks the stamp,
 because `relate` and `irregex` dial this same socket and three binaries from one
