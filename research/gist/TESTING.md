@@ -1,20 +1,20 @@
 ---
 doc_radar:
   occurrences:
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "NA"', equals: 14}
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 21}
-    - {file: pkg/kernels/irregex/bench/matrix/matrix.toml, pattern: '\[\[shape\]\]', equals: 19}
+    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
+    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
+    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "NA"', equals: 14}
+    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 21}
+    - {file: pkg/kernels/irregex/bench/conformance/shapes/shapes.toml, pattern: '\[\[shape\]\]', equals: 19}
   sentinels:
-    - file: pkg/kernels/irregex/bench/gates/ci_order.sh
+    - file: pkg/kernels/irregex/bench/conformance/gates/contract/ci_order.sh
       contains:
         - "rgsuite parity (check_results.py)"
-        - "CLI-shape matrix parity (matrix.py)"
+        - "CLI-shape matrix parity (shapes.py)"
         - "warm session floors (gate_session.py --committed)"
-        - "CLI-shape matrix floors (matrix.py gate)"
+        - "CLI-shape matrix floors (shapes.py gate)"
     - description: "canary for the Layer C roofline placement quoted in §6 — a re-mint moves it, and breaking here is the signal to restate it"
-      file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
       contains: "61.6 GB/s = 77% of the 79.8 GB/s single-core pure-read roof"
 ---
 
@@ -91,7 +91,7 @@ Companion suites exercise surfaces the mined replay cannot freeze cleanly:
 - `transforms.py`: preprocessing, binary handling, transcoding, and compressed
   inputs, once per walk engine.
 
-Reproduce from `pkg/kernels/irregex/bench/rgsuite/`:
+Reproduce from `pkg/kernels/irregex/bench/conformance/rgsuite/`:
 
 ```bash
 python3 run.py

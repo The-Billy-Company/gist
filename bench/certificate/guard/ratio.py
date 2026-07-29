@@ -19,8 +19,8 @@ regression drops a ratio under its floor and fails; refreshing floors after a
 deliberate certify republish is the intentional escape hatch.
 
 Usage:
-  python3 bench/certify/ratio_regress.py
-  python3 bench/certify/ratio_regress.py --live --force
+  python3 bench/certificate/guard/ratio.py
+  python3 bench/certificate/guard/ratio.py --live --force
   GIST_BENCH=1 make bench-gist-ratio
 """
 

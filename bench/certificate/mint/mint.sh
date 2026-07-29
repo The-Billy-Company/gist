@@ -200,6 +200,14 @@ raw_files=("${WORK}"/*__*.json)
 }
 cp -f "${raw_files[@]}" "${OUT}/raw/"
 
+# A rival's identity is BOTH what it calls itself and the bytes that ran. A bare
+# digest read as sufficient until a version-manager shim disproved it: `command
+# -v csearch` can resolve to the multiplexer itself (a mise shim is a symlink to
+# `mise`), so every shimmed tool hashes to the SAME launcher — csearch, zoekt and
+# mise measured one identical digest here — and the record pins nothing while
+# still looking like a pin. Two defenses, because either alone still degrades
+# quietly: the version is asked OF the tool, so it travels correctly through a
+# shim, and `guard/artifacts.py` fail-closes when two tools report one digest.
 tool_identity() { # <certificate tool id> <executable>
   local name="$1" executable="$2"
   [[ -x "${executable}" ]] || {
@@ -208,13 +216,74 @@ tool_identity() { # <certificate tool id> <executable>
   }
   python3 - "${name}" "${executable}" << 'PY'
 import hashlib
+import os
+import re
+import shutil
+import subprocess
 import sys
 
+name, first = sys.argv[1], sys.argv[2]
+tool = os.path.basename(first)
+# Two components is a real shape, not a truncation — GNU grep ships `3.12`.
+SEMVER = re.compile(r"v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?")
+
+
+def resolve(tool: str, first: str) -> str:
+    """The real binary rather than a version-manager multiplexer.
+
+    A shim resolves to the manager (`mise`, `asdf`); a real install still
+    carries the tool's own name after symlinks. That name is the whole signal
+    needed to tell them apart, so no manager is special-cased here.
+    """
+    for directory in os.get_exec_path():
+        candidate = os.path.join(directory, tool)
+        real = os.path.realpath(candidate)
+        if os.access(real, os.X_OK) and os.path.basename(real) == tool:
+            return real
+    return os.path.realpath(first)
+
+
+def run(argv: list[str], limit: int) -> str:
+    try:
+        done = subprocess.run(
+            argv, capture_output=True, text=True, timeout=limit, stdin=subprocess.DEVNULL
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout or done.stderr
+
+
+def version(path: str) -> str:
+    # Embedded module metadata comes first because it is authoritative and cannot
+    # have side effects. Neither csearch nor zoekt carries a version flag, and
+    # asking a SEARCH tool for one is actively unsafe: `csearch version` treats
+    # `version` as the regexp and prints a matching corpus line, which scraped a
+    # bogus `26.3.0` out of Billy's own source before this order was fixed.
+    if go := shutil.which("go"):
+        for line in run([go, "version", "-m", path], 20).splitlines():
+            field = line.split()
+            if len(field) >= 3 and field[0] == "mod":
+                return field[2]
+    if head := run([path, "--version"], 10).strip().splitlines():
+        if found := SEMVER.search(head[0]):
+            return found.group(0)
+    # `zig version` needs the bare form, so it stays reachable — but only when the
+    # whole reply IS a version. A search tool handed `version` answers with file
+    # content, which can never fullmatch.
+    lone = run([path, "version"], 10).strip().splitlines()
+    if len(lone) == 1 and SEMVER.fullmatch(lone[0]):
+        return lone[0]
+    return ""
+
+
+real = resolve(tool, first)
 digest = hashlib.sha256()
-with open(sys.argv[2], "rb") as executable:
+with open(real, "rb") as executable:
     for chunk in iter(lambda: executable.read(1 << 20), b""):
         digest.update(chunk)
-print(f"{sys.argv[1]} sha256:{digest.hexdigest()}")
+identity = [found] if (found := version(real)) else []
+identity.append(f"sha256:{digest.hexdigest()}")
+print(name, *identity)
 PY
 }
 

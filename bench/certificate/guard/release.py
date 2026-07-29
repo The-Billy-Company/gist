@@ -29,8 +29,8 @@ commit is surfaced here as provenance for a human, and nothing fails without it.
 
 Layout (additive — the flat ``artifact/`` stays the current-machine mint):
 
-    bench/certify/artifact/                 flat bundle (the Mac mint today)
-    bench/certify/artifact/linux-x86_64/    the Linux mint, published with
+    bench/certificate/artifact/              flat bundle (the Mac mint today)
+    bench/certificate/artifact/linux-x86_64/ the Linux mint, published with
                                             CERT_PUBLISH_DIR=…/linux-x86_64
 
 An explicit ``artifact/<platform-id>/`` subdir always wins over the flat dir for
@@ -202,7 +202,8 @@ def main(argv: list[str] | None = None) -> int:
         message = (
             f"no certificate bundles under {root} — release not set up. "
             "Mint on each machine: CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify "
-            "(Linux: CERT_PUBLISH_DIR=bench/certify/artifact/linux-x86_64 bash bench/certify/certify.sh)"
+            "(Linux: CERT_PUBLISH_DIR=bench/certificate/artifact/linux-x86_64 "
+            "bash bench/certificate/mint/mint.sh)"
         )
         if args.json:
             print(json.dumps({"ok": False, "absent": True, "message": message}, indent=2))

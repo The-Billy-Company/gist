@@ -41,9 +41,9 @@
 #     path fires. On a live tree the scoped reconcile keeps warm correct (never
 #     stale), just not maximally fast — that honesty is stated in the certificate.
 #
-# Usage:  bench/certify/certify_warm.sh          (RUNS=30 WARMUP=5 by default)
+# Usage:  bench/certificate/mint/warm.sh          (RUNS=30 WARMUP=5 by default)
 #         CERT_OUT=DIR  certificate dir (default <repo>/.local/gist-verify)
-# Assumes certify.sh already built the gist index + csearch/zoekt indexes this run
+# Assumes mint.sh already built the gist index + csearch/zoekt indexes this run
 # (it calls this script after the cold race); rebuilds the gist bin/index if missing.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

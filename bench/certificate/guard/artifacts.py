@@ -88,7 +88,8 @@ CERT_CLASSES = {
     "regex-eol",
     "regex-litalt",
 }
-SEMVER = re.compile(r"v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?")
+# Two components is a real release shape, not a truncated one — GNU grep is `3.12`.
+SEMVER = re.compile(r"v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?")
 SHA256_ID = re.compile(r"sha256:[0-9a-f]{64}", re.I)
 SHA256 = re.compile(r"[0-9a-f]{64}", re.I)
 TRANSCRIBE_MARKERS = re.compile(r"transcrib|hardcod|\bmanual\b|hand-wave|paste (?:it|the)", re.I)
@@ -123,19 +124,39 @@ def _check_tools(path: Path, problems: list[str]) -> set[str]:
     if not path.is_file():
         return set()
     identities: dict[str, str] = {}
+    digests: dict[str, str] = {}
     for line_no, line in enumerate(path.read_text().splitlines(), 1):
-        parts = line.split(maxsplit=1)
-        if len(parts) != 2:
-            problems.append(f"tool-versions.txt:{line_no}: expected '<tool> <identity>'")
+        tool, *tokens = line.split() or [""]
+        if not tool:
             continue
-        tool, identity = parts
+        if not tokens:
+            problems.append(f"tool-versions.txt:{line_no}: expected '<tool> <identity>...'")
+            continue
         if tool in identities:
             problems.append(f"tool-versions.txt: duplicate tool identity: {tool}")
-        identities[tool] = identity
-        if not (SEMVER.fullmatch(identity) or SHA256_ID.fullmatch(identity)):
+        identities[tool] = " ".join(tokens)
+        for token in tokens:
+            if SHA256_ID.fullmatch(token):
+                digests[tool] = token.lower()
+            elif not SEMVER.fullmatch(token):
+                problems.append(
+                    f"tool-versions.txt:{line_no}: {tool} needs exact semver or "
+                    f"executable sha256, got {token!r}"
+                )
+    # One digest under two tool ids means both resolved to the same file — the
+    # signature of a version-manager shim, where `command -v` hands back the
+    # multiplexer (a mise shim symlinks to `mise`) rather than the rival. Such a
+    # line still reads as an exact pin, so nothing but this check separates it
+    # from a real one.
+    collisions: dict[str, list[str]] = {}
+    for tool, digest in digests.items():
+        collisions.setdefault(digest, []).append(tool)
+    for digest, sharers in sorted(collisions.items()):
+        if len(sharers) > 1:
             problems.append(
-                f"tool-versions.txt:{line_no}: {tool} needs exact semver or "
-                f"executable sha256, got {identity!r}"
+                f"tool-versions.txt: {', '.join(sorted(sharers))} share one executable "
+                f"digest ({digest[7:21]}…) — a shim resolved them to the same binary, "
+                f"so none of them is pinned"
             )
     for tool in REQUIRED_TOOLS:
         if tool not in identities:
@@ -268,7 +289,7 @@ def _check_layers(d: Path, problems: list[str]) -> None:
     """Fail closed when the certificate promises layers/surfaces it does not ship."""
     problems.extend(
         f"missing Layer B–G artifact: {name} "
-        "(run the full bench/certify/certify.sh — never a partial mint)"
+        "(run the full bench/certificate/mint/mint.sh — never a partial mint)"
         for name in REQUIRED_LAYER_FILES
         if not (d / name).is_file()
     )
@@ -278,7 +299,7 @@ def _check_layers(d: Path, problems: list[str]) -> None:
     text = cert.read_text(errors="replace")
     problems.extend(
         f"CERTIFICATE.md missing section {header!r} — "
-        "the header promises this layer/surface; run the full certify.sh"
+        "the header promises this layer/surface; run the full mint.sh"
         for header in REQUIRED_LAYER_HEADERS
         if header not in text
     )
@@ -355,7 +376,7 @@ def check_artifacts(d: Path) -> list[str]:
     or pending regeneration, or an empty list on success.
     """
     if not d.is_dir():
-        print(f"  (no certificate dir at {d} — run `bench/certify/certify.sh` first)")
+        print(f"  (no certificate dir at {d} — run `bench/certificate/mint/mint.sh` first)")
         return ["__ABSENT__"]
     if (d / "REGENERATE.md").is_file() and not (d / "machine.json").is_file():
         print(f"  (certificate pending regeneration at {d} — see REGENERATE.md)")

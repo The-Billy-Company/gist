@@ -20,5 +20,15 @@ render time — generated from committed data, not transcribed.
 `>1` = gist faster). The verdicts on this box: gist's **WARM resident** path
 dominates (rg 807×, git grep 1158×, 20/20), while its **COLD** CLI loses to the
 whole field (rg 0.3×, csearch/zoekt 0.1×) — the per-query freshness `stat()`-walk
-cost — consistent with the macro certificate in `bench/certify/artifact/`.
+cost — consistent with the macro certificate in `bench/certificate/artifact/`.
 Regenerate (`make figures`) rather than hand-editing.
+
+**Do not read `cold.csv` as gist's verdict against the indexed pair.** `warm.csv`
+holds only the unindexed scanners, so csearch and zoekt appear in _this_ directory
+exclusively at gist's worst face: a fresh process paying a full freshness proof,
+against two rivals answering from an index with no freshness obligation at all —
+a weaker question, and one they answer while going silently stale. The comparison
+in gist's actual resident configuration lives in the certificate's warm tier
+(`certify_warm.csv`, columns `csearch_ms` / `zoekt_ms`), where the same `pgxpool`
+needle that loses here is **3.81 ms vs csearch 41.37 ms and zoekt 68.61 ms**. Both
+faces are real; neither alone is the story.
