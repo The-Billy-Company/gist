@@ -206,7 +206,7 @@ pub fn resolve(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, no
     // channels when the caller asked for structure).
     const rr = try flags.rootsOf(gpa, roots);
     defer rr.deinit(gpa);
-    var corpus = try corpus_mod.load(gpa, io, rr.items);
+    var corpus = try corpus_mod.load(gpa, io, rr.items, .contiguous);
     errdefer corpus.deinit();
     const sketches = buildSketches(gpa, corpus.docs);
     const silhouettes: ?[]Silhouette = if (wants == .structure) buildSilhouettes(gpa, corpus.docs) else null;

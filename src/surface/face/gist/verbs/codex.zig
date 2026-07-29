@@ -57,7 +57,7 @@ fn runBuild(gpa: std.mem.Allocator, io: std.Io) !void {
     const built_ns: i64 = @intCast(assay.anchor(io).ns());
     const roots = try corpus_mod.resolveRoots(gpa);
     defer corpus_mod.freeRoots(gpa, roots);
-    var corpus = try corpus_mod.load(gpa, io, roots);
+    var corpus = try corpus_mod.load(gpa, io, roots, .contiguous);
     defer corpus.deinit();
 
     const shelf = try shelf_mod.persist(gpa, io, corpus.docs, corpus.paths, built_ns);

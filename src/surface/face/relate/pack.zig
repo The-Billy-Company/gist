@@ -337,7 +337,7 @@ fn live(
 
     const rr = try flags.rootsOf(gpa, roots);
     defer rr.deinit(gpa);
-    var corpus = try corpus_mod.load(gpa, io, rr.items);
+    var corpus = try corpus_mod.load(gpa, io, rr.items, .contiguous);
     defer corpus.deinit();
 
     // One pass yields both the document frequency that prices each aspect and

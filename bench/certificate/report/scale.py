@@ -241,8 +241,66 @@ def _tier_section(rows: list[dict], meta: dict[str, str], machine: str, zig: str
     return out
 
 
+def _build_verdict(build: list[dict]) -> list[str]:
+    """The build lane's verdict, derived from its own rows.
+
+    This paragraph used to state its four ratios in prose, and a builder rewrite
+    that cut peak RSS by 3.2x left every one of them wrong while the table beside
+    it was already right — the same failure mode the matched pair had. The memory
+    clause reads its own comparison rather than asserting a loss, so the sentence
+    tells the truth on the mint where that lane finally turns over."""
+    by = {r["engine"]: r for r in build}
+    gist = by.get("gist")
+    if not gist:
+        return []
+    faster = [
+        f"{_num(r, 'wall_s') / max(_num(gist, 'wall_s'), 1e-9):.1f}x faster than {name}"
+        for name, r in by.items()
+        if name != "gist" and _num(r, "wall_s") > _num(gist, "wall_s")
+    ]
+    widest = max(
+        (r for name, r in by.items() if name != "gist"),
+        key=lambda r: _num(r, "index_mib"),
+        default=None,
+    )
+    lead = (
+        f"**gist builds the smallest index the fastest** — {_num(gist, 'text_gib'):.2f} GiB of "
+        f"text in {_num(gist, 'wall_s'):.1f} s"
+        + (f", {' and '.join(faster)}" if faster else "")
+        + f", at {_num(gist, 'index_pct_text'):.1f}% of the text it indexed"
+        + (
+            f" where {widest['engine']}'s comes to {_num(widest, 'index_mib') / 1024:.1f} GiB."
+            if widest and _num(widest, "index_mib") > _num(gist, "index_mib")
+            else "."
+        )
+    )
+    peak = _num(gist, "peak_rss_gib")
+    dearer = sorted(
+        (
+            (peak / max(_num(r, "peak_rss_gib"), 1e-9), name)
+            for name, r in by.items()
+            if name != "gist" and _num(r, "peak_rss_gib") < peak
+        ),
+        reverse=True,
+    )
+    if not dearer:
+        return [lead + " **And it no longer pays for that in memory**: nothing in this table "
+                f"builds inside {peak:.2f} GiB of peak RSS."]
+    return [
+        lead
+        + f" **Memory is still the lane it loses**: {peak:.2f} GiB peak RSS while indexing, "
+        + " and ".join(f"{factor:.1f}x {name}" for factor, name in dearer)
+        + ". That is the real scale ceiling in this table and it is not normalized away."
+    ]
+
+
 def _race_section(
-    race: list[dict], build: list[dict], resident: list[dict], elision: list[dict]
+    race: list[dict],
+    build: list[dict],
+    resident: list[dict],
+    elision: list[dict],
+    walkcost: list[dict],
+    walkcost_meta: dict[str, str],
 ) -> list[str]:
     if not race:
         return []
@@ -270,17 +328,7 @@ def _race_section(
                 f"| {r['engine']} | {_num(r, 'wall_s'):.1f} s | {_num(r, 'peak_rss_gib'):.2f} GiB "
                 f"| {_num(r, 'index_mib'):.0f} MiB | {_num(r, 'index_pct_text'):.1f}% |"
             )
-        out += [
-            "",
-            (
-                "**gist builds the smallest index the fastest** — 3.32 GiB of text in 21.4 s, "
-                "11.0x faster than zoekt and 2.6x faster than csearch, at 10.4% of the text it "
-                "indexed where zoekt's shards come to 8.7 GiB. **And it loses the memory lane "
-                "outright**: 14.50 GiB peak RSS while indexing, 5.1x csearch and 8.5x zoekt. "
-                "That is the real scale ceiling in this table and it is not normalized away."
-            ),
-            "",
-        ]
+        out += ["", *_build_verdict(build), ""]
     out += [
         "| class | gist | zoekt | csearch | gist vs csearch | verdict |",
         "|---|--:|--:|--:|--:|:--|",
@@ -414,37 +462,28 @@ def _race_section(
                 "336,780 files**, which every query re-runs to honor *a stale index can "
                 "accelerate a live tree without owning truth* — one touched byte costing a full "
                 "16 KiB page, so residency would track file count rather than query or index "
-                "size. That reasoning predicts any engine walking this tree pays this bill, and "
-                "**ripgrep walks this tree and does not.** Matched pair, both `-uu` over the same "
-                "corpus from the same directory, both returning zero matches:"
+                "size. That reasoning predicts any engine walking a tree pays this bill, and "
+                "**ripgrep walks one and does not** — which made the remainder gist's own, and "
+                "findable. The matched pair below is the instrument that settled it: same "
+                "needle, same `-uu` scope, same cwd, both counting, both a fresh process with "
+                "no index and no daemon, so the only difference left is the implementation of "
+                "walking. It is measured on its own tree rather than the race corpus above, "
+                "because what it isolates is walk cost per file and it must be re-runnable "
+                "anywhere:"
             ),
             "",
-            "| scanner (no index in play) | maxrss | owned |",
-            "|---|--:|--:|",
-            "| `rg -uu -F -c pgxpool .` | 35.7 MiB | **36.5 MiB** |",
-            "| `gist -uu --no-index -F -c pgxpool .` | 661.7 MiB | **219.2 MiB** |",
-            "",
-            (
-                "So walking is not what costs it — gist's *implementation* of walking is, and "
-                "the gap survives on the metric that is a cost: **6.0x rg on owned memory** for "
-                "identical work with no index. The freshness defense does not hold either, "
-                "because rg has perfect freshness — it reads the tree every time and trusts "
-                "nothing — for 36 MiB. csearch's 3–11 MiB does come from not walking, the same "
-                "decision that makes it unable to see a file created after indexing; but rg is "
-                "the honest denominator for a walk-cost claim, and rg is cheap."
-            ),
-            "",
+        ]
+        out += _walkcost(walkcost, walkcost_meta)
+        out += [
             (
                 "> **The honest score, on the metric that is a cost.** gist's owned working set "
                 "is **93–96 MiB, flat across every query class** — a rare literal, a "
                 "corpus-wide literal, a sub-trigram needle and a zero-candidate probe all land "
                 "within 3 MiB of each other. That is ~10x csearch, and **5.8x better than "
                 "zoekt**, whose 558 MiB of owned memory for a single common term is the largest "
-                "working set in this table. Against rg as a pure scanner gist owns **6.0x**, and "
-                "against csearch it loses maxrss outright. That gap is **unattributed overhead "
-                "in gist's walk path** — an open optimization target and the strongest surviving "
-                "form of the original scale claim, not a measured price of freshness, because "
-                "the engine with perfect freshness pays 36 MiB. The residual in-lane waste is "
+                "working set in this table. Against csearch gist loses maxrss outright, and "
+                "that is the standing shortfall: csearch does not walk, so it is not charged "
+                "for a tree it never reads. The residual in-lane waste is "
                 "bounded and named: `crest.bin`'s 5.3 MiB is walked eagerly at load to derive "
                 "the sliver rescue set that only a 1–2 byte needle consumes, worth ~1% of the "
                 "number and left alone because making it lazy would entangle that set's "
@@ -452,6 +491,56 @@ def _race_section(
             ),
             "",
         ]
+    return out
+
+
+def _walkcost(rows: list[dict], meta: dict[str, str]) -> list[str]:
+    """The matched pair, rendered from `scale_walkcost.tsv` rather than from prose.
+
+    This table used to be two numbers typed into the paragraph above, which is the
+    shape a fix invalidates silently — and one did: the walk path's own retention
+    was found and closed, and the certificate went on quoting the pre-fix figure.
+    An absent measurement now reads as absent instead of as the last one anybody
+    took."""
+    by = {r["tool"]: r for r in rows if r.get("maxrss_mib")}
+    gist, rg = by.get("gist"), by.get("rg")
+    if not gist or not rg:
+        return [
+            "This mint carries no matched-pair measurement (`scale_walkcost.tsv` absent or "
+            "one half unobtainable), so the refutation above is not restated with numbers "
+            "here. Take it with `bench/rungs/sliver/walkcost.py --root <tree>`.",
+            "",
+        ]
+    where = meta.get("corpus", "an unnamed tree")
+    files = meta.get("files")
+    out = [
+        f"| scanner over `{where}`"
+        + (f" ({int(files):,} files)" if files and files.isdigit() else "")
+        + " | maxrss | owned |",
+        "|---|--:|--:|",
+    ]
+    out += [
+        f"| `{r['invocation']}` | {_num(r, 'maxrss_mib'):.1f} MiB | **{_num(r, 'owned_mib'):.1f} MiB** |"
+        for r in (rg, gist)
+    ]
+    owned = _num(gist, "owned_mib") / max(_num(rg, "owned_mib"), 1e-9)
+    rss = _num(gist, "maxrss_mib") / max(_num(rg, "maxrss_mib"), 1e-9)
+    out += [
+        "",
+        (
+            "So walking is not what costs it — gist's *implementation* of walking was, and "
+            f"that is now closed to **{owned:.2f}x rg on owned memory**, the metric that is a "
+            f"cost, and **{rss:.2f}x on maxrss**, which charges an engine for clean evictable "
+            "page cache a `read(2)`-based scanner is never billed for. What closed it was "
+            "naming the retention rather than the phase: the walk was holding every large "
+            "file it had mapped until the process exited, so its resident set tracked the "
+            "corpus instead of the query. A worker now drops each mapping in the frame that "
+            "rendered it. The freshness defense was never the answer here — rg has perfect "
+            "freshness, it reads the tree every time and trusts nothing, and it is cheap — "
+            "which is exactly why rg is the honest denominator for a walk-cost claim."
+        ),
+        "",
+    ]
     return out
 
 
@@ -537,20 +626,27 @@ def render(
     resident: list[dict],
     pareto: list[dict],
     elision: list[dict],
+    walkcost: list[dict],
+    walkcost_meta: dict[str, str],
     machine: str,
     zig: str,
 ) -> str:
     """Render the whole Layer J markdown section."""
     lines = [START, HEADER, ""]
     lines += _tier_section(rows, meta, machine, zig)
-    lines += _race_section(race, build, resident, elision)
+    lines += _race_section(race, build, resident, elision, walkcost, walkcost_meta)
     lines += _positional_section(pareto)
     lines.append(END)
     return "\n".join(lines) + "\n"
 
 
 def write_sidecar(
-    path: Path, rows: list[dict], race: list[dict], pareto: list[dict], resident: list[dict]
+    path: Path,
+    rows: list[dict],
+    race: list[dict],
+    pareto: list[dict],
+    resident: list[dict],
+    walkcost: list[dict],
 ) -> None:
     """One flat side-car proving the layer was measured (the roster's `scale.csv`)."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -575,6 +671,12 @@ def write_sidecar(
         out.extend(
             f"resident\t{key}\t{col}\t{r.get(col)}"
             for col in ("gist_rss_mib", "gist_fp_mib", "csearch_rss_mib", "csearch_fp_mib")
+            if (r.get(col) or "").strip() not in ("", "—")
+        )
+    for r in walkcost:
+        out.extend(
+            f"walkcost\t{r['tool']}\t{col}\t{r.get(col)}"
+            for col in ("maxrss_mib", "owned_mib", "seconds")
             if (r.get(col) or "").strip() not in ("", "—")
         )
     path.write_text("\n".join(out) + "\n")
@@ -613,6 +715,9 @@ def main() -> int:
     ap.add_argument("--resident", type=Path, help="scale_resident.tsv (query-time peak RSS)")
     ap.add_argument("--pareto", type=Path, help="positional_pareto.tsv (size/benefit surface)")
     ap.add_argument("--elision", type=Path, help="scale_elision.tsv (indexed==--no-index proof)")
+    ap.add_argument(
+        "--walkcost", type=Path, help="scale_walkcost.tsv (gist vs rg walk memory, no index)"
+    )
     ap.add_argument("--sidecar", type=Path, help="write the roster side-car here (scale.csv)")
     ap.add_argument("--machine", default="?")
     ap.add_argument("--zig", default="?")
@@ -627,6 +732,9 @@ def main() -> int:
     resident = _rows(args.resident)[0] if args.resident and args.resident.exists() else []
     pareto = _rows(args.pareto)[0] if args.pareto and args.pareto.exists() else []
     elision = _rows(args.elision)[0] if args.elision and args.elision.exists() else []
+    walkcost, walkcost_meta = (
+        _rows(args.walkcost) if args.walkcost and args.walkcost.exists() else ([], {})
+    )
 
     if faults := audit(rows, meta, race, pareto, elision):
         print("certify_scale_report: REFUSING to splice — the layer's own claims do not hold:")
@@ -634,10 +742,22 @@ def main() -> int:
             print(f"  · {fault}")
         return 1
 
-    section = render(rows, meta, race, build, resident, pareto, elision, args.machine, args.zig)
+    section = render(
+        rows,
+        meta,
+        race,
+        build,
+        resident,
+        pareto,
+        elision,
+        walkcost,
+        walkcost_meta,
+        args.machine,
+        args.zig,
+    )
     splice(args.certificate, section)
     if args.sidecar:
-        write_sidecar(args.sidecar, rows, race, pareto, resident)
+        write_sidecar(args.sidecar, rows, race, pareto, resident, walkcost)
         print(f"wrote side-car → {args.sidecar}")
     print(f"wrote Layer J (index tiers at scale) → {args.certificate}")
     return 0

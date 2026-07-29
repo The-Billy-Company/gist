@@ -50,6 +50,17 @@ const fault = @import("../../../../fault.zig");
 const portal = @import("../../../../portal.zig");
 const home = @import("../../../../corpus/index/frame/home.zig");
 
+/// This process's peak resident set so far, in MiB — the running ceiling every
+/// `GIST_TRACE=index` phase line carries. Peak is monotonic, so the phase that
+/// RAISES it is the phase that owns the build's memory bill; a phase whose line
+/// repeats the previous number cost nothing at the high-water mark, however much
+/// it allocated and released along the way. Without this a build reports one
+/// total and leaves four unrelated causes indistinguishable — the same reason
+/// the wall-clock laps exist beside it.
+fn peakMib() f64 {
+    return @as(f64, @floatFromInt(portal.peakResident())) / (1 << 20);
+}
+
 /// Refresh the persisted index: amend incrementally when the base admits it,
 /// else build + persist the full pair.
 pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
@@ -74,29 +85,33 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // walk, more trigram postings, a slower disk on publish, or a sidecar
     // stalling — and one wall-clock number distinguishes none of them.
     var phase = assay.Span.open(io);
-    var corpus = try corpus_mod.load(gpa, io, roots);
+    // `.scattered`: a build reads each body a fixed twice — trigram extraction
+    // and the shard write — so `compact`'s contiguity copy has no repeat scan to
+    // amortize against, and it dominates the build's peak. That copy belongs to
+    // the resident session, which scans the same corpus indefinitely.
+    var corpus = try corpus_mod.load(gpa, io, roots, .scattered);
     defer corpus.deinit();
-    assay.trace(.index, "index phase: corpus load {d:.1} ms · {d} docs · {d:.1} MiB\n", .{
-        phase.lap(io).ms(), corpus.docs.len, @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20),
+    assay.trace(.index, "index phase: corpus load {d:.1} ms · peak {d:.0} MiB · {d} docs · {d:.1} MiB\n", .{
+        phase.lap(io).ms(), peakMib(), corpus.docs.len, @as(f64, @floatFromInt(corpus.bytes)) / (1 << 20),
     });
     var idx = try Index.build(gpa, corpus.docs);
     defer idx.deinit();
-    assay.trace(.index, "index phase: trigram build {d:.1} ms\n", .{phase.lap(io).ms()});
+    assay.trace(.index, "index phase: trigram build {d:.1} ms · peak {d:.0} MiB\n", .{ phase.lap(io).ms(), peakMib() });
     // Crest sidecar (the class-run sieve, research/crest/): one parallel pass
     // over the already-loaded docs. Best-effort — an OOM here costs only the
     // sieve, never the index build.
     const crest_vectors: ?[]const @import("../../../../kernel/math/crest.zig").Vector =
         crest_sidecar.build(gpa, corpus.docs) catch null;
     defer if (crest_vectors) |cv| gpa.free(cv);
-    assay.trace(.index, "index phase: crest sieve {d:.1} ms · {s}\n", .{
-        phase.lap(io).ms(), if (crest_vectors == null) "declined" else "built",
+    assay.trace(.index, "index phase: crest sieve {d:.1} ms · peak {d:.0} MiB · {s}\n", .{
+        phase.lap(io).ms(), peakMib(), if (crest_vectors == null) "declined" else "built",
     });
 
     // Generation-atomic publish: all blobs stage under gens/<id>/, then
     // pair.gen flips — concurrent loaders never see a mixed old/new set.
     const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths, roots, crest_vectors, built.ns());
-    assay.trace(.index, "index phase: publish {d:.1} ms · {d:.1} MiB\n", .{
-        phase.lap(io).ms(), @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
+    assay.trace(.index, "index phase: publish {d:.1} ms · peak {d:.0} MiB · {d:.1} MiB\n", .{
+        phase.lap(io).ms(), peakMib(), @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
     });
     try fresh.writeAnchor(io, built); // T3 freshness anchor
     if (jtok) |t| fresh.writeJournalToken(io, t); // journal since-token (best-effort)
@@ -108,7 +123,7 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // full-scan query falls back to opening every file, never the index build.
     fault.spare(
         "content shard (costs the shard read tier)",
-        shard.build(gpa, io, corpus.docs, corpus.paths, built.ns()),
+        shard.build(io, corpus.docs, corpus.paths, built.ns()),
     );
     // Bind the directory to this tree LAST: until it lands, every reader still
     // sees whatever binding was here before, so a rebuild that repurposes a
@@ -118,7 +133,7 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     frame.publishBinding(io, frame.treeRootFile());
     // The accelerator sidecars as one segment: each is individually best-effort
     // (`fault.spare`), so what matters here is what they cost together.
-    assay.trace(.index, "index phase: sidecars {d:.1} ms · anchor+journal+treemap+shard+binding\n", .{phase.lap(io).ms()});
+    assay.trace(.index, "index phase: sidecars {d:.1} ms · peak {d:.0} MiB · anchor+journal+treemap+shard+binding\n", .{ phase.lap(io).ms(), peakMib() });
 
     const dur = span.read(io).ms();
     assay.summary(gpa, false, "indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{

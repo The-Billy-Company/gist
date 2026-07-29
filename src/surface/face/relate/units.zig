@@ -425,7 +425,7 @@ fn resolveFragments(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u
 
     const rr = try flags.rootsOf(gpa, roots);
     defer rr.deinit(gpa);
-    var corpus = try corpus_mod.load(gpa, io, rr.items);
+    var corpus = try corpus_mod.load(gpa, io, rr.items, .contiguous);
     errdefer corpus.deinit();
     var build = try frag.buildAll(gpa, &corpus);
     errdefer build.deinit();
@@ -466,7 +466,7 @@ pub const Narrowed = struct {
         if (narrow.patterns.len == 0) die("--matching needs a pattern\n", .{});
         const rr = try flags.rootsOf(gpa, roots);
         defer rr.deinit(gpa);
-        var corpus = try corpus_mod.load(gpa, io, rr.items);
+        var corpus = try corpus_mod.load(gpa, io, rr.items, .contiguous);
         errdefer corpus.deinit();
         var set = compile(gpa, narrow) catch |e| dieCompile(e);
         errdefer set.deinit(gpa);

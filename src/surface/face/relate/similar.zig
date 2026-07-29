@@ -423,7 +423,7 @@ fn rankRecall(
     // whole-corpus cost.
     const rr = try flags.rootsOf(gpa, roots);
     defer rr.deinit(gpa);
-    var corpus = try corpus_mod.load(gpa, io, rr.items);
+    var corpus = try corpus_mod.load(gpa, io, rr.items, .contiguous);
     defer corpus.deinit();
     var lex = try lexicon.Lexicon.build(gpa, corpus.docs);
     defer lex.deinit();
