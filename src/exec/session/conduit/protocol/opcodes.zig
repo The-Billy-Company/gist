@@ -128,8 +128,8 @@ pub fn takeLenPrefixed(rest: *[]const u8) WireError![]const u8 {
 pub const writeAll = wire.writeAll;
 
 /// Send one framed message on `fd` (gist opcode → raw byte).
-pub fn sendFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t, op: Opcode, payload: []const u8) WireError!void {
-    return wire.sendFrame(gpa, fd, @intFromEnum(op), payload);
+pub fn sendFrame(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, op: Opcode, payload: []const u8) WireError!void {
+    return wire.sendFrame(gpa, io, fd, @intFromEnum(op), payload);
 }
 
 /// A framed message read off `fd`, owning its bytes (payload aliases into it).
@@ -149,8 +149,8 @@ pub const Frame = struct {
 
 /// Receive one whole frame from `fd`. `ConnClosed` on truncated peer;
 /// `StreamTooLong`/`UnexpectedFrame` fail closed.
-pub fn recvFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!Frame {
-    var raw = try wire.recvFrame(gpa, fd);
+pub fn recvFrame(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t) WireError!Frame {
+    var raw = try wire.recvFrame(gpa, io, fd);
     const op = std.enums.fromInt(Opcode, raw.op) orelse {
         raw.deinit();
         return WireError.UnexpectedFrame;
@@ -166,8 +166,8 @@ pub const FdFrame = struct { frame: Frame, passed_fd: ?std.posix.fd_t };
 /// that advertised `cap_fd_transport` uses this for the response so it can serve
 /// either a `chunk_fd` answer or the classic `chunk`/`result` frames (which
 /// simply arrive with `passed_fd == null`).
-pub fn recvFrameWithFd(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!FdFrame {
-    var raw = try wire.recvFrameWithFd(gpa, fd);
+pub fn recvFrameWithFd(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t) WireError!FdFrame {
+    var raw = try wire.recvFrameWithFd(gpa, io, fd);
     const op = std.enums.fromInt(Opcode, raw.frame.op) orelse {
         raw.frame.deinit();
         if (raw.passed_fd) |p| _ = std.c.close(p);

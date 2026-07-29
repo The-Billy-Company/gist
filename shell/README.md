@@ -41,6 +41,18 @@ so one rebuild refreshes every install site. An existing real file is never
 replaced by a link, a shell that isn't installed is never touched, and
 re-running changes nothing.
 
+On Windows the same job is [`install.ps1`](../install.ps1) rather than
+[`install.sh`](install.sh), and only the `powershell` row applies: the completion
+lands at `%LOCALAPPDATA%\gist\gist.ps1` and gets one guarded dot-source line in
+`$PROFILE`, because a profile is the only place PowerShell autoloads from — it has
+no `site-functions`, `bash-completion`, or `completions.d` equivalent to drop a
+file into and say nothing. The man page is still minted and placed for whoever has
+a `man` that reads it (Git for Windows, MSYS2, a WSL install sharing the home
+directory); nothing on a stock Windows will, and it costs one file to be right
+for the people who do. A symlink needs a privilege there, so each placement tries
+a link and falls back to a copy — which is why `install.ps1` reports which one it
+used: a copy goes stale on the next rebuild and a link does not.
+
 ## Why it is worth generating rather than writing
 
 ripgrep's zsh completion is the best hand-written one in the field, and it

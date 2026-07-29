@@ -42,6 +42,18 @@ ln -s "$PWD" ~/.vim/pack/gist/start/gist                     # Vim
 ln -s "$PWD" ~/.local/share/nvim/site/pack/gist/start/gist   # Neovim
 ```
 
+On Windows, [`install.ps1`](../../install.ps1) does the same thing to the same
+contract — the package roots just have different names, and a link needs
+Developer Mode, so it falls back to a copy rather than declining to install:
+
+```powershell
+$plugin = "$PWD"
+New-Item -ItemType SymbolicLink -Target $plugin `
+  -Path "$HOME\vimfiles\pack\gist\start\gist"                          # Vim
+New-Item -ItemType SymbolicLink -Target $plugin `
+  -Path "$env:LOCALAPPDATA\nvim-data\site\pack\gist\start\gist"        # Neovim
+```
+
 Then `:help gist` for the full guide, or `:GistHealth`
 (`:checkhealth gist` in Neovim) for what is and is not wired.
 

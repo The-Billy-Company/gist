@@ -14,8 +14,9 @@
 //! one request/response per connection, so the worker owns the fd for the
 //! query's duration and writes the whole answer — `chunk`, `result`, or the
 //! `chunk_fd` shm handoff — directly), and moves on to the next readable
-//! client. On completion the worker posts the connection back and nudges the
-//! poll thread over a self-pipe, which re-registers the fd.
+//! client. On completion the worker posts the connection back and rings the
+//! bell the poll thread is watching (`conduit/vigil.zig`), which re-registers
+//! the fd.
 //!
 //! The session is itself reader/writer-safe (the `Ward`: many warm reads
 //! overlap, a reconcile runs alone), so the workers answer in parallel; the
@@ -28,18 +29,17 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const portal = @import("../../../../portal.zig");
 const resident = @import("../../warm/resident.zig");
 const protocol = @import("../../conduit/protocol/protocol.zig");
 const watch = @import("../../watch/watch.zig");
+const vigil = @import("../../conduit/vigil.zig");
 const keep_mod = @import("../../answer/keep.zig");
 const answer = @import("answer.zig");
 const assay = @import("../../../../assay/assay.zig");
-const fault = @import("../../../../fault.zig");
 const net = std.Io.net;
 
 const ResidentSession = resident.ResidentSession;
-
-extern "c" fn write(fd: std.posix.fd_t, buf: [*]const u8, n: usize) isize;
 
 /// Registered-connection cap. Beyond it a new connection is closed at accept
 /// and the client falls back to the certified cold path — fail-open, never a
@@ -130,8 +130,9 @@ pub const Server = struct {
     jobs: Ring(Job) = .{},
     dones: Ring(Done) = .{},
     shutting_down: bool = false,
-    wake_r: std.posix.fd_t,
-    wake_w: std.posix.fd_t,
+    /// Rung by a worker, watched by the poll thread — the only thing that makes
+    /// a finished query visible before the wait's next deadline.
+    bell: vigil.Bell,
 
     /// Hand a parsed query frame to the pool: mark the slot in-flight (so the
     /// poll thread stops polling its fd), enqueue, and signal one worker. The
@@ -144,18 +145,10 @@ pub const Server = struct {
         self.job_ready.signal(self.io);
     }
 
-    /// Wake the poll thread from its `poll` so it drains completions promptly. A
-    /// single byte per completion; the pipe holds ≤ `max_clients` outstanding
-    /// bytes (« its buffer), so this write never blocks in practice.
-    fn wake(self: *Server) void {
-        _ = write(self.wake_w, &[_]u8{1}, 1);
-    }
-
-    /// Drain the self-pipe's readiness after `poll` reports it — one read clears
-    /// the accumulated wakeup bytes; any residue simply re-triggers next loop.
+    /// Drain the bell's readiness after the wait reports it — one read clears the
+    /// accumulated wakeup bytes; any residue simply re-triggers next loop.
     pub fn drainWake(self: *Server) void {
-        var buf: [256]u8 = undefined;
-        fault.spare("drain the wakeup self-pipe", std.posix.read(self.wake_r, &buf));
+        self.bell.quiet(self.io);
     }
 
     /// Apply every finished query the workers posted: re-register a kept
@@ -220,7 +213,7 @@ pub const Server = struct {
             self.mutex.lockUncancelable(self.io);
             self.dones.push(.{ .slot = job.slot, .drop = drop });
             self.mutex.unlock(self.io);
-            self.wake();
+            self.bell.ring(self.io);
         }
     }
 };
@@ -233,7 +226,7 @@ pub fn configuredWorkers() usize {
         const n = std.fmt.parseInt(usize, std.mem.span(s), 10) catch 0;
         if (n > 0) return @min(n, max_clients);
     }
-    const cpu = std.Thread.getCpuCount() catch 1;
+    const cpu = portal.cpuCount() catch 1;
     return std.math.clamp(cpu / 2, 1, worker_cap);
 }
 

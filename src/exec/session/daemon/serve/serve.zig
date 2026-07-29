@@ -27,8 +27,8 @@
 //! CLI forks one on the first eligible miss, so ~10 coworker CLIs may each race
 //! to start one):
 //!
-//!   * **Single-instance** — before touching the socket, `run` takes an advisory
-//!     `flock` on `<socket>.lock`. Exactly one racer wins; the losers return at
+//!   * **Single-instance** — before touching the socket, `run` takes an exclusive
+//!     lock on `<socket>.lock`. Exactly one racer wins; the losers return at
 //!     once *without* unlinking the winner's live socket. The lock is taken
 //!     first precisely so a loser never runs the stale-socket cleanup below.
 //!   * **Idle self-release, in two stages** (`idle.zig`) — the accept loop
@@ -56,6 +56,7 @@ const standdown = @import("../../warden/standdown.zig");
 const answer = @import("answer.zig");
 const crew = @import("crew.zig");
 const loop = @import("loop.zig");
+const vigil = @import("../../conduit/vigil.zig");
 const corpus = @import("../../../../corpus/tree/corpus.zig");
 // `frame` is taken by the protocol frames threaded through the daemon.
 const frame_mod = @import("../../../../corpus/index/frame/frame.zig");
@@ -77,10 +78,6 @@ fn surrenderKeep(ctx: *anyopaque) usize {
     return k.surrender();
 }
 
-extern "c" fn flock(fd: std.posix.fd_t, operation: c_int) c_int;
-extern "c" fn close(fd: std.posix.fd_t) c_int;
-extern "c" fn pipe(fds: *[2]std.posix.fd_t) c_int;
-
 /// Serve `roots` warm on `socket_path` until it goes idle, a client sends
 /// `shutdown`, or the listener dies. Owns the session + socket for its whole
 /// lifetime. Returns immediately (no-op) if another daemon already holds the
@@ -97,11 +94,11 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
 fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket_path: []const u8) !void {
     // Singleton FIRST — before any socket mutation — so a losing racer never
     // unlinks the winner's live socket during the stale-socket cleanup below.
-    const lock_fd = acquireSingleton(io, socket_path) orelse {
+    const lock = acquireSingleton(io, socket_path) orelse {
         crew.note("gist serve: another daemon already warm on {s}\n", .{socket_path});
         return;
     };
-    defer _ = close(lock_fd); // closing releases the advisory flock
+    defer lock.close(io); // closing releases the lock
 
     // Everything below is charged against ONE ration: the session's mirror and
     // trigram index, the answer keep, the watcher's bookkeeping, and each
@@ -109,7 +106,7 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     // that is true — `run` receives a single allocator and threads it into
     // everything it constructs — which is what lets a wrapper here bound the
     // whole resident set instead of the parts someone remembered to check.
-    const allowance = ration.ration();
+    const allowance = ration.addressable();
     if (allowance == 0) {
         crew.note("gist serve: this machine lends no resident ration — queries answer cold\n", .{});
         return;
@@ -177,12 +174,11 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
         fault.spare("unlink the socket binding on shutdown", Dir.cwd().deleteFile(io, bind_path));
     };
 
-    // Shared server state + the worker-completion wakeup pipe. Pipe failure is
-    // fatal to the daemon (essentially only fd exhaustion) — the client then
-    // just answers cold and re-spawns later; worker-spawn failure only degrades
-    // to inline handling (below), so it fails open.
-    var wp: [2]std.posix.fd_t = undefined;
-    if (pipe(&wp) != 0) return fault.Resource.Exhausted;
+    // Shared server state + the worker-completion bell. Failing to open it is
+    // fatal to the daemon (essentially only descriptor exhaustion) — the client
+    // then just answers cold and re-spawns later; worker-spawn failure only
+    // degrades to inline handling (below), so it fails open.
+    const bell = vigil.Bell.open(io) catch return fault.Resource.Exhausted;
     // The answer keep outlives every connection and dies with the daemon — its
     // whole soundness argument rests on this watcher's epoch, so it must not
     // survive the watcher that vouched for it.
@@ -193,16 +189,13 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     // output the daemon can recompute, which is what made it cacheable. Spend it
     // before declining a query (`warden/warden.zig`).
     warden.attend(.{ .ctx = &keep, .hand = surrenderKeep });
-    var server = crew.Server{ .gpa = mem, .io = io, .session = &session, .watcher = &watcher, .keep = &keep, .wake_r = wp[0], .wake_w = wp[1] };
+    var server = crew.Server{ .gpa = mem, .io = io, .session = &session, .watcher = &watcher, .keep = &keep, .bell = bell };
     // Teardown runs LIFO; register so it unwinds in this order: (1) stop + join
-    // the workers — they touch the session, the connections, and the wake pipe,
-    // so they must all be quiescent first; (2) close the connections; (3) close
-    // the pipe. `session.deinit`/`watcher.stop` (registered far above) run after
-    // the join, as they must.
-    defer {
-        _ = close(server.wake_r);
-        _ = close(server.wake_w);
-    }
+    // the workers — they touch the session, the connections, and the bell, so
+    // they must all be quiescent first; (2) close the connections; (3) close the
+    // bell. `session.deinit`/`watcher.stop` (registered far above) run after the
+    // join, as they must.
+    defer server.bell.close(io);
     defer for (&server.conns) |*c| {
         if (c.state != .free) c.stream.close(io);
     };
@@ -226,35 +219,35 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     // order of magnitude here. A daemon reporting a crest near its ration is one
     // rebuild away from standing down, which is worth knowing before it does.
     crew.note("gist serve: warm on {s} ({d} roots, {d} workers, held {d} MB of a {d} MB ration, load crest {d} MB)\n", .{ socket_path, roots.len, nworkers, warden.holding() >> 20, allowance >> 20, warden.peak() >> 20 });
-    try loop.run(&server, &listener);
+    loop.run(&server, &listener);
 }
 
-/// Take the advisory single-instance lock on `<socket_path>.lock`. Returns the
-/// held fd (keep it open for the daemon's lifetime — closing releases the lock),
-/// or `null` if another daemon owns it or the lock file can't be opened (in
-/// which case the caller declines to start rather than fight over the socket).
-fn acquireSingleton(io: std.Io, socket_path: []const u8) ?std.posix.fd_t {
-    // Single-daemon arbitration is `flock(2)`, which Windows does not have, and a
-    // platform that cannot host a resident session has no singleton to acquire
-    // (`portal.resident_sessions`). Null is already "someone else holds it, stand
-    // down" — the caller declines to serve, which is the correct outcome here too.
-    if (comptime portal.resident_sessions) return acquireSingletonPosix(io, socket_path);
-    return null;
-}
-
-fn acquireSingletonPosix(io: std.Io, socket_path: []const u8) ?std.posix.fd_t {
+/// Take the single-instance lock on `<socket_path>.lock`. Returns the held file
+/// (keep it open for the daemon's lifetime — closing releases the lock), or
+/// `null` if another daemon owns it or the lock file can't be opened (in which
+/// case the caller declines to start rather than fight over the socket).
+///
+/// One call, no platform arm: std acquires the lock *as part of* the open, and
+/// both spellings underneath it are release-on-close, so the `defer` that closes
+/// this file is the whole release protocol. POSIX is `flock(2)`; Windows has no
+/// `flock` but `NtLockFile` over a fixed byte range is the same fact — a
+/// non-blocking exclusive request that either wins or reports `WouldBlock`, which
+/// is exactly the two outcomes this function has ever had.
+fn acquireSingleton(io: std.Io, socket_path: []const u8) ?std.Io.File {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const lock_path = std.fmt.bufPrint(&buf, "{s}.lock", .{socket_path}) catch return null;
-    // Best-effort for the same reason as the socket directory: the `openat`
+    // Best-effort for the same reason as the socket directory: the create
     // below is the real check and already declines by returning null.
     if (std.fs.path.dirnamePosix(lock_path)) |dir|
         fault.spare("pre-create the lock directory", Dir.cwd().createDirPath(io, dir));
-    const fd = std.posix.openat(std.posix.AT.FDCWD, lock_path, .{ .ACCMODE = .RDWR, .CREAT = true }, 0o600) catch return null;
-    if (flock(fd, std.posix.LOCK.EX | std.posix.LOCK.NB) != 0) {
-        _ = close(fd); // held by a live daemon → this racer stands down
-        return null;
-    }
-    return fd;
+    // `truncate = false` because the file is a rendezvous, not a payload — the
+    // bytes are nobody's, and truncating one a live daemon holds would be a write
+    // this function has no business making.
+    return Dir.cwd().createFile(io, lock_path, .{
+        .truncate = false,
+        .lock = .exclusive,
+        .lock_nonblocking = true,
+    }) catch null; // WouldBlock = a live daemon holds it → this racer stands down
 }
 
 /// The socket path a daemon binds / a client dials: `$GIST_SESSION_SOCK` when

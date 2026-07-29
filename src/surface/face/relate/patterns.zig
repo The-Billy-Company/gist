@@ -36,6 +36,7 @@
 //! Diagnostics (timing) go to stderr; results to stdout, rg-style.
 
 const std = @import("std");
+const portal = @import("../../../portal.zig");
 const corpus_mod = @import("../../../corpus/tree/corpus.zig");
 const fresh = @import("../../../corpus/fresh/fresh.zig");
 const persist = @import("../../../corpus/index/trigrams/persist.zig");
@@ -134,7 +135,7 @@ fn attributeCandidates(
     rows: *std.ArrayList(loom.Row),
 ) !void {
     if (ids.len == 0) return;
-    const ncpu = std.Thread.getCpuCount() catch 8;
+    const ncpu = portal.cpuCount() catch 8;
     const nshards = if (ids.len < 64) 1 else @min(ids.len, ncpu);
     const shards = try gpa.alloc(AttrShard, nshards);
     defer gpa.free(shards);

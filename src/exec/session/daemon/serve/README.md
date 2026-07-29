@@ -7,9 +7,9 @@ doc_radar:
     - description: "serve.zig stays the lifecycle face, not the machinery"
       file: pkg/kernels/irregex/src/exec/session/daemon/serve/serve.zig
       contains: ["pub fn run", "pub fn socketPath"]
-    - description: "the accept loop stays poll-multiplexed with in-flight work off the set"
+    - description: "the accept loop stays one readiness wait with in-flight work off the set, and asks the platform through the vigil seam rather than naming a syscall"
       file: pkg/kernels/irregex/src/exec/session/daemon/serve/loop.zig
-      contains: ["std.posix.poll", "drainCompletions"]
+      contains: ["vigil.Vigil.open", "vigil.max_watched", "drainCompletions"]
     - description: "an unservable request is declined, never answered wrong"
       file: pkg/kernels/irregex/src/exec/session/daemon/serve/answer.zig
       contains: ["decline", "servesScope"]
@@ -43,12 +43,16 @@ outside this folder.
 
 [`crew.zig`](crew.zig) is the division of labor: the fixed-slot connection
 table (stable across accept/drop churn, so a worker can hold a slot) and the
-bounded worker pool. [`loop.zig`](loop.zig) is the poll multiplexer over the
-listener, the worker self-pipe, and every idle client — plus the only quiescent
+bounded worker pool. [`loop.zig`](loop.zig) is the multiplexer over the
+listener, the worker bell, and every idle client — plus the only quiescent
 window the daemon has, which is why the idle policy and the annals seed both
-run there. [`route.zig`](route.zig) decides what one readable client costs: a
-control frame is a few bytes and answers inline on the poll thread, while a
-search goes to the pool and its connection leaves the poll set until the worker
+run there. It asks its readiness question through
+[`conduit/vigil.zig`](../../conduit/vigil.zig) rather than naming a syscall, which
+is what lets one loop serve `poll(2)` on POSIX and AFD's `IOCTL_AFD_POLL` on
+Windows instead of the warm tier having two accept loops to keep honest.
+[`route.zig`](route.zig) decides what one readable client costs: a
+control frame is a few bytes and answers inline on the wait thread, while a
+search goes to the pool and its connection leaves the wait set until the worker
 reports back — the reason one slow query never stalls the other coworkers.
 [`answer.zig`](answer.zig) turns a query frame into an answer (ranked view,
 existence flag, lines over the socket or over shared memory, files/count) and
@@ -80,6 +84,14 @@ dropping the session to the reconcile-always baseline (slower, never staler) and
 re-registering only once returning traffic settles again. The resident session
 itself is this process's own RAM, so it lives until `ttl_ms` of continuous
 idleness and then exits; the next query re-spawns one.
+
+The ordering is macOS's appetite, but the policy is not macOS-only: shedding also
+retires a Linux daemon's recursive inotify watches and a Windows daemon's
+`ReadDirectoryChangesW` subscription plus its completion port. Those are a handful
+of handles rather than tens of thousands, so the pressure argument is weaker there
+— but a shed also **lapses the annals ledger**, so any answer held before the
+unwatched window retires instead of surviving the re-arm, and that has to happen on
+every platform for the keep to mean the same thing everywhere.
 
 ## One socket, one tree
 

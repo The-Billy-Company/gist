@@ -56,17 +56,17 @@ pub fn ask(gpa: std.mem.Allocator, io: std.Io, socket_path: []const u8, key: []c
     const ua = net.UnixAddress.init(socket_path) catch return .unusable;
     const stream = ua.connect(io) catch return .unusable; // no daemon → cold, silently
     defer stream.close(io);
-    return exchangeAsk(gpa, stream.socket.handle, key) catch .unusable;
+    return exchangeAsk(gpa, io, stream.socket.handle, key) catch .unusable;
 }
 
-fn exchangeAsk(gpa: std.mem.Allocator, fd: std.posix.fd_t, key: []const u8) !Ticket {
-    if (!try shakeHands(gpa, fd)) return .unusable;
+fn exchangeAsk(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, key: []const u8) !Ticket {
+    if (!try shakeHands(gpa, io, fd)) return .unusable;
     var qbuf: std.ArrayList(u8) = .empty;
     defer qbuf.deinit(gpa);
     try protocol.encodeRecall(&qbuf, gpa, key);
-    if (!protocol.writeAll(fd, qbuf.items)) return .unusable;
+    if (!protocol.writeAll(io, fd, qbuf.items)) return .unusable;
 
-    var resp = try client.recvFrameDeadline(gpa, fd, timeout_ms);
+    var resp = try client.recvFrameDeadline(gpa, io, fd, timeout_ms);
     defer resp.deinit();
     if (resp.op != .recalled) return .unusable;
     const r = protocol.decodeRecalled(resp.payload()) catch return .unusable;
@@ -94,23 +94,24 @@ pub fn offer(
     defer stream.close(io);
     fault.spare(
         "keep offer (costs only this answer's reuse next run)",
-        exchangeOffer(gpa, stream.socket.handle, key, epoch, code, answer),
+        exchangeOffer(gpa, io, stream.socket.handle, key, epoch, code, answer),
     );
 }
 
 fn exchangeOffer(
     gpa: std.mem.Allocator,
+    io: std.Io,
     fd: std.posix.fd_t,
     key: []const u8,
     epoch: u64,
     code: u8,
     answer: []const u8,
 ) !void {
-    if (!try shakeHands(gpa, fd)) return;
+    if (!try shakeHands(gpa, io, fd)) return;
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
     try protocol.encodeRetain(&buf, gpa, epoch, code, key, answer);
-    _ = protocol.writeAll(fd, buf.items);
+    _ = protocol.writeAll(io, fd, buf.items);
 }
 
 /// HELLO → READY, returning whether the peer speaks this exact protocol. No
@@ -124,9 +125,9 @@ fn exchangeOffer(
 /// the daemon never renders a kept answer: the CALLER computed it, and
 /// `cli/reprise.zig` already folds the caller's own build into the key, so a
 /// rebuilt binary asks a question its predecessor's answer cannot satisfy.
-fn shakeHands(gpa: std.mem.Allocator, fd: std.posix.fd_t) !bool {
-    try protocol.sendFrame(gpa, fd, .hello, &.{ protocol.protocol_version, 0 });
-    var ready = try client.recvFrameDeadline(gpa, fd, timeout_ms);
+fn shakeHands(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t) !bool {
+    try protocol.sendFrame(gpa, io, fd, .hello, &.{ protocol.protocol_version, 0 });
+    var ready = try client.recvFrameDeadline(gpa, io, fd, timeout_ms);
     defer ready.deinit();
     if (ready.op != .ready) return false;
     const r = protocol.decodeReady(ready.payload()) catch return false;

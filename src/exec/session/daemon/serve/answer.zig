@@ -96,7 +96,7 @@ pub fn query(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
     // `query_ext` carries a roots trailer whose slice headers live in the arena;
     // `query` is rootless. A malformed frame → decline (client → cold).
     const req = (if (ext) protocol.decodeQueryExt(arena.allocator(), payload) else protocol.decodeQuery(payload)) catch
-        return protocol.sendFrame(gpa, fd, .decline, "");
+        return protocol.sendFrame(gpa, session.io, fd, .decline, "");
     // Served-scope soundness: a scoped request is only answerable warm when its
     // roots are a subset of what THIS daemon mirrors — otherwise the resident
     // set is missing files cold would search, so warm could report empty where
@@ -104,7 +104,7 @@ pub fn query(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
     // CWD tree) and admits every relative root; an explicitly-scoped daemon
     // declines a query that reaches outside its subtree.
     if (!session.servesScope(req.filter.roots))
-        return protocol.sendFrame(gpa, fd, .decline, "");
+        return protocol.sendFrame(gpa, session.io, fd, .decline, "");
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
@@ -116,7 +116,7 @@ pub fn query(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
         // 2, and the client's `rootsExist` gate already sent those cold).
         const bytes = switch (try session.queryRank(arena.allocator(), req, k)) {
             .got => |got| got,
-            .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+            .declined => return protocol.sendFrame(gpa, session.io, fd, .decline, ""),
         };
         try protocol.encodeLines(&buf, gpa, bytes, true);
     } else if (req.quiet) {
@@ -126,7 +126,7 @@ pub fn query(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
         // and exits 0/1 on it. `-m0` resolves to `matched=false` inside.
         const found = switch (try session.queryExists(req)) {
             .got => |got| got,
-            .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+            .declined => return protocol.sendFrame(gpa, session.io, fd, .decline, ""),
         };
         try protocol.encodeLines(&buf, gpa, "", found);
     } else if (req.mode == .lines) {
@@ -141,33 +141,33 @@ pub fn query(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
         if ((caps & protocol.caps_supported & protocol.cap_fd_transport) != 0) {
             switch (switch (try session.queryLinesShm(arena.allocator(), req, protocol.fd_transport_floor)) {
                 .got => |got| got,
-                .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+                .declined => return protocol.sendFrame(gpa, session.io, fd, .decline, ""),
             }) {
                 .fd => |shl| {
                     var buffer = shl.buffer;
                     defer buffer.close();
                     buffer.freeze(); // drop the daemon's writable view, seal (Linux)
-                    sendDiag(gpa, fd, dbuf.items);
+                    sendDiag(gpa, session.io, fd, dbuf.items);
                     if (!protocol.sendChunkFd(fd, shl.len, shl.matched, buffer.fd)) return error.ConnClosed;
                     return;
                 },
                 .chunk => |chnk| {
                     try protocol.encodeLines(&buf, gpa, chnk.bytes, chnk.matched);
-                    sendDiag(gpa, fd, dbuf.items);
-                    if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+                    sendDiag(gpa, session.io, fd, dbuf.items);
+                    if (!protocol.writeAll(session.io, fd, buf.items)) return error.ConnClosed;
                     return;
                 },
             }
         }
         const ans = switch (try session.queryLines(arena.allocator(), req)) {
             .got => |got| got,
-            .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+            .declined => return protocol.sendFrame(gpa, session.io, fd, .decline, ""),
         };
         try protocol.encodeLines(&buf, gpa, ans.out, ans.matched);
     } else {
         const result = switch (try session.query(arena.allocator(), req)) {
             .got => |got| got,
-            .declined => return protocol.sendFrame(gpa, fd, .decline, ""),
+            .declined => return protocol.sendFrame(gpa, session.io, fd, .decline, ""),
         };
         switch (result.mode) {
             .files => try protocol.encodeFiles(&buf, gpa, result.files),
@@ -175,15 +175,15 @@ pub fn query(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
             .lines => unreachable, // routed above
         }
     }
-    sendDiag(gpa, fd, dbuf.items);
-    if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+    sendDiag(gpa, session.io, fd, dbuf.items);
+    if (!protocol.writeAll(session.io, fd, buf.items)) return error.ConnClosed;
 }
 
 /// Ship a warm query's captured diagnostics ahead of its answer as a `diag`
 /// frame, so the client can relay them to its stderr. Best-effort: a lost diag
 /// (dead peer, oversized) never fails the answer — the client's exit code and
 /// stdout are the contract, the timing line is advisory. Empty → nothing sent.
-fn sendDiag(gpa: std.mem.Allocator, fd: std.posix.fd_t, bytes: []const u8) void {
+fn sendDiag(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, bytes: []const u8) void {
     if (bytes.len == 0 or bytes.len > protocol.max_frame) return;
-    fault.spare("ship warm diagnostics to the client", protocol.sendFrame(gpa, fd, .diag, bytes));
+    fault.spare("ship warm diagnostics to the client", protocol.sendFrame(gpa, io, fd, .diag, bytes));
 }

@@ -25,8 +25,17 @@ engine unchanged.
 
 | Package | Role |
 | ------- | ---- |
-| [`serve/`](serve) | `gist serve` — bind the socket, poll-multiplex clients, answer or `decline` |
+| [`serve/`](serve) | `gist serve` — bind the socket, multiplex clients on one readiness wait, answer or `decline` |
 | [`client/`](client) | dial / emit / cold fallback; best-effort detached autoserve on a cold miss |
+
+"Unix socket" is literal on all three platforms, not a POSIX-only shorthand:
+Windows has had `AF_UNIX` since 1803, which is why the package declares that as
+its floor rather than porting the transport to named pipes. What differs is only
+the two mechanisms a socket cannot supply by itself — the readiness wait and the
+descriptor handoff — and both are seams in [`../conduit/`](../conduit/README.md)
+rather than branches in here. Descriptor passing is the one capability Windows
+genuinely lacks; it is advertised per-connection, so the answer travels as `chunk`
+frames there and the bytes are identical.
 
 The in-process sibling for embedding hosts is [`../../../surface/ffi/`](../../../surface/ffi) —
 same session, C ABI, no socket. The wire grammar lives in

@@ -39,7 +39,7 @@ pub const Route = enum { keep, drop, stop, dispatched };
 pub fn frame(server: *crew.Server, slot: u16) Route {
     const c = &server.conns[slot];
     const fd = c.stream.socket.handle;
-    var f = protocol.recvFrame(server.gpa, fd) catch return .drop; // closed/oversized/bad → drop peer
+    var f = protocol.recvFrame(server.gpa, server.io, fd) catch return .drop; // closed/oversized/bad → drop peer
     switch (f.op) {
         // The search verbs — the expensive path. With a live pool the frame's
         // ownership moves into a job and the connection leaves the poll set until
@@ -88,7 +88,7 @@ pub fn frame(server: *crew.Server, slot: u16) Route {
         },
         .ping => {
             defer f.deinit();
-            protocol.sendFrame(server.gpa, fd, .pong, "") catch return .drop;
+            protocol.sendFrame(server.gpa, server.io, fd, .pong, "") catch return .drop;
             return .keep;
         },
         // The annals consult: `gist index` asking "what changed since S?".
@@ -120,7 +120,7 @@ pub fn frame(server: *crew.Server, slot: u16) Route {
         // it as decline so a confused client falls back cold rather than hangs.
         else => {
             defer f.deinit();
-            protocol.sendFrame(server.gpa, fd, .decline, "") catch return .drop;
+            protocol.sendFrame(server.gpa, server.io, fd, .decline, "") catch return .drop;
             return .keep;
         },
     }
@@ -134,7 +134,7 @@ fn handleChanged(session: *ResidentSession, watcher: *watch.Watcher(ResidentSess
     defer buf.deinit(gpa);
     const since_ns = protocol.decodeChanged(payload) catch {
         try protocol.encodeAnnals(&buf, gpa, null);
-        if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+        if (!protocol.writeAll(session.io, fd, buf.items)) return error.ConnClosed;
         return;
     };
     var snap: ?annals_mod.Snapshot = if (watcher.flushSync())
@@ -143,7 +143,7 @@ fn handleChanged(session: *ResidentSession, watcher: *watch.Watcher(ResidentSess
         null;
     defer if (snap) |*s| s.deinit(gpa);
     try protocol.encodeAnnals(&buf, gpa, if (snap) |s| .{ .prefix = s.prefix, .paths = s.paths } else null);
-    if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+    if (!protocol.writeAll(session.io, fd, buf.items)) return error.ConnClosed;
 }
 
 /// The corpus change epoch, or null when the daemon cannot vouch for one — an
@@ -166,7 +166,7 @@ fn handleRecall(server: *crew.Server, fd: std.posix.fd_t, key: []const u8) !void
     defer buf.deinit(server.gpa);
     const epoch = epochNow(server) orelse {
         try protocol.encodeRecalled(&buf, server.gpa, null);
-        if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+        if (!protocol.writeAll(server.io, fd, buf.items)) return error.ConnClosed;
         return;
     };
     const found: ?protocol.Hit = switch (server.keep.recall(key, epoch)) {
@@ -174,7 +174,7 @@ fn handleRecall(server: *crew.Server, fd: std.posix.fd_t, key: []const u8) !void
         .stale, .absent => null,
     };
     try protocol.encodeRecalled(&buf, server.gpa, .{ .epoch = epoch, .hit = found });
-    if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+    if (!protocol.writeAll(server.io, fd, buf.items)) return error.ConnClosed;
 }
 
 /// Take a `retain` offer. Kept only when the corpus is still at the epoch the
@@ -198,5 +198,5 @@ fn sendReady(session: *ResidentSession, gpa: std.mem.Allocator, fd: std.posix.fd
     const gen = try session.indexGenDup(gpa);
     defer gpa.free(gen);
     try protocol.encodeReady(&buf, gpa, session.daemon_gen, session_gen, session.image, gen);
-    if (!protocol.writeAll(fd, buf.items)) return error.ConnClosed;
+    if (!protocol.writeAll(session.io, fd, buf.items)) return error.ConnClosed;
 }

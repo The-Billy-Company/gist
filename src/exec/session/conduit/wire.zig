@@ -16,6 +16,9 @@ const std = @import("std");
 const builtin = @import("builtin");
 const fault = @import("../../../fault.zig");
 const portal = @import("../../../portal.zig");
+const vigil = @import("vigil.zig");
+
+const windows = builtin.os.tag == .windows;
 
 /// Refused before allocation — dwarfs any real response, caps a hostile peer.
 pub const max_frame: u32 = 16 << 20;
@@ -74,8 +77,13 @@ fn armNoSigpipe(fd: std.posix.fd_t) void {
 
 /// Write all of `bytes` to `fd`, retrying short writes; false on a dead peer.
 /// Never raises SIGPIPE (see `armNoSigpipe`).
-pub fn writeAll(fd: std.posix.fd_t, bytes: []const u8) bool {
+///
+/// `io` is unused on POSIX and load-bearing on Windows, where a session socket is
+/// a raw AFD endpoint rather than a descriptor `write(2)` will accept — see
+/// `writeAllWindows`.
+pub fn writeAll(io: std.Io, fd: std.posix.fd_t, bytes: []const u8) bool {
     if (comptime !portal.resident_sessions) return false;
+    if (comptime windows) return writeAllWindows(io, fd, bytes);
     return writeAllPosix(fd, bytes);
 }
 
@@ -90,12 +98,29 @@ fn writeAllPosix(fd: std.posix.fd_t, bytes: []const u8) bool {
     return true;
 }
 
+/// The Win32 arm. Deliberately std's socket vtable (through `vigil.netWrite`) and not
+/// a second hand-rolled AFD `IOCTL_AFD_SEND`: `vigil.zig` reaches for the driver
+/// directly only because std exposes no readiness primitive at all, whereas byte
+/// I/O it does expose — and reimplementing what std already tests would be a fork
+/// wearing a port's clothes. There is no SIGPIPE to guard against here: a write to
+/// a closed peer returns a status, so the whole `armNoSigpipe` question is POSIX's
+/// alone.
+fn writeAllWindows(io: std.Io, fd: std.posix.fd_t, bytes: []const u8) bool {
+    var off: usize = 0;
+    while (off < bytes.len) {
+        const sent = vigil.netWrite(io, fd, bytes[off..]) orelse return false;
+        if (sent == 0) return false; // dead peer
+        off += sent;
+    }
+    return true;
+}
+
 /// Send one framed message on `fd`.
-pub fn sendFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t, op: u8, payload: []const u8) WireError!void {
+pub fn sendFrame(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, op: u8, payload: []const u8) WireError!void {
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(gpa);
     writeFrame(&buf, gpa, op, payload) catch return WireError.OutOfMemory;
-    if (!writeAll(fd, buf.items)) return WireError.ConnClosed;
+    if (!writeAll(io, fd, buf.items)) return WireError.ConnClosed;
 }
 
 /// A framed message read off `fd`, owning its bytes (payload aliases into it).
@@ -114,21 +139,27 @@ pub const Frame = struct {
 };
 
 /// Read exactly `n` bytes into `dst`; false on EOF/short read.
-fn readExact(fd: std.posix.fd_t, dst: []u8) bool {
+fn readExact(io: std.Io, fd: std.posix.fd_t, dst: []u8) bool {
     var off: usize = 0;
     while (off < dst.len) {
-        const n = std.posix.system.read(fd, dst.ptr + off, dst.len - off);
-        if (n <= 0) return false;
-        off += @intCast(n);
+        const n = if (comptime windows)
+            vigil.netRead(io, fd, dst[off..]) orelse return false
+        else p: {
+            const n = std.posix.system.read(fd, dst.ptr + off, dst.len - off);
+            if (n <= 0) return false;
+            break :p @as(usize, @intCast(n));
+        };
+        if (n == 0) return false; // clean EOF mid-frame is still a truncated frame
+        off += n;
     }
     return true;
 }
 
 /// Receive one whole frame from `fd`. `ConnClosed` on truncated peer;
 /// `StreamTooLong` fails closed.
-pub fn recvFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!Frame {
+pub fn recvFrame(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t) WireError!Frame {
     var ignored: ?std.posix.fd_t = null;
-    return recvFramed(gpa, fd, false, &ignored);
+    return recvFramed(gpa, io, fd, false, &ignored);
 }
 
 /// The single frame-reassembly body both receive faces run: header, the
@@ -139,24 +170,25 @@ pub fn recvFrame(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!Frame {
 /// grammar cannot drift between them.
 fn recvFramed(
     gpa: std.mem.Allocator,
+    io: std.Io,
     fd: std.posix.fd_t,
     comptime capture_fd: bool,
     out_fd: *?std.posix.fd_t,
 ) WireError!Frame {
     const fill = struct {
-        fn go(f: std.posix.fd_t, dst: []u8, o: *?std.posix.fd_t) bool {
-            return if (comptime capture_fd) recvExactMsg(f, dst, o) else readExact(f, dst);
+        fn go(i: std.Io, f: std.posix.fd_t, dst: []u8, o: *?std.posix.fd_t) bool {
+            return if (comptime capture_fd) recvExactMsg(f, dst, o) else readExact(i, f, dst);
         }
     }.go;
     var hdr: [4]u8 = undefined;
-    if (!fill(fd, &hdr, out_fd)) return WireError.ConnClosed;
+    if (!fill(io, fd, &hdr, out_fd)) return WireError.ConnClosed;
     const len = std.mem.readInt(u32, &hdr, .little);
     if (len == 0 or len > max_frame) return WireError.StreamTooLong;
     const total = 4 + @as(usize, len);
     const bytes = gpa.alloc(u8, total) catch return WireError.OutOfMemory;
     errdefer gpa.free(bytes);
     @memcpy(bytes[0..4], &hdr);
-    if (!fill(fd, bytes[4..], out_fd)) return WireError.ConnClosed;
+    if (!fill(io, fd, bytes[4..], out_fd)) return WireError.ConnClosed;
     return .{ .op = bytes[4], .bytes = bytes, .gpa = gpa };
 }
 
@@ -195,11 +227,11 @@ fn cmsgHdrConst(ctrl: *align(cmsg_align) const [cmsg_space]u8) *const cmsghdr {
 /// first send finishes plain (`writeAll`) with the fd already across. Same
 /// SIGPIPE guard as `writeAll`. `false` on a dead peer.
 pub fn sendWithFd(fd: std.posix.fd_t, bytes: []const u8, pass_fd: std.posix.fd_t) bool {
-    // Without unix-socket fd passing there is no SCM_RIGHTS handshake to complete
-    // and no resident session to complete it with (`portal.resident_sessions`).
-    // `false` is the same answer the caller already handles when a peer declines
-    // fd transport, so the degradation needs no new path on its side.
-    if (comptime portal.resident_sessions) return sendWithFdPosix(fd, bytes, pass_fd);
+    // Without `SCM_RIGHTS` there is no handshake to complete
+    // (`portal.fd_passing` — Windows has a resident session but no descriptor to
+    // pass over it). `false` is the same answer the caller already handles when a
+    // peer declines fd transport, so the degradation needs no new path on its side.
+    if (comptime portal.fd_passing) return sendWithFdPosix(fd, bytes, pass_fd);
     return false;
 }
 
@@ -226,7 +258,10 @@ fn sendWithFdPosix(fd: std.posix.fd_t, bytes: []const u8, pass_fd: std.posix.fd_
     const n = std.c.sendmsg(fd, &msg, send_flags);
     if (n <= 0) return false;
     const sent: usize = @intCast(n);
-    return sent >= bytes.len or writeAll(fd, bytes[sent..]);
+    // `writeAllPosix` rather than `writeAll`: this whole arm exists only where
+    // `fd_passing` holds, which is POSIX by definition, so there is no `io` here
+    // and no platform question left to ask.
+    return sent >= bytes.len or writeAllPosix(fd, bytes[sent..]);
 }
 
 /// A frame received alongside an optional passed fd (null unless the peer sent
@@ -237,19 +272,24 @@ pub const FdFrame = struct { frame: Frame, passed_fd: ?std.posix.fd_t };
 /// Like `recvFrame`, but over `recvmsg` so a passed fd is captured rather than
 /// silently dropped. Used by a client that advertised fd-transport support; a
 /// plain frame simply arrives with `passed_fd == null`.
-pub fn recvFrameWithFd(gpa: std.mem.Allocator, fd: std.posix.fd_t) WireError!FdFrame {
+pub fn recvFrameWithFd(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t) WireError!FdFrame {
+    // Where no descriptor can arrive, asking over `recvmsg` would only be a
+    // slower way to read the same bytes — so the capturing face degenerates to
+    // the plain one, and every caller's `passed_fd == null` branch already covers
+    // it (`portal.fd_passing`).
+    if (comptime !portal.fd_passing) return .{ .frame = try recvFrame(gpa, io, fd), .passed_fd = null };
     var passed: ?std.posix.fd_t = null;
     // A captured fd on any later failure would leak the shm handle — close it.
     errdefer if (passed) |p| {
         _ = std.c.close(p);
     };
-    return .{ .frame = try recvFramed(gpa, fd, true, &passed), .passed_fd = passed };
+    return .{ .frame = try recvFramed(gpa, io, fd, true, &passed), .passed_fd = passed };
 }
 
 /// Read exactly `dst.len` bytes via `recvmsg`, capturing the first SCM_RIGHTS fd
 /// seen into `out_fd`. False on EOF/short read.
 fn recvExactMsg(fd: std.posix.fd_t, dst: []u8, out_fd: *?std.posix.fd_t) bool {
-    if (comptime !portal.resident_sessions) return false;
+    if (comptime !portal.fd_passing) return false;
     return recvExactMsgPosix(fd, dst, out_fd);
 }
 

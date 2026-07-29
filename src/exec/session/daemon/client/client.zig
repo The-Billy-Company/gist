@@ -48,6 +48,7 @@ const beacon = @import("../../../../surface/cli/beacon.zig");
 const run = @import("../../../cold/engine/serial.zig");
 const assay = @import("../../../../assay/assay.zig");
 const portal = @import("../../../../portal.zig");
+const vigil = @import("../../conduit/vigil.zig");
 const net = std.Io.net;
 
 /// Transport capabilities this client advertises in HELLO — `caps_supported`
@@ -80,25 +81,32 @@ pub const Outcome = union(enum) {
 };
 
 /// Wait until `fd` is readable or the client deadline elapses. `false` means
-/// timed out / poll error — caller falls through to cold. Prefer `poll` over
-/// `SO_RCVTIMEO`: the latter's `timeval` ABI is easy to get wrong across libc
-/// cuts, and a silent setsockopt failure used to leave the CLI blocked forever.
+/// timed out / poll error — caller falls through to cold. Prefer a readiness wait
+/// over `SO_RCVTIMEO`: the latter's `timeval` ABI is easy to get wrong across
+/// libc cuts, and a silent setsockopt failure used to leave the CLI blocked
+/// forever.
+///
+/// This is the whole guard against a wedged daemon hanging the CLI, which is why
+/// it goes through `vigil` rather than `portal.readable`: the latter answers an
+/// optimistic `true` on Windows, correctly, for the one caller it has there (a
+/// unix socket cannot be that process's stdin) — and answering it here would put
+/// the hang back.
 fn waitReadable(fd: std.posix.fd_t, timeout_ms: i32) bool {
-    return portal.readable(fd, timeout_ms);
+    return vigil.readable(fd, timeout_ms);
 }
 
 /// Receive one frame, but never block longer than `client_io_timeout_ms`.
-pub fn recvFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i32) !protocol.Frame {
+pub fn recvFrameDeadline(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, timeout_ms: i32) !protocol.Frame {
     if (!waitReadable(fd, timeout_ms)) return error.TimedOut;
-    return protocol.recvFrame(gpa, fd);
+    return protocol.recvFrame(gpa, io, fd);
 }
 
 /// Like `recvFrameDeadline`, but over `recvmsg` so a `chunk_fd` answer's passed
 /// shm fd is captured (null for every other frame). Used for the query response
 /// once we've advertised `cap_fd_transport`.
-fn recvFdFrameDeadline(gpa: std.mem.Allocator, fd: std.posix.fd_t, timeout_ms: i32) !protocol.FdFrame {
+fn recvFdFrameDeadline(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, timeout_ms: i32) !protocol.FdFrame {
     if (!waitReadable(fd, timeout_ms)) return error.TimedOut;
-    return protocol.recvFrameWithFd(gpa, fd);
+    return protocol.recvFrameWithFd(gpa, io, fd);
 }
 
 /// True only if every scope root resolves on disk from the CWD (the tree cold
@@ -163,7 +171,7 @@ fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const
     // FIFO poll (`readableStdin` may wait up to its short poll window).
     if (run.readableStdin()) return .cold;
 
-    return exchange(gpa, fd, req, image.stamp(io), timeout_ms) catch .cold;
+    return exchange(gpa, io, fd, req, image.stamp(io), timeout_ms) catch .cold;
 }
 
 /// We are about to answer cold because the resident daemon speaks an OLDER wire
@@ -179,16 +187,19 @@ fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const
 /// after a single cold query, and the next eligible one auto-spawns from the
 /// binary that won.
 ///
-/// BUILD skew is deliberately not routed here. A build stamp is an identity,
-/// not an order (`image.zig`), so there is no "newer" to be; a daemon whose own
-/// executable was replaced stands itself down instead, which needs no
-/// comparison at all.
+/// BUILD skew routes here too, through `image.hosts` rather than through any
+/// claim about recency. A build stamp is an identity and not an order
+/// (`image.zig`), so `hosts` uses it only as a **tiebreak**: both sides pick the
+/// same winner from the same pair, which converges for the same reason the
+/// version order does. Self-retirement alone is not enough, because a daemon
+/// exec'd from a content-addressed build artifact can never observe its own
+/// executable being replaced — see `image.hosts` for the measured failure.
 ///
 /// Best-effort throughout: the frame is fire-and-forget (the daemon stops its
 /// loop on receipt, with nothing to read back) and a failed write is ignored.
 /// Either way the caller's answer is the certified cold one.
-fn retireIfSuperseded(gpa: std.mem.Allocator, fd: std.posix.fd_t, we_are_newer: bool) void {
-    if (we_are_newer) protocol.sendFrame(gpa, fd, .shutdown, "") catch {};
+fn retireIfSuperseded(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, we_are_newer: bool) void {
+    if (we_are_newer) protocol.sendFrame(gpa, io, fd, .shutdown, "") catch {};
 }
 
 /// The peer's wire version, read straight off READY rather than through
@@ -236,7 +247,7 @@ pub fn residency(gpa: std.mem.Allocator, io: std.Io, socket_path: []const u8) Re
     // no daemon has ever run here, and reporting *that* as a foreign resident
     // would be its own false alarm.
     if (!rendezvousIsOurs(socket_path)) return .foreign;
-    return probeReady(gpa, stream.socket.handle, image.stamp(io)) catch .foreign;
+    return probeReady(gpa, io, stream.socket.handle, image.stamp(io)) catch .foreign;
 }
 
 /// The handshake half of `residency`, over `status` rather than `hello`: the
@@ -244,9 +255,9 @@ pub fn residency(gpa: std.mem.Allocator, io: std.Io, socket_path: []const u8) Re
 /// — is not the daemon's cue to re-examine its own executable, so a report
 /// cannot be what ends a daemon's life. Otherwise the same two judgements
 /// `exchange` makes before it will trust a peer with a query.
-fn probeReady(gpa: std.mem.Allocator, fd: std.posix.fd_t, mine: u64) !Residency {
-    try protocol.sendFrame(gpa, fd, .status, "");
-    var ready = try recvFrameDeadline(gpa, fd, residency_timeout_ms);
+fn probeReady(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, mine: u64) !Residency {
+    try protocol.sendFrame(gpa, io, fd, .status, "");
+    var ready = try recvFrameDeadline(gpa, io, fd, residency_timeout_ms);
     defer ready.deinit();
     if (ready.op != .ready) return .foreign;
     if ((peerProtocol(ready.payload()) orelse return .foreign) != protocol.protocol_version) return .foreign;
@@ -261,8 +272,8 @@ pub const test_api = if (builtin.is_test) struct {
         return attemptWithDeadline(gpa, io, argv, socket_path, timeout_ms);
     }
     /// The skew exit, reachable without two differently-dated binaries.
-    pub fn retireOn(gpa: std.mem.Allocator, fd: std.posix.fd_t, we_are_newer: bool) void {
-        retireIfSuperseded(gpa, fd, we_are_newer);
+    pub fn retireOn(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, we_are_newer: bool) void {
+        retireIfSuperseded(gpa, io, fd, we_are_newer);
     }
     pub const peerProtocolOf = peerProtocol;
 } else struct {};
@@ -275,7 +286,7 @@ pub const test_api = if (builtin.is_test) struct {
 /// wire failure still degrades to a clean cold run with no duplicated output).
 /// A `decline`/`err` frame (or any wire error / deadline) propagates so
 /// `attempt` degrades to cold.
-fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request, mine: u64, timeout_ms: i32) !Outcome {
+fn exchange(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, req: request.Request, mine: u64, timeout_ms: i32) !Outcome {
     // Handshake: HELLO → READY. The second HELLO byte advertises our transport
     // capabilities (`cap_fd_transport` on a supported target); an old daemon
     // ignores it and simply never sends `chunk_fd`. A daemon speaking another
@@ -283,21 +294,27 @@ fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request, mi
     // Nor is one running a different BUILD: it frames identically and answers
     // from an engine this binary no longer shares, which is the shape a search
     // tool may never take — a well-formed answer carrying superseded bytes.
-    try protocol.sendFrame(gpa, fd, .hello, &.{ protocol.protocol_version, advertisedCaps() });
+    try protocol.sendFrame(gpa, io, fd, .hello, &.{ protocol.protocol_version, advertisedCaps() });
     {
-        var ready = try recvFrameDeadline(gpa, fd, timeout_ms);
+        var ready = try recvFrameDeadline(gpa, io, fd, timeout_ms);
         defer ready.deinit();
         if (ready.op != .ready) return .cold;
         const proto = peerProtocol(ready.payload()) orelse return .cold;
         if (proto != protocol.protocol_version) {
-            retireIfSuperseded(gpa, fd, proto < protocol.protocol_version);
+            retireIfSuperseded(gpa, io, fd, proto < protocol.protocol_version);
             return .cold;
         }
         const r = protocol.decodeReady(ready.payload()) catch return .cold;
-        // A build we do not share: decline, and leave the retiring to the
-        // daemon. Our HELLO is what prompts it to re-check its own executable,
-        // so a superseded one is already standing down as we fall through.
-        if (!image.agrees(mine, r.image)) return .cold;
+        // A build we do not share. Our HELLO already prompted it to re-check its
+        // own executable, which retires it whenever that file was rewritten —
+        // but a daemon exec'd from a content-addressed build artifact has no
+        // such file to lose, so that check can never fire and it would hold the
+        // rendezvous for the rest of the day. `image.hosts` settles it instead,
+        // as a tiebreak both sides compute identically (see `image.zig`).
+        if (!image.agrees(mine, r.image)) {
+            retireIfSuperseded(gpa, io, fd, image.hosts(mine, r.image));
+            return .cold;
+        }
     }
 
     var qbuf: std.ArrayList(u8) = .empty;
@@ -311,12 +328,12 @@ fn exchange(gpa: std.mem.Allocator, fd: std.posix.fd_t, req: request.Request, mi
         try protocol.encodeQuery(&qbuf, gpa, req)
     else
         try protocol.encodeQueryExt(&qbuf, gpa, req);
-    if (!protocol.writeAll(fd, qbuf.items)) return .cold;
+    if (!protocol.writeAll(io, fd, qbuf.items)) return .cold;
 
     var lines_out: std.ArrayList(u8) = .empty;
     defer lines_out.deinit(gpa);
     while (true) {
-        const got = try recvFdFrameDeadline(gpa, fd, timeout_ms);
+        const got = try recvFdFrameDeadline(gpa, io, fd, timeout_ms);
         var resp = got.frame;
         defer resp.deinit();
         // Only `chunk_fd` legitimately carries an fd; a stray one on any other
@@ -385,33 +402,39 @@ pub fn consultChanged(gpa: std.mem.Allocator, io: std.Io, a: std.mem.Allocator, 
     const ua = net.UnixAddress.init(socket_path) catch return null;
     const stream = ua.connect(io) catch return null; // no daemon → fallback
     defer stream.close(io);
-    return exchangeChanged(gpa, a, stream.socket.handle, image.stamp(io), since_ns) catch null;
+    return exchangeChanged(gpa, io, a, stream.socket.handle, image.stamp(io), since_ns) catch null;
 }
 
-fn exchangeChanged(gpa: std.mem.Allocator, a: std.mem.Allocator, fd: std.posix.fd_t, mine: u64, since_ns: i64) !?ChangedAnswer {
+fn exchangeChanged(gpa: std.mem.Allocator, io: std.Io, a: std.mem.Allocator, fd: std.posix.fd_t, mine: u64, since_ns: i64) !?ChangedAnswer {
     // Same HELLO → READY handshake as a query (no transport caps — the answer
     // is small). A version-skewed daemon would `UnexpectedFrame`-drop the `changed`
     // frame, so the mismatch bails here first — as does a build skew, whose
     // answer would be a changed-set computed by a different watcher.
-    try protocol.sendFrame(gpa, fd, .hello, &.{ protocol.protocol_version, 0 });
+    try protocol.sendFrame(gpa, io, fd, .hello, &.{ protocol.protocol_version, 0 });
     {
-        var ready = try recvFrameDeadline(gpa, fd, changed_timeout_ms);
+        var ready = try recvFrameDeadline(gpa, io, fd, changed_timeout_ms);
         defer ready.deinit();
         if (ready.op != .ready) return null;
         const proto = peerProtocol(ready.payload()) orelse return null;
         if (proto != protocol.protocol_version) {
-            retireIfSuperseded(gpa, fd, proto < protocol.protocol_version);
+            retireIfSuperseded(gpa, io, fd, proto < protocol.protocol_version);
             return null;
         }
         const r = protocol.decodeReady(ready.payload()) catch return null;
-        if (!image.agrees(mine, r.image)) return null; // see `exchange`: the daemon retires itself
+        // Same build-skew handover as `exchange`: an answer computed by another
+        // build's watcher is not one this amend may fold in, and a daemon whose
+        // executable cannot be rewritten never retires itself.
+        if (!image.agrees(mine, r.image)) {
+            retireIfSuperseded(gpa, io, fd, image.hosts(mine, r.image));
+            return null;
+        }
     }
     var qbuf: std.ArrayList(u8) = .empty;
     defer qbuf.deinit(gpa);
     try protocol.encodeChanged(&qbuf, gpa, since_ns);
-    if (!protocol.writeAll(fd, qbuf.items)) return null;
+    if (!protocol.writeAll(io, fd, qbuf.items)) return null;
 
-    var resp = try recvFrameDeadline(gpa, fd, changed_timeout_ms);
+    var resp = try recvFrameDeadline(gpa, io, fd, changed_timeout_ms);
     defer resp.deinit();
     if (resp.op != .annals) return null;
     const view = (protocol.decodeAnnals(resp.payload()) catch return null) orelse return null;

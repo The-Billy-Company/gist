@@ -7,7 +7,9 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const client = @import("client.zig");
+const image = @import("../../conduit/image.zig");
 const protocol = @import("../../conduit/protocol/protocol.zig");
+const vigil = @import("../../conduit/vigil.zig");
 const fault = @import("../../../../fault.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
@@ -122,36 +124,57 @@ test "client: wedged daemon times out to cold" {
 //
 // BUILD skew has no such order (a stamp is an mtime, and Zig's install
 // preserves the cache artifact's, so it can move backwards between two cached
-// builds). The client only declines; the daemon stands itself down when its own
-// executable is replaced — proved end to end in `serve/serve_test.zig`.
+// builds). Self-retirement covers it whenever the daemon's own executable was
+// rewritten — proved end to end in `serve/serve_test.zig` — but NOT when that
+// file can never be rewritten, which is exactly a content-addressed build
+// artifact. So build skew gets a tiebreak (`image.hosts`) whose only required
+// property is that both sides compute the same winner; the tests below pin
+// convergence and abstention rather than any reading of "newer".
 
-/// A connected local pair, the cheapest stand-in for "a daemon is on the other
-/// end" — no listener, no filesystem, nothing to race.
-fn duplex() ![2]std.posix.fd_t {
-    var fds: [2]std.posix.fd_t = undefined;
-    if (std.c.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds) != 0) return error.SkipZigTest;
-    return fds;
-}
+/// A connected local pair and the `Io` both ends speak through — the cheapest
+/// stand-in for "a daemon is on the other end": no listener, no filesystem,
+/// nothing to race.
+///
+/// `vigil.Pair` rather than a bare `socketpair(2)` so these three tests exercise
+/// the same channel the daemon's bell does, and so they still run on a platform
+/// that has no such call. The caller owns `threaded` (an `Io` holds a pointer
+/// into it, so it may not move) and closes via `deinit`.
+const Duplex = struct {
+    io: std.Io,
+    channel: vigil.Pair,
 
-/// Read whatever landed on the peer end without blocking. Returns an empty
-/// slice when nothing was written — the assertion the anti-thrash tests need.
-fn peerBytes(fd: std.posix.fd_t, buf: []u8) []u8 {
-    var pfd = [_]std.posix.pollfd{.{ .fd = fd, .events = std.posix.POLL.IN, .revents = 0 }};
-    const n = std.posix.poll(&pfd, 200) catch return buf[0..0];
-    if (n == 0 or (pfd[0].revents & std.posix.POLL.IN) == 0) return buf[0..0];
-    const got = std.c.read(fd, buf.ptr, buf.len);
-    return if (got > 0) buf[0..@intCast(got)] else buf[0..0];
-}
+    fn open(threaded: *std.Io.Threaded) !Duplex {
+        const io = threaded.io();
+        return .{ .io = io, .channel = vigil.Pair.open(io) catch return error.SkipZigTest };
+    }
+
+    fn deinit(self: *const Duplex) void {
+        self.channel.close(self.io);
+    }
+
+    /// The end a client writes its retirement frame to.
+    fn near(self: *const Duplex) std.posix.fd_t {
+        return self.channel.clapper;
+    }
+
+    /// Whatever landed on the peer end, without blocking indefinitely. Empty when
+    /// nothing was written — the assertion the anti-thrash tests need.
+    fn peerBytes(self: *const Duplex, buf: []u8) []u8 {
+        if (!vigil.readable(self.channel.ear, 200)) return buf[0..0];
+        return self.channel.read(self.io, buf);
+    }
+};
 
 test "skew: the newer peer retires the resident daemon it has obsoleted" {
-    const pair = try duplex();
-    defer _ = std.c.close(pair[0]);
-    defer _ = std.c.close(pair[1]);
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const pair = try Duplex.open(&threaded);
+    defer pair.deinit();
 
-    client.test_api.retireOn(std.testing.allocator, pair[0], true);
+    client.test_api.retireOn(std.testing.allocator, pair.io, pair.near(), true);
 
     var buf: [64]u8 = undefined;
-    const got = peerBytes(pair[1], &buf);
+    const got = pair.peerBytes(&buf);
     // `[u32 len][u8 opcode]` — one shutdown frame, nothing more.
     try std.testing.expectEqual(@as(usize, 5), got.len);
     try std.testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, got[0..4], .little));
@@ -159,14 +182,15 @@ test "skew: the newer peer retires the resident daemon it has obsoleted" {
 }
 
 test "skew: a peer that is not strictly newer leaves the daemon alone" {
-    const pair = try duplex();
-    defer _ = std.c.close(pair[0]);
-    defer _ = std.c.close(pair[1]);
+    var threaded = std.Io.Threaded.init(std.testing.allocator, .{});
+    defer threaded.deinit();
+    const pair = try Duplex.open(&threaded);
+    defer pair.deinit();
 
-    client.test_api.retireOn(std.testing.allocator, pair[0], false);
+    client.test_api.retireOn(std.testing.allocator, pair.io, pair.near(), false);
 
     var buf: [64]u8 = undefined;
-    try std.testing.expectEqual(@as(usize, 0), peerBytes(pair[1], &buf).len);
+    try std.testing.expectEqual(@as(usize, 0), pair.peerBytes(&buf).len);
 }
 
 test "skew: the version byte is read before the layout that may not parse" {
@@ -181,4 +205,60 @@ test "skew: the version byte is read before the layout that may not parse" {
 
     // A peer that says nothing at all is not one we get to judge.
     try std.testing.expectEqual(@as(?u8, null), client.test_api.peerProtocolOf(""));
+}
+
+test "skew: the build tiebreak converges instead of oscillating" {
+    const t = std.testing;
+    // The property the whole rule rests on: for any two DIFFERENT stamps exactly
+    // one side hosts, so both peers pick the same winner and no pair can take
+    // turns evicting each other. Asserted over the pair, not over one call, and
+    // over the boundary values a u64 mtime can actually reach.
+    const stamps = [_]u64{ 1, 2, 41, 1785212232, 1785218598, std.math.maxInt(u64) };
+    for (stamps) |a| for (stamps) |b| {
+        if (a == b) {
+            // Same build: nobody hosts, because nobody is superseded — the
+            // agreeing path never reaches the tiebreak at all.
+            try t.expect(!image.hosts(a, b));
+            try t.expect(image.agrees(a, b));
+            continue;
+        }
+        try t.expect(!image.agrees(a, b)); // skew, so the tiebreak is consulted
+        try t.expect(image.hosts(a, b) != image.hosts(b, a)); // exactly one wins
+    };
+}
+
+test "skew: a side that cannot identify itself never evicts one that can" {
+    const t = std.testing;
+    // `unknown` means "this check could not be made", and the fail-open rule in
+    // `image.zig` is that such a side abstains. Were it to win the tiebreak, a
+    // target with no self-exe path would evict every healthy daemon it dialed.
+    try t.expect(!image.hosts(image.unknown, 7));
+    try t.expect(!image.hosts(7, image.unknown));
+    try t.expect(!image.hosts(image.unknown, image.unknown));
+    // And abstention is agreement, so the tiebreak is not even reached.
+    try t.expect(image.agrees(image.unknown, 7));
+}
+
+test "skew: an immortal orphan daemon loses the rendezvous to a fresh install" {
+    const t = std.testing;
+    // The measured failure this rule exists for, as the two stamps it was
+    // observed with: an orphan daemon exec'd from a content-addressed build
+    // artifact (whose bytes can never be rewritten, so it never self-retires)
+    // against the freshly installed binary every client is actually running.
+    const orphan: u64 = 1785212232; // .cache/.../o/<hash>/gist
+    const installed: u64 = 1785218598; // zig-out/bin/gist
+    try t.expect(!image.agrees(installed, orphan)); // the client declines...
+    try t.expect(image.hosts(installed, orphan)); // ...and hands the socket over
+
+    // A retirement is one shutdown frame and nothing else, so the daemon stops
+    // and the next eligible query auto-spawns from what is on disk now.
+    var threaded = std.Io.Threaded.init(t.allocator, .{});
+    defer threaded.deinit();
+    const pair = try Duplex.open(&threaded);
+    defer pair.deinit();
+    client.test_api.retireOn(t.allocator, pair.io, pair.near(), image.hosts(installed, orphan));
+    var buf: [64]u8 = undefined;
+    const got = pair.peerBytes(&buf);
+    try t.expectEqual(@as(usize, 5), got.len);
+    try t.expectEqual(protocol.Opcode.shutdown, @as(protocol.Opcode, @enumFromInt(got[4])));
 }

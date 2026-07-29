@@ -1,12 +1,16 @@
-//! gist resident daemon — the poll-multiplexed accept loop.
+//! gist resident daemon — the readiness-multiplexed accept loop.
 //!
-//! One `poll` set over three kinds of descriptor: the listener, the worker
-//! self-pipe, and every currently-idle client. An in-flight connection is off
-//! the set entirely (its worker owns the fd), so one long query never blocks a
-//! new connection or another client's probe, and an idle persistent client
-//! never starves an arriving one. Each wakeup drains completions, serves one
-//! frame per readable client (`route.zig`), and accepts at most one connection
-//! — routing only; the session's correctness lives in `exec/session/`.
+//! One wait set over three kinds of handle: the listener, the worker bell, and
+//! every currently-idle client. An in-flight connection is off the set entirely
+//! (its worker owns the handle), so one long query never blocks a new connection
+//! or another client's probe, and an idle persistent client never starves an
+//! arriving one. Each wakeup drains completions, serves one frame per readable
+//! client (`route.zig`), and accepts at most one connection — routing only; the
+//! session's correctness lives in `exec/session/`.
+//!
+//! The wait is `conduit/vigil.zig`, which is `poll(2)` on POSIX and AFD's
+//! `IOCTL_AFD_POLL` on Windows. Both answer the same question in the same
+//! vocabulary, which is why this loop has no platform arm of its own.
 //!
 //! It is also where the daemon watches itself. The reconcile and budget-abort
 //! counters a worker may have bumped are sampled here and surfaced as one
@@ -24,6 +28,7 @@ const std = @import("std");
 const idle = @import("idle.zig");
 const crew = @import("crew.zig");
 const route = @import("route.zig");
+const vigil = @import("../../conduit/vigil.zig");
 const fresh = @import("../../../../corpus/fresh/fresh.zig");
 const journal = @import("../../../../corpus/fresh/journal.zig");
 const net = std.Io.net;
@@ -32,8 +37,7 @@ const Dir = std.Io.Dir;
 /// Serve until the daemon goes idle past its TTL, a client sends `shutdown`, or
 /// the listener dies. Owns nothing: `serve.run` built the session, the watcher,
 /// the socket, and the worker pool, and unwinds them after this returns.
-pub fn run(server: *crew.Server, listener: *net.Server) !void {
-    const gpa = server.gpa;
+pub fn run(server: *crew.Server, listener: *net.Server) void {
     const io = server.io;
     const session = server.session;
     const watcher = server.watcher;
@@ -43,10 +47,16 @@ pub fn run(server: *crew.Server, listener: *net.Server) !void {
     // can precede the seed.
     seedAnnals(server);
 
-    var pfds: std.ArrayList(std.posix.pollfd) = .empty;
-    defer pfds.deinit(gpa);
-    var pfd_slots: std.ArrayList(u16) = .empty;
-    defer pfd_slots.deinit(gpa);
+    // The set is rebuilt every wakeup but never grows past its ceiling — the
+    // listener, the bell, and at most `crew.max_clients` idle clients — so it
+    // lives on the stack rather than costing an allocation per wakeup.
+    var watches: [vigil.max_watched]vigil.Watch = undefined;
+    var slots: [vigil.max_watched]u16 = undefined;
+    var keeper = vigil.Vigil.open() catch |e| {
+        crew.note("gist serve: cannot open the readiness device ({t}) — standing down, queries answer cold\n", .{e});
+        return;
+    };
+    defer keeper.close();
 
     var session_gen: u64 = 0;
     var last_scoped: u64 = 0;
@@ -74,18 +84,21 @@ pub fn run(server: *crew.Server, listener: *net.Server) !void {
             crew.note("gist serve: query exceeded budget → declined cold (total {d})\n", .{aborts});
         }
 
-        pfds.clearRetainingCapacity();
-        pfd_slots.clearRetainingCapacity();
-        try pfds.append(gpa, .{ .fd = listener.socket.handle, .events = std.posix.POLL.IN, .revents = 0 });
-        try pfds.append(gpa, .{ .fd = server.wake_r, .events = std.posix.POLL.IN, .revents = 0 });
+        // Slots 0 and 1 are the listener and the bell, by position, for the whole
+        // loop; every entry after them is one idle client and `slots` says which.
+        watches[0] = .{ .handle = listener.socket.handle };
+        watches[1] = .{ .handle = server.bell.ear() };
+        var watched: usize = 2;
         var live: usize = 0;
         for (&server.conns, 0..) |*c, i| {
             if (c.state == .free) continue;
             live += 1; // active OR in-flight: a query in flight still pins the session
-            if (c.state != .active) continue; // in-flight: owned by a worker, not polled
-            try pfds.append(gpa, .{ .fd = c.stream.socket.handle, .events = std.posix.POLL.IN, .revents = 0 });
-            try pfd_slots.append(gpa, @intCast(i));
+            if (c.state != .active) continue; // in-flight: owned by a worker, not watched
+            watches[watched] = .{ .handle = c.stream.socket.handle };
+            slots[watched] = @intCast(i);
+            watched += 1;
         }
+        const set = watches[0..watched];
 
         // The idle clock runs only with nothing connected AND nothing in flight:
         // a connected (even quiet) client, or a running query, keeps the session
@@ -105,7 +118,7 @@ pub fn run(server: *crew.Server, listener: *net.Server) !void {
             step = plan;
             break :blk plan.in_ms;
         };
-        const ready = std.posix.poll(pfds.items, timeout) catch break;
+        const ready = keeper.wait(set, timeout) catch break;
         // A fired idle deadline is the only way out of this loop besides a
         // `shutdown` frame or a dead listener. Shedding and re-arming both run
         // HERE — with zero connections and nothing in flight, the same quiescent
@@ -133,13 +146,13 @@ pub fn run(server: *crew.Server, listener: *net.Server) !void {
             },
         };
 
-        if (pfds.items[1].revents & std.posix.POLL.IN != 0) server.drainWake();
+        if (set[1].ready.readable) server.drainWake();
 
         // Serve every readable idle client (one frame each). A query dispatches
         // to the pool (the connection leaves the poll set until its worker
         // reports back); everything else answers inline right here.
-        for (pfds.items[2..], pfd_slots.items) |pfd, slot| {
-            if (pfd.revents & (std.posix.POLL.IN | std.posix.POLL.HUP | std.posix.POLL.ERR) == 0) continue;
+        for (set[2..], slots[2..watched]) |watch, slot| {
+            if (!watch.ready.any()) continue;
             switch (route.frame(server, slot)) {
                 .keep, .dispatched => {},
                 .drop => {
@@ -150,7 +163,7 @@ pub fn run(server: *crew.Server, listener: *net.Server) !void {
             }
         }
 
-        if (pfds.items[0].revents & std.posix.POLL.IN != 0) {
+        if (set[0].ready.readable) {
             const stream = listener.accept(io) catch break;
             // Somebody is back: a shed watch set has become worth re-registering
             // (once this burst goes quiet again — never in front of this query,
