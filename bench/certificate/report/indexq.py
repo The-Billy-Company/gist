@@ -395,18 +395,24 @@ def render(
         ),
         "",
         (
-            "> **And it is the product, not a harness.** The cover is wired onto the cold "
-            "query path: `gate.coverPlan` derives it from the effective pattern under "
-            "`arm.linearOptions` — the same flags the matcher compiled with, so the plan "
+            "> **And it is the product, not a harness — on both tiers.** The cover is wired "
+            "onto the cold query path: `gate.winnow` derives it from the effective pattern "
+            "under `arm.linearOptions` — the same flags the matcher compiled with, so the plan "
             "cannot disagree with the engine — and `elide.askIndex` puts it to the index "
             "ahead of the flat OR, which stays the fallback. A run's whole answer is "
-            "unchanged: `bench/sieve/cover_parity.sh` holds the wired path byte-identical to "
-            "the pre-wiring prefilter, to gist's own `--no-index` read, and to ripgrep across "
+            "unchanged: `bench/rungs/sieve/cover_parity.sh` holds the wired path byte-identical "
+            "to the pre-wiring prefilter, to gist's own `--no-index` read, and to ripgrep across "
             "21 cases on a frozen real-source corpus — including `-i`, `-U`, `-F`, multi-`-e`, "
             "PCRE2 and the unprovable patterns, each of which exercises a different "
             "stand-down. Caseless and PCRE2 deliberately keep their existing prefilters "
             "(a folded-AST cover and a foreign-grammar cover are each a soundness argument "
-            "this layer has not made), so they are certified as unchanged, not as improved."
+            "this layer has not made), so they are certified as unchanged, not as improved. "
+            "The resident daemon asks the same question in the same order "
+            "(`gather.candidateIds`, off the same one-parse `query.winnow`), and "
+            "`bench/rungs/sieve/warm_parity.sh` certifies that separately: 27 cases "
+            "byte-identical against a SECOND daemon with both prunings stood down — the "
+            "knobs are read where the pruning is derived, so a client-side baseline would "
+            "have been a copy of the arm under test."
         ),
         END,
     ]
