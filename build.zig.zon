@@ -19,5 +19,6 @@
         "editor",
         "shell",
         "README.md",
+        "CHANGELOG.md",
     },
 }
