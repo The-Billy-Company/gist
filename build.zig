@@ -38,6 +38,26 @@ pub fn build(b: *std.Build) void {
     });
 
     // ── the product binaries ──
+    // The CLIs are the product surface — the on-PATH binaries whose entire
+    // reason to exist is out-running ripgrep. A Debug build is 4–8× slower and
+    // reads to a caller like a hang, so the faces (and the chassis + engines
+    // they link, where the hot loops live) default to ReleaseFast regardless
+    // of the build-wide `-Doptimize` — a bare `zig build` must never install
+    // a slow debug `gist`. `-Dcli-optimize=Debug` still yields a debug CLI for
+    // engine debugging; tests / coverage / the C-ABI libs keep the standard
+    // (safety-checked, DWARF-carrying) default optimize untouched.
+    const cli_optimize = b.option(
+        std.builtin.OptimizeMode,
+        "cli-optimize",
+        "optimize mode for the installed CLIs (default ReleaseFast — the product surface's whole point is speed)",
+    ) orelse .ReleaseFast;
+    const cli_chassis = if (cli_optimize == optimize) chassis else b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = cli_optimize,
+        .pic = true,
+        .imports = &engines(b, target, cli_optimize),
+    });
     const faces = [_]struct { name: []const u8, source: []const u8 }{
         .{ .name = "gist", .source = "src/surface/face/gist/main.zig" },
         .{ .name = "relate", .source = "src/surface/face/relate/main.zig" },
@@ -51,8 +71,9 @@ pub fn build(b: *std.Build) void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path(face.source),
                 .target = target,
-                .optimize = optimize,
-                .imports = &(deps ++ [_]std.Build.Module.Import{.{ .name = "gist", .module = chassis }}),
+                .optimize = cli_optimize,
+                .imports = &(engines(b, target, cli_optimize) ++
+                    [_]std.Build.Module.Import{.{ .name = "gist", .module = cli_chassis }}),
             }),
         });
         b.installArtifact(exe);
