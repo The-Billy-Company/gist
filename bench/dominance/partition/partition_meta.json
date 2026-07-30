@@ -1,0 +1,51 @@
+{
+ "platform": "Darwin arm64",
+ "runs": 10,
+ "warmup": 2,
+ "keep_disabled": true,
+ "rival": {
+  "tool": "rg",
+  "derived_from": "gist --type-list --docs  \u2229  rg --type-list",
+  "union_types": 25,
+  "gist_docs_type_rows": 26,
+  "types_rg_cannot_name": 1
+ },
+ "populations": {
+  "fixture": {
+   "population": "fixture",
+   "walks": {
+    "gist": 9,
+    "rg": 9,
+    "shared": 9
+   },
+   "docs_population": {
+    "gist": 4,
+    "rg_union": 5
+   },
+   "classification": {
+    "over_claimed_by_union": 3,
+    "over_claim_top": "CMakeLists.txt (3)",
+    "rescued_by_genus": 2,
+    "rescued_without_extension": 2
+   }
+  },
+  "tracked": {
+   "population": "tracked",
+   "walks": {
+    "gist": 23079,
+    "rg": 23092,
+    "shared": 23078
+   },
+   "docs_population": {
+    "gist": 4483,
+    "rg_union": 4482
+   },
+   "classification": {
+    "over_claimed_by_union": 0,
+    "over_claim_top": "none",
+    "rescued_by_genus": 1,
+    "rescued_without_extension": 0
+   }
+  }
+ }
+}

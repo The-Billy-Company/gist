@@ -1,0 +1,6 @@
+{
+  "_comment": "Floors for the corpus-partition lane — `gist --docs` against the ripgrep `-t` union derived from gist's own docs type roster. Both speed floors are geomeans of rg_union_ms / gist_ms over the needle slate, deliberately set BELOW the observed spread on an idle box so only a real regression trips them: cold measured 2.2-3.1x across repeated mints (floor 1.8), warm 9.9-31.9x (floor 6.0 — the wide warm spread is scheduling noise on a laptop shared with ~10 coworker agents, and a floor that hugged the median would fail on load rather than on regression). Both are ratios, so they survive a slower or faster machine; raise them deliberately after a quiet-box republish. The walk-agreement floor is what makes the classification columns meaningful at all: gist and rg must be looking at substantially the same corpus (measured 0.9994 = 23078 shared of 23092) before a difference between their docs sets means anything. The classification numbers themselves are NOT floored on the live tree — they are asserted by equality against fixture_expected.json over the hermetic tree the mint builds, because that tree is identical on every machine.",
+  "cold_geomean_floor": 1.8,
+  "warm_geomean_floor": 6.0,
+  "min_walk_agreement": 0.98
+}

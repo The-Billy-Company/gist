@@ -1,0 +1,7 @@
+{
+ "note": "hand-written expectation for the hermetic tree the mint builds; a change here is a change of contract, not of measurement",
+ "over_claimed_by_union": 3,
+ "over_claim_top": "CMakeLists.txt (3)",
+ "rescued_by_genus": 2,
+ "rescued_without_extension": 2
+}
