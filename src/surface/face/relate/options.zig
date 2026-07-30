@@ -12,16 +12,16 @@
 //! no meaning for — the loop is shared, the surface is not.
 
 const std = @import("std");
-const candidates = @import("../../../kernel/compose/candidates.zig");
-const echoes = @import("../../../kernel/kinship/cluster/echoes.zig");
-const scope = @import("../../../corpus/scope/filter.zig");
+const candidates = @import("relate").compose.candidates;
+const echoes = @import("relate").kinship.echoes;
+const scope = @import("irregex").commands.scope.filter;
 const flags = @import("../../cli/flags.zig");
 const grade = @import("../../cli/grade.zig");
 const kinship = @import("kinship.zig");
 const units = @import("units.zig");
 
-const die = @import("../../cli/outcome.zig").die;
-const oom = @import("../../cli/outcome.zig").oom;
+const die = @import("irregex").inner.cli.outcome.die;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 pub const Channel = grade.Channel;
 pub const Unit = units.Unit;

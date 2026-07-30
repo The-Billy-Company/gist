@@ -22,13 +22,13 @@
 //! catch the drift; here the drift has nowhere to live.
 
 const std = @import("std");
-const beacon = @import("../../cli/beacon.zig");
-const catalog = @import("../../../exec/cold/argv/catalog.zig");
-const encoding = @import("../../../corpus/read/encoding.zig");
-const intent = @import("../../../exec/cold/argv/intent.zig");
-const oom = @import("../../cli/outcome.zig").oom;
+const beacon = @import("irregex").inner.cli.beacon;
+const catalog = @import("irregex").inner.cold.catalog;
+const encoding = @import("irregex").inner.corpus.encoding;
+const intent = @import("irregex").inner.cold.intent;
+const oom = @import("irregex").inner.cli.outcome.oom;
 const primer = @import("../../cli/primer/primer.zig");
-const types = @import("../../../corpus/scope/types.zig");
+const types = @import("irregex").commands.scope.types;
 
 const Act = catalog.Act;
 const Choice = primer.Choice;

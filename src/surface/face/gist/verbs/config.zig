@@ -21,13 +21,13 @@
 //! learn the format to get a correct charter.
 
 const std = @import("std");
-const assay = @import("../../../../assay/assay.zig");
-const charter = @import("../../../../corpus/scope/charter.zig");
-const corpus = @import("../../../../corpus/tree/corpus.zig");
-const misread = @import("../../../../kernel/math/misread.zig");
-const preference = @import("../../../../exec/cold/argv/preference.zig");
-const jsonstr = @import("../../../cli/jsonstr.zig");
-const home = @import("../../../../corpus/index/frame/home.zig");
+const assay = @import("irregex").assay;
+const charter = @import("irregex").commands.scope.charter;
+const corpus = @import("irregex").corpus;
+const misread = @import("irregex").commands.scope.misread;
+const preference = @import("irregex").preference;
+const jsonstr = @import("irregex").inner.cli.jsonstr;
+const home = @import("irregex").home;
 
 const Dir = std.Io.Dir;
 

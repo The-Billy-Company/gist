@@ -19,10 +19,11 @@
 
 const std = @import("std");
 const irregex = @import("irregex");
+const chassis = @import("gist");
 
 pub fn main(init: std.process.Init) void {
-    irregex.commands.manifest.drive(
-        irregex.commands.relate_repertoire.face,
+    chassis.cli.manifest.drive(
+        chassis.faces.relate_repertoire.face,
         irregex.version_string,
         init,
     );

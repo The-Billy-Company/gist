@@ -14,9 +14,9 @@ const answer = @import("answer.zig"); // the query answer path owns the in-fligh
 const protocol = @import("../../conduit/protocol/protocol.zig");
 const image = @import("../../conduit/image.zig");
 const client = @import("../client/client.zig"); // the residency probe `gist status` reports through
-const request = @import("../../answer/request.zig");
-const shm = @import("../../conduit/shm.zig");
-const fault = @import("../../../../fault.zig");
+const request = @import("irregex").session.request;
+const shm = @import("irregex").inner.session.shm;
+const fault = @import("irregex").fault;
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 

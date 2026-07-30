@@ -5,7 +5,7 @@
 
 const std = @import("std");
 const protocol = @import("protocol.zig");
-const request = @import("../../answer/request.zig");
+const request = @import("irregex").session.request;
 
 const gpa = std.testing.allocator;
 
@@ -250,7 +250,7 @@ test "chunk_fd payload encode/decode preserves length + matched, fails closed sh
 }
 
 test "fd-transport capability advertises exactly where the shm path exists" {
-    const shm = @import("../shm.zig");
+    const shm = @import("irregex").inner.session.shm;
     // The advertised set is the fd bit iff this target has the anonymous-shm +
     // SCM_RIGHTS path — a peer on an unsupported target advertises nothing and
     // stays on chunk frames automatically.
@@ -478,7 +478,7 @@ test "annals encode/decode: decline round-trips as null; malformed payloads fail
 }
 
 test "query_ext round-trips the corpus-partition trailer" {
-    const genus = @import("../../../../corpus/scope/genus.zig");
+    const genus = @import("irregex").commands.scope.genus;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     // Every combination of selected × negated genus survives the wire, because a
@@ -532,7 +532,7 @@ test "query_ext round-trips the corpus-partition trailer" {
 }
 
 test "a genus byte claiming an unknown genus fails closed" {
-    const genus = @import("../../../../corpus/scope/genus.zig");
+    const genus = @import("irregex").commands.scope.genus;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     var buf: std.ArrayList(u8) = .empty;
@@ -549,7 +549,7 @@ test "a genus byte claiming an unknown genus fails closed" {
 }
 
 test "genus Set bits round-trip every subset, and reject the impossible" {
-    const genus = @import("../../../../corpus/scope/genus.zig");
+    const genus = @import("irregex").commands.scope.genus;
     // All 8 subsets of the 3-genus partition survive bits→fromBits unchanged.
     for (0..8) |raw| {
         const b: u8 = @intCast(raw);

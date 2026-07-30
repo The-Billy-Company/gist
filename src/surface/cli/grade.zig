@@ -18,9 +18,9 @@
 //!     hint grammar, plus the rg-shaped exit code that goes with it.
 
 const std = @import("std");
-const corpus_mod = @import("../../corpus/tree/corpus.zig");
-const channel_mod = @import("../../kernel/kinship/metric/channel.zig");
-const guide = @import("guide.zig");
+const corpus_mod = @import("irregex").corpus;
+const channel_mod = @import("relate").kinship.channel;
+const guide = @import("irregex").inner.cli.guide;
 const reprise = @import("reprise.zig");
 
 /// The one channel vocabulary + its calibrated bands (kernel-owned).

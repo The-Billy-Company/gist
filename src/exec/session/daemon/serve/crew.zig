@@ -29,14 +29,14 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const portal = @import("../../../../portal.zig");
-const resident = @import("../../warm/resident.zig");
+const portal = @import("irregex").portal;
+const resident = @import("irregex").session.resident;
 const protocol = @import("../../conduit/protocol/protocol.zig");
-const watch = @import("../../watch/watch.zig");
+const watch = @import("irregex").session.watch;
 const vigil = @import("../../conduit/vigil.zig");
-const keep_mod = @import("../../answer/keep.zig");
+const keep_mod = @import("irregex").inner.session.keep;
 const answer = @import("answer.zig");
-const assay = @import("../../../../assay/assay.zig");
+const assay = @import("irregex").assay;
 const net = std.Io.net;
 
 const ResidentSession = resident.ResidentSession;

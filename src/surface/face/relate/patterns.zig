@@ -36,26 +36,26 @@
 //! Diagnostics (timing) go to stderr; results to stdout, rg-style.
 
 const std = @import("std");
-const portal = @import("../../../portal.zig");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const fresh = @import("../../../corpus/fresh/fresh.zig");
-const persist = @import("../../../corpus/index/trigrams/persist.zig");
-const cli_args = @import("../../../exec/cold/argv/args.zig");
-const assay = @import("../../../assay/assay.zig");
-const scope = @import("../../../corpus/scope/filter.zig");
-const patterns_mod = @import("../../../kernel/slate/patterns.zig");
-const loom = @import("../../../kernel/slate/loom.zig");
-const elide = @import("../../../exec/cold/quarry/elide.zig");
-const walk = @import("../../../exec/cold/quarry/walk.zig");
-const ignore = @import("../../../corpus/tree/ignore.zig");
-const query = @import("../../../kernel/query/query.zig");
-const parallel = @import("../../../kernel/math/parallel.zig");
+const portal = @import("irregex").portal;
+const corpus_mod = @import("irregex").corpus;
+const fresh = @import("irregex").fresh;
+const persist = @import("irregex").persist;
+const cli_args = @import("irregex").argv;
+const assay = @import("irregex").assay;
+const scope = @import("irregex").commands.scope.filter;
+const patterns_mod = @import("irregex").irregex.patterns;
+const loom = @import("irregex").irregex.loom;
+const elide = @import("irregex").inner.cold.elide;
+const walk = @import("irregex").inner.cold.walk;
+const ignore = @import("irregex").inner.corpus.ignore;
+const query = @import("irregex").engine.query;
+const parallel = @import("irregex").parallel;
 const flags = @import("../../cli/flags.zig");
-const emit = @import("../../cli/emit.zig");
-const slurp = @import("../../../corpus/read/slurp.zig");
+const emit = @import("irregex").inner.cli.emit;
+const slurp = @import("irregex").inner.corpus.slurp;
 
-const die = @import("../../cli/outcome.zig").die;
-const oom = @import("../../cli/outcome.zig").oom;
+const die = @import("irregex").inner.cli.outcome.die;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 /// Attribute one document's bytes: the gate rejects all-miss docs in a single
 /// pass; survivors get exact per-pattern, per-line attribution as loom rows.

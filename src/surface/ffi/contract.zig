@@ -12,8 +12,8 @@
 //! `contract/search_api.toml`; nothing here invents a mapping.
 
 const std = @import("std");
-const api = @import("../api.zig");
-const fault = @import("../../fault.zig");
+const api = @import("irregex").api;
+const fault = @import("irregex").fault;
 
 /// Which of ADR-373's three channels an outcome belongs to — the `disposition`
 /// column of `[status_codes]`, made executable.

@@ -25,23 +25,23 @@
 //! artifact may not surface a file that has since been deleted.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const frag = @import("../../../corpus/index/frag/frag.zig");
-const candidates = @import("../../../kernel/compose/candidates.zig");
-const regions = @import("../../../kernel/compose/regions.zig");
-const patterns_mod = @import("../../../kernel/slate/patterns.zig");
-const echoes = @import("../../../kernel/kinship/cluster/echoes.zig");
-const sketch_mod = @import("../../../kernel/kinship/metric/sketch.zig");
-const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
-const fingerprint = @import("../../../kernel/kinship/metric/fingerprint.zig");
-const fault = @import("../../../fault.zig");
+const corpus_mod = @import("irregex").corpus;
+const frag = @import("relate").frag;
+const candidates = @import("relate").compose.candidates;
+const regions = @import("relate").compose.regions;
+const patterns_mod = @import("irregex").irregex.patterns;
+const echoes = @import("relate").kinship.echoes;
+const sketch_mod = @import("relate").kinship.sketch;
+const silhouette_mod = @import("relate").kinship.silhouette;
+const fingerprint = @import("relate").kinship.fingerprint;
+const fault = @import("irregex").fault;
 const flags = @import("../../cli/flags.zig");
 const kinship = @import("kinship.zig");
 
 const Sketch = sketch_mod.Sketch;
 const Silhouette = silhouette_mod.Silhouette;
-const die = @import("../../cli/outcome.zig").die;
-const oom = @import("../../cli/outcome.zig").oom;
+const die = @import("irregex").inner.cli.outcome.die;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 /// What one row of the comparison table is.
 pub const Unit = enum {

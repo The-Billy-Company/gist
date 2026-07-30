@@ -10,10 +10,10 @@
 //! (`UnexpectedFrame` → decline → cold), never a dropped flag served warm.
 
 const std = @import("std");
-const request = @import("../../answer/request.zig");
+const request = @import("irregex").session.request;
 const wire = @import("../wire.zig");
 const frame = @import("opcodes.zig");
-const genus = @import("../../../../corpus/scope/genus.zig");
+const genus = @import("irregex").commands.scope.genus;
 
 const WireError = frame.WireError;
 

@@ -19,18 +19,18 @@
 //! re-exported here so the face's call sites stay stable.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const atlas_mod = @import("../../../corpus/index/atlas/atlas.zig");
-const trigram_persist = @import("../../../corpus/index/trigrams/persist.zig");
-const sketch = @import("../../../kernel/kinship/metric/sketch.zig");
-const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
-const fingerprint = @import("../../../kernel/kinship/metric/fingerprint.zig");
-const pairs = @import("../../../kernel/kinship/cluster/pairs.zig");
+const corpus_mod = @import("irregex").corpus;
+const atlas_mod = @import("relate").atlas;
+const trigram_persist = @import("irregex").persist;
+const sketch = @import("relate").kinship.sketch;
+const silhouette_mod = @import("relate").kinship.silhouette;
+const fingerprint = @import("relate").kinship.fingerprint;
+const pairs = @import("relate").kinship.pairs;
 const flags = @import("../../cli/flags.zig");
 const grade = @import("../../cli/grade.zig");
-const assay = @import("../../../assay/assay.zig");
+const assay = @import("irregex").assay;
 
-const oom = @import("../../cli/outcome.zig").oom;
+const oom = @import("irregex").inner.cli.outcome.oom;
 pub const Sketch = sketch.Sketch;
 pub const Silhouette = silhouette_mod.Silhouette;
 

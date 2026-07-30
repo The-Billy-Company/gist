@@ -29,8 +29,8 @@ const idle = @import("idle.zig");
 const crew = @import("crew.zig");
 const route = @import("route.zig");
 const vigil = @import("../../conduit/vigil.zig");
-const fresh = @import("../../../../corpus/fresh/fresh.zig");
-const journal = @import("../../../../corpus/fresh/journal.zig");
+const fresh = @import("irregex").fresh;
+const journal = @import("irregex").inner.corpus.journal;
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 

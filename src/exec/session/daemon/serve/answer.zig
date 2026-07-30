@@ -25,10 +25,10 @@
 //! legitimate local warm query approaches it.
 
 const std = @import("std");
-const resident = @import("../../warm/resident.zig");
+const resident = @import("irregex").session.resident;
 const protocol = @import("../../conduit/protocol/protocol.zig");
-const assay = @import("../../../../assay/assay.zig");
-const fault = @import("../../../../fault.zig");
+const assay = @import("irregex").assay;
+const fault = @import("irregex").fault;
 
 const ResidentSession = resident.ResidentSession;
 

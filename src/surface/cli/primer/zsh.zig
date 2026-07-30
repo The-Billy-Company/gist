@@ -34,7 +34,7 @@
 const std = @import("std");
 const primer = @import("primer.zig");
 const shell = @import("shell.zig");
-const oom = @import("../outcome.zig").oom;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 const Choice = primer.Choice;
 const Opt = primer.Opt;

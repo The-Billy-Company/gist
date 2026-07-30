@@ -14,11 +14,11 @@
 //! slot for the next one.
 
 const std = @import("std");
-const resident = @import("../../warm/resident.zig");
-const annals_mod = @import("../../reconcile/annals.zig");
+const resident = @import("irregex").session.resident;
+const annals_mod = @import("irregex").inner.session.annals;
 const protocol = @import("../../conduit/protocol/protocol.zig");
 const image = @import("../../conduit/image.zig");
-const watch = @import("../../watch/watch.zig");
+const watch = @import("irregex").session.watch;
 const answer = @import("answer.zig");
 const crew = @import("crew.zig");
 

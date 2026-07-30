@@ -60,19 +60,19 @@
 //! back to the live corpus scan. Results stdout, diagnostics stderr.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const assay = @import("../../../assay/assay.zig");
-const coverage = @import("../../../kernel/kinship/recall/coverage.zig");
-const compose = @import("../../../kernel/compose/context.zig");
-const retrieval = @import("../../../exec/retrieval/retrieval.zig");
+const corpus_mod = @import("irregex").corpus;
+const assay = @import("irregex").assay;
+const coverage = @import("relate").kinship.coverage;
+const compose = @import("relate").compose.context;
+const retrieval = @import("relate").retrieval;
 const options = @import("options.zig");
 const units = @import("units.zig");
 const flags = @import("../../cli/flags.zig");
-const emit = @import("../../cli/emit.zig");
+const emit = @import("irregex").inner.cli.emit;
 const grade = @import("../../cli/grade.zig");
 
-const die = @import("../../cli/outcome.zig").die;
-const oom = @import("../../cli/outcome.zig").oom;
+const die = @import("irregex").inner.cli.outcome.die;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 const usage = "usage: relate pack <text> [--matching PAT]... [--match any|all] [-F] [-i] [--min-grade G] [--top N] [--json] [ROOT...]\n";
 

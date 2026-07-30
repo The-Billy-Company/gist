@@ -34,16 +34,16 @@
 //! ship.
 
 const std = @import("std");
-const emit = @import("emit.zig");
-const outcome = @import("outcome.zig");
-const corpus_mod = @import("../../corpus/tree/corpus.zig");
-const charter = @import("../../corpus/scope/charter.zig");
-const assay = @import("../../assay/assay.zig");
+const emit = @import("irregex").inner.cli.emit;
+const outcome = @import("irregex").inner.cli.outcome;
+const corpus_mod = @import("irregex").corpus;
+const charter = @import("irregex").commands.scope.charter;
+const assay = @import("irregex").assay;
 const reprise = @import("reprise.zig");
-const beacon = @import("beacon.zig");
-const portal = @import("../../portal.zig");
+const beacon = @import("irregex").inner.cli.beacon;
+const portal = @import("irregex").portal;
 
-const oom = @import("outcome.zig").oom;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 /// A flag's default, typed so the manifest renders `8` / `0.25` / `false` /
 /// `"any"` / `null` as JSON rather than as prose about them.

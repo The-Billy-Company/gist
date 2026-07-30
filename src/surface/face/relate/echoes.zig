@@ -53,15 +53,15 @@
 //! statistical scores stay in separate columns; they are never fused.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const assay = @import("../../../assay/assay.zig");
-const echoes = @import("../../../kernel/kinship/cluster/echoes.zig");
-const emit = @import("../../cli/emit.zig");
+const corpus_mod = @import("irregex").corpus;
+const assay = @import("irregex").assay;
+const echoes = @import("relate").kinship.echoes;
+const emit = @import("irregex").inner.cli.emit;
 const grade = @import("../../cli/grade.zig");
 const options = @import("options.zig");
 const units = @import("units.zig");
 
-const oom = @import("../../cli/outcome.zig").oom;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 pub fn runEchoes(gpa: std.mem.Allocator, io: std.Io, argv: []const []const u8) !void {
     var o: options.Opts = .{ .top = 50, .channel = .twins };

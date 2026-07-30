@@ -10,7 +10,7 @@ const client = @import("client.zig");
 const image = @import("../../conduit/image.zig");
 const protocol = @import("../../conduit/protocol/protocol.zig");
 const vigil = @import("../../conduit/vigil.zig");
-const fault = @import("../../../../fault.zig");
+const fault = @import("irregex").fault;
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 

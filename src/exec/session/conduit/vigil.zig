@@ -37,7 +37,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const portal = @import("../../../portal.zig");
+const portal = @import("irregex").portal;
 
 const windows = builtin.os.tag == .windows;
 const w = std.os.windows;

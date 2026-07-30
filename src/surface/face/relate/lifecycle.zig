@@ -17,14 +17,14 @@
 //! `relate index` against a mid-query load and never observe torn bytes.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const Outcome = @import("../../cli/outcome.zig").Outcome;
-const fresh = @import("../../../corpus/fresh/fresh.zig");
-const frame = @import("../../../corpus/index/frame/frame.zig");
-const atlas_mod = @import("../../../corpus/index/atlas/atlas.zig");
-const frag_mod = @import("../../../corpus/index/frag/frag.zig");
-const shelf_mod = @import("../../../corpus/index/shelf/shelf.zig");
-const assay = @import("../../../assay/assay.zig");
+const corpus_mod = @import("irregex").corpus;
+const Outcome = @import("irregex").inner.cli.outcome.Outcome;
+const fresh = @import("irregex").fresh;
+const frame = @import("irregex").inner.corpus.frame;
+const atlas_mod = @import("relate").atlas;
+const frag_mod = @import("relate").frag;
+const shelf_mod = @import("relate").codex.shelf;
+const assay = @import("irregex").assay;
 const kinship = @import("kinship.zig");
 const flags = @import("../../cli/flags.zig");
 

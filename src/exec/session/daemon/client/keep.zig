@@ -24,8 +24,8 @@
 const std = @import("std");
 const protocol = @import("../../conduit/protocol/protocol.zig");
 const client = @import("client.zig");
-const frame = @import("../../../../corpus/index/frame/frame.zig");
-const fault = @import("../../../../fault.zig");
+const frame = @import("irregex").inner.corpus.frame;
+const fault = @import("irregex").fault;
 const net = std.Io.net;
 
 /// Deadline for both errands. Tighter than a query's two seconds and for the

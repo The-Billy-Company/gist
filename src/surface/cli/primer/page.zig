@@ -17,7 +17,7 @@
 
 const std = @import("std");
 const primer = @import("primer.zig");
-const oom = @import("../outcome.zig").oom;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 const Opt = primer.Opt;
 const Surface = primer.Surface;

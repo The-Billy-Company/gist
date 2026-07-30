@@ -38,16 +38,16 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const request = @import("../../answer/request.zig");
+const request = @import("irregex").session.request;
 const protocol = @import("../../conduit/protocol/protocol.zig");
 const image = @import("../../conduit/image.zig");
-const shm = @import("../../conduit/shm.zig");
-const corpus = @import("../../../../corpus/tree/corpus.zig");
-const frame = @import("../../../../corpus/index/frame/frame.zig");
-const beacon = @import("../../../../surface/cli/beacon.zig");
-const run = @import("../../../cold/engine/serial.zig");
-const assay = @import("../../../../assay/assay.zig");
-const portal = @import("../../../../portal.zig");
+const shm = @import("irregex").inner.session.shm;
+const corpus = @import("irregex").corpus;
+const frame = @import("irregex").inner.corpus.frame;
+const beacon = @import("irregex").inner.cli.beacon;
+const run = @import("irregex").commands.search;
+const assay = @import("irregex").assay;
+const portal = @import("irregex").portal;
 const vigil = @import("../../conduit/vigil.zig");
 const net = std.Io.net;
 

@@ -30,9 +30,9 @@
 const std = @import("std");
 const contract = @import("contract.zig");
 const Relay = @import("relay.zig").Relay;
-const resident = @import("../../exec/session/warm/resident.zig");
-const request = @import("../../exec/session/answer/request.zig");
-const assay = @import("../../assay/assay.zig");
+const resident = @import("irregex").session.resident;
+const request = @import("irregex").session.request;
+const assay = @import("irregex").assay;
 
 /// The FFI allocates through the C allocator so a host that already owns the C
 /// heap (the Python process) shares one arena, and teardown needs no Zig GPA.

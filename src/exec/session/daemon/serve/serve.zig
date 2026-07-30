@@ -46,10 +46,10 @@
 //! disconnecting just frees the daemon for the next one.
 
 const std = @import("std");
-const resident = @import("../../warm/resident.zig");
+const resident = @import("irregex").session.resident;
 const image = @import("../../conduit/image.zig");
-const watch = @import("../../watch/watch.zig");
-const keep_mod = @import("../../answer/keep.zig");
+const watch = @import("irregex").session.watch;
+const keep_mod = @import("irregex").inner.session.keep;
 const ration = @import("../../warden/ration.zig");
 const warden_mod = @import("../../warden/warden.zig");
 const standdown = @import("../../warden/standdown.zig");
@@ -57,12 +57,12 @@ const answer = @import("answer.zig");
 const crew = @import("crew.zig");
 const loop = @import("loop.zig");
 const vigil = @import("../../conduit/vigil.zig");
-const corpus = @import("../../../../corpus/tree/corpus.zig");
+const corpus = @import("irregex").corpus;
 // `frame` is taken by the protocol frames threaded through the daemon.
-const frame_mod = @import("../../../../corpus/index/frame/frame.zig");
-const fault = @import("../../../../fault.zig");
-const portal = @import("../../../../portal.zig");
-const home = @import("../../../../corpus/index/frame/home.zig");
+const frame_mod = @import("irregex").inner.corpus.frame;
+const fault = @import("irregex").fault;
+const portal = @import("irregex").portal;
+const home = @import("irregex").home;
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 

@@ -33,22 +33,22 @@
 //! re-proves it first.
 
 const std = @import("std");
-const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
-const fresh = @import("../../../../corpus/fresh/fresh.zig");
-const persist = @import("../../../../corpus/index/trigrams/persist.zig");
-const codicil = @import("../../../../corpus/index/trigrams/codicil.zig");
-const journal = @import("../../../../corpus/fresh/journal.zig");
+const corpus_mod = @import("irregex").corpus;
+const fresh = @import("irregex").fresh;
+const persist = @import("irregex").persist;
+const codicil = @import("irregex").codicil;
+const journal = @import("irregex").inner.corpus.journal;
 const client = @import("../../../../exec/session/daemon/client/client.zig");
 const session_spawn = @import("../../../../exec/session/conduit/spawn.zig");
-const crest_sidecar = @import("../../../../corpus/index/crest/sidecar.zig");
-const frame = @import("../../../../corpus/index/frame/frame.zig");
-const treemap = @import("../../../../corpus/index/phantom/treemap.zig");
-const shard = @import("../../../../corpus/index/content/shard.zig");
-const Index = @import("../../../../corpus/index/trigrams/trigram.zig").Index;
-const assay = @import("../../../../assay/assay.zig");
-const fault = @import("../../../../fault.zig");
-const portal = @import("../../../../portal.zig");
-const home = @import("../../../../corpus/index/frame/home.zig");
+const crest_sidecar = @import("irregex").crest_sidecar;
+const frame = @import("irregex").inner.corpus.frame;
+const treemap = @import("irregex").inner.corpus.treemap;
+const shard = @import("irregex").inner.corpus.shard;
+const Index = @import("irregex").trigram.Index;
+const assay = @import("irregex").assay;
+const fault = @import("irregex").fault;
+const portal = @import("irregex").portal;
+const home = @import("irregex").home;
 
 /// This process's peak resident set so far, in MiB — the running ceiling every
 /// `GIST_TRACE=index` phase line carries. Peak is monotonic, so the phase that
@@ -100,7 +100,7 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // Crest sidecar (the class-run sieve, research/crest/): one parallel pass
     // over the already-loaded docs. Best-effort — an OOM here costs only the
     // sieve, never the index build.
-    const crest_vectors: ?[]const @import("../../../../kernel/math/crest.zig").Vector =
+    const crest_vectors: ?[]const @import("irregex").crest.Vector =
         crest_sidecar.build(gpa, corpus.docs) catch null;
     defer if (crest_vectors) |cv| gpa.free(cv);
     assay.trace(.index, "index phase: crest sieve {d:.1} ms · peak {d:.0} MiB · {s}\n", .{

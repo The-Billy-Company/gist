@@ -26,7 +26,7 @@
 //! (`physical`) so every fail-closed edge is unit-testable without a 3 GB box.
 
 const std = @import("std");
-const assay = @import("../../../assay/assay.zig");
+const assay = @import("irregex").assay;
 
 /// The largest fraction of physical RAM ONE resident session may hold (1/4),
 /// and the only term that binds on a SMALL machine.

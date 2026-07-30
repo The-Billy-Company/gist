@@ -34,7 +34,7 @@
 //! speed that is.
 
 const std = @import("std");
-const fault = @import("../../../fault.zig");
+const fault = @import("irregex").fault;
 const Dir = std.Io.Dir;
 
 /// How long a refusal is believed. Ten minutes, matching the daemon's own idle

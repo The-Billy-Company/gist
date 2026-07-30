@@ -14,8 +14,8 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const fault = @import("../../../fault.zig");
-const portal = @import("../../../portal.zig");
+const fault = @import("irregex").fault;
+const portal = @import("irregex").portal;
 const vigil = @import("vigil.zig");
 
 const windows = builtin.os.tag == .windows;

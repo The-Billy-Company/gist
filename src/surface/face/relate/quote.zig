@@ -22,16 +22,16 @@
 //! diagnostics on stderr.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const shelf_mod = @import("../../../corpus/index/shelf/shelf.zig");
-const outcome = @import("../../cli/outcome.zig");
+const corpus_mod = @import("irregex").corpus;
+const shelf_mod = @import("relate").codex.shelf;
+const outcome = @import("irregex").inner.cli.outcome;
 const lifecycle = @import("lifecycle.zig");
-const assay = @import("../../../assay/assay.zig");
-const cento = @import("../../../kernel/codex/cento.zig");
-const emit = @import("../../cli/emit.zig");
+const assay = @import("irregex").assay;
+const cento = @import("relate").codex.cento;
+const emit = @import("irregex").inner.cli.emit;
 
-const die = @import("../../cli/outcome.zig").die;
-const oom = @import("../../cli/outcome.zig").oom;
+const die = @import("irregex").inner.cli.outcome.die;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 const jsonStr = emit.jsonStr;
 

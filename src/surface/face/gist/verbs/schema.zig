@@ -7,12 +7,12 @@
 //! same reason: an agent cannot be told about a destination the parser rejects.
 
 const std = @import("std");
-const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
-const args = @import("../../../../exec/cold/argv/args.zig");
-const beacon = @import("../../../cli/beacon.zig");
-const genus = @import("../../../../corpus/scope/genus.zig");
-const jsonstr = @import("../../../cli/jsonstr.zig");
-const assay = @import("../../../../assay/assay.zig");
+const corpus_mod = @import("irregex").corpus;
+const args = @import("irregex").argv;
+const beacon = @import("irregex").inner.cli.beacon;
+const genus = @import("irregex").commands.scope.genus;
+const jsonstr = @import("irregex").inner.cli.jsonstr;
+const assay = @import("irregex").assay;
 
 // Split at the version so the one number is interpolated from the engine's
 // single source rather than hand-copied here — the drift `relate echoes` caught
@@ -63,7 +63,7 @@ const manifest_prefix =
     \\    ],
     \\    "flag_surface": "a tested ripgrep-compatible flag surface: every implemented flag matches ripgrep's behavior, except the `improvements` bucket where gist is strictly better (identical-or-superset results, faster, or more robust) — never a regression. Not every ripgrep flag is implemented; an unimplemented or unknown flag fails loud with exit 2.",
     \\    "ripgrep_compatibility": {
-    \\      "source_of_truth": "src/exec/cold/argv/args.zig:flag_catalog",
+    \\      "source_of_truth": "irregex/src/exec/cold/argv/args.zig:flag_catalog",
     \\      "unknown_flags": "unsupported-fail-loud",
     \\      "buckets": {
 ;
@@ -92,7 +92,7 @@ const manifest_suffix =
     \\      "extend": "a genus name is a type name, so `--type-add 'docs:notes/**'` extends it for one run and `types = [\"docs:notes/**\"]` in .irregex.toml extends it for the tree",
     \\      "warm_path": "fully daemon-eligible — the selection rides the query_ext frame as a two-byte trailer, so a genus query is answered from the resident session at warm speed and is byte-identical to the cold run. A positive genus alongside another positive family declines to cold, where the OR is the authority.",
     \\      "prior_art": "GitHub Linguist's programming/markup/prose/data types and its documentation.yml path rules, with two divergences for retrieval rather than statistics: doc directories count at any depth (monorepos), and examples/demos/samples stay code. No grep-class tool ships this axis — ripgrep has 13 prose-adjacent types and no aggregate over them, and its type globs are basename-only so a docs/ rule is not expressible there (ripgrep#3339, open); ugrep's `text` type is five extensions with no code counterpart; zoekt links go-enry's Prose/Data classifiers and never calls them.",
-    \\      "source_of_truth": "src/corpus/scope/genus.zig",
+    \\      "source_of_truth": "irregex/src/corpus/scope/genus.zig",
     \\      "genera":
 ++ " ";
 
@@ -152,7 +152,7 @@ const manifest_hyperlink_tail =
     \\        "keys": {"roots": "string[] — what \"the corpus\" means here", "skip": "string[] — directory basenames the corpus walk never enters", "types": "string[] — --type-add specs applied before argv"},
     \\        "reach_ceiling": "corpus",
     \\        "precedence": "below GIST_ROOTS / GIST_SKIP, above the built-in defaults",
-    \\        "source_of_truth": "src/corpus/scope/charter.zig"
+    \\        "source_of_truth": "irregex/src/corpus/scope/charter.zig"
     \\      },
     \\      {
     \\        "name": "preferences",
@@ -162,7 +162,7 @@ const manifest_hyperlink_tail =
     \\        "gate": "interactive terminal only — the same envelope that gates the answer keep, the resident daemon, and color; a pipe, a redirect, --json, a script, CI, and the daemon are all structurally outside it",
     \\        "format": "one flag per line, shell-tokenized (quotes are quotes), prepended to argv so anything typed still wins; a line that is not a known flag is a fatal error at read time",
     \\        "reach_ceiling": "semantics",
-    \\        "source_of_truth": "src/exec/cold/argv/preference.zig"
+    \\        "source_of_truth": "irregex/src/exec/cold/argv/preference.zig"
     \\      }
     \\    ],
     \\    "suppress": {"flag": "--no-config", "env": "GIST_NO_CONFIG=1", "when": "read from raw argv before either file is opened, and accepted anywhere any verb accepts flags", "affects": "what a search honors, not what a report may describe — gist config and gist status still name both files and mark the run suppressed"},
@@ -324,21 +324,25 @@ test "--schema is valid JSON derived from the parser catalog" {
     // catalog is relocated again, this fails to build, forcing the public string
     // below to be updated in lockstep — the manifest can never silently outlive
     // its authority.
+    // The catalog crossed into the irregex library package, where a relative
+    // @embedFile cannot follow; referencing the exported decl is the same
+    // compile-time proof — rename or relocate `argv.flag_catalog` and this
+    // fails to build, forcing the public string below to move in lockstep.
     comptime {
-        _ = @embedFile("../../../../exec/cold/argv/args.zig");
+        _ = @import("irregex").argv.flag_catalog;
     }
-    try t.expect(std.mem.indexOf(u8, manifest, "\"source_of_truth\": \"src/exec/cold/argv/args.zig:flag_catalog\"") != null);
+    try t.expect(std.mem.indexOf(u8, manifest, "\"source_of_truth\": \"irregex/src/exec/cold/argv/args.zig:flag_catalog\"") != null);
     try t.expect(std.mem.indexOf(u8, manifest, "runtime/cold") == null); // no stale pre-move pointer survives
 
     // Same existence proof for the two config layers the manifest describes: an
     // agent is told which module decides each one, so relocating either fails
     // the build rather than leaving the manifest pointing at nothing.
     comptime {
-        _ = @embedFile("../../../../corpus/scope/charter.zig");
-        _ = @embedFile("../../../../exec/cold/argv/preference.zig");
+        _ = @import("irregex").commands.scope.charter;
+        _ = @import("irregex").preference;
     }
-    try t.expect(std.mem.indexOf(u8, manifest, "\"src/corpus/scope/charter.zig\"") != null);
-    try t.expect(std.mem.indexOf(u8, manifest, "\"src/exec/cold/argv/preference.zig\"") != null);
+    try t.expect(std.mem.indexOf(u8, manifest, "\"irregex/src/corpus/scope/charter.zig\"") != null);
+    try t.expect(std.mem.indexOf(u8, manifest, "\"irregex/src/exec/cold/argv/preference.zig\"") != null);
 
     // The preference layer's whole safety argument is that it cannot reach a
     // non-interactive reader. If that claim is ever softened here, the manifest
@@ -358,10 +362,10 @@ test "--schema is valid JSON derived from the parser catalog" {
     // flags the catalog really has, or an agent would be told about a spelling
     // that exits 2.
     comptime {
-        _ = @embedFile("../../../../corpus/scope/genus.zig");
+        _ = @import("irregex").commands.scope.genus;
     }
     const partition = parsed.value.object.get("search").?.object.get("corpus_partition").?.object;
-    try t.expect(std.mem.eql(u8, partition.get("source_of_truth").?.string, "src/corpus/scope/genus.zig"));
+    try t.expect(std.mem.eql(u8, partition.get("source_of_truth").?.string, "irregex/src/corpus/scope/genus.zig"));
     const genera = partition.get("genera").?.object;
     try t.expectEqual(@typeInfo(genus.Genus).@"enum".fields.len, genera.count());
     inline for (comptime std.enums.values(genus.Genus)) |g| {

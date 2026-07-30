@@ -35,17 +35,17 @@
 //! and a false `identical` is worse than no row.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const assay = @import("../../../assay/assay.zig");
-const echoes = @import("../../../kernel/kinship/cluster/echoes.zig");
-const sketch_mod = @import("../../../kernel/kinship/metric/sketch.zig");
-const silhouette_mod = @import("../../../kernel/kinship/metric/silhouette.zig");
-const frag = @import("../../../corpus/index/frag/frag.zig");
-const lexicon = @import("../../../kernel/kinship/recall/lexicon.zig");
-const zipper = @import("../../../kernel/kinship/recall/zipper.zig");
-const retrieval = @import("../../../exec/retrieval/retrieval.zig");
+const corpus_mod = @import("irregex").corpus;
+const assay = @import("irregex").assay;
+const echoes = @import("relate").kinship.echoes;
+const sketch_mod = @import("relate").kinship.sketch;
+const silhouette_mod = @import("relate").kinship.silhouette;
+const frag = @import("relate").frag;
+const lexicon = @import("relate").kinship.lexicon;
+const zipper = @import("relate").kinship.zipper;
+const retrieval = @import("relate").retrieval;
 const flags = @import("../../cli/flags.zig");
-const emit = @import("../../cli/emit.zig");
+const emit = @import("irregex").inner.cli.emit;
 const grade = @import("../../cli/grade.zig");
 const options = @import("options.zig");
 const units = @import("units.zig");
@@ -53,8 +53,8 @@ const units = @import("units.zig");
 const Sketch = sketch_mod.Sketch;
 const Silhouette = silhouette_mod.Silhouette;
 const Dir = std.Io.Dir;
-const die = @import("../../cli/outcome.zig").die;
-const oom = @import("../../cli/outcome.zig").oom;
+const die = @import("irregex").inner.cli.outcome.die;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 const usage =
     "usage: relate similar <path | path#Lnnn | text> [--as copies|twins|shapes|any]\n" ++

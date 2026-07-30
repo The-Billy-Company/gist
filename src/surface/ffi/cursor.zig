@@ -22,7 +22,7 @@
 //! exactly the discipline the callback path already documents.
 
 const std = @import("std");
-const api = @import("../api.zig");
+const api = @import("irregex").api;
 const contract = @import("contract.zig");
 
 /// Share the host's C heap so a boxed handle frees without a Zig GPA.
@@ -214,7 +214,7 @@ fn viewOf(rec: api.OwnedMatch, subs: [*]const contract.Submatch, nsubs: usize) c
 
 test "a successful entry hands back no fault, however the previous call failed" {
     const t = std.testing;
-    const fault = @import("../../fault.zig");
+    const fault = @import("irregex").fault;
     const sc = fault.scope();
     defer sc.end();
 

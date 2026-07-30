@@ -34,14 +34,14 @@
 //! generator reads the same tables the search does.
 
 const std = @import("std");
-const corpus_mod = @import("../../../corpus/tree/corpus.zig");
-const assay = @import("../../../assay/assay.zig");
-const oom = @import("../outcome.zig").oom;
+const corpus_mod = @import("irregex").corpus;
+const assay = @import("irregex").assay;
+const oom = @import("irregex").inner.cli.outcome.oom;
 
 const page = @import("page.zig");
 const shell = @import("shell.zig");
 const zsh = @import("zsh.zig");
-const portal = @import("../../../portal.zig");
+const portal = @import("irregex").portal;
 
 // ── the vocabulary a face describes itself in ────────────────────────────
 

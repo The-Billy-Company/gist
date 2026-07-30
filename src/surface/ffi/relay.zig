@@ -6,7 +6,7 @@
 
 const std = @import("std");
 const contract = @import("contract.zig");
-const resident = @import("../../exec/session/warm/resident.zig");
+const resident = @import("irregex").session.resident;
 
 const gpa = std.heap.c_allocator;
 

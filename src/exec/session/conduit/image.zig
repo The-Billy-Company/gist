@@ -52,7 +52,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const inode = @import("../../../corpus/read/inode.zig");
+const inode = @import("irregex").inner.corpus.inode;
 
 /// No answer available. A real stamp is a wall-clock nanosecond count, so zero
 /// is unambiguously "this side could not identify itself".

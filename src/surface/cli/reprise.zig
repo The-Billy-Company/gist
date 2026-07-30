@@ -30,10 +30,10 @@
 //! lifecycle is `gist`'s, and the keep is a passenger on it.
 
 const std = @import("std");
-const assay = @import("../../assay/assay.zig");
-const corpus = @import("../../corpus/tree/corpus.zig");
+const assay = @import("irregex").assay;
+const corpus = @import("irregex").corpus;
 const keep = @import("../../exec/session/daemon/client/keep.zig");
-const paths = @import("../../corpus/scope/paths.zig");
+const paths = @import("irregex").inner.corpus.paths;
 const serve = @import("../../exec/session/daemon/serve/serve.zig");
 
 /// Environment knobs that can change WHAT a verb prints. Anything that only

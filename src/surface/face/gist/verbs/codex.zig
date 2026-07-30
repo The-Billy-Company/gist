@@ -25,11 +25,11 @@
 //! as-of-snapshot, and the report says so.
 
 const std = @import("std");
-const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
-const outcome = @import("../../../cli/outcome.zig");
+const corpus_mod = @import("irregex").corpus;
+const outcome = @import("irregex").inner.cli.outcome;
 const Outcome = outcome.Outcome;
-const shelf_mod = @import("../../../../corpus/index/shelf/shelf.zig");
-const assay = @import("../../../../assay/assay.zig");
+const shelf_mod = @import("relate").codex.shelf;
+const assay = @import("irregex").assay;
 const Dir = std.Io.Dir;
 
 const shelfFile = shelf_mod.shelfFile;

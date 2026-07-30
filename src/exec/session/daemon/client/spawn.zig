@@ -18,12 +18,12 @@
 //! We only avoid the obviously-wasteful spawn when a daemon is already up.
 
 const std = @import("std");
-const request = @import("../../answer/request.zig");
-const run = @import("../../../cold/engine/serial.zig");
+const request = @import("irregex").session.request;
+const run = @import("irregex").commands.search;
 const session_spawn = @import("../../conduit/spawn.zig");
 const standdown = @import("../../warden/standdown.zig");
 const ration = @import("../../warden/ration.zig");
-const fault = @import("../../../../fault.zig");
+const fault = @import("irregex").fault;
 const net = std.Io.net;
 
 /// Fire off a detached `gist serve` iff this query would benefit from a warm

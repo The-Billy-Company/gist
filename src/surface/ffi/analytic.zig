@@ -27,7 +27,7 @@
 //! next pull, so a batching host holds every batch it pulled without copying.
 
 const std = @import("std");
-const api = @import("../api.zig");
+const api = @import("irregex").api;
 const contract = @import("contract.zig");
 const rows = @import("rows.zig");
 

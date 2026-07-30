@@ -32,25 +32,26 @@
 //! completions, rendered from that same flag table for a human at a prompt).
 //!
 //! This is the thin dispatch shell only: every verb's real work lives in the
-//! engine + command modules, reached through the `gist` module (`commands.search`
-//! for the unified search engine, `commands.indexer` for `gist index`,
-//! `commands.status` for introspection, `commands.schema` for the manifest). The
-//! bench/verify/certify harness is a separate executable (`bench/harness/bench.zig`).
+//! engine + command modules — the search engine and scope policy through the
+//! `irregex` library module (`commands.search`, `commands.scope`), the product
+//! verbs and the daemon from this package's own tree. The bench/verify/certify
+//! harness is a separate executable (`bench/harness/bench.zig`).
 
 const std = @import("std");
 const gist = @import("irregex");
+const chassis = @import("gist");
 
 const portal = gist.portal;
 
-const indexer = gist.commands.indexer; // `gist index` — build + persist the trigram index
-const codex_face = gist.commands.codex; // `gist codex` — the exact existence/count tier
-const status = gist.commands.status; // read-only index introspection
-const config = gist.commands.config; // `gist config` — the persisted-configuration stack
-const schema = gist.commands.schema; // `--schema` JSON manifest
-const primer = gist.commands.primer; // `--generate` man page + shell completions
+const indexer = chassis.faces.indexer; // `gist index` — build + persist the trigram index
+const codex_face = chassis.faces.codex; // `gist codex` — the exact existence/count tier
+const status = chassis.faces.status; // read-only index introspection
+const config = chassis.faces.config; // `gist config` — the persisted-configuration stack
+const schema = chassis.faces.schema; // `--schema` JSON manifest
+const primer = chassis.faces.primer; // `--generate` man page + shell completions
 const search = gist.commands.search; // the unified search engine (bare shorthand + `gist rg`)
-const serve = gist.commands.serve; // `gist serve` — the resident warm daemon
-const client = gist.commands.client; // the warm CLI fast path (daemon dial + cold fallback)
+const serve = chassis.session.serve; // `gist serve` — the resident warm daemon
+const client = chassis.session.client; // the warm CLI fast path (daemon dial + cold fallback)
 
 /// Canonicalize a `gist index ROOT` argument to the walk's path shape: strip
 /// any leading `./` and trailing `/` (so `./libs/` indexes as `libs` — the

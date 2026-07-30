@@ -7,7 +7,7 @@
 //! do not, and either path decodes to the same `ResultView`.
 
 const std = @import("std");
-const request = @import("../../answer/request.zig");
+const request = @import("irregex").session.request;
 const wire = @import("../wire.zig");
 const frame = @import("opcodes.zig");
 

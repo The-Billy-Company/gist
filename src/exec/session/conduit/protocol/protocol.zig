@@ -19,7 +19,7 @@
 
 const std = @import("std");
 const wire = @import("../wire.zig");
-const shm = @import("../shm.zig");
+const shm = @import("irregex").inner.session.shm;
 const frame = @import("opcodes.zig");
 const query = @import("query.zig");
 const result = @import("result.zig");
