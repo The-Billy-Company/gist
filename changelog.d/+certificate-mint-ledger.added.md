@@ -1,0 +1,1 @@
+Every published Dominance-and-Fit Certificate now appends a row to a mint ledger (bench/certify/LEDGER.md) recording its corpus, the layers it actually carried, its verdict tally, and its cold/crest geomeans — so a re-mint that silently drops a layer is caught at the mint instead of surfacing later as a stale documentation pin. Verify with 'make bench-gist-ledger ARGS=verify'.
