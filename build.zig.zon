@@ -20,5 +20,7 @@
         "shell",
         "README.md",
         "CHANGELOG.md",
+        "LICENSE",
+        "NOTICE",
     },
 }

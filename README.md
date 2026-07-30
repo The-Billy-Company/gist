@@ -52,4 +52,5 @@ PLAN v5 split). The cut line is ripgrep's: what `rg`-the-binary owns
 (the daemon, the product vocabulary, distribution, the certificate)
 lives here; what the `grep-*` crates own (engines, walker, index, argv)
 lives in the library. Architecture is machine-checked by
-`contract/gist.ward`.
+`contract/gist.ward`. Apache-2.0; nothing third-party is bundled here —
+the certificate measures competitors by invoking installed binaries.
