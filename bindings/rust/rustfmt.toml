@@ -1,1 +1,102 @@
-../../../../../rustfmt.toml
+# rustfmt — single workspace-wide config (RFC 3338 style edition 2024).
+#
+# Every Rust crate root has its `rustfmt.toml` symlinked to this file so that
+# editors which resolve config from the crate root (rust-analyzer, IntelliJ)
+# see the same shape as `cargo fmt` invoked from the CLI / CI. Don't fork
+# per crate — see .cursor/rules/rust-services.mdc.
+#
+# Stable options only. The workspace pins `channel = "1.96.0"` via
+# rust-toolchain.toml; turning on `unstable_features = true` (which would
+# unlock `imports_granularity`, `group_imports`, `wrap_comments`,
+# `format_strings`, `format_macro_bodies`, `format_generated_files`,
+# `condense_wildcard_suffixes`, etc.) requires nightly across every crate
+# and we're not paying that fragmentation cost.
+#
+# Style is policy here, not vibes. Every knob below encodes a deliberate
+# decision and is pinned explicitly — even when the value matches today's
+# upstream default. Several of these defaults have flipped at least once
+# across rustfmt minor bumps (`match_arm_leading_pipes`, `version` /
+# `style_edition`, the chain-width heuristics under `use_small_heuristics`);
+# pinning insulates the codebase from a silent quiet reformat on toolchain
+# upgrade. Pure runtime knobs (`emit_mode`, `disable_all_formatting`,
+# `print_misformatted_file_names`) are left to the caller.
+
+# ── Edition pinning ────────────────────────────────────────────────────────
+# Parser edition. `cargo fmt` reads this from Cargo.toml automatically, but
+# bare `rustfmt path/to/file.rs` (and several editor format-on-save
+# integrations) default to 2015 without an explicit pin. Tracks the workspace
+# `[workspace.package].edition` — bump in lockstep when the workspace flips.
+edition = "2024"
+
+# Style edition — RFC 3338 decouples the *formatting* style from the parser
+# edition. The 2024 style edition unlocks three improvements on stable:
+#
+#   * Version-sorted imports
+#       use std::num::{NonZeroU8, NonZeroU16, NonZeroU32, NonZeroU64};
+#     instead of the prior ASCIIbetical
+#       use std::num::{NonZeroU16, NonZeroU32, NonZeroU64, NonZeroU8};
+#   * `overflow_delimited_expr` defaults to true — last-arg struct literals
+#     and closures hug the call site:
+#       do_thing(x, Bar { y: 1, z: 2 });
+#     instead of always splitting onto a new indented line.
+#   * Unicode-aware "non-lowercase before lowercase" sort across imports.
+#
+# Stabilized in rustfmt 1.8 / Rust 1.83 (rust-lang/rustfmt#6431). Independent
+# of `edition`; staying on parser edition 2021 with style_edition 2024 is
+# supported and intended.
+style_edition = "2024"
+
+# ── Layout primitives ──────────────────────────────────────────────────────
+# Hard column cap. Default is also 100; pin so the percentage scaler driven
+# by `use_small_heuristics` (~60% → 60-col fn-call wrap, ~18-col struct lit,
+# 50-col single-line let-else, etc.) stays deterministic across rustfmt
+# minor bumps.
+max_width = 100
+
+# 4-space soft indent. Defaults, pinned so style intent is visible.
+hard_tabs = false
+tab_spaces = 4
+
+# Deterministic LF on every platform. Default `Auto` detects per-file, which
+# silently introduces CRLF when a Windows contributor edits a file.
+newline_style = "Unix"
+
+# Width-derived wrap thresholds (`fn_call_width`, `chain_width`,
+# `struct_lit_width`, `single_line_if_else_max_width`, …) stay coupled to
+# `max_width` via the percentage scaler. "Default" uses the percentages,
+# "Max" collapses onto one line, "Off" goes always-vertical. We want
+# percentage-scaled.
+use_small_heuristics = "Default"
+
+# ── Reordering & merging ───────────────────────────────────────────────────
+# All defaults true — pinned because a future rustfmt minor that flips one
+# of them silently reorganizes the entire codebase on the next `cargo fmt`.
+reorder_imports = true
+reorder_modules = true
+merge_derives = true
+remove_nested_parens = true
+
+# Always emit `extern "C" fn …` even when "C" is the implicit ABI for a bare
+# `extern fn …`. Default true; pinned because the explicit form is policy
+# (a load-bearing safety detail, not a stylistic flourish).
+force_explicit_abi = true
+
+# ── Function & match arm shape ─────────────────────────────────────────────
+# One parameter per line when wrapping function signatures. The alternative
+# "Compressed" packs as many params as fit per line, which makes function
+# signatures harder to diff and read.
+fn_params_layout = "Tall"
+
+# Strip leading `|` on the first match arm. "Preserve" keeps whatever the
+# author wrote; "Never" enforces the leaner shape uniformly.
+match_arm_leading_pipes = "Never"
+
+# Trailing comma after `{ ... }` block-bodied match arms. Upstream default
+# is `false` and the style guide allows either form, but `true` turns
+# "add a new match arm" into a single-line diff instead of a two-line
+# rewrite of the previous arm.
+match_block_trailing_comma = true
+
+# ── Shorthand idioms ───────────────────────────────────────────────────────
+use_field_init_shorthand = true # Foo { x }   not Foo { x: x }
+use_try_shorthand = true        # ?           not try!(...)

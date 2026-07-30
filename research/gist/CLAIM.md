@@ -1,8 +1,8 @@
 ---
 doc_radar:
   occurrences:
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
-    - {file: pkg/kernels/irregex/bench/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
+    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
+    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
   sentinels:
     - file: pkg/kernels/irregex/src/exec/cold/engine/serial.zig
       contains: ["used purely to ELIDE reads", "never to change the file set"]
@@ -18,12 +18,12 @@ doc_radar:
         - 'uds = { status = "operational-accelerator"'
         - 'ffi = { status = "operational-accelerator"'
     - description: "every measured number this page quotes is still the one the certificate carries"
-      file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
       contains:
         - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
         - "7.5× geomean end-to-end speedup"
     - description: "the warm claim is sourced from the armed resident-session certificate, never the cold race"
-      file: pkg/kernels/irregex/bench/session/session_meta.json
+      file: pkg/kernels/irregex/bench/dominance/session/session_meta.json
       contains: ['"armed": true', '"geomean_speedup": 565.6']
 ---
 

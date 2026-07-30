@@ -1,0 +1,21 @@
+.{
+    .name = .gist,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        // Sibling-checkout path deps (dev). Releases pin url+hash via the
+        // publish script — see the ecosystem split plan.
+        .irregex = .{ .path = "../irregex" },
+        .relate = .{ .path = "../relate" },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "include",
+        "bindings",
+        "editor",
+        "shell",
+        "README.md",
+    },
+}

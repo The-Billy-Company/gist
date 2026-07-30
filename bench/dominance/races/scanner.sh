@@ -7,11 +7,18 @@
 # daemon (`GIST_NO_AUTOSERVE=1`), nothing but a live directory walk, a read, and
 # a scan. Exactly ripgrep's model, over exactly ripgrep's corpus scope.
 #
-# The 12 classes are byte-identical to `certify/certify.sh`'s PROBES (and to
-# `bench/harness/certify.zig`'s), so a scanner-lane row maps 1:1 onto the Layer A
+# The 12 canonical classes are byte-identical to the shared registry
+# `bench/apparatus/harness/probes.zig` (which Layer A's `certify.zig` and Layer D's
+# lowerbound both `@import`), so a scanner-lane row maps 1:1 onto the Layer A
 # indexed row above it — same pattern, same roots, same ignore scope, same
 # `-l` command shape. The only difference between the `noidx` cell and the `idx`
 # cell is whether the index is allowed to elide reads.
+#
+# On top of those 12 this lane runs SELECTOR_PROBES — 7 classes that isolate
+# PREFILTER quality from true-match volume. They are scanner-lane-only on purpose:
+# prefilter collapse is a property of the scan kernel, which only runs over the
+# whole corpus when the index is out of the way. See that array's header for the
+# defect it guards and the standing requirement on the set.
 #
 # WHY THIS SCRIPT DOES ITS OWN TIMING INSTEAD OF CALLING HYPERFINE
 # ----------------------------------------------------------------
@@ -31,15 +38,16 @@
 # (SOURCED, never executed) — identical to every other race in this folder.
 #
 # Usage:
-#   bash bench/races/scanner_headtohead.sh                 # RUNS=15 WARMUP=2
-#   RUNS=25 bash bench/races/scanner_headtohead.sh         # tighten the CIs
-#   SCANNER_LANES="list count" bash bench/races/scanner_headtohead.sh
-#   SCANNER_OUT=/tmp/scan bash bench/races/scanner_headtohead.sh
+#   bash bench/dominance/races/scanner.sh                  # RUNS=15 WARMUP=2
+#   RUNS=25 bash bench/dominance/races/scanner.sh          # tighten the CIs
+#   SCANNER_LANES="list count" bash bench/dominance/races/scanner.sh
+#   SCANNER_OUT=/tmp/scan bash bench/dominance/races/scanner.sh
+#   SCANNER_SELECTOR=0 bash …    # 12 canonical classes only (drop SELECTOR_PROBES)
 #
 # Output: ${SCANNER_OUT}/{class}__{noidx,idx,rg}.json  (hyperfine-shaped)
 #         ${SCANNER_OUT}/order.tsv                     (class<TAB>kind<TAB>pattern)
 #         ${SCANNER_OUT}/meta.json                     (runs/warmup/roots/lanes)
-# Consumed by: bench/certify/certify_scanner_report.py (Layer I).
+# Consumed by: bench/certificate/report/scanner.py (Layer I).
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=field.sh
@@ -55,11 +63,31 @@ OUTDIR="${SCANNER_OUT:-${COMPETE_DIR}/scanner}"
 # this disables the warm session that would answer from RAM instead.
 export GIST_NO_AUTOSERVE=1
 
-# Byte-identical to certify.sh's PROBES — the scanner lane certifies the same
-# 12 classes the indexed macroscopic tier does, so the two tables compare.
+# Byte-identical to the canonical registry's PROBES — the scanner lane certifies
+# the same 12 classes the indexed macroscopic tier does, so the two tables
+# compare. The canonical definition is `bench/apparatus/harness/probes.zig`
+# (Layer A cycles/byte + Layer D lowerbound both `@import` it); this array and
+# `bench/dominance/evaluate/regimes.py`'s PROBES are its two cross-language
+# mirrors. NOTHING MACHINE-ENFORCES THAT — there is no drift gate over the three
+# copies, only this comment, so a change to any one of them must be applied to
+# all three by hand in the same commit.
+#
+# DO NOT ADD SELECTOR-QUALITY PROBES HERE. They are scanner-lane-only by design
+# and live in SELECTOR_PROBES below; appending them to this array would silently
+# break the byte-identity above.
 PROBES=(
   "literal-rare literal pgxpool"
   "literal-dotted literal context.Context"
+  # WHAT THIS ROW ACTUALLY MEASURES (the class name is load-bearing — frozen
+  # artifacts `bench/certificate/artifact/{certify,scanner}.csv` key on it, so it
+  # is NOT renamed): `func` is not merely common, it is DEGENERATE. f,u,n,c are
+  # all high-frequency bytes, so a marginal-rarity offset selector has no signal
+  # and collapses to the adjacent pair (0,1). This row therefore bills TWO costs
+  # to one number — many true matches AND a failed prefilter — and historically
+  # its slowness was read as the former. That misreading is precisely how the
+  # selector-collapse defect survived in a suite that was already running it.
+  # `literal-degenerate` in SELECTOR_PROBES is the disambiguating row: same tie
+  # condition, few true matches, so only the prefilter can make it slow.
   "literal-common literal func"
   "literal-punct2 literal })"
   "regex-decl regex func\\s+\\w+\\("
@@ -71,6 +99,92 @@ PROBES=(
   "regex-eol regex ;\$"
   "regex-litalt regex panic|0x"
 )
+
+# ── SELECTOR QUALITY — prefilter failure, separated from true-match volume ─────
+#
+# WHY THIS SET EXISTS. The literal kernel picks two byte offsets of the needle to
+# filter 64-byte blocks on. That selection COLLAPSED to the adjacent pair (0,1)
+# for any needle whose bytes all had equal corpus rarity — most lowercase
+# identifiers. Cost: 18.1 GB/s literal scan where 35.5 GB/s was achievable on
+# code, and 13.1 vs 33.4 GB/s on prose. In the shipped binary `stepSec` (7 B, 464
+# true matches) ran 41% SLOWER than `pgxpool` (7 B, 8856 true matches) — vastly
+# more real work, less time.
+#
+# THE SUITE ABOVE COULD NOT SEE IT, and that is what this set fixes. Two holes:
+#   1. `literal-rare` is `pgxpool`, a LUCKY needle — `pg` is a genuinely rare
+#      digraph, so it selects a good pair and looks fast. The whole "rare literal"
+#      class was represented by its best case.
+#   2. `literal-common` IS a degenerate all-tied needle and it IS above — but the
+#      label says "common", so its slowness was charged to having many true
+#      matches. The suite could not distinguish "slow because there is real work"
+#      from "slow because the prefilter failed". That conflation is the blind spot.
+#
+# STANDING REQUIREMENT: the literal probe set must span the needle space and must
+# always contain a LOW-MATCH, DEGENERATE-SELECTION case. That combination is the
+# only one whose slowness has a single possible cause — there is no true work to
+# blame it on, so it can only be the prefilter. Deleting these rows re-opens the
+# blind spot; treat it as a coverage regression, not a cleanup.
+#
+# WHY HERE AND NOT IN THE INDEXED MATRIX. This is the `--no-index` lane, so the
+# scan kernel actually runs over the whole corpus. On the indexed path the trigram
+# index elides nearly everything for a low-match needle and the kernel barely
+# executes: measured on this tree, trap/control is 1.04 indexed vs 1.00 un-indexed.
+# The indexed matrix (`bench/conformance/shapes/shapes.toml`) carries the same
+# needles for PARITY — a wrong offset pair is a correctness bug before it is a
+# speed bug — and defers the timing claim to this lane.
+#
+# HOW TO READ IT: as a RATIO against a length-matched control, never as absolute
+# numbers. `literal-degenerate` (trap) vs `literal-rare` (control, `pgxpool`) are
+# both 7 bytes and differ only in prefilter signal, so a healthy kernel keeps them
+# close — the trap may be marginally slower, since `-l` early-exits per matching
+# file and the trap matches fewer files. 41% apart the wrong way is the defect.
+#
+# AND READ IT ONLY FROM PAIRWISE-INTERLEAVED SAMPLES. This is not a nicety; it is
+# the difference between a guard and a false-alarm generator, and it cost real time
+# to learn. The round-robin sampler below interleaves the three CELLS within one
+# class, but classes still run sequentially — so whichever class runs FIRST pays a
+# colder page cache than the ones after it. Measured on this tree, that position
+# effect alone is worth ~10-15 ms on a ~190 ms cell, and it MOVES THE RATIO ACROSS
+# THE ALARM LINE: timing the two classes in their own back-to-back blocks gave
+# 1.031 with the trap first and 0.984 with the control first, and a colder start put
+# the same healthy binary at 1.384 — indistinguishable from the 1.41 defect
+# signature. Interleaved trap-against-control on the same binary: 1.007.
+# So do not compute this ratio by dividing two rows of `scanner.csv`. Sample the
+# trap and the control alternately, against each other, in one loop.
+SELECTOR_PROBES=(
+  # THE REGRESSION GUARD. 7 bytes of pure letters → every byte ties on rarity, so
+  # a marginal-rarity selector has nothing to choose on; but it matches rarely, so
+  # slowness here can ONLY be the prefilter. Paired against `literal-rare` above,
+  # which is the same length and selects well — that pair is the whole instrument.
+  "literal-degenerate literal stepSec"
+  # The four SAME-CLASS RUNS: every byte from one character class, which is exactly
+  # where a byte-frequency table has no discriminating signal. One row per class
+  # that ties, so a fallback that works for letters but not digits or punctuation
+  # cannot hide behind an average. `literal-punctrun` is 4 B on purpose —
+  # `literal-punct2` (`})`) is 2 B, so it has exactly one possible pair and cannot
+  # express an offset-PAIR bug at all.
+  "literal-lowerrun literal dialect"
+  "literal-upperrun literal PENDING"
+  "literal-digitrun literal 1234567"
+  "literal-punctrun literal }));"
+  # THE POSITIONAL PAIR — a controlled experiment on end bias. Both are 7 B, both
+  # carry exactly ONE rare byte (`z`, the rarest lowercase letter), both are
+  # low-match. The ONLY difference is where it sits: offset 0 vs offset 6. An
+  # implementation that quietly prefers one end of the needle — a prefix bias, or
+  # the (0,1) collapse itself — makes these two diverge while every other row stays
+  # quiet. Keep them together; either alone has no baseline to compare against.
+  "literal-headrare literal zeroing"
+  "literal-tailrare literal dataviz"
+)
+
+# The lane runs the 12 canonical classes PLUS the selector set. `SCANNER_SELECTOR=0`
+# drops the selector rows — for reproducing a pre-selector artifact exactly, not for
+# a routine mint. It is opt-OUT rather than opt-in because a probe that is off by
+# default guards nothing; the cost is 7 extra classes per lane.
+RACE_PROBES=("${PROBES[@]}")
+if [[ "${SCANNER_SELECTOR:-1}" = 1 ]]; then
+  RACE_PROBES+=("${SELECTOR_PROBES[@]}")
+fi
 
 # `--no-index` is a gist flag, not a different tool, so the scanner cell is the
 # gist command `_compete.sh` already builds with the flag spliced in after the
@@ -121,7 +235,7 @@ echo
 
 failed=0
 for lane in ${LANES}; do
-  for row in "${PROBES[@]}"; do
+  for row in "${RACE_PROBES[@]}"; do
     read -r class kind pat <<< "${row}"
     case "${lane}" in
       list)
@@ -252,4 +366,4 @@ if [[ "${failed}" -ne 0 ]]; then
   echo "scanner_headtohead: one or more classes failed the rg-equivalence precheck" >&2
   exit 1
 fi
-echo "next: python3 bench/certify/certify_scanner_report.py ${OUTDIR} --certificate <CERT> …"
+echo "next: python3 bench/certificate/report/scanner.py ${OUTDIR} --certificate <CERT> …"

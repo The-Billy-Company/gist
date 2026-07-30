@@ -102,6 +102,19 @@ pub fn ration() u64 {
     return arms(shareOf(physical() orelse return 0));
 }
 
+/// The ration an allocator can actually be handed: what the machine will lend,
+/// narrowed to what this process can address. Those are different quantities and
+/// only one of them is a machine fact — a 32-bit build reads the same 64-bit
+/// memory size and then cannot address it, and the ceiling above is 4 GiB
+/// *exactly*, which overruns a 32-bit `usize` by a single byte (the operator
+/// override is unbounded outright). Narrowing once, here, keeps that distinction
+/// in the policy that owns the number instead of at each site that allocates
+/// against it; `standdown` still compares the unnarrowed machine fact, because
+/// what one daemon can address says nothing about what another one already holds.
+pub fn addressable() usize {
+    return @intCast(@min(ration(), std.math.maxInt(usize)));
+}
+
 /// One session's share of a known machine size: the smaller of what the machine
 /// can spare and what the work can justify. BOTH terms are needed and each is
 /// the only one that binds at one end of the range — the fraction on a 2 GB

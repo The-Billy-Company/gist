@@ -3,13 +3,13 @@ doc_radar:
   paths_exist:
     - pkg/kernels/irregex/src/surface/face/gist/main.zig
     - pkg/kernels/irregex/contract/search_api.toml
-    - pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+    - pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
   sentinels:
     - file: pkg/kernels/irregex/src/exec/cold/argv/catalog.zig
       contains:
         - "pub const flag_catalog"
         - "unsupported_fail_loud"
-    - file: pkg/kernels/irregex/bench/gates/ci_order.sh
+    - file: pkg/kernels/irregex/bench/conformance/gates/contract/ci_order.sh
       contains:
         - "pcre parity -P"
         - "index-elision parity"
@@ -17,12 +17,20 @@ doc_radar:
     - file: pkg/kernels/irregex/contract/search_api.toml
       contains:
         - 'subprocess = { status = "authoritative"'
-    - description: "canary for the 12-class win range quoted below — a re-mint moves both bounds, and breaking here is the signal to restate them"
-      file: pkg/kernels/irregex/bench/certify/artifact/CERTIFICATE.md
+    - description: "canary for the Layer A (index-on) 12-class win range quoted below — a re-mint moves both bounds, and breaking here is the signal to restate them"
+      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
       contains:
         - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
+        - "machine: **Apple M4 Max**"
         - "8.93x"
         - "5.78x"
+    - description: "canary for the Layer I (scanner-only) sweep and geomean this file leads with, and the Layer J scale caveat that bounds both"
+      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
+      contains:
+        - "24 win · 0 parity · 0 loss"
+        - "the scanner alone is **1.93× faster than ripgrep**"
+        - "352,316 files / 5.5 GiB on disk"
+        - "wins 5, ties 2, loses 5"
 ---
 
 # Gist — research map for agent-loop code search
@@ -73,9 +81,31 @@ make bench-gist-certify           # refresh Certificate layers (see TESTING.md)
 
 ## Measured (committed Certificate artifact)
 
-On the recorded certificate corpus, gist beat ripgrep in all 12 query classes
-by 5.78×–8.93× under fail-closed statistics (lower median **and** Mann–Whitney
-p < 0.05). Those are measurements from
+Two layers, two claims, and the research record keeps them apart because they
+answer different objections.
+
+**Layer A — index on.** On the recorded certificate corpus, gist beat a cold
+ripgrep in all 12 query classes by 5.78×–8.93× under fail-closed statistics
+(lower median **and** Mann–Whitney p < 0.05). This is the regime an agent runs
+in; it is an indexed engine against a scanner, and it does not answer "would
+you win without the index?"
+
+**Layer I — index off, daemon off.** The answer to that question, and the
+number to lead with when the claim is contested: `gist --no-index` with no
+resident session, a fresh process doing the same live walk, read, and scan
+ripgrep does, wins **24 of 24 certified cells** (the 12 classes' `-l` argv plus
+a `-c` lane where nothing can short-circuit) — 0 parity, 0 losses, every cell
+at p < 0.001 — for a **1.93× geomean**. The index is then worth a further 3.1×
+on top of that, which is where Layer A's wider range comes from.
+
+**Where the corpus stops generalizing.** Both layers are minted on the Billy
+monorepo (20,660 files / 204.6 MiB) on an Apple M4 Max — the workload the tool
+is built for, and therefore not a neutral proof. Layer J re-runs the field at
+352,316 files / 5.5 GiB of Linux/LLVM/Go/Rust, where csearch still takes the
+cheap-literal classes (gist wins 5, ties 2, loses 5) and peak RSS, not time, is
+the binding ceiling.
+
+All of these are measurements from
 [`bench/certify/artifact/CERTIFICATE.md`](../../bench/certify/artifact/CERTIFICATE.md),
 not universal constants. Correctness gates always run before performance gates
 (`bench/gates/ci_order.sh`).

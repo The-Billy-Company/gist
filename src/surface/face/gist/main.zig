@@ -63,6 +63,38 @@ fn normalizeRootArg(raw: []const u8) []const u8 {
     return if (root.len == 0) "." else root;
 }
 
+/// Collect a verb's trailing `[ROOT...]`, holding it to the argv contract every
+/// other entry point already has: `--help` answers, an unrecognized flag exits 2
+/// naming itself. Both root-taking verbs used to append every token verbatim, so
+/// a mistyped flag became a root that resolves to nothing — and each verb then
+/// took its worst branch while reporting success: `serve` daemonized over the CWD,
+/// and `index` overwrote a working index with an empty one, silently demoting
+/// every later query to a live scan. A bare `-` stays a root (the stdin spelling).
+/// Returns false when help was printed and the caller should simply return.
+fn collectRoots(
+    gpa: std.mem.Allocator,
+    it: *Argv,
+    verb: []const u8,
+    roots: *std.ArrayList([]const u8),
+    comptime normalize: bool,
+) !bool {
+    while (it.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
+            usage();
+            return false;
+        }
+        if (arg.len > 1 and arg[0] == '-') {
+            gist.assay.diag(
+                "gist {s}: unknown flag '{s}' — {s} takes only [ROOT...]\n",
+                .{ verb, arg, verb },
+            );
+            std.process.exit(2);
+        }
+        try roots.append(gpa, if (normalize) normalizeRootArg(arg) else arg);
+    }
+    return true;
+}
+
 /// Try the resident daemon for an eligible query; on a served answer this exits
 /// the process with rg's code and never returns. Any miss (ineligible argv, no
 /// daemon, decline, wire error) returns so the caller runs the cold engine —
@@ -146,9 +178,12 @@ fn usage() void {
         \\  multiline               -U; --multiline-dotall also lets `.` cross newlines
         \\  context                 -A N / -B N / -C N
         \\  scope                   PATH... · -t TYPE · -T TYPE · -g GLOB · --iglob GLOB
+        \\  docs or code            --docs reads the paper trail · --no-docs the implementation
         \\  hidden / ignored        -u disables ignores · -uu adds hidden · -uuu adds binary
         \\
         \\native choices:
+        \\  --docs / --code / --data prose · implementation · config — one KIND of file, an axis
+        \\                          -t cannot express; --no-<genus> is the exact complement
         \\  --rank[=N]              definition-biased bounded view; linear engine only
         \\  --no-index / --index    pure live oracle / explicitly re-enable acceleration
         \\  resident session        automatic and fail-open for eligible searches; do nothing
@@ -344,7 +379,7 @@ fn run(init: std.process.Init) !void {
     if (std.mem.eql(u8, mode, "index")) {
         var roots: std.ArrayList([]const u8) = .empty;
         defer roots.deinit(gpa);
-        while (it.next()) |arg| try roots.append(gpa, normalizeRootArg(arg));
+        if (!try collectRoots(gpa, &it, "index", &roots, true)) return;
         if (roots.items.len > 0) return indexer.run(gpa, io, roots.items);
         const resolved = try gist.corpus.resolveRoots(gpa);
         defer gist.corpus.freeRoots(gpa, resolved);
@@ -398,7 +433,7 @@ fn run(init: std.process.Init) !void {
         defer gpa.free(sock);
         var roots: std.ArrayList([]const u8) = .empty;
         defer roots.deinit(gpa);
-        while (it.next()) |arg| try roots.append(gpa, arg);
+        if (!try collectRoots(gpa, &it, "serve", &roots, false)) return;
         // Empty roots ⇒ rootless CWD walk (byte-identical to rootless cold).
         try serve.run(gpa, io, roots.items, sock);
         return;

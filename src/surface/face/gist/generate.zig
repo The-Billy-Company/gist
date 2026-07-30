@@ -180,6 +180,8 @@ const Baked = struct { types: []const Choice, encodings: []const Choice, links: 
 fn valueOf(spec: catalog.FlagSpec, baked: Baked) ?Value {
     return switch (spec.action) {
         .set, .unset, .set_many, .filename, .case, .locate, .boundary, .mode, .mode_off, .passthru, .sort_files, .glob_ci, .no_ctxsep, .pretty, .plain, .engine_is, .encoding_is, .pre_off, .buffered, .noop, .no_config, .unsupported => null,
+        // `--docs` names its genus in the flag, so unlike `-t` it takes nothing.
+        .genus_pick => null,
         // `-u`/`-uu`/`-uuu` is a tier counted by repetition, not a value.
         .unrestrict => null,
         .set_num, .num_set, .ctx_at => .{ .name = "NUM", .of = .number },
@@ -257,7 +259,11 @@ fn rivalOf(spec: catalog.FlagSpec) []const u8 {
         // `--no-pre` is `--pre`'s rival even though `--pre` is a `.set_str` row:
         // both write `pre`, and the tag name is how that rivalry is spelled.
         .pre_off => "pre",
-        .set_many, .unrestrict, .passthru, .ctx_at, .glob_ci, .regexp, .typ, .glob, .file, .ignore_file, .type_add, .type_clear, .pre_glob, .bufsize, .colors, .noop, .noop_val, .no_config, .unsupported => "",
+        // A fourth abstention, for the same reason as `-t`/`-T`: `--docs` and
+        // `--no-docs` write different fields and the parser accepts both at once
+        // (the selection empties, exactly as `-t md -T md` does), so they are
+        // opposites without being rivals.
+        .set_many, .unrestrict, .passthru, .ctx_at, .glob_ci, .regexp, .typ, .genus_pick, .glob, .file, .ignore_file, .type_add, .type_clear, .pre_glob, .bufsize, .colors, .noop, .noop_val, .no_config, .unsupported => "",
     };
 }
 
@@ -296,7 +302,7 @@ const sections = [_]primer.Section{
     .{ .title = "CONFIGURATION FILES", .paragraphs = &.{
         "Two files, split along a line ripgrep's .ripgreprc does not draw: what the tree IS, versus what one reader likes to look at. Neither is required, and --no-config (or GIST_NO_CONFIG=1) ignores both.",
         ".irregex.toml, committed at the tree root, holds facts about the repository every clone should agree on. It carries no argv, only typed keys — roots, skip, and types — and all three faces honor it. Discovery climbs from the working directory and stops at the repository boundary, so a tree without its own declaration never inherits a parent directory's. It is ceilinged at corpus reach: a shared file may say what the repository is, and may never quietly change what matches for the people who clone it.",
-        "$XDG_CONFIG_HOME/gist/preferences is machine-local and never committed ($GIST_PREFERENCES overrides the path). It is flag lines, one per line, prepended to argv, so anything typed still wins. Lines are tokenized with shell quoting — ripgrep's are verbatim argv elements, which is why a quoted glob there arrives with its quotes and matches nothing — every flag is checked against the catalog as the file is read, and a line not starting with a flag is refused, because a stray bare word in a persisted argv file is the search pattern for every invocation forever.",
+        "$XDG_CONFIG_HOME/gist/preferences is machine-local and never committed ($GIST_PREFERENCES overrides the path; on Windows the fallbacks are %LOCALAPPDATA%\\gist\\preferences then %USERPROFILE%\\.config\\gist\\preferences — LOCALAPPDATA rather than APPDATA precisely because APPDATA roams between machines and this file must not). It is flag lines, one per line, prepended to argv, so anything typed still wins. Lines are tokenized with shell quoting — ripgrep's are verbatim argv elements, which is why a quoted glob there arrives with its quotes and matches nothing — every flag is checked against the catalog as the file is read, and a line not starting with a flag is refused, because a stray bare word in a persisted argv file is the search pattern for every invocation forever.",
         "Preferences apply only when stdout is an interactive terminal. That is the same envelope gist already draws for the answer keep, the resident session, and color resolution, which puts a pipe, a redirect, --json, a script, CI, and every agent structurally outside their reach — so none of them ever needs --no-config to be sure what it will get.",
     } },
     .{ .title = "SHELL COMPLETION", .paragraphs = &.{

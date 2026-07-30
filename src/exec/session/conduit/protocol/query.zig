@@ -2,7 +2,7 @@
 //!
 //! Two opcodes carry every warm request: `query` (the unscoped classic) and
 //! `query_ext` (length-prefixed pattern + the `PathFilter` and self-describing
-//! rank/context/engine trailers). Encode and decode live together on purpose:
+//! rank/context/engine/genus trailers). Encode and decode live together on purpose:
 //! a trailer whose writer and reader disagree by one byte silently reinterprets
 //! everything after it, so the two halves of each field are read side by side.
 //!
@@ -13,6 +13,7 @@ const std = @import("std");
 const request = @import("../../answer/request.zig");
 const wire = @import("../wire.zig");
 const frame = @import("opcodes.zig");
+const genus = @import("../../../../corpus/scope/genus.zig");
 
 const WireError = frame.WireError;
 
@@ -91,6 +92,12 @@ pub fn encodeQueryExt(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, req: requ
     // `query_ext` even when rootless (the client routes it here), so an old
     // daemon — which never negotiates this protocol version — is not reached.
     try body.append(gpa, @intFromBool(req.pcre));
+    // The `--docs`/`--code`/`--data` trailer: two fixed bytes, the selected and
+    // the negated genus sets. Unconditional rather than presence-gated because
+    // two bits-per-genus bytes are already smaller than a presence byte plus a
+    // payload, and an all-zero pair reads as "no constraint" on its own.
+    try body.append(gpa, req.filter.genera.bits());
+    try body.append(gpa, req.filter.neg_genera.bits());
     try frame.writeFrame(buf, gpa, .query_ext, body.items);
 }
 
@@ -175,7 +182,10 @@ pub fn decodeQueryExt(a: std.mem.Allocator, payload: []const u8) WireError!reque
     const rank_k = try takeRank(&rest);
     const ctx = try takeContext(&rest);
     const pcre = takePcre(&rest);
-    return requestFrom(head.mode, head.flags, head.max_count, pattern, filter, rank_k, ctx.before, ctx.after, pcre);
+    const genera = try takeGenera(&rest);
+    var scoped = filter;
+    scoped.genera, scoped.neg_genera = .{ genera.sel, genera.neg };
+    return requestFrom(head.mode, head.flags, head.max_count, pattern, scoped, rank_k, ctx.before, ctx.after, pcre);
 }
 
 /// Consume the `[u8 pcre]` engine trailer. A same-version peer always writes it,
@@ -187,6 +197,19 @@ fn takePcre(rest: *[]const u8) bool {
     const b = rest.*[0];
     rest.* = rest.*[1..];
     return b != 0;
+}
+
+/// Consume the `[u8 genera][u8 neg_genera]` corpus-partition trailer (one bit
+/// per genus — `genus.Set.bits`). A missing trailer means no genus constraint;
+/// a byte claiming a genus this build does not know fails closed, because
+/// dropping an unknown constraint would answer a DIFFERENT query than the one
+/// asked and the caller could not tell.
+fn takeGenera(rest: *[]const u8) WireError!struct { sel: genus.Set, neg: genus.Set } {
+    if (rest.len < 2) return .{ .sel = .empty, .neg = .empty };
+    const sel = genus.Set.fromBits(rest.*[0]) orelse return WireError.UnexpectedFrame;
+    const neg = genus.Set.fromBits(rest.*[1]) orelse return WireError.UnexpectedFrame;
+    rest.* = rest.*[2..];
+    return .{ .sel = sel, .neg = neg };
 }
 
 /// Consume the `[u8 present][opt u64 k]` rank trailer. Absent (a v3 peer always

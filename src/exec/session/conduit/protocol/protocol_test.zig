@@ -476,3 +476,86 @@ test "annals encode/decode: decline round-trips as null; malformed payloads fail
         try std.testing.expectError(protocol.WireError.UnexpectedFrame, it2.next()); // the phantom one
     }
 }
+
+test "query_ext round-trips the corpus-partition trailer" {
+    const genus = @import("../../../../corpus/scope/genus.zig");
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    // Every combination of selected × negated genus survives the wire, because a
+    // dropped genus would answer a DIFFERENT query warm than cold — silently.
+    inline for (.{ genus.Genus.docs, .code, .data }) |g| {
+        var sel: genus.Set = .empty;
+        sel.add(g);
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(gpa);
+        try protocol.encodeQueryExt(&buf, gpa, .{ .pattern = "x", .mode = .files, .filter = .{ .genera = sel } });
+        const got = try protocol.decodeQueryExt(arena.allocator(), (try roundTrip(&buf)).payload);
+        try std.testing.expectEqual(sel, got.filter.genera);
+        try std.testing.expect(!got.filter.neg_genera.any());
+
+        var nbuf: std.ArrayList(u8) = .empty;
+        defer nbuf.deinit(gpa);
+        try protocol.encodeQueryExt(&nbuf, gpa, .{ .pattern = "x", .mode = .files, .filter = .{ .neg_genera = sel } });
+        const ngot = try protocol.decodeQueryExt(arena.allocator(), (try roundTrip(&nbuf)).payload);
+        try std.testing.expectEqual(sel, ngot.filter.neg_genera);
+        try std.testing.expect(!ngot.filter.genera.any());
+    }
+    // A union rides intact alongside the other trailers it shares a frame with.
+    {
+        var both: genus.Set = .empty;
+        both.add(.docs);
+        both.add(.data);
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(gpa);
+        try protocol.encodeQueryExt(&buf, gpa, .{
+            .pattern = "needle",
+            .mode = .lines,
+            .before = 2,
+            .after = 3,
+            .pcre = true,
+            .filter = .{ .roots = &.{"libs"}, .genera = both },
+        });
+        const got = try protocol.decodeQueryExt(arena.allocator(), (try roundTrip(&buf)).payload);
+        try std.testing.expectEqual(both, got.filter.genera);
+        try std.testing.expectEqual(@as(u64, 2), got.before);
+        try std.testing.expectEqual(@as(u64, 3), got.after);
+        try std.testing.expect(got.pcre);
+    }
+    // An unfiltered scoped query decodes to no constraint at all.
+    {
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(gpa);
+        try protocol.encodeQueryExt(&buf, gpa, .{ .pattern = "x", .mode = .files, .filter = .{ .roots = &.{"libs"} } });
+        const got = try protocol.decodeQueryExt(arena.allocator(), (try roundTrip(&buf)).payload);
+        try std.testing.expect(!got.filter.genera.any() and !got.filter.neg_genera.any());
+    }
+}
+
+test "a genus byte claiming an unknown genus fails closed" {
+    const genus = @import("../../../../corpus/scope/genus.zig");
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(gpa);
+    var sel: genus.Set = .empty;
+    sel.add(.docs);
+    try protocol.encodeQueryExt(&buf, gpa, .{ .pattern = "x", .mode = .files, .filter = .{ .genera = sel } });
+    // The trailer is the last two bytes; set a bit no genus owns. Dropping an
+    // unrecognized constraint would silently widen the answer, so this must be a
+    // hard frame error (→ decline → cold), never a lenient parse.
+    buf.items[buf.items.len - 2] |= 0x80;
+    const p = try roundTrip(&buf);
+    try std.testing.expectError(protocol.WireError.UnexpectedFrame, protocol.decodeQueryExt(arena.allocator(), p.payload));
+}
+
+test "genus Set bits round-trip every subset, and reject the impossible" {
+    const genus = @import("../../../../corpus/scope/genus.zig");
+    // All 8 subsets of the 3-genus partition survive bits→fromBits unchanged.
+    for (0..8) |raw| {
+        const b: u8 = @intCast(raw);
+        const s = genus.Set.fromBits(b) orelse return error.SubsetRejected;
+        try std.testing.expectEqual(b, s.bits());
+    }
+    // Every byte above the partition's width is refused rather than truncated.
+    for (8..256) |raw| try std.testing.expectEqual(@as(?genus.Set, null), genus.Set.fromBits(@intCast(raw)));
+}

@@ -133,6 +133,7 @@ codex. Start in the first lane; cross over only when the question changes.
 | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------- |
 | Find matching lines                            | `rg PATTERN [PATH...]`                       | `gist PATTERN [PATH...]`                                             |
 | Narrow the corpus                              | `-t`, `-T`, `-g`, `--iglob`, explicit paths  | same flags and positional paths                                      |
+| Read only the paper trail, or only the source  | hand-assemble a dozen `-t` names             | `--docs` / `--code` / `--data`, and their `--no-` complements         |
 | Shape familiar output                          | `-n`, `-l`, `-c`, `-o`, `-A/-B/-C`, `--json` | same output contract                                                 |
 | Find the best definition or use                | inspect ordinary grep output                 | `--rank[=N]`                                                         |
 | Use lookaround or backreferences               | `-P`                                         | `-P`, or `--engine auto` to escalate only when needed                |
@@ -165,6 +166,87 @@ The aliases `gist rg` and `gist search` exist for callers that require a verb,
 not because they unlock a different engine. Agents should emit the bare form:
 it is shorter, canonical, and leaves the pattern in the same argv position as
 ripgrep.
+
+### Docs or code — the corpus partition
+
+`-t` answers "which language is this?", and that is the wrong grain for the
+question anyone actually asks, which is never "is this reStructuredText" but
+**"am I reading the paper trail, or am I reading the implementation?"** So that
+is its own corpus axis:
+
+```bash
+gist 'WalletService' --docs       # only prose: what was written ABOUT it
+gist 'WalletService' --no-docs    # only the implementation and its payload
+gist 'retry_budget' --data        # only config: json, yaml, toml, lockfiles
+gist 'TODO' --code --no-index     # implementation only, no acceleration
+```
+
+Three genera — `docs`, `code`, `data` — total and disjoint over every path, so
+`--docs` and `--no-docs` are exact complements and no file can fall through the
+partition. Repeats union (`--docs --data` is either); each name is also a type
+name, so `-t docs` and `-T code` mean the same thing and compose with
+`--type-add`. The aliases `prose`, `doc`, and `source` resolve too, because a
+name you guess correctly beats one you have to learn.
+
+**`code` is the leftover, never a recognized set.** An unfamiliar extension, a
+generated blob, or a file with no extension at all lands in `code`, so the worst
+a gap in the table can do is show `--code` one line too many. The alternative
+default — a fourth `unknown` genus excluded from `--code` — would turn every gap
+into a *silent miss*, which is the one failure an agent cannot detect.
+
+Classification is spelling first, then location: a documentation directory or a
+`CHANGELOG`-class name only promotes a path that **no language type claimed**.
+So `docs/notes.md` and `docs/CONVENTIONS` are docs, while `docs/conf.py` and a
+docs site's `docs/**/*.tsx` stay code. It is also why `CMakeLists.txt` is a
+build recipe and not prose: a specific spelling outranks a bare extension, and
+the shadow set that needs is derived from the type table rather than listed.
+
+<!-- The three paths above are illustrative shapes of the rule, not files here. -->
+<!-- doc-xref-ignore: docs/notes.md -->
+<!-- doc-xref-ignore: docs/CONVENTIONS -->
+<!-- doc-xref-ignore: docs/conf.py -->
+
+A genus **narrows** what the walk produced and never un-hides. Unlike `-t` and
+`-g` it will not pull a dotfile or a gitignored leaf back in — `code` is the
+default, so an un-hiding genus would surface all of `.git/`.
+
+The whole thing is daemon-eligible: the selection rides the `query_ext` frame as
+a two-byte trailer, so a `--docs` query answers from the resident session at
+warm speed, byte-identical to the cold run. Extend it with
+`--type-add 'docs:notes/**'` for one run, or `types = ["docs:notes/**"]` in
+`.irregex.toml` for the whole tree.
+
+No grep-class tool ships this axis. ripgrep has prose-adjacent types and no
+aggregate over them, and its type globs are basename-only, so a `docs/` rule is
+not expressible there even by hand ([ripgrep#3339][rg3339], open). The rival is
+therefore what a person types instead: one `-t` per prose type, hand-assembled,
+every time. Against that union — derived at run time from
+`gist --type-list --docs ∩ rg --type-list` so it can be neither strawmanned nor
+left to drift — `--docs` runs **2.9× faster cold and 21× warm** (geomean over the
+needle slate; the warm arm runs with the answer keep disabled, so it is a search
+and not a memoized recall).
+
+Speed is the smaller half. A basename glob and a genus **disagree about what is
+prose**, and the disagreement is proven on a hermetic tree rather than on this
+repo, so the numbers are the same on your machine: the union calls three
+`CMakeLists.txt` build recipes prose, because `*.txt` has no way to say "except
+this one", and cannot name two extensionless documents that gist promotes by
+location and by name. Over this repo's tracked corpus the two rosters land within
+one file of each other — expected, since the rival is derived from gist's own docs
+types — which is why the mechanism is measured where it can't drift.
+
+Both halves are gated permanently:
+[`partition_parity.sh`](../../../../../bench/conformance/gates/parity/partition_parity.sh)
+proves the set identities over the live tree on every `make test-gist`, and
+[`bench/dominance/partition/`](../../../../../bench/dominance/partition/README.md)
+holds the speed floors and the classification contract.
+
+The taxonomy is [GitHub Linguist's][linguist]; see
+[`corpus/scope/genus.zig`](../../../../corpus/scope/genus.zig) for the two
+deliberate divergences.
+
+[rg3339]: https://github.com/BurntSushi/ripgrep/issues/3339
+[linguist]: https://github.com/github-linguist/linguist/blob/master/lib/linguist/documentation.yml
 
 ### Niche choices that prevent wrong searches
 
@@ -227,7 +309,8 @@ ripgrep.
   proven only when `gist codex status` reports a clean shelf.
 - **Persisted defaults:** a committed `.irregex.toml` at the tree root declares
   the corpus (`roots`, `skip`, `types`); a machine-local
-  `$XDG_CONFIG_HOME/gist/preferences` holds flag lines and applies **only when
+  `$XDG_CONFIG_HOME/gist/preferences` (on Windows, `%LOCALAPPDATA%\gist\preferences`
+  — never the roaming `%APPDATA%`) holds flag lines and applies **only when
   stdout is an interactive terminal**, so a pipe, a script, `--json`, and the
   daemon never inherit them — nor do they open the file, so a typo in one
   person's preferences cannot fail anybody else's run. `gist config` reports the

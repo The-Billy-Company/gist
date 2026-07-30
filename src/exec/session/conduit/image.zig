@@ -66,10 +66,11 @@ pub const unknown: u64 = 0;
 /// too, and a duplicated stat is cheaper than a lock on a path taken once per
 /// process.
 pub fn stamp(io: std.Io) u64 {
-    const seen = memo.load(.monotonic);
-    if (seen != unknown) return seen;
+    if (latched.load(.acquire)) return memo;
     const v = compute(io);
-    memo.store(v, .monotonic);
+    if (v == unknown) return v; // a non-answer is never latched; keep re-asking
+    memo = v;
+    latched.store(true, .release);
     return v;
 }
 
@@ -80,6 +81,36 @@ pub fn agrees(mine: u64, theirs: u64) bool {
     return mine == unknown or theirs == unknown or mine == theirs;
 }
 
+/// On build skew, which of the two should HOST the rendezvous? A strict total
+/// order over the two stamps — and it is a **tiebreak, not a recency claim**.
+/// Everything above about mtime being an identity rather than an order still
+/// holds: `hosts` does not assert the larger stamp is the newer build, only
+/// that both sides compute the same winner from the same pair.
+///
+/// That is the property `replaced` alone cannot deliver. `replaced` retires a
+/// daemon whose own file was rewritten, which silently assumes every daemon's
+/// executable is one a rebuild eventually overwrites. A daemon exec'd from a
+/// content-addressed build artifact breaks the assumption outright: the path
+/// embeds a hash of its own bytes, so it can never be rewritten, `replaced` is
+/// false for the whole of its life, and it holds the socket while every
+/// rebuilt client declines and runs cold. The idle TTL is no escape either —
+/// it wants ten *continuous* quiet minutes, which a tree ~10 coworker agents
+/// query never gets. Measured: 10 such orphans resident at once, the warm tier
+/// stranded, every eligible query 6-13x slower than the daemon beside it.
+///
+/// Symmetry is the trap to avoid, so this is deliberately not "we disagree".
+/// A symmetric rule has two live builds taking turns evicting each other all
+/// afternoon; `>` converges after one cold query, to the same winner from
+/// either side, no matter which dialed first. The loser stays cold exactly as
+/// it does today — so the worst case is the current behavior, and the common
+/// case (a fresh install against a stale orphan) hands the rendezvous back.
+///
+/// `unknown` abstains on either side: a side that cannot identify itself must
+/// not evict one that can.
+pub fn hosts(mine: u64, theirs: u64) bool {
+    return mine != unknown and theirs != unknown and mine > theirs;
+}
+
 /// Has the executable this process is running been rewritten since `stamp`
 /// latched it? For a resident daemon that is the whole retirement question,
 /// answered against the filesystem rather than against a peer: the bytes it
@@ -88,17 +119,29 @@ pub fn agrees(mine: u64, theirs: u64) bool {
 /// process, a deleted path — because an accelerator must never stop itself on
 /// a doubt.
 pub fn replaced(io: std.Io) bool {
-    const latched = memo.load(.monotonic);
-    if (latched == unknown) return false; // never identified itself; nothing to compare
+    if (!latched.load(.acquire)) return false; // never identified itself; nothing to compare
     const now = compute(io);
-    return now != unknown and now != latched;
+    return now != unknown and now != memo;
 }
 
-/// `unknown` until a real stamp lands. A target that genuinely cannot identify
-/// itself therefore recomputes per call — a couple of failed stats over a
-/// process's life, on the platform where the check does nothing anyway, in
-/// exchange for no lock and no second flag word.
-var memo: std.atomic.Value(u64) = .init(unknown);
+/// The latched stamp, and the flag that publishes it.
+///
+/// Two words rather than one wide atomic because an atomic may not exceed the
+/// target's largest — four bytes on a 32-bit target, where a stamp is eight by
+/// definition. The alternative, sizing the memo to the target, would quietly
+/// narrow the very identity the daemon and its clients compare, on exactly the
+/// target least able to afford a collision. So the width stays honest and the
+/// *flag* carries the ordering: `release` on the write, `acquire` on the read,
+/// so a reader that sees the latch sees the whole value behind it.
+///
+/// Racing writers are still benign, which is what lets the value itself stay
+/// plain: the input is one file, so every winner writes identical bytes, and a
+/// duplicated stat is cheaper than a lock on a path taken once per process. A
+/// target that genuinely cannot identify itself never latches at all and
+/// recomputes per call — a couple of failed stats over a process's life, on the
+/// platform where the check does nothing anyway.
+var memo: u64 = unknown;
+var latched: std.atomic.Value(bool) = .init(false);
 
 /// The file this process is running, into `buf` — no allocation, because this
 /// runs on the daemon's per-connection path. Symlinks are already resolved by
@@ -122,7 +165,8 @@ pub const test_api = if (builtin.is_test) struct {
     /// `path` and must outlive the override.
     pub fn standIn(path: ?[]const u8) void {
         exe_override = path;
-        memo.store(unknown, .monotonic);
+        latched.store(false, .release);
+        memo = unknown;
     }
 } else struct {};
 

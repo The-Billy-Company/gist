@@ -5,7 +5,8 @@ doc_radar:
     - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
     - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "NA"', equals: 14}
     - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 21}
-    - {file: pkg/kernels/irregex/bench/conformance/shapes/shapes.toml, pattern: '\[\[shape\]\]', equals: 19}
+    - {file: pkg/kernels/irregex/bench/conformance/shapes/shapes.toml, pattern: '\[\[shape\]\]', equals: 27}
+    - {file: pkg/kernels/irregex/bench/conformance/shapes/shapes.toml, pattern: 'select = "degenerate"', min: 1}
   sentinels:
     - file: pkg/kernels/irregex/bench/conformance/gates/contract/ci_order.sh
       contains:
@@ -107,7 +108,7 @@ python3 transforms.py run --engine both
 ## 3. CLI-shape admission matrix — `bench/matrix/`
 
 The mined replay is broad by upstream test case; the matrix is broad by
-invocation shape. Its 19 declared rows span engine mode, output form, walk
+invocation shape. Its 27 declared rows span engine mode, output form, walk
 scope, selectivity, and pattern kind. `parity` drives every row through three
 real argv paths and compares at the row's declared set/lines/count bar:
 
@@ -125,6 +126,20 @@ an enforced win (the former report-only holes, literal-free PCRE2
 backreferences and the two multiline shapes, fell to the shadow gate and the
 parallel multiline DFA). A future declared loss would stay report-only:
 correctness parity always gates; only a known performance loss is non-blocking.
+
+**`selectivity` means the prefilter's signal, not the match count** — and it
+means that because the older reading hid a real defect. The literal kernel picks
+two byte offsets to filter 64-byte blocks on, and that choice collapsed to the
+adjacent pair `(0,1)` for any needle whose bytes all tied on corpus rarity (most
+lowercase identifiers): 18.1 GB/s where 35.5 GB/s was achievable on code, and a
+shipped `stepSec` running 41% slower than `pgxpool` despite ~19x less true work.
+Every literal probe was labelled `rare` or `common`, so the class was represented
+by its luckiest needle (`pg` is a rare digraph) and the degenerate needles that
+were already being timed had their slowness charged to true-match volume. The
+probe set therefore carries a **standing requirement** to span the needle space
+and always keep a degenerate, low-match case — the one shape whose slowness has
+no second explanation. See
+[`bench/conformance/shapes/README.md`](../../bench/conformance/shapes/README.md).
 
 ---
 

@@ -10,6 +10,7 @@ const std = @import("std");
 const corpus_mod = @import("../../../../corpus/tree/corpus.zig");
 const args = @import("../../../../exec/cold/argv/args.zig");
 const beacon = @import("../../../cli/beacon.zig");
+const genus = @import("../../../../corpus/scope/genus.zig");
 const jsonstr = @import("../../../cli/jsonstr.zig");
 const assay = @import("../../../../assay/assay.zig");
 
@@ -76,8 +77,31 @@ const manifest_suffix =
     \\      {"native": "--index", "type": "bool", "default": false, "description": "re-enable automatic index acceleration after --no-index"},
     \\      {"native": "--uncap", "type": "bool", "default": false, "description": "lift the ~25k-token (100 KiB) soft output cap for this query; the hard 256 MiB OOM ceiling still applies. Env: GIST_UNCAP=1, GIST_MAX_OUTPUT_TOKENS, GIST_MAX_OUTPUT_BYTES"},
     \\      {"native": "--buffer-size", "type": "size", "default": "64K", "description": "ceiling for the bytes the drain may hold, with an optional K/M/G suffix. Implies --block-buffered when no cadence was named, and sizes the line policy's tail when one was; 0 holds nothing, so every fragment is its own write. rg's block size is a fixed 8 KiB constant with no knob"},
-    \\      {"native": "--plain", "type": "bool", "default": false, "description": "pin the answer to what a PIPE would receive even on a terminal: --color never, no long-line elision, block-buffered — so a terminal run and a redirected one differ in nothing the destination decides. Walk order is not one of those things: pin it with --sort path, as a piped run must"}
+    \\      {"native": "--plain", "type": "bool", "default": false, "description": "pin the answer to what a PIPE would receive even on a terminal: --color never, no long-line elision, block-buffered — so a terminal run and a redirected one differ in nothing the destination decides. Walk order is not one of those things: pin it with --sort path, as a piped run must"},
+    \\      {"native": "--docs / --code / --data", "type": "bool", "default": false, "description": "search one KIND of file: prose, implementation, or payload. See corpus_partition below"},
+    \\      {"native": "--no-docs / --no-code / --no-data", "type": "bool", "default": false, "description": "the exact complement of the matching positive flag"}
     \\    ],
+    \\    "corpus_partition": {
+    \\      "summary": "WHICH KIND of file, the axis `-t <language>` cannot express. Three genera, total and disjoint over every path, so a positive and its --no- form are exact complements and nothing falls through. Reach: corpus.",
+    \\      "why": "an agent's real question is never \"is this reStructuredText\" but \"am I reading the paper trail or the implementation?\". Spelling that with -t means naming a dozen types and still missing the extensionless CHANGELOG; spelling it with -g means hand-assembling globs that no longer say what they were for.",
+    \\      "spellings": ["--docs", "--no-docs", "--code", "--no-code", "--data", "--no-data", "-t <genus>", "-T <genus>"],
+    \\      "combining": "repeats union (`--docs --data` is either); a negative vetoes and composes freely with anything. A POSITIVE genus ANDs with positional PATH roots and with excludes, and ORs with -t/-g the way a repeated -t does.",
+    \\      "classified_by": "spelling first — the 223-row language table, with specific spellings outranking bare extensions, so CMakeLists.txt is a build recipe and not prose — then documentation LOCATION or NAME (docs/, man/, CHANGELOG) for paths NO language type claimed, then the code default. Hence docs/notes.md and docs/CONVENTIONS are docs while docs/conf.py and a docs site's *.tsx stay code.",
+    \\      "default_direction": "code is what is left over, never a recognized set. An unfamiliar extension, a generated blob, or a file with no extension lands in code, so the worst a gap in the table can do is show --code one line too many — where a fourth `unknown` genus excluded from --code would turn every gap into a silent miss.",
+    \\      "hidden_files": "a genus narrows what the walk produced and never un-hides: unlike -t and -g it will not drag a dotfile or a gitignored leaf back in, since `code` is the default and that would surface all of .git/.",
+    \\      "extend": "a genus name is a type name, so `--type-add 'docs:notes/**'` extends it for one run and `types = [\"docs:notes/**\"]` in .irregex.toml extends it for the tree",
+    \\      "warm_path": "fully daemon-eligible — the selection rides the query_ext frame as a two-byte trailer, so a genus query is answered from the resident session at warm speed and is byte-identical to the cold run. A positive genus alongside another positive family declines to cold, where the OR is the authority.",
+    \\      "prior_art": "GitHub Linguist's programming/markup/prose/data types and its documentation.yml path rules, with two divergences for retrieval rather than statistics: doc directories count at any depth (monorepos), and examples/demos/samples stay code. No grep-class tool ships this axis — ripgrep has 13 prose-adjacent types and no aggregate over them, and its type globs are basename-only so a docs/ rule is not expressible there (ripgrep#3339, open); ugrep's `text` type is five extensions with no code counterpart; zoekt links go-enry's Prose/Data classifiers and never calls them.",
+    \\      "source_of_truth": "src/corpus/scope/genus.zig",
+    \\      "genera":
+++ " ";
+
+// The genus roster is rendered from `genus.Genus` and its spelling table — the
+// same rows `-t` resolves against — so the manifest can neither invent a genus
+// the parser rejects nor omit one it accepts.
+const manifest_partition_tail =
+    \\
+    \\    },
     \\    "buffering": {
     \\      "summary": "when result bytes leave the process. Delivery cadence only: the emitted bytes are identical under every setting, and no policy is ever allowed to reorder them.",
     \\      "spellings": ["--line-buffered", "--block-buffered", "--buffer-size <SIZE>"],
@@ -132,7 +156,7 @@ const manifest_hyperlink_tail =
     \\      },
     \\      {
     \\        "name": "preferences",
-    \\        "path": "$GIST_PREFERENCES, else $XDG_CONFIG_HOME/gist/preferences, else ~/.config/gist/preferences",
+    \\        "path": "$GIST_PREFERENCES, else $XDG_CONFIG_HOME/gist/preferences, else ~/.config/gist/preferences (windows: %LOCALAPPDATA%\\gist\\preferences, then %USERPROFILE%\\.config\\gist\\preferences — LOCALAPPDATA because APPDATA roams and this file must not)",
     \\        "committed": false,
     \\        "applies_to_you": false,
     \\        "gate": "interactive terminal only — the same envelope that gates the answer keep, the resident daemon, and color; a pipe, a redirect, --json, a script, CI, and the daemon are all structurally outside it",
@@ -228,6 +252,28 @@ fn render(a: std.mem.Allocator, version: []const u8) ![]u8 {
     }
     try out.append(a, '\n');
     try out.appendSlice(a, manifest_suffix);
+    try out.append(a, '{');
+    inline for (comptime std.enums.values(genus.Genus), 0..) |g, i| {
+        if (i > 0) try out.append(a, ',');
+        jsonstr.write(&out, a, g.label());
+        try out.appendSlice(a, ":{\"flags\":[\"--");
+        try out.appendSlice(a, g.label());
+        try out.appendSlice(a, "\",\"--no-");
+        try out.appendSlice(a, g.label());
+        try out.appendSlice(a, "\"],\"type_names\":[");
+        var first_name = true;
+        for (genus.spellings) |row| {
+            if (row.genus != g) continue;
+            if (!first_name) try out.append(a, ',');
+            jsonstr.write(&out, a, row.name);
+            first_name = false;
+        }
+        try out.appendSlice(a, "],\"is\":");
+        jsonstr.write(&out, a, g.blurb());
+        try out.append(a, '}');
+    }
+    try out.append(a, '}');
+    try out.appendSlice(a, manifest_partition_tail);
     try out.appendSlice(a, "\n    \"aliases\": {");
     for (beacon.aliases, 0..) |x, i| {
         if (i > 0) try out.append(a, ',');
@@ -306,4 +352,29 @@ test "--schema is valid JSON derived from the parser catalog" {
     // agent reads them against.
     const vocab = cfg.get("reach_vocabulary").?.object;
     inline for (@typeInfo(args.Reach).@"enum".fields) |f| try t.expect(vocab.get(f.name) != null);
+
+    // The corpus partition is rendered from the enum, so the manifest must name
+    // every genus the parser accepts — and each one's advertised flags must be
+    // flags the catalog really has, or an agent would be told about a spelling
+    // that exits 2.
+    comptime {
+        _ = @embedFile("../../../../corpus/scope/genus.zig");
+    }
+    const partition = parsed.value.object.get("search").?.object.get("corpus_partition").?.object;
+    try t.expect(std.mem.eql(u8, partition.get("source_of_truth").?.string, "src/corpus/scope/genus.zig"));
+    const genera = partition.get("genera").?.object;
+    try t.expectEqual(@typeInfo(genus.Genus).@"enum".fields.len, genera.count());
+    inline for (comptime std.enums.values(genus.Genus)) |g| {
+        const row = genera.get(g.label()).?.object;
+        try t.expect(row.get("is").?.string.len > 0);
+        for (row.get("flags").?.array.items) |spelling| {
+            const long = spelling.string[2..]; // past the "--"
+            try t.expect(known: for (args.flag_catalog) |spec| {
+                for (spec.longs) |l| if (std.mem.eql(u8, l, long)) break :known true;
+            } else false);
+        }
+        // Every advertised type name must also resolve to THIS genus.
+        for (row.get("type_names").?.array.items) |name|
+            try t.expect(genus.named(name.string).?.has(g));
+    }
 }

@@ -144,8 +144,16 @@ pub const Warden = struct {
     /// Allocations the ceiling turned away, and bytes relief clawed back. Both
     /// are diagnostics; neither participates in the bound. Aligned onto a line of
     /// their own so writing them cannot slow a charge down.
-    refusals: std.atomic.Value(u64) align(std.atomic.cache_line) = .init(0),
-    relieved: std.atomic.Value(u64) = .init(0),
+    ///
+    /// One machine word each, like `held` and `crest`, because that is the width a
+    /// 32-bit target can load and add atomically at all — a 64-bit atomic has no
+    /// lock-free instruction on i386 or ARM32, so declaring one there is a compile
+    /// error rather than a slow path. `turnedAway`/`reclaimed` still report `u64`,
+    /// which costs nothing (the widening is implicit, and identity on a 64-bit
+    /// host) and keeps the reported shape independent of the word size it was
+    /// counted in.
+    refusals: std.atomic.Value(usize) align(std.atomic.cache_line) = .init(0),
+    relieved: std.atomic.Value(usize) = .init(0),
     relief: ?Relief = null,
     /// Guards against re-entering relief from inside relief (a hand that frees
     /// through this allocator re-enters `release`, which is safe, but a hand
