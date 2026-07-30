@@ -1,0 +1,118 @@
+// gist — import topology.
+//
+// The product chassis of the irregex ecosystem: the CLI vocabulary, the
+// resident daemon transport, the C-ABI plane, and the two product faces
+// (`gist` · `relate`). The engines beneath are sibling modules — `irregex`
+// (exact search) and `relate` (compression kinship) — reached only through
+// `@import("irregex")` / `@import("relate")`; a file import cannot cross a
+// package boundary. The composed face rides this package's chassis module
+// from `blast`. Judged by `ward verify`.
+
+package gist {
+    // root.zig is the chassis module's public face: it re-exports the cli,
+    // session, ffi, and face tiers (what the thin exe mains and `blast`
+    // consume) and aggregates the test step, so it alone may reach anywhere.
+    root   src
+    facade root.zig
+}
+
+// Tiers, low to high. An import may only point back up the page.
+tiers {
+    // Shared flag, grade, manifest and answer-keep vocabulary — the floor the
+    // transports and faces stand on. (`reprise.zig` is the answer keep's CLI
+    // half; its reach up into the daemon it rides is the ratified exception
+    // below, inherited from the pre-split contract.)
+    cli         surface/cli/**
+
+    // The resident session's transport primitives: the wire grammar, the
+    // versioned protocol, the daemon image/spawn/vigil lifecycle.
+    conduit     exec/session/conduit/**
+
+    // The daemon's self-government: memory rationing and stand-down.
+    warden      exec/session/warden/**
+
+    // The daemon proper — dial-or-spawn client and the serve loop over the
+    // resident core (which lives in `irregex`, reached as a module).
+    daemon      exec/session/daemon/**
+
+    // C-ABI session + analytic plane — the `libirregex` surface the Python /
+    // Go / Rust bindings link.
+    ffi         surface/ffi/**
+
+    // The two thin product faces. A face imports the chassis; the chassis
+    // never imports a face except through root's re-export shelf.
+    face        surface/face/**
+}
+
+// Guest lists: regions only the named importers may reach at all.
+
+// The two product faces are peers, not a stack. Each is one product with its
+// own CLI contract, and the whole point of two faces over one chassis is that
+// a change to gist's verbs cannot reach relate's. When both need the same
+// thing, it belongs under them, not in whichever one wrote it first.
+keep surface/face/gist/**   to root.zig
+keep surface/face/relate/** to root.zig
+
+// The C-ABI plane is the package's other public face — for callers outside
+// Zig. Nothing inside the package consumes its own FFI shims; a Zig caller
+// that wants the session takes irregex's `api.zig`, which is what ffi does.
+keep surface/ffi/** to root.zig
+
+// Tests are consumers of the architecture, never load-bearing in it.
+keep **/*_test.zig to root.zig
+
+// Seals: directories that are deep modules — enter by the entry file.
+
+// The resident session's wire grammar is a cross-language contract — the Zig
+// CLI, the Rust binding and the Python binding all speak it — and every frame
+// it defines is gated on one negotiated `protocol_version`. Split into the
+// opcode spine plus a codec chapter per opcode family (query · result · keep ·
+// annals), it is entered as one so a caller binds to the whole versioned
+// contract rather than to half of it.
+seal exec/session/conduit/protocol through protocol.zig
+
+// Daemon dial + spawn is one decision; a caller that reaches spawn directly
+// bypasses the fail-open deadline.
+seal exec/session/daemon/client through client.zig
+
+// The resident session's serve loop — split into route/answer/crew/loop,
+// entered as one.
+seal exec/session/daemon/serve through serve.zig
+
+// Structural laws.
+limit  reach to 5 hops
+forbid cycles across directories
+
+// Ratified exceptions.
+//
+// Every one carries the fix that would retire it. An exception that stops
+// matching is a hard failure, so paying the debt forces deleting the entry —
+// they shrink instead of accreting as folklore.
+
+// ── The resident answer keep's three edges. One fact stated three ways: the
+// answer keep is shared CLI vocabulary (it installs itself on irregex's
+// `outcome.departure` hook so every exit seals an answer in), but the
+// transport it rides lives two tiers up in the session.
+
+allow tier surface/cli/reprise.zig -> exec/session/daemon/client/keep.zig
+    because
+        \\The answer keep is a passenger on the resident daemon: it never
+        \\starts one, it only dials an existing socket to ask whether this
+        \\exact question was already answered against these exact bytes. It
+        \\lives in `cli/` because the departure hook — the exit path every
+        \\process shares — is what seals an answer in, but the transport it
+        \\dials is the session's. Retire by giving the keep's frame types a
+        \\home below `cli` (or moving reprise into the session outright, now
+        \\that outcome takes an installable departure), after which `cli`
+        \\depends on nothing above itself.
+
+allow tier surface/cli/reprise.zig -> exec/session/daemon/serve/serve.zig
+    because "Reads the serve loop's frame vocabulary. Retire with the reprise move above."
+
+allow seal surface/cli/reprise.zig -> exec/session/daemon/client/keep.zig
+    because
+        \\`client/` is sealed through `client.zig` so no caller can skip the
+        \\fail-open dial deadline. This reaches `keep.zig` beside it for the
+        \\keep's own frame types, not to dial — the deadline is untouched.
+        \\Retire either by re-exporting those types from `client.zig`, or with
+        \\the reprise move above, whichever lands first.
