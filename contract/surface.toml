@@ -1,0 +1,186 @@
+# ═════════════════════════════════════════════════════════════════════════════
+#  gist's surface contract
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# How a request reaches gist, and what a host may call it. Everything here is
+# gist's own: the published artifact names, the three transports a search can
+# ride, the resident daemon's wire semantics, and the aliases an embedding host
+# is allowed to spell its parameters with.
+#
+#   [package]        the published artifact names
+#   [transports]     subprocess (authoritative) · uds · ffi
+#   [session]        semantics of the resident-daemon transport
+#   [tool_boundary]  what an agent may call, and under which aliases
+#
+# The analytic row schemas gist returns are NOT here. They are substrate, shared
+# with relate and blast, and declared once in `irregex/contract/analytic.toml`
+# alongside the generator that lowers them into every binding. The engine's
+# in-process return vocabulary (`[status_codes]`, `[decline_reasons]`,
+# `[fault_domains]`, `[coordinate_spaces]`) is likewise the engine's, in
+# `irregex/contract/engine.toml`: those codes describe what `include/irregex.h`
+# returns, so they belong to the package that emits them. libgist speaks that
+# vocabulary by linking it rather than redeclaring it, and this repository's
+# Go/Python/Rust mirrors check themselves against the engine's copy.
+
+
+[package]
+dist = "gist"
+import = "gist"
+
+
+# ═══ 3 · delivery ════════════════════════════════════════════════════════════
+
+# ── [transports] — how one contract is carried to the engine ─────────────────
+# Status tokens are truthful about disk, not aspiration: all three are callable
+# today. Both accelerators fail OPEN to a slower tier, so neither is a second
+# source of truth or a new failure mode.
+#
+# subprocess · authoritative
+#   Safe by construction: a bad pattern exits the child, never the host.
+#
+# uds · accelerator
+#   A per-repository `gist serve` daemon holds the corpus and trigram index
+#   warm in memory and answers eligible requests over a length-prefixed
+#   Unix-domain-socket protocol (see [session]). It sidesteps the die()->exit
+#   hazard because the resident query kernels RETURN errors instead of calling
+#   die(). The stack is landed and verified end to end: the eligibility
+#   classifier (src/exec/session/answer/request.zig), the wire codec
+#   (…/session/conduit/protocol/protocol.zig), the warm error-returning engine
+#   (…/session/warm/resident.zig), the fail-closed freshness watcher
+#   (…/session/watch/watch.zig), the daemon accept loop
+#   (src/exec/session/daemon/serve/serve.zig), and the fail-open connecting
+#   client (…/daemon/client/client.zig, wired into the bare-`gist` front door in
+#   src/surface/face/gist/main.zig) — under an end-to-end lifecycle test
+#   (…/daemon/serve/serve_test.zig). The warm path routes only what it can
+#   answer with cold's own per-file bytes and exit code, and file order is the
+#   deterministic pathLess canonicalization of cold's parallel discovery order.
+#
+# ffi · accelerator
+#   The same error-returning resident engine, in-process, so a bad query
+#   surfaces as IRREGEX_STALE rather than a dead host. Layering:
+#   src/surface/ffi/contract.zig owns the stable statuses, flags, options and
+#   record layouts; relay.zig translates resident records; session.zig owns
+#   handle lifecycle and execution. `gist_search` takes the complete
+#   size-checked options shape — smart-case, explicit Unicode/ASCII mode,
+#   invert, before/after context, quiet, per-file max-count — and streams typed
+#   records that distinguish match from context, while invert selections stay
+#   match records with zero submatches, byte-identical to cold JSON. Streaming
+#   non-matching lines from every live document is a presentation requirement,
+#   not an index limitation: the `-v -l` and `-v -c` faces prove the match set
+#   is soundly trigram-prunable via the set complement `lines(f) − matching(f)`.
+#   Zig's `effectiveIgnoreCase` and the `CompiledQuery` unicode field remain the
+#   sole case/class authorities, so no binding reimplements either. Unlike
+#   rootless `uds`, FFI passes SearchRequest.paths as `gist_open` roots, and
+#   Python bounds and keys handles by (cwd, roots) so scopes cannot
+#   cross-contaminate. engine=auto optimistically tries linear FFI, then lets
+#   IRREGEX_STALE fall through to authoritative cold PCRE2.
+[transports]
+subprocess = { status = "authoritative", detail = "the certified `gist` binary + --json; results come from the same combinePatterns->collectFiles->json.run path the CLI uses" }
+uds = { status = "operational-accelerator", detail = "the daemon answers eligible queries ([session].eligible_modes) from a warm ResidentSession behind a Unix socket, and the front-door client falls open to `subprocess` on any ineligible argv, TTY stdout, readable stdin, absent daemon, decline, or wire hiccup; a large `lines` answer may skip the socket copy entirely via the negotiated fd transport ([session].capabilities)" }
+ffi = { status = "operational-accelerator", detail = "one coherent open/search/close session over that same resident engine, streaming full Match records in-process; Session.run/files/count/absent route through cffi when available and fall open to `uds` or `subprocess` otherwise, so cffi stays optional. Verified by the C-ABI smoke and the FFI-vs-cold parity tests" }
+
+# ── [session] — the resident (`uds`) transport's semantics ───────────────────
+# A client opens a persistent connection to one daemon generation and issues
+# many queries. Three monotonic generations ride every READY/STATUS frame — the
+# daemon's boot id, the per-connection id, and the published index pair.gen — so
+# a client can detect a rebuilt index or a restarted daemon and re-handshake.
+# None of this is mirrored as package constants: it governs the wire the daemon
+# and its clients speak, so there is no per-language drift risk, but it is
+# pinned here as the authoritative shape.
+#
+# The wire · src/exec/session/conduit/protocol/protocol.zig
+#   A length-prefixed frame protocol whose query-flags byte is now fully
+#   assigned: fixed 0, ignore_case 1, line_num 2, word 3, invert 4, smart_case
+#   5, quiet 6, max_count 7 (bit 7 also writes a u64 LE cap immediately after
+#   the flags byte). The daemon FAILS CLOSED on any unimplemented bit (BadFrame
+#   -> decline -> cold); with the byte full, fail-closed now rests on the
+#   version handshake plus the length and opcode gates.
+#
+# Capabilities · negotiated in the HELLO frame
+#   Additive, and NOT query flags — that byte is full. The client appends a caps
+#   byte after the version; an old peer sends none and the daemon reads 0, so a
+#   capability is used only when advertised AND supported on the build's target.
+#   `cap_fd_transport` (bit 0) lets a client receive a large `lines` answer as
+#   an anonymous-shm fd over SCM_RIGHTS — one `chunk_fd` frame carrying
+#   {length, matched}, which the client mmaps read-only and writes out. The
+#   daemon uses it only when the answer clears fd_transport_floor (1 MiB) and
+#   shm is available (Linux memfd+seal · macOS
+#   shm_open→ftruncate→shm_unlink); otherwise the byte-identical `chunk` frames.
+#
+# Eligible modes · what the fast path answers directly
+#   files   -l, files-with-matches.
+#   count   -c, a wire-only corpus-wide matching-line total for embedders (rg's
+#           -c is per-file, so the CLI answers that one cold).
+#   lines   the bare default `path:text` search (`-n` for `path:line:text`),
+#           pre-rendered daemon-side through the cold Emitter and
+#           chunk-streamed.
+#   The CLI routes `files` and `lines` warm. Everything else (--json, context,
+#   --rank, replace, multiline, explicit file lists, stdin, a TTY stdout) is
+#   unsupported on the fast path and falls back to the cold subprocess
+#   transport, byte for byte identically.
+#
+# Eligible flags · the session applies cold's exact rules
+#   The case family is fully eligible: `-i`, `-s`, and `-S` smart-case — the raw
+#   smart_case bit crosses the wire and the SESSION resolves it against the
+#   pattern via request.zig::effectiveIgnoreCase, so clients never implement
+#   hasUpper. `-w` (word), `-q` (quiet — the existence early-halt) and `-m N`
+#   (the per-file cap, including rg's `-m0` = match nothing) are eligible too.
+#   `-v` (invert) is eligible via the set complement `non_matching(f) = lines(f)
+#   − matching(f)`: the trigram prefilter stays sound for the MATCH set (a
+#   ruled-out file matches nothing) and cached per-file line counts supply the
+#   rest with no scan.
+#
+# Parallelism
+#   EVERY warm face — the positive and invert `-c`/`-l` folds, the bare/`-n`
+#   emit, and the FFI record stream — shards its scan over cores above a byte
+#   floor through ONE shared primitive (src/kernel/math/parallel.zig),
+#   byte-identical to the serial core below it, so a large positive result no
+#   longer loses to cold's fused 16-core scan on core count. FFI additionally
+#   opens explicit paths as C root arrays and carries explicit Unicode/ASCII
+#   mode into the shared compile seam.
+#
+# Freshness
+#   Fail-closed: a query is answered from resident bytes only when the barrier
+#   proves the searched roots unchanged since the daemon's build anchor (a
+#   watcher-clean window). Otherwise the daemon reconciles changed, new and
+#   deleted paths against the live filesystem before answering, preserving the
+#   invariant `resident matches == --no-index matches == rg matches`. Linux gets
+#   an inotify accelerator; the portable metadata-reconcile barrier is always
+#   there.
+[session]
+socket_env = "GIST_SESSION_SOCK"                 # overrides the per-repo default below
+default_socket = ".local/gist-verify/gistd.sock"
+protocol_version = 9                             # the length-prefixed frame protocol
+generations = [ "daemon", "session", "index" ]   # boot id · connection id · published pair.gen
+build_identity = "image"                         # READY's u64 build stamp; a skewed peer runs cold
+residency = [ "none", "ours", "foreign" ]        # what `gist status` reports about the peer at the rendezvous
+capabilities = [ "cap_fd_transport" ]            # HELLO-negotiated, additive
+eligible_modes = [ "files", "count", "lines" ]   # -l · corpus-wide -c · the bare line search
+freshness = "fail-closed-reconcile"              # resident bytes only behind a proven barrier
+watchers = [ "inotify", "reconcile" ]            # linux accelerator · portable barrier
+
+
+# ═══ 5 · embedding ═══════════════════════════════════════════════════════════
+
+# ── [tool_boundary] — an embedding host's search verb ────────────────────────
+# A person at a terminal and an agent working a repository are the same actor:
+# both express "find these matches in this tree" as one SearchRequest. A host
+# that exposes search as a callable tool usually spells a few parameters its own
+# way, so the mapping is declared here instead of being re-guessed at each call
+# site; `request_from_tool` in the Python face applies it.
+#
+# `aliases` rename a tool-boundary parameter onto its canonical request option.
+# `routing_keys` are recognized-but-ignored: they select *where* the tree lives
+# and *how* results are ranked, which is the host adapter's decision, not this
+# engine's. Listing them is the contract statement that one semantic API does
+# not require one transport — placement and routing stay outside the search
+# contract.
+[tool_boundary.aliases]
+query = "pattern"         # a host's name for the pattern
+glob = "globs"            # a singular tool param -> the list option
+context_lines = "context" # a symmetric-context param
+
+[tool_boundary.routing_keys]
+place = "which store owns the tree (e.g. workspace | machine | scratch)"
+at = "addressing within that store (e.g. a named root, or an absolute granted path)"
+semantic = "rank by meaning via the host's vector index, not this engine"
