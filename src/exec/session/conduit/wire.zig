@@ -1,4 +1,4 @@
-//! Length-prefixed frame plumbing for the resident daemons (ADR-352).
+//! Length-prefixed frame plumbing for the resident daemons.
 //!
 //! One grammar, `[u32 LE len][u8 opcode][payload…]` where `len` counts the
 //! opcode + payload, shared verbatim by every resident session's socket
@@ -24,7 +24,7 @@ const windows = builtin.os.tag == .windows;
 pub const max_frame: u32 = 16 << 20;
 
 /// Every fault this transport can produce, drawn entirely from the declared
-/// `wire` + `persist` + `resource` domains (ADR-373 law 2). `UnexpectedFrame`
+/// `wire` + `persist` + `resource` domains. `UnexpectedFrame`
 /// carries what were once `BadFrame` and `BadOpcode`: no handler ever
 /// distinguished them — both mean "the peer sent bytes this protocol cannot
 /// read", and both end the connection — so two names bought nothing and cost

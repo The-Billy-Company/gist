@@ -1,4 +1,4 @@
-//! gist resident client — best-effort daemon auto-spawn (ADR-352 rung 2.5).
+//! gist resident client — best-effort daemon auto-spawn.
 //!
 //! The warm path only pays off if a daemon is actually running, but an agent's
 //! reflex is a bare `gist <pattern> -l` with zero setup — nobody runs `gist
@@ -21,6 +21,7 @@ const std = @import("std");
 const request = @import("irregex").session.request;
 const run = @import("irregex").commands.search;
 const session_spawn = @import("../../conduit/spawn.zig");
+const rendezvous = @import("../../conduit/rendezvous.zig");
 const standdown = @import("../../warden/standdown.zig");
 const ration = @import("../../warden/ration.zig");
 const fault = @import("irregex").fault;
@@ -54,7 +55,7 @@ pub fn maybeSpawn(
     if (req.mode == .count or (std.Io.File.stdout().isTty(io) catch false) or run.readableStdin()) return;
     // A daemon may have come up since the client's dial (a coworker's spawn, or
     // one still binding). Probe once; if it answers, leave it be.
-    if (net.UnixAddress.init(socket_path)) |ua| {
+    if (rendezvous.address(socket_path)) |ua| {
         if (ua.connect(io) catch null) |stream| {
             stream.close(io);
             return;

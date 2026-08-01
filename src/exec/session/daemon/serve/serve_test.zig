@@ -17,6 +17,7 @@ const client = @import("../client/client.zig"); // the residency probe `gist sta
 const request = @import("irregex").session.request;
 const shm = @import("irregex").inner.session.shm;
 const fault = @import("irregex").fault;
+const rendezvous = @import("../../conduit/rendezvous.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
@@ -36,7 +37,7 @@ fn daemonMain(args: DaemonArgs) void {
 /// runs alongside several other test binaries under `zig build test`, and a
 /// CPU-starved daemon thread must never turn a scheduling delay into a failure.
 fn dial(io: std.Io, socket: []const u8) !net.Stream {
-    const ua = try net.UnixAddress.init(socket);
+    const ua = try rendezvous.address(socket);
     for (0..1000) |_| {
         if (ua.connect(io) catch null) |s| return s;
         try io.sleep(.fromNanoseconds(10 * std.time.ns_per_ms), .real);
@@ -509,7 +510,7 @@ test "serve: a daemon whose executable was replaced stands itself down" {
     try putFile(io, a, root, "a.txt", "needle\n");
 
     // Stand in for "the binary this daemon is running" — the test cannot
-    // rewrite its own executable, and a live `make install-gist` is exactly the
+    // rewrite its own executable, and a live `zig build` is exactly the
     // event being simulated.
     const exe = try std.fmt.allocPrint(a, "/tmp/gist_retire_exe_{x}", .{@intFromPtr(&threaded)});
     try Dir.cwd().writeFile(io, .{ .sub_path = exe, .data = "build-1" });
@@ -550,7 +551,7 @@ test "serve: a daemon whose executable was replaced stands itself down" {
     }
     var gone = false;
     for (0..1000) |_| {
-        const ua = try net.UnixAddress.init(daemon.socket);
+        const ua = try rendezvous.address(daemon.socket);
         if (ua.connect(io) catch null) |s| {
             s.close(io);
             try io.sleep(.fromNanoseconds(10 * std.time.ns_per_ms), .real);
@@ -796,8 +797,8 @@ test "serve: annals consult declines pre-coverage instants and vouches for a liv
     // armed or not, the ledger never vouches for a window it did not watch.
     try std.testing.expect((try consultChanged(gpa, io, a, fd, 1)) == null);
 
-    // (2) The vouch path needs a live per-file-exact watcher (macOS kqueue,
-    // ADR-372). Elsewhere — or when the watch set won't fit this environment's
+    // (2) The vouch path needs a live per-file-exact watcher (macOS kqueue).
+    // Elsewhere — or when the watch set won't fit this environment's
     // descriptor budget — every consult declines, and (1) already proved that
     // shape; skip the rest.
     if (@import("builtin").os.tag != .macos) return error.SkipZigTest;

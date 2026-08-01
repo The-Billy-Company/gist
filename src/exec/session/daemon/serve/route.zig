@@ -50,7 +50,7 @@ pub fn frame(server: *crew.Server, slot: u16) Route {
             // post their event inside the syscall that caused it (Linux inotify ·
             // macOS kqueue), so any write that completed before this request was
             // sent is already queued here and gets noted for the reconcile
-            // (ADR-372). An unarmed session reconciles fully anyway.
+            // An unarmed session reconciles fully anyway.
             _ = server.watcher.flushSync();
             if (server.pool_ready) {
                 server.dispatch(slot, f); // frame ownership moves into the job
@@ -149,7 +149,7 @@ fn handleChanged(session: *ResidentSession, watcher: *watch.Watcher(ResidentSess
 /// The corpus change epoch, or null when the daemon cannot vouch for one — an
 /// unarmed or non-syscall-synchronous watcher, or a ledger poisoned by an event
 /// it could not attribute. Same causal barrier the annals consult stands on
-/// (ADR-372): the flush drains every event whose syscall completed before this
+/// The flush drains every event whose syscall completed before this
 /// request was sent, so an epoch read here cannot miss a write the client's own
 /// earlier run could have seen.
 fn epochNow(server: *crew.Server) ?u64 {

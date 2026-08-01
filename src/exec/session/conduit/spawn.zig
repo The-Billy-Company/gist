@@ -1,4 +1,4 @@
-//! Detached daemon auto-spawn, shared by the resident CLIs (ADR-352 rung 2.5).
+//! Detached daemon auto-spawn, shared by the resident CLIs.
 //!
 //! The warm path only pays off if a daemon is running, but an agent's reflex is
 //! a bare query with zero setup — nobody runs `<cli> serve` by hand. So when an

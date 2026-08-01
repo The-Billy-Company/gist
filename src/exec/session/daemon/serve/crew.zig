@@ -238,7 +238,7 @@ pub fn configuredWorkers() usize {
 /// from a passing unit-test binary makes the build runner dump the step tree
 /// with a spurious "failed command:" banner — a green run must read green.
 ///
-/// Routed through `assay.diag` rather than `std.debug.print` (ADR-373 law 6):
+/// Routed through `assay.diag` rather than `std.debug.print` (never write the host's stderr):
 /// the sink is what decides where a lifecycle line lands, and the daemon is the
 /// one process where that decision is load-bearing — a worker answering a warm
 /// query holds a `buffer` sink so its diagnostics reach the *client's* stderr

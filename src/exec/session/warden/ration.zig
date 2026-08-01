@@ -1,5 +1,4 @@
-//! gist resident session — how many bytes this machine will lend a daemon
-//! (ADR-352 rung 2.5).
+//! gist resident session — how many bytes this machine will lend a daemon.
 //!
 //! One question, deliberately shaped like `watch/budget.zig`'s: how much memory
 //! may a resident session hold? And for the same reason — a background daemon's

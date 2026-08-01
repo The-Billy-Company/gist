@@ -11,7 +11,7 @@
 //! So an idle daemon releases them in the order they cost the MACHINE, not the
 //! order they cost itself: the watch set first, at `shed_ms`, and the session
 //! only at `ttl_ms`. Shedding is free of correctness risk by construction — the
-//! watcher is a pure accelerator (ADR-372), so a shed session simply reconciles
+//! watcher is a pure accelerator, so a shed session simply reconciles
 //! every query against the live filesystem, which is the pre-ADR behavior. What
 //! it costs is speed, and only until the set is re-registered.
 //!

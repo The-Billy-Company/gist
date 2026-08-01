@@ -11,6 +11,7 @@ const image = @import("../../conduit/image.zig");
 const protocol = @import("../../conduit/protocol/protocol.zig");
 const vigil = @import("../../conduit/vigil.zig");
 const fault = @import("irregex").fault;
+const rendezvous = @import("../../conduit/rendezvous.zig");
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 
@@ -25,7 +26,7 @@ const WedgedArgs = struct {
 /// byte of the client's HELLO and returning would close the socket and look
 /// like an instant cold miss instead of a deadline wait.
 fn wedgedMain(args: WedgedArgs) void {
-    const ua = net.UnixAddress.init(args.socket) catch return;
+    const ua = rendezvous.address(args.socket) catch return;
     var server = ua.listen(args.io, .{}) catch return;
     defer server.deinit(args.io);
 

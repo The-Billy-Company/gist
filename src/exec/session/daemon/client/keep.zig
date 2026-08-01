@@ -23,6 +23,7 @@
 
 const std = @import("std");
 const protocol = @import("../../conduit/protocol/protocol.zig");
+const rendezvous = @import("../../conduit/rendezvous.zig");
 const client = @import("client.zig");
 const frame = @import("irregex").inner.corpus.frame;
 const fault = @import("irregex").fault;
@@ -53,7 +54,7 @@ pub const Ticket = union(enum) {
 /// Ask the keep for `key`. Never errors; every uncertainty is `.unusable`.
 pub fn ask(gpa: std.mem.Allocator, io: std.Io, socket_path: []const u8, key: []const u8) Ticket {
     if (!rendezvousIsOurs(socket_path)) return .unusable;
-    const ua = net.UnixAddress.init(socket_path) catch return .unusable;
+    const ua = rendezvous.address(socket_path) catch return .unusable;
     const stream = ua.connect(io) catch return .unusable; // no daemon → cold, silently
     defer stream.close(io);
     return exchangeAsk(gpa, io, stream.socket.handle, key) catch .unusable;
@@ -89,7 +90,7 @@ pub fn offer(
     code: u8,
     answer: []const u8,
 ) void {
-    const ua = net.UnixAddress.init(socket_path) catch return;
+    const ua = rendezvous.address(socket_path) catch return;
     const stream = ua.connect(io) catch return;
     defer stream.close(io);
     fault.spare(

@@ -2,13 +2,13 @@
 doc_radar:
   sentinels:
     - description: "warm client stays fail-open with an I/O deadline"
-      file: pkg/kernels/irregex/src/exec/session/daemon/client/client.zig
+      file: src/exec/session/daemon/client/client.zig
       contains: ["pub fn attempt", "client_io_timeout_ms", ".cold", ".served"]
     - description: "autoserve remains opt-out, not opt-in"
-      file: pkg/kernels/irregex/src/exec/session/daemon/client/spawn.zig
+      file: src/exec/session/daemon/client/spawn.zig
       contains: ["maybeSpawn", "GIST_NO_AUTOSERVE"]
     - description: "a superseded daemon is declined, retired one-directionally, and reportable"
-      file: pkg/kernels/irregex/src/exec/session/daemon/client/client.zig
+      file: src/exec/session/daemon/client/client.zig
       contains: ["image.agrees", "fn retireIfSuperseded", "pub fn residency"]
 ---
 
@@ -19,7 +19,7 @@ daemon ([`../serve`](../serve)). Warm acceleration is opportunistic; correctness
 always has the cold engine behind it.
 
 `attempt(gpa, io, argv, socket_path)` classifies the argv
-([`exec/session/answer/request.zig`](../../../../exec/session/answer/request.zig)) and only dials when
+(`irregex/src/exec/session/answer/request.zig`) and only dials when
 the request is one the warm path can answer with **cold's own per-file bytes
 and exit code**:
 
@@ -60,7 +60,7 @@ version it does not speak.
 
 Declining alone would strand the warm tier: the daemon's idle TTL wants ten
 *continuous* minutes of quiet, which a tree with ten coworker agents never
-gives it, so one `make install-gist` would mean cold queries for the rest of the
+gives it, so one `zig build` would mean cold queries for the rest of the
 day. On the way out to cold, a client that is **strictly newer** — a higher wire
 version, or a later build stamp — sends `shutdown`. The order is one-directional
 on purpose: a symmetric "we disagree, so you stop" rule has an old shell and a

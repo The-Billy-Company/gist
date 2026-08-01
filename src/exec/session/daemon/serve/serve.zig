@@ -1,4 +1,4 @@
-//! gist resident daemon — `gist serve` (ADR-352 rung 2.5).
+//! gist resident daemon — `gist serve`.
 //!
 //! Holds one `ResidentSession` warm behind a Unix-domain socket so a persistent
 //! client answers an eligible query without re-paying the cold subprocess's
@@ -37,7 +37,7 @@
 //!     one descriptor per watched vnode (~26k here, a real slice of the
 //!     system-wide file table) and several trees each keep their own daemon, so
 //!     a quiet daemon releases every one of them and drops to the
-//!     reconcile-always baseline — pure speed, never correctness (ADR-372) —
+//!     reconcile-always baseline — pure speed, never correctness —
 //!     re-registering once returning traffic settles. Then the session: at
 //!     `idle.ttl_ms` of continuous idleness the daemon exits so an abandoned
 //!     session doesn't pin RAM forever. The next query just re-spawns it.
@@ -48,6 +48,7 @@
 const std = @import("std");
 const resident = @import("irregex").session.resident;
 const image = @import("../../conduit/image.zig");
+const rendezvous = @import("../../conduit/rendezvous.zig");
 const watch = @import("irregex").session.watch;
 const keep_mod = @import("irregex").inner.session.keep;
 const ration = @import("../../warden/ration.zig");
@@ -155,7 +156,7 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     if (std.fs.path.dirnamePosix(socket_path)) |dir|
         fault.spare("pre-create the socket directory", Dir.cwd().createDirPath(io, dir));
     fault.spare("clear a stale socket from a crashed daemon", Dir.cwd().deleteFile(io, socket_path));
-    const ua = try net.UnixAddress.init(socket_path);
+    const ua = try rendezvous.address(socket_path);
     var listener = try ua.listen(io, .{});
     defer listener.deinit(io);
     defer fault.spare("unlink the socket on shutdown", Dir.cwd().deleteFile(io, socket_path));

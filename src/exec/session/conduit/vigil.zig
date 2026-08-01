@@ -38,6 +38,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const portal = @import("irregex").portal;
+const rendezvous = @import("rendezvous.zig");
 
 const windows = builtin.os.tag == .windows;
 const w = std.os.windows;
@@ -439,13 +440,13 @@ pub const Pair = struct {
             portal.processId(),
             seq.fetchAdd(1, .monotonic),
         }) catch return error.Unexpected;
-        const ua = net.UnixAddress.init(path) catch return error.Unexpected;
-        var rendezvous = ua.listen(io, .{}) catch return error.Unexpected;
-        defer rendezvous.deinit(io);
+        const ua = rendezvous.address(path) catch return error.Unexpected;
+        var listener = ua.listen(io, .{}) catch return error.Unexpected;
+        defer listener.deinit(io);
         defer std.Io.Dir.cwd().deleteFile(io, path) catch {};
         const clapper = ua.connect(io) catch return error.Unexpected;
         errdefer clapper.close(io);
-        const ear = rendezvous.accept(io) catch return error.Unexpected;
+        const ear = listener.accept(io) catch return error.Unexpected;
         return .{ .ear = ear.socket.handle, .clapper = clapper.socket.handle };
     }
 

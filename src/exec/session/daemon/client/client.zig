@@ -1,4 +1,4 @@
-//! gist resident client — the CLI's warm fast path (ADR-352 rung 2.5).
+//! gist resident client — the CLI's warm fast path.
 //!
 //! `attempt` is the thin, fail-open bridge between the bare `gist <pattern>`
 //! front door and the resident daemon: it classifies the argv, and only when the
@@ -49,6 +49,7 @@ const run = @import("irregex").commands.search;
 const assay = @import("irregex").assay;
 const portal = @import("irregex").portal;
 const vigil = @import("../../conduit/vigil.zig");
+const rendezvous = @import("../../conduit/rendezvous.zig");
 const net = std.Io.net;
 
 /// Transport capabilities this client advertises in HELLO — `caps_supported`
@@ -161,7 +162,7 @@ fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const
 
     if (!rendezvousIsOurs(socket_path)) return .cold;
 
-    const ua = net.UnixAddress.init(socket_path) catch return .cold;
+    const ua = rendezvous.address(socket_path) catch return .cold;
     const stream = ua.connect(io) catch return .cold; // no daemon → cold
     defer stream.close(io);
     const fd = stream.socket.handle;
@@ -240,7 +241,7 @@ const residency_timeout_ms: i32 = 500;
 /// first for no reason the reader could see. (It does open one connection, so
 /// a resident daemon's idle TTL is nudged — the one unavoidable trace.)
 pub fn residency(gpa: std.mem.Allocator, io: std.Io, socket_path: []const u8) Residency {
-    const ua = net.UnixAddress.init(socket_path) catch return .none;
+    const ua = rendezvous.address(socket_path) catch return .none;
     const stream = ua.connect(io) catch return .none; // nothing listening
     defer stream.close(io);
     // Ordered after the dial on purpose: the binding file is also absent when
@@ -399,7 +400,7 @@ pub const ChangedAnswer = struct { prefix: []const u8, paths: []const []const u8
 /// proven fallback (journal replay → stat walk). Never errors, never spawns;
 /// output lives in `a` (the caller's arena).
 pub fn consultChanged(gpa: std.mem.Allocator, io: std.Io, a: std.mem.Allocator, socket_path: []const u8, since_ns: i64) ?ChangedAnswer {
-    const ua = net.UnixAddress.init(socket_path) catch return null;
+    const ua = rendezvous.address(socket_path) catch return null;
     const stream = ua.connect(io) catch return null; // no daemon → fallback
     defer stream.close(io);
     return exchangeChanged(gpa, io, a, stream.socket.handle, image.stamp(io), since_ns) catch null;

@@ -2,28 +2,28 @@
 doc_radar:
   sentinels:
     - description: "daemon socket path stays contract-pinned"
-      file: pkg/kernels/irregex/contract/search_api.toml
+      file: contract/surface.toml
       contains: ["GIST_SESSION_SOCK", "gistd.sock"]
     - description: "serve.zig stays the lifecycle face, not the machinery"
-      file: pkg/kernels/irregex/src/exec/session/daemon/serve/serve.zig
+      file: src/exec/session/daemon/serve/serve.zig
       contains: ["pub fn run", "pub fn socketPath"]
     - description: "the accept loop stays one readiness wait with in-flight work off the set, and asks the platform through the vigil seam rather than naming a syscall"
-      file: pkg/kernels/irregex/src/exec/session/daemon/serve/loop.zig
+      file: src/exec/session/daemon/serve/loop.zig
       contains: ["vigil.Vigil.open", "vigil.max_watched", "drainCompletions"]
     - description: "an unservable request is declined, never answered wrong"
-      file: pkg/kernels/irregex/src/exec/session/daemon/serve/answer.zig
+      file: src/exec/session/daemon/serve/answer.zig
       contains: ["decline", "servesScope"]
     - description: "idle release stays two-stage: watch set before session"
-      file: pkg/kernels/irregex/src/exec/session/daemon/serve/idle.zig
+      file: src/exec/session/daemon/serve/idle.zig
       contains: ["pub const ttl_ms", "pub const shed_ms", "pub fn nextStep"]
     - description: "the keep is routed inline and gated on an epoch the watcher can vouch for"
-      file: pkg/kernels/irregex/src/exec/session/daemon/serve/route.zig
+      file: src/exec/session/daemon/serve/route.zig
       contains: ["handleRecall", "handleRetain", "epochNow"]
 ---
 
 # exec/session/daemon/serve — `gist serve`
 
-Keeps one [`ResidentSession`](../../../../exec/session/warm/resident.zig) warm behind a
+Keeps one `ResidentSession` (`irregex/src/exec/session/warm/resident.zig`) warm behind a
 Unix-domain socket so a persistent client answers an eligible query without
 re-paying the cold subprocess's process + index-mmap + candidate-read startup —
 the mechanism behind the warm session certificate.
@@ -64,9 +64,9 @@ holds the per-query wall-clock budget that reclaims a runaway or abandoned scan.
 Everything above makes ONE query cheaper. Some questions have no cheaper form —
 `relate echoes --shape distinct` is a claim about every pair of files, and no
 index makes a claim about every pair cheap. For those, `route.zig` also serves
-the [answer keep](../../../../exec/session/answer/keep.zig): rendered stdout plus
+the answer keep (`irregex/src/exec/session/answer/keep.zig`): rendered stdout plus
 an exit code, held against the corpus change epoch
-([`annals.epoch`](../../../../exec/session/reconcile/annals.zig)).
+(`annals.epoch` in `irregex/src/exec/session/reconcile/annals.zig`).
 
 The daemon **never computes** a kept answer. A client computes cold and offers
 its rendered bytes back stamped with the epoch it read before it started; the
@@ -74,7 +74,7 @@ daemon keeps them only if the corpus has not moved since. That asymmetry is the
 whole safety argument — a store that cannot recompute cannot recompute
 differently — and it is why `recall`/`retain` are control frames answered inline
 rather than pool work. The caller's half is
-[`cli/reprise.zig`](../../../../cli/reprise.zig).
+`gist/src/surface/cli/reprise.zig`.
 
 ## Idle release is ordered by what the resource costs the machine
 
@@ -102,7 +102,7 @@ Because that default sits _inside_ the artifact directory, an absolute
 answer names files by paths that resolve in either tree, so a crossed dial is
 invisible in the output. So the daemon records the tree it went resident over
 in a hidden `.<socket>.tree` beside the socket
-([`frame.socketBindingPath`](../../../../../corpus/index/frame/frame.zig)), and the client
+(`frame.socketBindingPath` in `irregex/src/corpus/index/frame/frame.zig`), and the client
 re-proves it before dialing; a socket bound to another tree reads as no daemon
 at all and the query answers cold.
 
