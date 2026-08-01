@@ -11,6 +11,14 @@ divergence is always the engine, never the fixture.
 Needles are UPPER_SNAKE tokens unique per trap; sweep.py greps for them by
 name, so a false negative pinpoints its trap immediately.
 
+The tree has a second consumer with a different need. `vendor/` + `src/` give
+`gates/parity/patterns_corpus_parity.sh` the one property it cannot manufacture
+for itself — a directory the corpus loader prunes that the rg-parity walk still
+enters, committed rather than gitignored — so that gate has a hermetic corpus
+to be green on instead of only a private monorepo. Those two subtrees carry
+ordinary third-party-looking identifiers, not NEEDLE_ tokens; see the comment
+on them for why the shapes are load-bearing.
+
 Usage: python3 torture.py <dest-dir>
 """
 
@@ -118,6 +126,71 @@ def build(root: Path) -> None:
     for i in range(3000):
         _write(fan / f"tiny{i:04d}.txt", b"tiny %d\n" % i)
     _write(fan / "hit.txt", b"NEEDLE_FANOUT\n")
+
+    # ── the pruned-but-walked pair (corpus-parity instrument) ────────────────
+    # `vendor` is one of the comptime basenames `haystack.isSkipDir` prunes out
+    # of the CORPUS LOADER while the rg-parity walk still ENTERS it. That
+    # asymmetry is the only place the two populations can disagree, and it is
+    # the one corpus property `gates/parity/patterns_corpus_parity.sh` cannot
+    # manufacture for itself. Nothing here is gitignored — the ignore hierarchy
+    # above is scoped under `ignore/`, and this tree has no root .gitignore — so
+    # the walk really sees these files. `node_modules` prunes identically but is
+    # gitignored in nearly every real tree, and then BOTH sides drop it and the
+    # gate passes having proved nothing; that trap is why the pruned root has to
+    # be a directory people commit.
+    #
+    # These carry ordinary-looking third-party identifiers rather than the
+    # UPPER_SNAKE `NEEDLE_` tokens the traps above use, because the shapes ARE
+    # that gate's coverage argument: a plain lowercase literal (`hexdrift`), an
+    # underscored identifier (`hexdrift_encode`), a 3-character pattern (`cfg`,
+    # exactly one trigram) and first-party names that must never appear under
+    # the pruned tree (`ledger_entry`, `LedgerEntry`). The gate's `torture`
+    # slate names all five; a rename here has to land there in the same commit.
+    w("vendor/hexdrift/README.md", b"hexdrift, vendored. Committed on purpose.\n")
+    w(
+        "vendor/hexdrift/hexdrift.h",
+        b"#ifndef HEXDRIFT_H\n#define HEXDRIFT_H\n"
+        b"struct hexdrift_cfg { int lanes; };\n"
+        b"int hexdrift_encode(const char *in, char *out);\n#endif\n",
+    )
+    for i in range(16):
+        w(
+            f"vendor/hexdrift/lane{i:02d}.c",
+            b'#include "hexdrift.h"\n'
+            b"int hexdrift_encode_lane%d(struct hexdrift_cfg *cfg) { return cfg->lanes; }\n" % i,
+        )
+    for i in range(6):
+        w(
+            f"vendor/lattice/node{i:02d}.go",
+            b"package lattice\n\n// vendored beside hexdrift; cfg knobs only.\n"
+            b"func Node%d(cfg int) int { return cfg }\n" % i,
+        )
+
+    # The unpruned half of the pair, so an explicit root narrows a walk that was
+    # already entering both. `hexdrift`/`hexdrift_encode` reach in from here so
+    # neither is purely a vendored token — the monorepo case they stand in for
+    # had 471 of its 616 files vendored, not all of them.
+    w(
+        "src/ledger.h",
+        b"#ifndef LEDGER_H\n#define LEDGER_H\n"
+        b"struct LedgerEntry { long amount; };\n"
+        b"int ledger_entry_apply(struct LedgerEntry *e, int cfg);\n#endif\n",
+    )
+    for i in range(8):
+        w(
+            f"src/ledger{i:02d}.c",
+            b'#include "ledger.h"\n#include "../vendor/hexdrift/hexdrift.h"\n'
+            b"int ledger_entry_%d(struct LedgerEntry *e, int cfg) {\n"
+            b"  char out[16];\n"
+            b"  return hexdrift_encode(\"x\", out) + e->amount + cfg;\n}\n" % i,
+        )
+    # Outside src/, so `LedgerEntry` scoped to src/ genuinely narrows rather
+    # than returning the whole population under a different name.
+    w(
+        "cmd/report.c",
+        b'#include "../src/ledger.h"\n'
+        b"void report(struct LedgerEntry *e) { (void)e; }\n",
+    )
 
     # ── links ────────────────────────────────────────────────────────────────
     links = root / "links"

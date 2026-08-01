@@ -22,6 +22,17 @@ doc_radar:
       contains:
         - 'GIST_NO_PARALLEL'
         - 'ripgrep is the oracle'
+    - description: "torture plants the pruned-but-walked subtree the patterns parity gate's `torture` slate names, token for token"
+      file: bench/apparatus/corpora/torture.py
+      contains:
+        - 'vendor/hexdrift/hexdrift.h'
+        - 'hexdrift_encode'
+        - 'ledger_entry'
+        - 'LedgerEntry'
+    - description: "a regenerated torture tree is distinguishable from an older one, so a stale corpus cannot claim to be ready"
+      file: bench/apparatus/corpora/fetch.sh
+      contains:
+        - 'TORTURE_BUILD='
 ---
 
 # gist/bench/corpora — the multi-corpus battery
@@ -39,6 +50,25 @@ each — `gist rg` vs real ripgrep, byte-for-byte, both engines.
 | `typescript` | Both file-size extremes in one tree — `checker.ts` ~3 MiB beside ~60k tiny baseline fixtures (pinned `v5.8.3`)  |
 | `subtitles`  | ripgrep's own perf corpus — one giant line-oriented text file per language (en+ru, fixed 256 MiB prefixes)      |
 | `torture`    | Generated adversarial tree (`torture.py`, deterministic) — cap edges, symlink cycles, NULs, UTF-16, CRLF, links |
+
+`torture` has a second job. Its `vendor/` and `src/` subtrees exist for
+`gates/parity/patterns_corpus_parity.sh`, which needs one corpus property it
+cannot manufacture for itself: a directory `haystack.isSkipDir` prunes out of
+the corpus loader that the rg-parity walk still **enters**. `vendor/` is in the
+comptime skip set and nothing here is gitignored, so the two populations can
+actually disagree — which is the whole instrument. (`node_modules` prunes the
+same way but is gitignored in nearly every real tree, and then both sides drop
+it and the gate passes having proved nothing.) That gate's `torture` slate names
+`hexdrift` / `hexdrift_encode` / `ledger_entry` / `LedgerEntry` / `cfg`
+directly, so a rename in either place has to land in both; the sentinel above is
+the only thing watching.
+
+```bash
+bench/apparatus/corpora/fetch.sh torture
+(cd .local/gist-corpora/torture && gist index)     # so the gate's armed leg is armed
+GIST_CORPUS_ROOT="$PWD/.local/gist-corpora/torture" GIST_PARITY_SLATE=torture \
+  bench/conformance/gates/parity/patterns_corpus_parity.sh
+```
 
 ## Run it
 

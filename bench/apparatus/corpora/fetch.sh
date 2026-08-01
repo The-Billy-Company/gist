@@ -91,18 +91,28 @@ fetch_subtitles() {
   echo "v2016 en+ru ${SUB_BYTES}B prefixes" > "${dir}/.corpus-ready"
 }
 
+# The generated corpus is the one whose CONTENT can change without its name or
+# tag changing, so its marker carries a build id and a stale one regenerates. A
+# plain existence check made an older tree indistinguishable from a current one:
+# `patterns_corpus_parity.sh` reads the vendor/ + src/ subtrees added in v2, and
+# a v1 tree on disk would have failed it as vacuous while claiming to be ready.
+TORTURE_BUILD="torture.py deterministic build v2 (adds vendor/ + src/ parity subtrees)"
+
 fetch_torture() {
   local dir="${DEST}/torture"
   if [[ -f "${dir}/.corpus-ready" ]]; then
     local ready
     ready="$(cat "${dir}/.corpus-ready")"
-    echo "  torture: ready (${ready})"
-    return 0
+    if [[ "${ready}" == "${TORTURE_BUILD}" ]]; then
+      echo "  torture: ready (${ready})"
+      return 0
+    fi
+    echo "  torture: stale (${ready}) — regenerating"
   fi
   rm -rf "${dir}"
   echo "  torture: generating adversarial tree (torture.py)…"
   python3 "${HERE}/torture.py" "${dir}" || return 1
-  echo "torture.py deterministic build" > "${dir}/.corpus-ready"
+  echo "${TORTURE_BUILD}" > "${dir}/.corpus-ready"
 }
 
 WANT=("$@")
