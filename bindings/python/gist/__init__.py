@@ -13,6 +13,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+# Pinning the engine copy has to precede every `irregex` import, because
+# importing `irregex` maps one eagerly. See `_substrate`.
+# isort: off
+from . import _substrate as _pin_the_engine  # noqa: F401
 from irregex.contract import ABI_VERSION, ENGINE_VERSION
 from irregex.request import (
     Match,
@@ -55,6 +59,8 @@ from .index.lifecycle import (
     index,
     status,
 )
+
+# isort: on
 
 schema = capabilities
 
