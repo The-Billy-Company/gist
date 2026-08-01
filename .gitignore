@@ -16,6 +16,22 @@ dist/
 .pytest_cache/
 .ruff_cache/
 
+# gist's own artifact home: index, atlas, shelf, freshness anchor, daemon socket
+.gist/
+
+# Upstream checkouts cloned by hand for the differential oracle (e.g. ripgrep)
+upstream/
+
+# Minted benchmark evidence. Every bundle so far was minted over a private
+# corpus, so the bytes carry absolute paths, that tree's file roster, and its
+# commit SHAs. Re-mint over a public corpus before publishing any of it.
+# `artifact/README.md` is hand-written documentation, not mint output.
+/bench/certificate/artifact/**
+!/bench/certificate/artifact/README.md
+/bench/certificate/ledger/LEDGER.md
+/bench/certificate/ledger/ledger.jsonl
+/bench/conformance/targets/artifact/
+
 # Machine-local scratch
 .local/
 .DS_Store
