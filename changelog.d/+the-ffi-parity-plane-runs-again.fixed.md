@@ -5,8 +5,9 @@ reads as green. Two causes, both artifacts of the repo split.
 
 `cffi` is deliberately not a runtime dependency: the in-process tier is an
 accelerator and fails open to the subprocess without it, which is what keeps the
-shipped wheel pure-Python. Inside billy it arrived anyway, transitively, from the
-sibling cffi kernels; a standalone checkout has no such sibling, so the tier went
+shipped wheel pure-Python. Inside the originating monorepo it arrived anyway,
+transitively, from the sibling cffi kernels; a standalone checkout has no such
+sibling, so the tier went
 dark everywhere at once. It is now a test-only dependency, which is where it
 always belonged — the runtime contract is unchanged.
 

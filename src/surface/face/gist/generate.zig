@@ -308,7 +308,7 @@ const sections = [_]primer.Section{
     .{ .title = "SHELL COMPLETION", .paragraphs = &.{
         "This page and the completions for bash, zsh, fish, and PowerShell are all minted by gist --generate, each a rendering of the same table the parser dispatches argv on. A flag therefore cannot exist in the binary and be missing from a menu.",
         "Every closed value set — the file-type registry behind -t, the WHATWG labels behind -E, the sort keys, the engines, the hyperlink aliases — is written into the completion when it is generated. A tab costs no subprocess, where ripgrep's zsh function answers -t by running rg --type-list and re-parsing it on every keystroke. The zsh completion additionally groups its candidates by what a flag changes and withholds the flags a chosen flag rules out, both derived rather than hand-kept.",
-        "Regenerate after upgrading gist, since the menus are a snapshot of the binary that wrote them: make install-gist does this and installs all five artifacts under the XDG directories.",
+        "Regenerate after upgrading gist, since the menus are a snapshot of the binary that wrote them: zig build does this and installs all five artifacts under the XDG directories.",
     } },
 };
 
@@ -400,7 +400,7 @@ pub fn surface(gpa: std.mem.Allocator) primer.Surface {
             .{ .word = "NO_COLOR", .doc = "any value turns colorization off, as --color never does" },
         },
         .examples = &.{
-            .{ .cmd = "gist WalletService", .doc = "every occurrence in this tree, ripgrep's default shape" },
+            .{ .cmd = "gist SessionStore", .doc = "every occurrence in this tree, ripgrep's default shape" },
             .{ .cmd = "gist 'pgxpool\\.\\w+' --rank", .doc = "definitions first, call sites after, generated files demoted" },
             .{ .cmd = "gist -P '(?<=func )\\w+' services", .doc = "a lookbehind, still trigram-prefiltered" },
             .{ .cmd = "gist -t zig -l 'fn write'", .doc = "just the Zig files that contain it" },

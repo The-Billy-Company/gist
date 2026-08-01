@@ -38,8 +38,8 @@ for m in gist::search(r"func\s+\w+\(")? {
 
 let hits  = gist::files("TODO")?;                    // files-with-matches (-l)
 let total = gist::count("panic")?;                   // total matching lines
-let scoped = gist::SearchRequest::new("Wallet")      // the deep builder
-    .path("services/backend")
+let scoped = gist::SearchRequest::new("Session")     // the deep builder
+    .path("src/server/api")
     .type_("go")
     .ignore_case()
     .run()?;
@@ -70,7 +70,7 @@ crate additionally links `libgist` + `libirregex` and exposes a warm
 `Match` records — the callback-free sibling of the daemon `Session`:
 
 ```rust
-let engine = gist::Engine::open(["services/backend"])?;   // none = rootless CWD walk
+let engine = gist::Engine::open(["src/server/api"])?;   // none = rootless CWD walk
 for m in engine.search(&gist::SearchRequest::new("TODO"))? {
     let m = m?;                                            // Iterator<Item = Result<Match>>
     println!("{}:{}: {}", m.path, m.line_number, m.text);

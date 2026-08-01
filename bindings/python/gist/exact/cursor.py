@@ -76,13 +76,13 @@ def _require_abi() -> tuple[FFI, object]:
 
     The Engine/Cursor surface is in-process by definition — unlike the top-level
     helpers there is no subprocess to fall back to, so an absent or ABI-skewed
-    library is a loud `GistNotFoundError` (build it with `make install-gist`).
+    library is a loud `GistNotFoundError` (build it with `zig build`).
     """
     loaded = native.load()
     if loaded is None:
         msg = (
             "the native gist library is unavailable or ABI-skewed; "
-            "build it with `make install-gist` (or set $GIST_LIB)"
+            "build it with `zig build` (or set $GIST_LIB)"
         )
         raise GistNotFoundError(msg)
     _, lib = loaded
@@ -308,7 +308,7 @@ class Engine:
 
     @classmethod
     def open(cls, *paths: str | os.PathLike[str]) -> Engine:
-        """Alias for the constructor, reading as `Engine.open("services/backend")`."""
+        """Alias for the constructor, reading as `Engine.open("src/server/api")`."""
         return cls(*paths)
 
     def cancel_token(self) -> CancelToken:

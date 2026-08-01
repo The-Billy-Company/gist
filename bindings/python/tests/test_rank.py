@@ -42,7 +42,7 @@ needs_gist = pytest.mark.skipif(not _binary_available(), reason="no gist binary"
 _SAMPLE = (
     " 1. bindings/rust/src/request.rs:33  [def]  \u00d711  pub struct SearchRequest {\n"
     " 2. bindings/rust/tests/session.rs:15  [use]  \u00d719  use gist::{SearchRequest};\n"
-    " 3. services/backend/api/internal/pb/grpc/atelierpb/atelier.pb.go:2227  [gen]  \u00d752  type SearchRequest struct {\n"
+    " 3. src/server/api/internal/pb/search.pb.go:2227  [gen]  \u00d752  type SearchRequest struct {\n"
 )
 
 

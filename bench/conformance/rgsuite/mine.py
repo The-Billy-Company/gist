@@ -14,7 +14,7 @@ all sharing the same fixture. Concatenating multiple invocations into one argv
 (the old behavior) produced bogus argv like `['--files','--files','a/src']`.
 
 Regenerate only when bumping the pinned ripgrep the suite tracks:
-    python3 mine.py [path/to/ripgrep/tests]   # default: <repo>/.etc/ripgrep/tests
+    python3 mine.py [path/to/ripgrep/tests]   # default: <repo>/upstream/ripgrep/tests
 
 Each record carries status ok|skip so the scoreboard stays honest about what it
 could and couldn't reproduce.
@@ -29,7 +29,7 @@ import sys
 
 
 HERE = Path(__file__).resolve().parent
-_DEFAULT = HERE.parents[2] / ".etc" / "ripgrep" / "tests"  # optional local ripgrep tests clone
+_DEFAULT = HERE.parents[2] / "upstream" / "ripgrep" / "tests"  # optional local ripgrep tests clone
 TESTS = Path(sys.argv[1]) if len(sys.argv) > 1 else _DEFAULT
 FILES = ["binary.rs", "feature.rs", "json.rs", "misc.rs", "multiline.rs", "regression.rs"]
 

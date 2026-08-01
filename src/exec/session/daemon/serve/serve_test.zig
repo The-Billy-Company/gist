@@ -281,10 +281,10 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
 
     const root = try freshRoot(io, a, "serve", @intFromPtr(&threaded));
     defer fault.spare("remove fixture", Dir.cwd().deleteTree(io, root));
-    try putFile(io, a, root, "a.txt", "WalletService here\n");
+    try putFile(io, a, root, "a.txt", "SessionStore here\n");
     try putFile(io, a, root, "b.txt", "nothing\n");
-    try putFile(io, a, root, "c.txt", "also WalletService\n");
-    try putFile(io, a, root, "d.txt", "walletservice lower\n");
+    try putFile(io, a, root, "c.txt", "also SessionStore\n");
+    try putFile(io, a, root, "d.txt", "sessionstore lower\n");
     // Word-boundary fixtures (lane 2): e has a word-valid `run` per line (the
     // second only AFTER a word-rejected `rerun` occurrence), f only substring
     // hits, g only a Unicode-neighbor-rejected hit (`é` beside the match).
@@ -310,7 +310,7 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     }
 
     // Eligible `-l` query returns the sorted matching-file set.
-    const files = try collectFiles(gpa, io, fd, a, .{ .pattern = "WalletService", .mode = .files, .fixed = true });
+    const files = try collectFiles(gpa, io, fd, a, .{ .pattern = "SessionStore", .mode = .files, .fixed = true });
     try std.testing.expectEqual(@as(usize, 2), files.len);
     try std.testing.expect(hasSuffix(files, "a.txt"));
     try std.testing.expect(hasSuffix(files, "c.txt"));
@@ -319,16 +319,16 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     // Bare `lines` query: chunk-streamed pre-rendered `path:text` rows in
     // cold's `pathLess` file order, then the terminal matched flag.
     {
-        const lr = try collectLines(gpa, io, fd, a, .{ .pattern = "WalletService", .mode = .lines, .fixed = true });
+        const lr = try collectLines(gpa, io, fd, a, .{ .pattern = "SessionStore", .mode = .lines, .fixed = true });
         try std.testing.expect(lr.matched);
-        const want = try std.fmt.allocPrint(a, "{s}/a.txt:WalletService here\n{s}/c.txt:also WalletService\n", .{ root, root });
+        const want = try std.fmt.allocPrint(a, "{s}/a.txt:SessionStore here\n{s}/c.txt:also SessionStore\n", .{ root, root });
         try std.testing.expectEqualStrings(want, lr.out);
     }
     // `-n` flips the same rows to `path:line:text`.
     {
-        const lr = try collectLines(gpa, io, fd, a, .{ .pattern = "WalletService", .mode = .lines, .fixed = true, .line_num = true });
+        const lr = try collectLines(gpa, io, fd, a, .{ .pattern = "SessionStore", .mode = .lines, .fixed = true, .line_num = true });
         try std.testing.expect(lr.matched);
-        const want = try std.fmt.allocPrint(a, "{s}/a.txt:1:WalletService here\n{s}/c.txt:1:also WalletService\n", .{ root, root });
+        const want = try std.fmt.allocPrint(a, "{s}/a.txt:1:SessionStore here\n{s}/c.txt:1:also SessionStore\n", .{ root, root });
         try std.testing.expectEqualStrings(want, lr.out);
     }
     // A no-match `lines` query: zero chunks, terminal `matched = false`.
@@ -343,14 +343,14 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     // stays case-sensitive (the raw bit crossed the socket; the SESSION
     // resolved it against the pattern).
     {
-        const folded = try collectFiles(gpa, io, fd, a, .{ .pattern = "walletservice", .mode = .files, .fixed = true, .smart_case = true });
+        const folded = try collectFiles(gpa, io, fd, a, .{ .pattern = "sessionstore", .mode = .files, .fixed = true, .smart_case = true });
         try std.testing.expectEqual(@as(usize, 3), folded.len);
         try std.testing.expect(hasSuffix(folded, "a.txt"));
         try std.testing.expect(hasSuffix(folded, "c.txt"));
         try std.testing.expect(hasSuffix(folded, "d.txt"));
     }
     {
-        const exact = try collectFiles(gpa, io, fd, a, .{ .pattern = "WalletService", .mode = .files, .fixed = true, .smart_case = true });
+        const exact = try collectFiles(gpa, io, fd, a, .{ .pattern = "SessionStore", .mode = .files, .fixed = true, .smart_case = true });
         try std.testing.expectEqual(@as(usize, 2), exact.len);
         try std.testing.expect(!hasSuffix(exact, "d.txt"));
     }
@@ -378,7 +378,7 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     // `lines` frame carrying only the matched flag — existence, no output. A
     // present pattern matches; an absent one does not; `-w` narrows it.
     {
-        const yes = try collectLines(gpa, io, fd, a, .{ .pattern = "WalletService", .mode = .lines, .fixed = true, .quiet = true });
+        const yes = try collectLines(gpa, io, fd, a, .{ .pattern = "SessionStore", .mode = .lines, .fixed = true, .quiet = true });
         try std.testing.expect(yes.matched);
         try std.testing.expectEqualStrings("", yes.out);
         const no = try collectLines(gpa, io, fd, a, .{ .pattern = "NoSuchNeedleAnywhere", .mode = .lines, .fixed = true, .quiet = true });
@@ -407,7 +407,7 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     // qualifies every file with a non-matching line — a/c (one line, all
     // matching) drop out; the other five stay.
     {
-        const inv = try collectFiles(gpa, io, fd, a, .{ .pattern = "WalletService", .mode = .files, .fixed = true, .invert = true });
+        const inv = try collectFiles(gpa, io, fd, a, .{ .pattern = "SessionStore", .mode = .files, .fixed = true, .invert = true });
         try std.testing.expectEqual(@as(usize, 5), inv.len);
         try std.testing.expect(hasSuffix(inv, "b.txt") and hasSuffix(inv, "d.txt") and hasSuffix(inv, "e.txt"));
         try std.testing.expect(hasSuffix(inv, "f.txt") and hasSuffix(inv, "g.txt"));
@@ -416,25 +416,25 @@ test "serve: handshake → -l query → ping → shutdown round-trips over the s
     // `-v` emit streams the complementary lines in `pathLess` order: a/c hold
     // only matching lines (nothing emitted); the rest emit whole.
     {
-        const lr = try collectLines(gpa, io, fd, a, .{ .pattern = "WalletService", .mode = .lines, .fixed = true, .invert = true });
+        const lr = try collectLines(gpa, io, fd, a, .{ .pattern = "SessionStore", .mode = .lines, .fixed = true, .invert = true });
         try std.testing.expect(lr.matched);
-        const want = try std.fmt.allocPrint(a, "{s}/b.txt:nothing\n{s}/d.txt:walletservice lower\n{s}/e.txt:run runner\n{s}/e.txt:rerun run\n{s}/f.txt:runner only\n{s}/g.txt:\xc3\xa9run here\n", .{ root, root, root, root, root, root });
+        const want = try std.fmt.allocPrint(a, "{s}/b.txt:nothing\n{s}/d.txt:sessionstore lower\n{s}/e.txt:run runner\n{s}/e.txt:rerun run\n{s}/f.txt:runner only\n{s}/g.txt:\xc3\xa9run here\n", .{ root, root, root, root, root, root });
         try std.testing.expectEqualStrings(want, lr.out);
     }
     // `-c -v` is the corpus-wide complement Lever A serves warm over the wire:
     // TOTAL_CORPUS_LINES (8) − Σ matchCount (2) = 6 non-matching lines. (The CLI
     // routes `-c` cold for rg's per-file semantics; embedders reach this path.)
     {
-        const total = try collectCount(gpa, io, fd, .{ .pattern = "WalletService", .mode = .count, .fixed = true });
+        const total = try collectCount(gpa, io, fd, .{ .pattern = "SessionStore", .mode = .count, .fixed = true });
         try std.testing.expectEqual(@as(u64, 2), total);
-        const inv = try collectCount(gpa, io, fd, .{ .pattern = "WalletService", .mode = .count, .fixed = true, .invert = true });
+        const inv = try collectCount(gpa, io, fd, .{ .pattern = "SessionStore", .mode = .count, .fixed = true, .invert = true });
         try std.testing.expectEqual(@as(u64, 6), inv);
     }
     // `-v -m1` caps the inverted emit at one row per file (e.txt drops its 2nd).
     {
-        const capped = try collectLines(gpa, io, fd, a, .{ .pattern = "WalletService", .mode = .lines, .fixed = true, .invert = true, .max_count = 1 });
+        const capped = try collectLines(gpa, io, fd, a, .{ .pattern = "SessionStore", .mode = .lines, .fixed = true, .invert = true, .max_count = 1 });
         try std.testing.expect(capped.matched);
-        const want = try std.fmt.allocPrint(a, "{s}/b.txt:nothing\n{s}/d.txt:walletservice lower\n{s}/e.txt:run runner\n{s}/f.txt:runner only\n{s}/g.txt:\xc3\xa9run here\n", .{ root, root, root, root, root });
+        const want = try std.fmt.allocPrint(a, "{s}/b.txt:nothing\n{s}/d.txt:sessionstore lower\n{s}/e.txt:run runner\n{s}/f.txt:runner only\n{s}/g.txt:\xc3\xa9run here\n", .{ root, root, root, root, root });
         try std.testing.expectEqualStrings(want, capped.out);
     }
 

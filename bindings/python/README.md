@@ -21,7 +21,7 @@ only — importing `gist` does not make relate or blast reachable.
 ```python
 import gist
 
-for m in gist.search(r"func\s+\w+\(", paths=["services/backend"]):
+for m in gist.search(r"func\s+\w+\(", paths=["src/server/api"]):
     print(f"{m.path}:{m.line_number}: {m.text}")
 
 hits = gist.files("TODO", types=["py"])

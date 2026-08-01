@@ -324,7 +324,7 @@ test "query_ext round-trips the PathFilter and the --rank trailer" {
     defer arena.deinit();
     // A scoped rank query: regex pattern, `-i`, a PATH root, and `--rank=5`.
     const sent: request.Request = .{
-        .pattern = "WalletService",
+        .pattern = "SessionStore",
         .mode = .lines,
         .ignore_case = true,
         .rank_k = 5,
@@ -337,7 +337,7 @@ test "query_ext round-trips the PathFilter and the --rank trailer" {
     const p = try roundTrip(&buf);
     try std.testing.expectEqual(protocol.Opcode.query_ext, p.op);
     const got = try protocol.decodeQueryExt(arena.allocator(), p.payload);
-    try std.testing.expectEqualStrings("WalletService", got.pattern);
+    try std.testing.expectEqualStrings("SessionStore", got.pattern);
     try std.testing.expect(got.ignore_case);
     try std.testing.expectEqual(@as(?usize, 5), got.rank_k);
     try std.testing.expectEqualStrings("services/ai", got.filter.roots[0]);

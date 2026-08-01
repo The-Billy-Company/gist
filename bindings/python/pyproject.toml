@@ -34,9 +34,10 @@ dev = [
   "pytest>=9.0",
   "ruff>=0.15",
   # Test-only, never a runtime dependency: the in-process tier is opportunistic
-  # and fails open to the subprocess without it (see the header). In billy it
-  # arrived transitively from the sibling cffi kernels; a standalone checkout has
-  # no such sibling, so without this the whole FFI parity plane silently skips.
+  # and fails open to the subprocess without it (see the header). In the
+  # originating monorepo it arrived transitively from the sibling cffi kernels; a
+  # standalone checkout has no such sibling, so without this the whole FFI parity
+  # plane silently skips.
   "cffi>=1.17",
 ]
 

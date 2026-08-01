@@ -76,7 +76,7 @@ works, one blocking search at a time.
 			file names the way |cmdline-special| expands them
 			for |:grep|. Quotes and backslashes still group
 			the way your fingers expect: >
-				:Gist WalletService services/backend
+				:Gist SessionStore src/server/api
 				:Gist 'fn \w+\(' -t rust
 				:Gist -F 'a|b' --hidden
 				:Gist -F gist#job#start

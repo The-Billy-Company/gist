@@ -41,11 +41,11 @@ fn context(path: &str, line: u64) -> Match {
 
 fn sample() -> Vec<Match> {
     vec![
-        hit("services/api/wallet.go", 10, "TODO"),
-        hit("services/api/wallet.go", 20, "TODO"),
+        hit("services/api/session.go", 10, "TODO"),
+        hit("services/api/session.go", 20, "TODO"),
         hit("services/api/ledger.go", 5, "TODO"),
         hit("clients/web/app.ts", 3, "FIXME"),
-        context("services/api/wallet.go", 21),
+        context("services/api/session.go", 21),
     ]
 }
 
@@ -54,12 +54,12 @@ fn sample() -> Vec<Match> {
 #[test]
 fn by_file_counts_lines_and_ranks_desc() {
     let t = gist::tally(sample(), Axis::File);
-    // wallet.go(2) ahead of ledger.go(1) & app.ts(1); ties broken by key asc.
+    // session.go(2) ahead of ledger.go(1) & app.ts(1); ties broken by key asc.
     let keys: Vec<&str> = t.iter().map(|g| g.key.as_str()).collect();
     assert_eq!(
         keys,
         [
-            "services/api/wallet.go",
+            "services/api/session.go",
             "clients/web/app.ts",
             "services/api/ledger.go",
         ]
@@ -74,7 +74,7 @@ fn by_dir_groups_across_files() {
     let t = gist::tally(sample(), Axis::Dir);
     let top = &t.top(1)[0];
     assert_eq!(top.key, "services/api");
-    assert_eq!(top.count(), 3); // 2 wallet + 1 ledger
+    assert_eq!(top.count(), 3); // 2 session + 1 ledger
     assert_eq!(top.files(), 2); // spanning two files
     assert_eq!(t.get("clients/web").unwrap().count(), 1);
 }

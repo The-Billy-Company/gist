@@ -61,18 +61,18 @@ Definition first, call sites after, codegen sunk. It is heuristic text ranking r
 **Docs or code.** The other native axis is one `-t` cannot express. `-t` answers "which language is this," and nobody asks that. The question people actually ask is whether they are reading the paper trail or the implementation, so that is its own partition: `docs`, `code`, `data`, total and disjoint over every path, with `--no-` complements that are exact.
 
 ```
-$ gist WalletService --docs      # only prose: what was written ABOUT it
-$ gist WalletService --no-docs   # only the implementation and its payload
-$ gist retry_budget --data       # only config: json, yaml, toml, lockfiles
+$ gist SessionStore --docs      # only prose: what was written ABOUT it
+$ gist SessionStore --no-docs   # only the implementation and its payload
+$ gist retry_budget --data      # only config: json, yaml, toml, lockfiles
 ```
 
 **Scope.** Underneath those, the ordinary narrowing. Positional paths shrink the walk; globs and types shrink it further.
 
 ```
-$ gist wallet clients/web        # explicit scope
-$ gist wallet -g '*.sql'         # one glob
-$ gist wallet -g '!vendor/**'    # negate it and the glob subtracts instead
-$ gist wallet -tgo -tpy          # type filters compose; -T subtracts one
+$ gist session src/server       # explicit scope
+$ gist session -g '*.sql'       # one glob
+$ gist session -g '!vendor/**'  # negate it and the glob subtracts instead
+$ gist session -tgo -tpy        # type filters compose; -T subtracts one
 ```
 
 `gist --type-list` prints the registry - a strict superset of ripgrep's, so anything parsing rg's format parses this - and `--type-add 'notes:docs/**'` invents a type for the length of one run.

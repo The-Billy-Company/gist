@@ -83,7 +83,7 @@ The result is deliberately boring to call:
 
 ```bash
 gist 'class Wallet' --rank
-gist 'pgxpool\.\w+' services/backend -t go
+gist 'pgxpool\.\w+' src/server/api -t go
 gist -P '(?<=route\()"/api/[^"]+"' -U
 ```
 

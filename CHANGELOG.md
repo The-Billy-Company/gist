@@ -60,8 +60,8 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   mislabeling the same shape, so the two can never drift.
 - A release is now gated on the Certificate of Optimality being freshly
   re-minted and attached on **both** the Mac and the Linux machine
-  (`bench/certify/check_release.py`). Cold-CLI dominance is machine-specific
-  (ADR-320), so per-platform bundles publish under `artifact/<platform-id>/`
+  (`bench/certify/check_release.py`). Cold-CLI dominance is machine-specific,
+  so per-platform bundles publish under `artifact/<platform-id>/`
   and Town Crier refuses the release until both are present, valid, and
   current.
 - A second emit lane in the cold field race (`bench/races/coldquery.sh`): after
@@ -103,7 +103,7 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   model for any Apple CPU (all map to the 2013 Cyclone model; LLVM #63698); it
   degrades gracefully to a documented skip when `llvm-mca` is not installed.
 - (in `irregex`) Added a zero-copy emit transport to the warm `gist serve` daemon: a large…
-- Added the gist operational-envelope matrix under `bench/evaluate/` (ADR-352):
+- Added the gist operational-envelope matrix under `bench/evaluate/`:
   a closed-verb evaluator (`run`/`verify`/`compare`/`brief`) over the regimes
   frozen in `contract/performance_evidence.toml` — lifecycle, resource, scale,
   and concurrency — that reuses the existing race registry (`_compete.sh`),
@@ -123,10 +123,9 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   (`GIST_CORPUS_ROOT`) so a live ~10-agent coworking tree cannot churn under a
   capture, and carries `_compete.sh`'s uncapped-output env contract
   (`GIST_UNCAP=1`) into every command so gist's default output budget can't
-  clip a repo-wide result and desync the ripgrep oracle. A Billy-native,
-  idle-gated Anvil path (`scripts/observe/delivery/anvilbox/gist_eval.py`)
-  borrows the GPU box for a second x86_64-linux datapoint over the pinned-key
-  transport, never raw ssh and never stopping the forge's day job.
+  clip a repo-wide result and desync the ripgrep oracle. An idle-gated path to
+  a self-hosted GPU box borrows it for a second x86_64-linux datapoint over a
+  pinned-key transport, never raw ssh and never stopping its day job.
   (see also: irregex)
 - CREST's production proof now fixes and pins the class-run optional-seam false
   negative against the real matcher, records all ASCII/Unicode ×
@@ -161,11 +160,10 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   Layer G (relate — retrieval-by-description-length boundary, recall@1, and
   anti-redundant pack). Each is fail-closed and gated by `check_artifacts.py`;
   the warm tier is upgraded to a per-class Mann-Whitney dominance verdict.
-- New Go binding (`bindings/go/`, module
-  `irregex/bindings/go`) over the pull-cursor C ABI
-  (ADR-352) — a cgo wrapper linking the self-contained `libgist.a`, in its
-  own `go.mod` so it never enters the `CGO_ENABLED=0` static Cloud Run services
-  (ADR-110). A warm `Engine` opened over roots (none = the rootless CWD walk)
+- New Go binding (`bindings/go/`) over the pull-cursor C ABI — a cgo wrapper
+  linking the self-contained `libgist.a`, in its own `go.mod` so it never
+  enters a consumer's `CGO_ENABLED=0` static build. A warm `Engine` opened
+  over roots (none = the rootless CWD walk)
   runs many `Search(ctx, Request)` queries, each materializing a pull `Cursor`
   driven scanner-style (`Next`/`Match`/`Err`) or via a Go 1.23 `All()`
   range-over-func; the cursor refills an internal batch under the hood, paying
@@ -209,13 +207,13 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   `certify_crest_report.py`; the reproducibility gate now requires the Layer E
   section + `crest.csv` sidecar.
 - The Python bindings now ship `gist.ensure_serve` and the
-  `gist.opening_session` context manager (ADR-352 rung 2.5): a batch caller
+  `gist.opening_session` context manager: a batch caller
   opens one warm `Session` — auto-spawning a detached `gist serve` daemon when
   none is listening (herd-safe, `GIST_NO_AUTOSERVE`-gated, fail-open to cold) —
   so its multi-query loop rides the resident UDS path instead of re-paying the
-  cold subprocess + index-mmap startup per call. First consumers: the doc-radar
-  `still_here` batch and the codegen/trust lint file scans.
-- The Python package now drives the in-process C session ABI (ADR-352 rung 3)
+  cold subprocess + index-mmap startup per call. Its first consumers were batch
+  documentation-freshness and lint file scans in the originating monorepo.
+- The Python package now drives the in-process C session ABI
   over cffi (`irregex/_ffi.py` ABI-mode `dlopen` of `libirregex.{dylib,so}`),
   so a persistent `Session` serves eligible queries WARM inside the host
   process — no subprocess, no Unix socket. Unlike the rootless UDS transport
@@ -234,7 +232,7 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   cold: records, files, count, explicit relative/file/absolute roots,
   read-your-writes, deletion reconcile, unsupported→cold, ABI parity).
 - The Rust `gist` crate gained an opt-in `native` feature exposing an
-  in-process warm `Engine`/`Cursor` over the pull-cursor C ABI (ADR-352), the
+  in-process warm `Engine`/`Cursor` over the pull-cursor C ABI, the
   graduation rung beside the default subprocess transport.
   `Engine::open(roots)` holds a warm corpus; `search`/`run` return a pull
   `Cursor` implementing `Iterator<Item = Result<Match>>` (plus `batches(n)` to
@@ -302,7 +300,7 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
 - The irregex verbs ship as their own product face: a `relate` binary
   (`similar` / `dups` / `patterns` + `--schema`) built from
   `src/cli/relate/main.zig` over the same kernel, corpus policy, and persisted
-  trigram index as `gist` — one engine, two faces. `make install-gist` installs
+  trigram index as `gist` — one engine, two faces. The install step places
   both (`~/.local/bin/{gist,relate}`); the Python bindings drive the verbs
   through `relate` (`RELATE_BIN` override); the `gist` CLI sheds them with a
   redirect stub (exit 2) rather than a silent literal search, and its
@@ -479,7 +477,7 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
 - `bench/session/` certifies the honest warm-product path: a persistent client
   dialing a `gist serve` daemon once over a Unix socket and replaying a slate
   over
-  that warm connection (ADR-352 rung 2.5). A new `zig build bench -- session`
+  that warm connection. A new `zig build bench -- session`
   mode
   times the real client→daemon round-trip (daemon on its own thread, one reused
   connection); `certify_session.sh` pairs each needle with ripgrep-cold and
@@ -580,15 +578,16 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   reporting a near-roof result.
 - Scrubbed the last project-specific hardcoding out of the kernel for OSS-clean
   defaults. The artifact home is `GIST_DIR`-relocatable (default
-  `.local/gist-verify`; every derived path — index, atlas, shelf, anchor,
+  `.gist`; every derived path — index, atlas, shelf, anchor,
   daemon socket — resolves through `corpus.outDir()` / `corpus.ArtifactPath`,
   and the Python/Rust bindings honor the same env). The skip-dir policy is now
-  generic-only: `graphify-out` left the comptime baseline (34 cross-ecosystem
+  generic-only: `derived-out` left the comptime baseline (34 cross-ecosystem
   names — VCS, package caches, build output), and per-tree extras ride
   `GIST_SKIP` (env, `:`/`,`/space separated) or `<GIST_DIR>/skips.list` (one
   name per line, `#` comments) — both scope only the corpus walks (index build,
   freshness, relate); rg-mode search keeps pure gitignore parity and ignores
-  them. Billy seeds `graphify-out` into `skips.list` via `make install-gist`.
+  them. A consuming monorepo seeds its own `derived-out` into `skips.list` at
+  install time.
   The bench harness follows suit: `_compete.sh`/`multipattern.sh`/`race.sh`
   resolve their corpus scope via `GIST_ROOTS` → published-corpus roots when
   present → the whole tree, mirroring `corpus.resolveRoots`.
@@ -783,8 +782,9 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   `serial.pathLess` (rg's `Path::cmp`, valid for single/implicit root where
   rg's per-argv-root walker order collapses to it); descending is the global
   mirror for any root count. Time keys (modified/accessed/created), `--files`,
-  `--json`, and multi-root ascending stay on the serial engine. Result: `gist
-  -l --sort path WalletService` went from 935 ms to 36 ms — **34.8x faster**
+  `--json`, and multi-root ascending stay on the serial engine. Result: a
+  `gist -l --sort path` search for a high-match symbol went from 935 ms to 36
+  ms — **34.8x faster**
   than rg 15.2 (content `--sort path` 26x); non-sorted paths and the stat-only
   `--files --sort` listing are unchanged.
 - `--stats` and `--files-without-match` now ride the fused parallel walk
@@ -1064,7 +1064,7 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   discarded)
   and a needle miss (grep exits 1) no longer aborts hyperfine.
 - (in `irregex`) **`rg --json` emits ripgrep's JSON Lines record stream — was a fail-loud…
-- (in `irregex`) Initial scaffold mirroring `pkg/kernels/core` conventions: `build.zig`…
+- (in `irregex`) Initial scaffold mirroring the sibling kernel packages' conventions: `build.zig`…
 
 ### Changed
 

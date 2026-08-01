@@ -224,7 +224,7 @@ Track A replays without the ripgrep checkout. Regenerate it only when bumping th
 tracked ripgrep:
 
 ```bash
-python3 mine.py [path/to/ripgrep/tests]   # default: <repo>/.etc/ripgrep/tests
+python3 mine.py [path/to/ripgrep/tests]   # default: <repo>/upstream/ripgrep/tests
 ```
 
 ## Modes companion (`modes.py`) — the `-U`/`-P` proof

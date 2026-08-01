@@ -7,8 +7,8 @@ tests were worse: an empty scope yields no picks, and "no picks" reads as a
 clean answer rather than as a test that never ran. They now derive the scope
 from the tree - the kernel is the nearest ancestor holding a `build.zig`, the
 binding is this package's own directory - and both resolve correctly whether
-the kernel sits at a repo root or nested under `pkg/kernels/irregex`, which
-is the same dual-layout rule the cold-binary probe already followed.
+the kernel sits at a repo root or nested inside a larger tree, which is the
+same dual-layout rule the cold-binary probe already followed.
 
 The containment assertion was rewritten to compare resolved paths rather than a
 string prefix, so it stays meaningful when the scope is the repo root.

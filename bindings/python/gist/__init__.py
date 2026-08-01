@@ -5,7 +5,7 @@ Exact search over a tree. Kinship lives in `relate`; composed verbs live in
 
     import gist
 
-    for m in gist.search(r"func\\s+\\w+\\(", paths=["services/backend"]):
+    for m in gist.search(r"func\\s+\\w+\\(", paths=["src/server/api"]):
         print(f"{m.path}:{m.line_number}: {m.text}")
 """
 

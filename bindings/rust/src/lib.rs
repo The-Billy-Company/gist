@@ -18,8 +18,8 @@
 //!
 //! let hits  = gist::files("TODO")?;                              // files-with-matches
 //! let total = gist::count("panic")?;                            // total matching lines
-//! let scoped = gist::SearchRequest::new("Wallet")
-//!     .path("services/backend")
+//! let scoped = gist::SearchRequest::new("Session")
+//!     .path("src/server/api")
 //!     .type_("go")
 //!     .run()?;
 //! # Ok::<(), gist::Error>(())
@@ -63,7 +63,7 @@
 //!
 //! ```no_run
 //! # #[cfg(feature = "native")] {
-//! let engine = gist::Engine::open(["services/backend"])?;
+//! let engine = gist::Engine::open(["src/server/api"])?;
 //! for m in engine.search(&gist::SearchRequest::new("TODO"))? {
 //!     let m = m?;
 //!     println!("{}:{}: {}", m.path, m.line_number, m.text);

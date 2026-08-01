@@ -444,7 +444,7 @@ fn run(init: std.process.Init) !void {
     // a redirect stub regresses nothing a literal searcher could reach; it just
     // routes muscle memory (and agents replaying old argv) to the new face.
     if (std.mem.eql(u8, mode, "similar") or std.mem.eql(u8, mode, "dups") or std.mem.eql(u8, mode, "patterns")) {
-        gist.assay.diag("gist: '{s}' moved to the relate binary — run `relate {s} ...` (same flags; `make install-gist` installs both)\n", .{ mode, mode });
+        gist.assay.diag("gist: '{s}' moved to the relate binary — run `relate {s} ...` (same flags; `zig build` installs both)\n", .{ mode, mode });
         std.process.exit(2);
     }
 

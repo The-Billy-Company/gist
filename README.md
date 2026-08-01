@@ -136,10 +136,10 @@ question anyone actually asks, which is never "is this reStructuredText" but
 is its own corpus axis:
 
 ```bash
-gist 'WalletService' --docs       # only prose: what was written ABOUT it
-gist 'WalletService' --no-docs    # only the implementation and its payload
-gist 'retry_budget' --data        # only config: json, yaml, toml, lockfiles
-gist 'TODO' --code --no-index     # implementation only, no acceleration
+gist 'SessionStore' --docs      # only prose: what was written ABOUT it
+gist 'SessionStore' --no-docs   # only the implementation and its payload
+gist 'retry_budget' --data      # only config: json, yaml, toml, lockfiles
+gist 'TODO' --code --no-index   # implementation only, no acceleration
 ```
 
 Three genera — `docs`, `code`, `data` — total and disjoint over every path, so

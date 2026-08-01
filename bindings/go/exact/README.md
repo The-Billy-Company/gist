@@ -17,7 +17,7 @@ Where is this exact pattern? A warm `Engine` opened over some roots, queried man
 times, each query yielding a pull `Cursor` you drive scanner-style or range over.
 
 ```go
-eng, _ := exact.Open("services/backend")
+eng, _ := exact.Open("src/server/api")
 defer eng.Close()
 
 cur, err := eng.Search(ctx, analytic.Request{Pattern: `func\s+\w+`, IgnoreCase: true})
