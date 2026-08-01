@@ -76,6 +76,16 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    // Run the CLI straight out of the build graph, from the package root:
+    // `zig build cli -- index`, `-- status`, `-- <pattern> [flags]`. The
+    // monorepo also carried a `gist` step that installed the CLI *without* the
+    // lab; here a bare `zig build` already does exactly that, so it is gone.
+    const run_cli = b.addRunArtifact(exe);
+    run_cli.setCwd(b.path("."));
+    if (b.args) |args| run_cli.addArgs(args);
+    b.step("cli", "gist CLI: `-- index`, `-- status`, `-- <pattern> [flags]`")
+        .dependOn(&run_cli.step);
+
     // ── the C-ABI dual artifact ──
     // Dynamic lib (Python cffi dlopen); owns the header install. Named `gist`
     // — its symbols and header are this product's. Substrate symbols resolve
@@ -148,6 +158,92 @@ pub fn build(b: *std.Build) void {
     copy_eng_static.step.dependOn(&irregex_lib.step);
     b.getInstallStep().dependOn(&b.addInstallLibFile(eng_static_out, "libirregex.a").step);
 
+    // ── the measurement lab ──
+    // Deliberately OFF the default install step: a bare `zig build` (and every
+    // parity gate that rebuilds the CLI) pays only for the product surface.
+    // Each lab exe installs on its own named step, so the documented
+    // `sudo zig-out/bin/<exe>` re-runs keep working after e.g. `zig build
+    // certify`; `zig build lab` installs both at once.
+    //
+    // What lives here is what measures THIS binary. The engine's own rungs and
+    // certificate bounds stay with the kernel in the `irregex` package; the
+    // three shared instruments come back from there as modules, so a class name
+    // means the same thing in both repos' numbers.
+    const lab_step = b.step("lab", "Build + install the measurement-lab executables (gist-bench, warden) → zig-out/bin");
+
+    // `gist-bench` — one binary, six modes. It links the engine like any
+    // consumer AND the product chassis, because its session lane spawns a real
+    // `gist serve` daemon on a thread and speaks the real UDS frame grammar to
+    // it. That second import is why this harness lives here: the engine package
+    // is upstream of the product and cannot reach down to the daemon.
+    const bench_mod = b.createModule(.{
+        .root_source_file = b.path("bench/apparatus/harness/bench.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &(deps ++ [_]std.Build.Module.Import{
+            .{ .name = "gist", .module = chassis },
+            .{ .name = "pmu", .module = irregex_dep.module("pmu") },
+            .{ .name = "probes", .module = irregex_dep.module("probes") },
+            .{ .name = "stats", .module = irregex_dep.module("stats") },
+        }),
+    });
+    // Layer-A certify mode reads hardware perf counters through Apple's private
+    // kperf framework via `dlopen` (std.DynLib) — needs libc.
+    bench_mod.link_libc = true;
+    const bench_exe = b.addExecutable(.{ .name = "gist-bench", .root_module = bench_mod });
+    const bench_install = &b.addInstallArtifact(bench_exe, .{}).step;
+    lab_step.dependOn(bench_install);
+
+    // Every mode runs from the package root. In the monorepo this was three
+    // levels up, because the corpus and the package were different trees; here
+    // the corpus lives in this package under `bench/apparatus/corpora/`, and a
+    // corpus elsewhere is named the way the harness already expects —
+    // positionally, or through GIST_CORPUS_ROOT.
+    for ([_]struct { step: []const u8, mode: ?[]const u8, blurb: []const u8 }{
+        .{ .step = "bench", .mode = null, .blurb = "Build the index over given dirs and time the query slate" },
+        .{ .step = "verify", .mode = "verify", .blurb = "Emit gist match sets + corpus list for the rg equality diff" },
+        .{ .step = "session", .mode = "session", .blurb = "Warm-tier product path: persistent client → resident daemon over a Unix socket" },
+        .{ .step = "certify", .mode = "certify", .blurb = "Layer-A optimality cert: per-class cycles/byte + bootstrap CI" },
+        .{ .step = "flagbench", .mode = "flagbench", .blurb = "Per-function micro-profiles for -i / -n / -v (byte-identity self-checked)" },
+        .{ .step = "sessionprof", .mode = "sessionprof", .blurb = "Per-function micro-profiles for the warm session seams (answer-digest self-checked)" },
+    }) |lane| {
+        const run = b.addRunArtifact(bench_exe);
+        run.setCwd(b.path("."));
+        if (lane.mode) |m| run.addArg(m);
+        if (b.args) |args| run.addArgs(args);
+        const step = b.step(lane.step, lane.blurb);
+        step.dependOn(&run.step);
+        step.dependOn(bench_install);
+    }
+    // `warden` — what the resident memory ceiling costs on the alloc path. A
+    // safety feature that shows up in a throughput benchmark is not worth
+    // having, so this decomposes the wrapper's cost (bare / passthru / warden)
+    // against the allocator the daemon really gets, and FAILS on regression
+    // rather than merely reporting. Correctness of the bound itself rides
+    // `zig build test` via root.zig.
+    const warden_mod = b.createModule(.{
+        .root_source_file = b.path("bench/rungs/warden/bench.zig"),
+        .target = target,
+        .optimize = cli_optimize, // product-speed posture — this is a timing tool
+    });
+    // Imports the metered allocator ALONE rather than the whole chassis: it
+    // depends on nothing but `std`, so the thing being timed is the thing being
+    // measured, with no unrelated compile in the way.
+    warden_mod.addImport("warden", b.createModule(.{
+        .root_source_file = b.path("src/exec/session/warden/warden.zig"),
+        .target = target,
+        .optimize = cli_optimize,
+    }));
+    const warden_exe = b.addExecutable(.{ .name = "warden", .root_module = warden_mod });
+    const warden_install = &b.addInstallArtifact(warden_exe, .{}).step;
+    lab_step.dependOn(warden_install);
+    const run_warden = b.addRunArtifact(warden_exe);
+    run_warden.setCwd(b.path("."));
+    if (b.args) |args| run_warden.addArgs(args);
+    const warden_step = b.step("warden", "Resident memory ceiling: what the bound costs per allocation, decomposed vs a no-op wrapper");
+    warden_step.dependOn(&run_warden.step);
+    warden_step.dependOn(warden_install);
+
     // ── the test chassis ──
     const test_optimize = b.option(
         std.builtin.OptimizeMode,
@@ -185,6 +281,10 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     addShards(b, tests, test_step, shards, test_filter, test_skip);
+    // The lab harness compiles against both the engine and the daemon, so a
+    // product refactor can break it in a way `zig build` alone would not catch.
+    // (`stats.zig`'s verdict math is tested in the package that owns it.)
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = bench_mod })).step);
 
     const debug_tests = if (test_module == chassis) tests else b.addTest(.{
         .root_module = chassis,
