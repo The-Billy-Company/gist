@@ -142,9 +142,6 @@ NO_ARGS = {"--type-list", "--version", "--help", "--generate", "--pcre2-version"
 #   residual="superset"  gist prints MORE than rg for the same verdict: rg's
 #                        reported paths must still all be present, so the
 #                        boundary can add lines but never lose a file rg found
-#   residual="silent0"   BOTH printed nothing and rg still claims success: the
-#                        only admitted shape is rg exit 0 / gist exit 1 with two
-#                        empty streams, where gist's code is the coherent one
 # ---------------------------------------------------------------------------
 BOUNDARIES = {
     "--pretty": ("ansi", "gist paints its own OKLCH-derived palette (catalog: --colors)"),
@@ -165,16 +162,16 @@ BOUNDARIES = {
         "locator prints every matching line of a NUL-bearing file where rg prints one "
         "opaque `binary file matches` summary and stops",
     ),
-    "--files-without-match": (
-        "silent0",
-        "measured rg self-contradiction: over a tree holding ANY walked NUL-bearing "
-        "file, `rg --files-without-match` exits 0 while printing no path at all — and "
-        "it does so whether or not that file matches (`bytes searched: 0` in its own "
-        "--stats block). Its Summary printer suppresses binary paths while its exit "
-        "code counts them, so the code says `found` and the stream says `none`. gist "
-        "exits 1, which is what this mode's exit code means: 0 iff a path was listed",
-    ),
 }
+# `--files-without-match` used to be declared here as a boundary: over a tree
+# holding a walked NUL-bearing file rg exits 0 while printing no path, and gist
+# exited 1 on the theory that this mode's code means "a path was listed". It does
+# not. rg's `SummarySink::has_match` for `PathWithoutMatch` is `match_count == 0`,
+# so the question is "did some file's search find no match" - and an abandoned
+# binary search found none. The printer's refusal to LIST an unproven file is a
+# separate rule, which is why the two part company on exactly that file shape.
+# gist now answers rg's question, so there is nothing left to excuse; deleting
+# the entry is what keeps a regression to exit 1 from being waved through here.
 
 
 # ---------------------------------------------------------------------------
@@ -326,8 +323,6 @@ def _residual_holds(kind: str, rc_rg: int, rc_g: int, out_rg: bytes, out_g: byte
         return rc_rg == rc_g and all(name in gt and rgt[name] <= gt[name] for name in rgt)
     if kind == "identity":
         return rc_rg == rc_g
-    if kind == "silent0":
-        return rc_rg == 0 and rc_g == 1 and not out_rg and not out_g
     if kind == "superset":
         # The improvement may add LINES; it may not change which files matched or
         # the exit code. rg's suppressing summary still names its path, so the two

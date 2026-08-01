@@ -401,7 +401,7 @@ _residual check_ re-verified on the same run, so a boundary that has quietly
 become a bug is scored as one. `divergent` (differs for no declared reason) and
 `rejected` (gist exits 2 where rg accepts — a hole) both cost a point.
 Conformance is `(identical + boundary) / documented`. Currently **186 of 186 =
-100.0%** (177 identical, 9 declared boundaries, 0 divergent, 0 rejected).
+100.0%** (176 identical, 10 declared boundaries, 0 divergent, 0 rejected).
 
 A separate **undo-pair** lane covers the half a per-flag probe structurally
 cannot see: most negations name the default, so a negation that silently no-ops
