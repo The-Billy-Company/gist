@@ -41,15 +41,13 @@ There is no universal millisecond floor.
 ## Verbs
 
 ```bash
-python3 bench/evaluate/evaluate.py run       # measure THIS machine → bundle + report
-python3 bench/evaluate/evaluate.py run --publish   # commit a verified, clean-tree bundle
-python3 bench/evaluate/evaluate.py verify    # hermetic: check committed bundles + claims (CI path)
-python3 bench/evaluate/evaluate.py compare --a A/bundle.json --b B/bundle.json
-python3 bench/evaluate/evaluate.py brief     # digest of committed bundles
+python3 bench/dominance/evaluate/evaluate.py run       # measure THIS machine → bundle + report
+python3 bench/dominance/evaluate/evaluate.py run --publish   # commit a verified, clean-tree bundle
+python3 bench/dominance/evaluate/evaluate.py verify    # hermetic: check committed bundles + claims (CI path)
+python3 bench/dominance/evaluate/evaluate.py compare --a A/bundle.json --b B/bundle.json
+python3 bench/dominance/evaluate/evaluate.py brief     # digest of committed bundles
+python3 bench/dominance/evaluate/evaluate.py run --foreign   # adds the foreign-corpus scale lane
 ```
-
-Or via make: `make gist-evaluate`, `make gist-evaluate-verify`,
-`make gist-evaluate-foreign` (adds the foreign-corpus scale lane).
 
 ## Regimes (measurement lanes)
 

@@ -139,8 +139,8 @@ case "${art_rc}" in
     ;;
   2)
     echo "NOTE: no committed certificate yet — regenerate with"
-    echo "      CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify"
-    echo "      (or CERT_PUBLISH_DIR=bench/certificate/artifact bash bench/certificate/mint/mint.sh)"
+    echo "      CERT_FULL=1 CERT_SUDO=1 CERT_PUBLISH_DIR=bench/certificate/artifact \\"
+    echo "      bash bench/certificate/mint/mint.sh"
     echo "      on a clean tree (or isolated git worktree)."
     ;;
   *)

@@ -21,7 +21,8 @@ render time — generated from committed data, not transcribed.
 dominates (rg 807×, git grep 1158×, 20/20), while its **COLD** CLI loses to the
 whole field (rg 0.3×, csearch/zoekt 0.1×) — the per-query freshness `stat()`-walk
 cost — consistent with the macro certificate in `bench/certificate/artifact/`.
-Regenerate (`make figures`) rather than hand-editing.
+Regenerate by re-racing (`bash bench/dominance/races/{cold,warm,regex}.sh`)
+rather than hand-editing.
 
 **Do not read `cold.csv` as gist's verdict against the indexed pair.** `warm.csv`
 holds only the unindexed scanners, so csearch and zoekt appear in _this_ directory

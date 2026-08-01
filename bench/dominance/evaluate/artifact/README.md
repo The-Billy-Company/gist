@@ -12,5 +12,6 @@ shape are compared across them (`evaluate.py compare` / the footprint-consistenc
 section of `REPORT.md`). Cold/warm query dominance lives in the
 [Dominance-and-Fit Certificate](../../../certificate/), not here.
 
-Regenerate rather than hand-edit: `make gist-evaluate` (measure) →
-`make gist-evaluate-verify` (hermetic contract + claim check, the CI path).
+Regenerate rather than hand-edit: `python3 bench/dominance/evaluate/evaluate.py run`
+(measure) → `python3 bench/dominance/evaluate/evaluate.py verify` (hermetic
+contract + claim check, the CI path).

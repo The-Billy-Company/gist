@@ -16,10 +16,10 @@
 # each tool on its fastest honest path). gist + indexed rivals cold-load an index
 # built ONCE over the same corpus; rg/ugrep/ag/grep re-walk + re-scan.
 #
-# Usage:  bench/certify/certify.sh            (RUNS=20 WARMUP=3 by default)
-#         RUNS=40 bench/certify/certify.sh    (tighten the CIs)
-#         CERT_SUDO=1 CERT_PUBLISH_DIR=bench/certify/artifact …
-#         bash bench/certificate/mint/mint.sh             (B–E refresh; CERT_FULL=1 = this)
+# Usage:  bash bench/certificate/mint/mint.sh          (RUNS=20 WARMUP=3 by default)
+#         RUNS=40 bash bench/certificate/mint/mint.sh  (tighten the CIs)
+#         CERT_SUDO=1 CERT_PUBLISH_DIR=bench/certificate/artifact \
+#           bash bench/certificate/mint/mint.sh        (B–E refresh; CERT_FULL=1 = this)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../../dominance/races/field.sh
@@ -35,7 +35,7 @@ fi
 dirty="$(git -C "${REPO}" status --porcelain 2> /dev/null || true)"
 if [[ -n "${dirty}" && "${CERT_ALLOW_DIRTY:-0}" != "1" ]]; then
   echo "certificate aborted: worktree is dirty — commit or isolate changes before certifying" >&2
-  echo "(local refresh: CERT_ALLOW_DIRTY=1 …, or bash bench/certify/certify_layers.sh for B–E only)" >&2
+  echo "(local refresh: CERT_ALLOW_DIRTY=1 bash bench/certificate/mint/mint.sh — B–E only)" >&2
   git -C "${REPO}" status --porcelain >&2
   exit 1
 fi
@@ -80,7 +80,7 @@ if [[ -x "${BENCH_BIN}" ]] && ! grep -q 'cycles/byte provenance: \*\*measured on
         }
       else
         echo "  no passwordless sudo — Layer A micro stays wall-clock (cycles labeled NOT measured)"
-        echo "  tip: CERT_SUDO=1 bash bench/certify/certify.sh   # prompt once for PMU"
+        echo "  tip: CERT_SUDO=1 bash bench/certificate/mint/mint.sh   # prompt once for PMU"
       fi
       ;;
   esac
