@@ -1,5 +1,21 @@
+# Zig
 zig-out/
 .zig-cache/
 zig-cache/
-.DS_Store
 zig-pkg/
+
+# Rust (bindings/rust)
+target/
+
+# Python (bindings/python)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Machine-local scratch
+.local/
+.DS_Store
