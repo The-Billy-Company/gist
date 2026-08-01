@@ -454,7 +454,7 @@ fn profileReplace(gpa: std.mem.Allocator, io: std.Io, meter: *Meter, corpus: *co
     for (emit_needles) |ndl| {
         var m = Matcher{ .linear = Regex.compile(gpa, ndl) catch continue };
         defer m.deinit();
-        var caps = gist.captures.Caps{ .linear = gist.captures.Captures.compile(gpa, ndl, false, true) catch continue };
+        var caps = gist.captures.Caps{ .linear = gist.captures.Captures.compile(gpa, ndl, .{}) catch continue };
         defer caps.deinit();
         var sim = try Matcher.Sim.init(gpa, &m);
         defer sim.deinit();
