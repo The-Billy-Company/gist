@@ -20,7 +20,7 @@ tier and rebuilds it deliberately.
 c := index.Over(".").In(repoRoot)
 
 if t, _ := c.Status(ctx); !t.Ready() {
-    t, _ = c.Refresh(ctx)           // ~3 s over the Billy tree
+    t, _ = c.Refresh(ctx)           // ~3 s over a large tree
 }
 if a, _ := c.Atlas(ctx); !a.Shelf.Ready() {
     a, _ = c.RefreshAtlas(ctx, true) // the shelf is the expensive one, so it is opt-in

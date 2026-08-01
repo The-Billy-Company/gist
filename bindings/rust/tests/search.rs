@@ -1,4 +1,4 @@
-//! Behavioral + rg-parity tests for the importable search API (ADR-352).
+//! Behavioral + rg-parity tests for the importable search API.
 //!
 //! These drive the real `gist` binary over a throwaway corpus, so they skip
 //! cleanly where no binary is built. The parity test additionally requires `rg`
@@ -8,7 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use gist::{Error, MatchKind, SearchRequest};
+use gist::{Error, MatchKind, SearchEngine, SearchRequest};
 
 fn have_gist() -> bool {
     gist::binary().is_ok()
@@ -122,6 +122,30 @@ fn unsupported_pattern_errors_not_kills() {
         .run()
         .unwrap_err();
     assert!(matches!(err, Error::UnsupportedPattern(_)), "got {err:?}");
+}
+
+/// The other exit-2 class, and the reason it needs to be its own variant: these
+/// patterns are malformed in EVERY grammar the engine has, so the retry
+/// `UnsupportedPattern` invites cannot work. The second loop asserts exactly
+/// that — if PCRE2 could take them, the distinction would be decorative.
+///
+/// `a\1` is the case worth having: ripgrep answers it by telling you to try
+/// `--pcre2`, and following that advice fails, because there is no group 1.
+#[test]
+fn a_malformed_pattern_is_not_an_unsupported_one() {
+    if !have_gist() {
+        eprintln!("skip: no gist binary");
+        return;
+    }
+    let dir = corpus();
+    for pat in [r"[abc", r"a{2,1}", r"a\1", r")("] {
+        let err = SearchRequest::new(pat).cwd(dir.path()).run().unwrap_err();
+        assert!(matches!(err, Error::BadPattern(_)), "{pat}: got {err:?}");
+        for engine in [SearchEngine::Pcre2, SearchEngine::Auto] {
+            let retried = SearchRequest::new(pat).cwd(dir.path()).engine(engine).run();
+            assert!(retried.is_err(), "{pat} on {engine:?}: expected refusal");
+        }
+    }
 }
 
 #[test]

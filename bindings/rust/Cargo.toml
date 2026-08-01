@@ -1,12 +1,12 @@
-# Standalone crate — deliberately EXCLUDED from the repo-root Cargo workspace
-# (see `[workspace] exclude` in /Cargo.toml). By default it links NO native
-# archive: it is a subprocess transport over the certified `gist` binary
-# (ADR-352), so it needs neither `make build-gist` nor `zig-out/`, and the whole
-# `bindings/rust/` tree lifts out cleanly for the public OSS release with its own
-# `Cargo.lock` + toolchain. The opt-in `native` feature is the graduation rung:
-# it links the self-contained `libirregex` and adds the in-process warm
-# `Engine`/`Cursor` surface (like the sibling principia / lamina / billog
-# bindings), still with the subprocess API intact beside it.
+# Standalone crate — deliberately EXCLUDED from any parent Cargo workspace.
+# By default it links NO native archive: it is a subprocess transport over the
+# certified `gist` binary so it needs neither `zig build` nor `zig-out/`, and
+# the whole `bindings/rust/` tree lifts out cleanly for the public OSS release
+# with its own `Cargo.lock` + toolchain. The opt-in `native` feature is the
+# graduation rung: it links `libgist` + `libirregex` and adds the in-process
+# warm `Engine`/`Cursor` surface, still with the subprocess API intact beside it.
+[workspace]
+
 [package]
 name = "gist"
 version = "0.1.0"                                                                                                  # x-release-please-version
@@ -14,29 +14,30 @@ edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
 publish = false
-description = "Importable, rg-parity search API over the GIST code-search kernel (subprocess transport, ADR-352)."
+description = "Importable, rg-parity search API over the GIST code-search kernel (subprocess transport by default)."
 
 [lib]
 name = "gist"
 
-# `native` (opt-in) links the self-contained `libirregex` and exposes the
-# in-process pull-cursor `Engine`/`Cursor` surface (ADR-352); its `build.rs`
-# resolves the library beside the kernel (or `$GIST_LIB_DIR`). Default stays a
-# pure subprocess transport so the tree lifts out cleanly for the OSS release.
+# `native` (opt-in) links libgist + libirregex and exposes the in-process
+# pull-cursor `Engine`/`Cursor` surface; its `build.rs` resolves the libraries
+# beside the kernel (or `$GIST_LIB_DIR`). Default stays a pure subprocess
+# transport so the tree lifts out cleanly for the OSS release.
 [features]
 default = [  ]
 native = [  ]
 
 [dependencies]
+# Shared substrate: contracts, row protocol, transports, typed failures.
+# Path for in-tree development; once published, `cargo add gist` pulls the
+# same version range of `irregex` from crates.io.
+irregex = { version = "0.1.0", path = "../../../irregex/bindings/rust" }
 # ripgrep's `--json` record stream is the wire format; serde is the idiomatic,
 # ubiquitous parser for it. No other runtime dependency — the engine is a process.
 serde = { version = "1", features = [ "derive" ] }
 serde_json = "1"
 
 [dev-dependencies]
-# The parity test reads the canonical `contract/search_api.toml` and asserts the
-# crate's mirror matches it (the registry-as-contract drift gate).
-toml = "1"
 # Behavioral + rg-parity tests build a throwaway corpus.
 tempfile = "3"
 

@@ -1,12 +1,12 @@
-"""Idiomatic in-process `Engine` / `Cursor` over the pull-cursor C ABI (ADR-352).
+"""Idiomatic in-process `Engine` / `Cursor` over the pull-cursor C ABI.
 
-The top-level `irregex.search(...)` helpers answer a *one-shot* query and pick a
+The top-level `gist.search(...)` helpers answer a *one-shot* query and pick a
 transport (in-process FFI when eligible, else the certified subprocess). This
 module is the other shape a host wants: a **warm engine held open** across many
 queries, each producing a **pull `Cursor`** the caller iterates at its own pace.
 
-It drives the pull-cursor symbols (`irregex_engine_open` / `irregex_search_cursor`
-/ `irregex_cursor_next` / `_next_batch` / `_close`, plus `irregex_cancel_*`) — the
+It drives the pull-cursor symbols (`irregex_engine_open` / `gist_search_cursor`
+/ `gist_cursor_next` / `_next_batch` / `_close`, plus `irregex_cancel_*`) — the
 callback-free sibling of the push session `native.Handle` uses. Because no
 C-to-Python callback runs during a pull, **cffi releases the GIL for the whole
 native scan**, so one thread can `cancel()` a `search()` another thread is
@@ -37,10 +37,9 @@ import os
 import threading
 from typing import TYPE_CHECKING
 
-from ..runtime import native
-from ..runtime.errors import GistError, GistNotFoundError, UnsupportedPatternError
-from .request import Match, MatchKind, SearchEngine, SearchRequest, Submatch
-
+from irregex.request import Match, MatchKind, SearchEngine, SearchRequest, Submatch
+from irregex.runtime import native
+from irregex.runtime.errors import GistError, GistNotFoundError, UnsupportedPatternError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -89,14 +88,14 @@ def _require_abi() -> tuple[FFI, object]:
     _, lib = loaded
     # A same-ABI library predating the cursor symbols still declines cleanly here
     # (cffi raises AttributeError for a missing symbol, which hasattr folds to False).
-    if not hasattr(lib, "irregex_search_cursor"):
+    if not hasattr(lib, "gist_search_cursor"):
         msg = "the native library lacks the pull-cursor ABI"
         raise GistNotFoundError(msg)
     return loaded
 
 
 def _flags(req: SearchRequest) -> int:
-    """The `irregex_search_request.flags` bitset for the representable subset."""
+    """The `gist_search_request.flags` bitset for the representable subset."""
     return (
         (native._FLAG_FIXED if req.fixed else 0)
         | (native._FLAG_IGNORE_CASE if req.ignore_case else 0)
@@ -125,13 +124,13 @@ def _reject_unrepresentable(req: SearchRequest) -> None:
     if bad:
         msg = (
             f"the in-process cursor cannot honor {', '.join(bad)}; "
-            "use irregex.search(...) for the full CLI surface"
+            "use gist.search(...) for the full CLI surface"
         )
         raise GistError(msg)
 
 
 def _to_match(ffi: FFI, m: object) -> Match:
-    """Copy one borrowed `irregex_match` view into an owned `Match` dataclass."""
+    """Copy one borrowed `gist_match` view into an owned `Match` dataclass."""
     subs = tuple(
         Submatch(text=_decode(ffi.buffer(s.text, s.len)), start=s.start, end=s.end)
         for s in (m.submatches[i] for i in range(m.nsubmatches))
@@ -224,7 +223,7 @@ class Cursor:
         True even if a budget cut the scan short. Stable for the cursor's lifetime.
         """
         if self._matched is None:
-            self._matched = bool(self._lib.irregex_cursor_matched(self._cursor))
+            self._matched = bool(self._lib.gist_cursor_matched(self._cursor))
         return self._matched
 
     def __iter__(self) -> Cursor:
@@ -235,8 +234,8 @@ class Cursor:
         """Return the next match, or raise ``StopIteration`` when exhausted."""
         if not self._cursor:
             raise StopIteration
-        rec = self._ffi.new("irregex_match *")
-        status = self._lib.irregex_cursor_next(self._cursor, rec)
+        rec = self._ffi.new("gist_match *")
+        status = self._lib.gist_cursor_next(self._cursor, rec)
         if status == _MATCH:
             return _to_match(self._ffi, rec)
         if status == _OK:
@@ -253,10 +252,10 @@ class Cursor:
         if size < 1:
             msg = "batch size must be >= 1"
             raise ValueError(msg)
-        buf = self._ffi.new("irregex_match[]", size)
+        buf = self._ffi.new("gist_match[]", size)
         written = self._ffi.new("size_t *")
         while self._cursor:
-            status = self._lib.irregex_cursor_next_batch(self._cursor, buf, size, written)
+            status = self._lib.gist_cursor_next_batch(self._cursor, buf, size, written)
             if status == _MATCH:
                 yield [_to_match(self._ffi, buf[i]) for i in range(written[0])]
                 continue
@@ -268,7 +267,7 @@ class Cursor:
         """Free the native cursor and its record buffer (idempotent)."""
         cursor, self._cursor = self._cursor, self._ffi.NULL
         if cursor:
-            self._lib.irregex_cursor_close(cursor)
+            self._lib.gist_cursor_close(cursor)
 
     def __enter__(self) -> Cursor:
         """Return self for ``with cursor:``."""
@@ -364,9 +363,9 @@ class Engine:
             else (request.context, request.context)
         )
         req = ffi.new(
-            "irregex_search_request *",
+            "gist_search_request *",
             {
-                "struct_size": ffi.sizeof("irregex_search_request"),
+                "struct_size": ffi.sizeof("gist_search_request"),
                 "flags": _flags(request),
                 "max_count": request.max_count or 0,
                 "before_context": before,
@@ -378,12 +377,12 @@ class Engine:
                 "cancel": cancel._token if cancel is not None else ffi.NULL,
             },
         )
-        out = ffi.new("irregex_cursor **")
+        out = ffi.new("gist_cursor **")
         with self._lock:
             if not self._engine:
                 msg = "engine is closed"
                 raise GistError(msg)
-            status = self._lib.irregex_search_cursor(self._engine, req, out)
+            status = self._lib.gist_search_cursor(self._engine, req, out)
         if status != _OK:
             raise _status_error(status, f"search {request.pattern!r}")
         return Cursor(ffi, self._lib, self, out[0])
@@ -417,7 +416,7 @@ def _status_error(status: int, what: str) -> Exception:
     if status == _STALE:
         return UnsupportedPatternError(
             f"{what}: pattern is outside the linear-time engine "
-            "(use irregex.search with engine='auto'/'pcre2' for lookaround)"
+            "(use gist.search with engine='auto'/'pcre2' for lookaround)"
         )
     if status == _OOM:
         return MemoryError(f"{what}: native out of memory")

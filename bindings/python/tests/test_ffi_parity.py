@@ -1,4 +1,4 @@
-"""In-process FFI transport parity (ADR-352 rung 3).
+"""In-process FFI transport parity.
 
 Proves the cffi transport (`gist/_ffi.py` over `libirregex`) is byte-identical to
 the certified cold subprocess — same `run`/`files`/`count` answers, same record
@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import pytest
 
-import irregex
-from irregex.exact.request import Match, SearchEngine, SearchRequest
-from irregex.runtime import native as _ffi, shell as engine
-
+import gist
+from irregex.request import Match, SearchEngine, SearchRequest
+from irregex.runtime import native as _ffi
+from irregex.runtime import shell as engine
 
 pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirregex/cffi unavailable")
 
@@ -239,7 +239,7 @@ def test_explicit_root_handle_cache_is_bounded(corpus) -> None:
 def test_session_run_is_warm_and_matches_cold(corpus) -> None:
     # `Session.run` gains a warm transport for the first time (UDS only ever did
     # files/count) — it must equal the cold `--json` matches exactly.
-    with irregex.Session(cwd=None) as s:
+    with gist.Session(cwd=None) as s:
         warm = s.run(SearchRequest(pattern="TODO"))
     assert _by_file(warm) == _by_file(engine.run(SearchRequest(pattern="TODO"), cwd=None))
 
@@ -251,7 +251,7 @@ def test_abi_version_parity() -> None:
     loaded = _ffi._load()
     assert loaded is not None
     _ffi_mod, lib = loaded
-    assert lib.irregex_abi_version() == _ffi._ABI_VERSION
+    assert lib.gist_abi_version() == _ffi._ABI_VERSION
 
 
 def test_read_your_writes(corpus) -> None:
@@ -276,10 +276,10 @@ def test_deletion_is_reconciled(corpus) -> None:
 
 def test_unsupported_pattern_declines_to_cold(corpus) -> None:
     # A pattern outside gist's linear-time syntax → IRREGEX_STALE → None (the caller
-    # answers cold), never a crashed host. This is the property ADR-352 gated on.
+    # answers cold), never a crashed host. This is the property the in-process ABI is gated on.
     assert _ffi.run(SearchRequest(pattern=r"(?=lookahead)"), cwd=None) is None
     # The Session fails open: it still returns the cold answer for such a pattern.
-    with irregex.Session(cwd=None) as s:
+    with gist.Session(cwd=None) as s:
         req = SearchRequest(pattern=r"(?=lookahead)", engine=SearchEngine.PCRE2)
         assert s.run(req) is not None
 
@@ -290,5 +290,5 @@ def test_auto_uses_ffi_only_for_linear_compatible_patterns(corpus) -> None:
 
     pcre = SearchRequest(pattern=r"(?=lookahead)", engine=SearchEngine.AUTO)
     assert _ffi.run(pcre, cwd=None) is None
-    with irregex.Session(cwd=None) as session:
+    with gist.Session(cwd=None) as session:
         assert session.run(pcre) == engine.run(pcre, cwd=None)

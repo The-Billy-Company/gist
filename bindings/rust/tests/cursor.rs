@@ -1,4 +1,4 @@
-//! In-process `Engine` / `Cursor` tests (ADR-352 pull-cursor surface, `native`).
+//! In-process `Engine` / `Cursor` tests (pull-cursor surface, `native`).
 //!
 //! Proves the warm [`gist::Engine`] + pull [`gist::Cursor`] produce records
 //! byte-identical to the certified cold subprocess (`SearchRequest::run`) — same

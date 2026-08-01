@@ -1,93 +1,81 @@
 <!--
 doc_radar:
   counts:
-    - glob: "pkg/kernels/irregex/bindings/go/*/"
-      equals: 5
+    - glob: "bindings/go/*/"
+      equals: 2
       unit: dirs
   sentinels:
-    - file: contract.go
+    - file: exact/engine.go
       contains:
-        - "ABIVersion    = 2"
-        - "func Verb(op Op) (VerbDef, bool)"
-        - "func Schema(id uint32) (SchemaDef, bool)"
-        - "func EnumOrdinal(id uint32, label string) (int64, bool)"
-    - file: runtime/analytic.go
+        - "func Open(roots ...string) (*Engine, error)"
+        - "func (e *Engine) Search(ctx context.Context, req analytic.Request) (*Cursor, error)"
+    - file: index/index.go
       contains:
-        - "func Run(ctx context.Context, q Query) (*Rows, error)"
-    - file: request.go
-      contains:
-        - "type Request struct"
-        - "type Match struct"
+        - "func Over(roots ...string) *Corpus"
+        - "func (c *Corpus) Status(ctx context.Context) (Trigrams, error)"
 -->
 
-# `pkg/kernels/irregex/bindings/go/`
+# `bindings/go/`
 
-Go binding for [irregex](../../README.md) — Billy's `ripgrep`-parity code-search
-kernel and its compression-search sibling. Since ADR-377 it reaches the **whole**
-kernel: exact search, the seven kinship verbs, the five retrieval verbs, the four
-composed verbs, and the artifact lifecycle.
+Go binding for [gist](../../README.md) — search a tree. Exact pattern search and
+the warm-artifact lifecycle; nothing else. Kinship lives in the relate module,
+composed verbs in the blast module, and the shared contract/runtime in irregex.
 
-Lives in **its own `go.mod`** so it is never pulled into the `CGO_ENABLED=0`
-static Cloud Run services (backend / gateway / platform — ADR-110). Importing it
-is an opt-in to cgo — but no longer a _requirement_ of it: without a library every
-verb answers through the certified binary instead.
+Lives in **its own `go.mod`**, so importing it never drags unrelated product
+faces into a consumer that only wants search.
+
+## Install
+
+```bash
+go get github.com/The-Billy-Company/gist/bindings/go
+```
+
+That is the whole story: the default build is **pure Go and needs no native
+artifact**. Every verb answers by running the installed `gist` binary, the
+transport `contract/surface.toml` calls authoritative, so a `CGO_ENABLED=0`
+static image can import this module unchanged.
+
+The in-process tier is an accelerator, and it is opt-in:
+
+```bash
+zig build                      # mints zig-out/{lib/libgist.dylib,include/gist.h}
+go build -tags irregex_ffi ./...
+```
+
+This module is nested, so its release tags carry the subdirectory prefix —
+`bindings/go/v0.1.0`, not `v0.1.0`.
 
 ## Layout
 
-| Package               | Concern                                                                                                                                     |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| root (`irregex`)      | the generated schema table, the mirrored contract constants, `Request`/`Match`, the analytic param families, grade/channel/unit calibration |
-| [`runtime`](runtime/) | the transports and the fallback ladder: cgo dispatch, the generic row decoder, the child runner, error mapping                              |
-| [`exact`](exact/)     | pattern search — `Engine`, `Cursor`, files / count / rank                                                                                   |
-| [`relate`](relate/)   | kinship and retrieval — similar · dups · clusters · echoes · concepts · fragments · distinct · recall · pack · quote · patterns · counts    |
-| [`compose`](compose/) | the composed verbs — context · family · provenance · blast                                                                                  |
-| [`index`](index/)     | artifact lifecycle and readiness                                                                                                            |
+| Package           | Concern                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------ |
+| [`exact`](exact/) | pattern search — `Engine`, `Cursor`, files / count / rank                            |
+| [`index`](index/) | artifact lifecycle and readiness                                                     |
 
-Dependencies flow one way: the root package holds the contract and imports
-nothing, `runtime` imports the root, and the four verb packages import `runtime`.
-`Engine` and `Cursor` therefore live in `exact` rather than at the root — the root
-is the contract, not a facade, because a facade re-exporting `exact` would close
-the cycle. `schema_gen.go` stays where its generator writes it, which is what
-makes the root package the contract package.
+Shared types (`Request`, `Match`, analytic params, the row decoder, the fallback
+ladder) come from
+[`irregex/bindings/go/{analytic,runtime}`](../../../irregex/bindings/go/).
 
 ## Using it
 
 ```go
 import (
-    irregex "irregex/bindings/go"
-    "irregex/bindings/go/exact"
-    "irregex/bindings/go/relate"
+    "github.com/The-Billy-Company/irregex/bindings/go/analytic"
+    "github.com/The-Billy-Company/gist/bindings/go/exact"
 )
 
-eng, _ := exact.Open("services/backend")
+eng, _ := exact.Open("src")
 defer eng.Close()
-cur, err := eng.Search(ctx, irregex.Request{Pattern: `func\s+\w+`, IgnoreCase: true})
+cur, err := eng.Search(ctx, analytic.Request{Pattern: `func\s+\w+`, IgnoreCase: true})
 for cur.Next() { m := cur.Match(); /* … */ }
-
-kin, _ := relate.Over("libs").In(root).Similar(ctx, irregex.Kinship{Target: "pkg/tools/support/scan.py", Top: 5})
 ```
-
-Each package's README carries its own vocabulary. Two facts hold everywhere:
-
-- **A tier that cannot answer declines, and a declinature is not an error.** A
-  stale artifact, a library with no analytic plane, a pattern outside the
-  linear-time engine, a `CGO_ENABLED=0` build — each falls through to the child
-  process and produces the same rows. Only a real fault is an `error`.
-- **Absent is not zero.** Every optional field is read through a presence mask,
-  because `distance = 0.0` means _identical_ and a sentinel would erase the
-  difference.
 
 ## Build and test
 
 ```bash
-make build-gist    # produces ../../zig-out/{lib/libirregex.a,include/irregex.h}
-cd pkg/kernels/irregex/bindings/go
-GOWORK=off go test ./...                  # cgo tier + child tier
-GOWORK=off CGO_ENABLED=0 go test ./...    # child tier only — a first-class mode
+zig build
+cd bindings/go
+GOWORK=off go test ./...                       # child tier — the default
+GOWORK=off go test -tags irregex_ffi ./...     # cgo tier + child tier
+GOWORK=off CGO_ENABLED=0 go test ./...         # child tier with cgo off
 ```
-
-Tests use the installed `gist` / `relate` / `irregex` binaries (or `$GIST_BIN` /
-`$RELATE_BIN` / `$IRREGEX_BIN`, or `PATH`, or `../../zig-out/bin`) as a
-cross-face oracle, and skip cleanly when none resolves. `IRREGEX_NO_FFI=1` forces
-the child tier, which is both an operator escape hatch and how the tier-agreement
-tests prove the two transports answer alike.

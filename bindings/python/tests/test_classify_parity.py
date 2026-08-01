@@ -1,4 +1,4 @@
-"""Cross-language eligibility parity (ADR-352 rung 2.5).
+"""Cross-language eligibility parity.
 
 `session.warm_eligible` (a cheap pure-Python predicate on `SearchRequest`) and
 `src/surface/exec/session/answer/request.zig::classify` (the daemon's argv authority) are two
@@ -20,9 +20,9 @@ import subprocess
 
 import pytest
 
-import irregex
-from irregex import warm_eligible
-from irregex.exact.request import SearchEngine, SearchRequest
+import gist
+from gist import warm_eligible
+from irregex.request import SearchEngine, SearchRequest
 from irregex.runtime.daemon import ffi_eligible
 
 
@@ -30,8 +30,8 @@ def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        irregex.binary()
-    except irregex.GistNotFoundError:
+        gist.binary()
+    except gist.GistNotFoundError:
         return False
     return True
 
@@ -147,7 +147,7 @@ def _binary_verdict(req: SearchRequest, cwd) -> bool:
     `[ineligible]` line is printed before any dial or walk, so this is the pure
     classify verdict — no daemon required.
     """
-    argv = [irregex.binary(), *req.to_argv(), req.pattern, *req.paths]
+    argv = [gist.binary(), *req.to_argv(), req.pattern, *req.paths]
     env = {**os.environ, "GIST_TRACE": "warm", "GIST_NO_AUTOSERVE": "1"}
     proc = subprocess.run(  # noqa: S603 — trusted binary, list argv, no shell
         argv, cwd=str(cwd), env=env, capture_output=True, text=True
@@ -205,7 +205,7 @@ def test_pattern_shape_boundary_is_cold_without_a_binary() -> None:
 
 def test_ffi_predicate_extends_uds_with_roots_unicode_and_auto() -> None:
     # The in-process options ABI carries the complete UDS request subset, and
-    # irregex_open additionally accepts explicit root arrays.
+    # gist_open additionally accepts explicit root arrays.
     smart = SearchRequest(pattern="todo", smart_case=True)
     assert warm_eligible(smart) is True
     assert ffi_eligible(smart) is True
@@ -222,7 +222,7 @@ def test_ffi_predicate_extends_uds_with_roots_unicode_and_auto() -> None:
         assert ffi_eligible(ffi_option) is True
     for req in _ELIGIBLE:
         assert ffi_eligible(req) is warm_eligible(req)
-    # The FFI options ABI + `irregex_open` root array extend the UDS subset with
+    # The FFI options ABI + `gist_open` root array extend the UDS subset with
     # invert, `-A`/`-B`/`-C` context, explicit roots, explicit Unicode, and the
     # linear arm of `engine="auto"` — but NOT `-g`/`-t` globs (no glob ABI) or
     # `-P` (no PCRE ABI), so those stay FFI-cold even though the daemon serves

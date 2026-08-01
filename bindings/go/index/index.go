@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	"irregex/bindings/go/runtime"
+	"github.com/The-Billy-Company/irregex/bindings/go/runtime"
 )
 
 // Corpus is the tree whose artifacts are being inspected or rebuilt.

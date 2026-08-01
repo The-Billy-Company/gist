@@ -1,4 +1,4 @@
-//! Result-side aggregation over GIST matches (ADR-352).
+//! Result-side aggregation over GIST matches.
 //!
 //! `search`/`files`/`count` answer *where* a pattern occurs; aggregation
 //! answers *how it is distributed* — the question an agent asks next: which
@@ -24,7 +24,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::contract::{Match, MatchKind};
+use irregex::contract::{Match, MatchKind};
 
 /// The bucketing axis for a [`tally`] — the match property that decides which
 /// bucket a match falls into.

@@ -1,9 +1,9 @@
-"""Result-side aggregation over GIST matches (ADR-352).
+"""Result-side aggregation over GIST matches.
 
 Two layers, mirroring the rest of the suite. The pure layer drives `tally`
 over synthetic `Match` records — no binary, so it always runs and pins the
 grouping/ranking/skip-context contract exactly. The integration layer runs
-`irregex.summary` over a throwaway corpus through the real engine and asserts the
+`gist.summary` over a throwaway corpus through the real engine and asserts the
 aggregate agrees with the flat `search` it is derived from.
 """
 
@@ -13,17 +13,17 @@ import shutil
 
 import pytest
 
-import irregex
-from irregex.exact.aggregate import Group, Tally, resolve_axis, tally
-from irregex.exact.request import Match, MatchKind, Submatch
+import gist
+from gist.exact.aggregate import Group, Tally, resolve_axis, tally
+from irregex.request import Match, MatchKind, Submatch
 
 
 def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        irregex.binary()
-    except irregex.GistNotFoundError:
+        gist.binary()
+    except gist.GistNotFoundError:
         return False
     return True
 
@@ -98,12 +98,12 @@ def test_by_extension_axis() -> None:
 def test_by_match_text_groups_distinct_tokens() -> None:
     """The axis for "what distinct tokens did this pattern hit"."""
     matches = [
-        _m("x.md", 1, "see ADR-091 here", hit="ADR-091"),
-        _m("y.md", 1, "also ADR-091", hit="ADR-091"),
-        _m("z.md", 1, "and ADR-352", hit="ADR-352"),
+        _m("x.md", 1, "see RFC-2119 here", hit="RFC-2119"),
+        _m("y.md", 1, "also RFC-2119", hit="RFC-2119"),
+        _m("z.md", 1, "and RFC-7231", hit="RFC-7231"),
     ]
     t = tally(matches, by="match")
-    assert [(g.key, g.count) for g in t] == [("ADR-091", 2), ("ADR-352", 1)]
+    assert [(g.key, g.count) for g in t] == [("RFC-2119", 2), ("RFC-7231", 1)]
 
 
 def test_custom_callable_axis() -> None:
@@ -140,10 +140,10 @@ def test_group_and_tally_are_frozen() -> None:
     """Frozen dataclasses: neither Group.key nor Tally.groups may be reassigned."""
     g = Group(key="k", matches=())
     with pytest.raises((AttributeError, TypeError)):
-        setattr(g, "key", "other")
+        g.key = "other"
     t = Tally(groups=(g,))
     with pytest.raises((AttributeError, TypeError)):
-        setattr(t, "groups", ())
+        t.groups = ()
     # Mutation must not silently succeed — identity and ranking stay pinned.
     assert t.groups[0].key == "k"
     assert t.total == 0
@@ -169,8 +169,8 @@ def test_summary_by_file_agrees_with_flat_search(corpus) -> None:
     every bucket's count sums to the flat match total, and the ranking puts the
     busiest file first.
     """
-    flat = irregex.search("TODO", cwd=corpus)
-    t = irregex.summary("TODO", by="file", cwd=corpus)
+    flat = gist.search("TODO", cwd=corpus)
+    t = gist.summary("TODO", by="file", cwd=corpus)
     assert t.total == len(flat)
     assert t.groups[0].key.endswith("a.py")  # a.py has two TODOs → the head
     assert t.groups[0].count == 2
@@ -178,7 +178,7 @@ def test_summary_by_file_agrees_with_flat_search(corpus) -> None:
 
 @needs_gist
 def test_summary_by_dir_concentrates_the_root(corpus) -> None:
-    t = irregex.summary("TODO", by="dir", cwd=corpus)
+    t = gist.summary("TODO", by="dir", cwd=corpus)
     # a.py + b.py sit at the corpus root; pkg/d.py under pkg/ — the root bucket wins.
     assert t.groups[0].count == 3
 
@@ -189,6 +189,6 @@ def test_summary_forwards_search_options(corpus) -> None:
     `.py` files match and the `.txt` file is pruned before it can enter the
     tally, so the ext axis has exactly one `.py` bucket.
     """
-    t = irregex.summary("TODO", by="ext", types=["py"], cwd=corpus)
+    t = gist.summary("TODO", by="ext", types=["py"], cwd=corpus)
     assert [g.key for g in t.groups] == [".py"]
     assert t.total == 4  # a.py x2, b.py x1, pkg/d.py x1

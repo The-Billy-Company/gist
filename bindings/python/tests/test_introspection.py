@@ -6,16 +6,16 @@ import shutil
 
 import pytest
 
-import irregex
-from irregex.index.lifecycle import IndexState, IndexStatus, parse_status
+import gist
+from gist.index.lifecycle import IndexState, IndexStatus, parse_status
 
 
 def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        irregex.binary()
-    except irregex.GistNotFoundError:
+        gist.binary()
+    except gist.GistNotFoundError:
         return False
     return True
 
@@ -71,26 +71,29 @@ def test_parse_status_surfaces_an_artifact_directory_from_another_tree() -> None
 
 @needs_gist
 def test_capability_schema_is_typed_and_queryable() -> None:
-    schema = irregex.capabilities()
+    schema = gist.capabilities()
     assert schema.tool == "gist"
-    assert schema.version == irregex.version()
+    assert schema.version == gist.version()
     assert schema.supports("-P")
     assert schema.supports("--multiline")
     assert schema.supports("--no-unicode")
     assert schema.compatibility("--definitely-unknown") is None
-    assert irregex.schema() == schema
+    assert gist.schema() == schema
 
 
 @needs_gist
-def test_index_lifecycle_returns_observed_status(tmp_path) -> None:
+def test_index_lifecycle_returns_observed_status(tmp_path, monkeypatch) -> None:
+    # Artifact home follows the answering binary's tree by default; pin it so a
+    # READY index from a sibling checkout cannot leak into this empty corpus.
+    monkeypatch.setenv("GIST_DIR", str(tmp_path / ".gist"))
     (tmp_path / "libs").mkdir()
     (tmp_path / "libs" / "sample.py").write_text("needle\n")
-    assert not irregex.status(cwd=tmp_path).ready
-    state = irregex.index(cwd=tmp_path)
+    assert not gist.status(cwd=tmp_path).ready
+    state = gist.index(cwd=tmp_path)
     assert state.ready
     assert state.files == 1
     assert state.freshness_anchor
     # No tree layout is assumed: a bare `gist index` resolves to `.` (the
     # whole tree) unless GIST_ROOTS or positional roots say otherwise.
     assert state.roots == (".",)
-    assert irregex.status(cwd=tmp_path).path == state.path
+    assert gist.status(cwd=tmp_path).path == state.path

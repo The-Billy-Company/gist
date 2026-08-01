@@ -1,5 +1,5 @@
 //! The in-process `Engine` / `Cursor` surface over the pull-cursor C ABI
-//! (ADR-352), compiled only under the `native` feature.
+//!, compiled only under the `native` feature.
 //!
 //! The crate's top-level [`crate::search`] helpers answer a *one-shot* query over
 //! the certified subprocess. This module is the other shape a host wants: a **warm
@@ -21,11 +21,43 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use crate::contract::{Match, MatchKind, Submatch};
-use crate::runtime::sys;
-use crate::runtime::{Error, Result};
+use std::os::raw::{c_char, c_int};
+
+use irregex::contract::{Match, MatchKind, Submatch};
+use irregex::runtime::sys;
+use irregex::runtime::{Error, Result};
 
 use super::{SearchEngine, SearchRequest};
+
+// Link-time declarations for the exact-plane cursor. The analytic plane in
+// `irregex::runtime` resolves producers with `dlsym` and never names these;
+// under `native` this crate links `libgist` + `libirregex`, so the symbols are
+// present at link time.
+unsafe extern "C" {
+    fn irregex_engine_open(
+        roots: *const *const c_char,
+        nroots: usize,
+        out: *mut *mut sys::irregex_engine,
+    ) -> c_int;
+    fn irregex_engine_close(engine: *mut sys::irregex_engine);
+    fn irregex_cancel_new(out: *mut *mut sys::irregex_cancel) -> c_int;
+    fn irregex_cancel_request(token: *mut sys::irregex_cancel);
+    fn irregex_cancel_free(token: *mut sys::irregex_cancel);
+    fn gist_search_cursor(
+        engine: *mut sys::irregex_engine,
+        request: *const sys::SearchRequest,
+        out: *mut *mut sys::gist_cursor,
+    ) -> c_int;
+    fn gist_cursor_next(cursor: *mut sys::gist_cursor, out: *mut sys::MatchView) -> c_int;
+    fn gist_cursor_next_batch(
+        cursor: *mut sys::gist_cursor,
+        out: *mut sys::MatchView,
+        cap: usize,
+        written: *mut usize,
+    ) -> c_int;
+    fn gist_cursor_matched(cursor: *mut sys::gist_cursor) -> c_int;
+    fn gist_cursor_close(cursor: *mut sys::gist_cursor);
+}
 
 /// Records-per-native-call default for [`Cursor::batches`]: enough to amortize the
 /// FFI crossing without holding a large transient view buffer.
@@ -53,7 +85,7 @@ impl CancelToken {
     /// [`Error::Failed`] if the native allocation fails (out of memory).
     pub fn new() -> Result<Self> {
         let mut out: *mut sys::irregex_cancel = std::ptr::null_mut();
-        let status = unsafe { sys::irregex_cancel_new(&mut out) };
+        let status = unsafe { irregex_cancel_new(&mut out) };
         if status != sys::OK {
             return Err(status_error(status, "allocate cancel token"));
         }
@@ -62,13 +94,13 @@ impl CancelToken {
 
     /// Request cancellation of any in-flight search using this token.
     pub fn cancel(&self) {
-        unsafe { sys::irregex_cancel_request(self.inner) };
+        unsafe { irregex_cancel_request(self.inner) };
     }
 }
 
 impl Drop for CancelToken {
     fn drop(&mut self) {
-        unsafe { sys::irregex_cancel_free(self.inner) };
+        unsafe { irregex_cancel_free(self.inner) };
     }
 }
 
@@ -115,7 +147,7 @@ impl<'a> Run<'a> {
 /// record buffer frees on [`Drop`].
 #[derive(Debug)]
 pub struct Cursor {
-    inner: *mut sys::irregex_cursor,
+    inner: *mut sys::gist_cursor,
     matched: Option<bool>,
     done: bool,
 }
@@ -130,7 +162,7 @@ impl Cursor {
     pub fn matched(&mut self) -> bool {
         *self
             .matched
-            .get_or_insert_with(|| unsafe { sys::irregex_cursor_matched(self.inner) } != 0)
+            .get_or_insert_with(|| unsafe { gist_cursor_matched(self.inner) } != 0)
     }
 
     /// Yield lists of up to `size` records, each filled by one native call — the
@@ -156,7 +188,7 @@ impl Iterator for Cursor {
             return None;
         }
         let mut view = MaybeUninit::<sys::MatchView>::uninit();
-        let status = unsafe { sys::irregex_cursor_next(self.inner, view.as_mut_ptr()) };
+        let status = unsafe { gist_cursor_next(self.inner, view.as_mut_ptr()) };
         match status {
             sys::MATCH => Some(Ok(to_match(unsafe { view.assume_init_ref() }))),
             sys::OK => {
@@ -173,7 +205,7 @@ impl Iterator for Cursor {
 
 impl Drop for Cursor {
     fn drop(&mut self) {
-        unsafe { sys::irregex_cursor_close(self.inner) };
+        unsafe { gist_cursor_close(self.inner) };
     }
 }
 
@@ -193,7 +225,7 @@ impl Iterator for Batches {
         }
         let mut written: usize = 0;
         let status = unsafe {
-            sys::irregex_cursor_next_batch(
+            gist_cursor_next_batch(
                 self.cursor.inner,
                 self.buf.as_mut_ptr().cast::<sys::MatchView>(),
                 self.buf.len(),
@@ -258,7 +290,7 @@ impl Engine {
             ptrs.as_ptr()
         };
         let mut out: *mut sys::irregex_engine = std::ptr::null_mut();
-        let status = unsafe { sys::irregex_engine_open(root_ptr, ptrs.len(), &mut out) };
+        let status = unsafe { irregex_engine_open(root_ptr, ptrs.len(), &mut out) };
         if status != sys::OK {
             return Err(status_error(status, "engine open"));
         }
@@ -315,10 +347,10 @@ impl Engine {
             max_results: run.max_results.unwrap_or(0),
             cancel: run.cancel.map_or(std::ptr::null_mut(), |t| t.inner),
         };
-        let mut out: *mut sys::irregex_cursor = std::ptr::null_mut();
+        let mut out: *mut sys::gist_cursor = std::ptr::null_mut();
         let status = {
             let _guard = self.lock.lock().expect("engine lock poisoned");
-            unsafe { sys::irregex_search_cursor(self.inner, &req, &mut out) }
+            unsafe { gist_search_cursor(self.inner, &req, &mut out) }
         };
         if status != sys::OK {
             return Err(status_error(status, "search"));
@@ -333,11 +365,11 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        unsafe { sys::irregex_engine_close(self.inner) };
+        unsafe { irregex_engine_close(self.inner) };
     }
 }
 
-/// The `irregex_search_request.flags` bitset for the representable option subset.
+/// The `gist_search_request.flags` bitset for the representable option subset.
 fn flags(r: &SearchRequest) -> u32 {
     let mut f = 0;
     if r.fixed {

@@ -17,13 +17,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..runtime import analytic, shell
-
+from irregex.runtime import analytic, shell
 
 if TYPE_CHECKING:
     import os
 
-    from .request import Ranked, SearchRequest
+    from irregex.request import Ranked, SearchRequest
 
 
 def rank(

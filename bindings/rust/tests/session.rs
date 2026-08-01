@@ -1,4 +1,4 @@
-//! Persistent resident-session client tests (ADR-352 rung 2.5).
+//! Persistent resident-session client tests.
 //!
 //! Three layers: the pure `warm_eligible` classifier (no binary), fail-open when
 //! no daemon is listening (must equal the cold answer), and a real round-trip

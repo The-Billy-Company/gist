@@ -1,4 +1,4 @@
-//! Result-side aggregation tests (ADR-352).
+//! Result-side aggregation tests.
 //!
 //! Two layers. The pure layer builds [`Match`] records by hand and drives
 //! [`gist::tally`] / [`gist::tally_by`] — no binary, so it pins the bucketing,
@@ -142,10 +142,7 @@ fn summary_distributes_real_matches_by_ext() {
         return;
     }
     let dir = corpus();
-    let t = SearchRequest::new("TODO")
-        .cwd(dir.path())
-        .summary(Axis::Ext)
-        .unwrap();
+    let t = gist::summary(SearchRequest::new("TODO").cwd(dir.path()), Axis::Ext).unwrap();
     // Three uppercase TODOs, all in .py files (lowercase 'todo' excluded).
     let py = t.get(".py").expect(".py bucket");
     assert_eq!(py.count(), 3);
@@ -153,17 +150,15 @@ fn summary_distributes_real_matches_by_ext() {
 }
 
 #[test]
-fn free_summary_matches_request_method() {
+fn free_summary_matches_tally_of_run() {
     if !have_gist() {
         eprintln!("skip: no gist binary");
         return;
     }
     let dir = corpus();
-    let free = gist::summary(SearchRequest::new("TODO").cwd(dir.path()), Axis::File).unwrap();
-    let method = SearchRequest::new("TODO")
-        .cwd(dir.path())
-        .summary(Axis::File)
-        .unwrap();
-    assert_eq!(free.total(), method.total());
-    assert_eq!(free.len(), method.len());
+    let req = SearchRequest::new("TODO").cwd(dir.path());
+    let free = gist::summary(req.clone(), Axis::File).unwrap();
+    let tallied = gist::tally(req.run().unwrap(), Axis::File);
+    assert_eq!(free.total(), tallied.total());
+    assert_eq!(free.len(), tallied.len());
 }

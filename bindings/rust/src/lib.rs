@@ -1,9 +1,15 @@
-//! `gist` — the importable Rust face of Billy's code-search kernel (ADR-352).
+//! `gist` — the importable Rust face of the code-search kernel.
 //!
 //! One clean, rg-parity search API over the certified `gist` engine, sharing the
 //! exact `SearchRequest` shape the CLI and the Python package speak. Results are
 //! produced by the same engine the CLI uses — this crate *drives* it, it does not
 //! reimplement search.
+//!
+//! The shared substrate (contracts, row protocol, transports, typed failures)
+//! lives in the [`irregex`] crate. Kinship / retrieval / sweep live in
+//! [`relate`](https://crates.io/crates/relate); composed verbs live in
+//! [`blast`](https://crates.io/crates/blast). Depending on `gist` does not make
+//! those faces reachable.
 //!
 //! ```no_run
 //! for m in gist::search(r"func\s+\w+\(")? {
@@ -34,34 +40,6 @@
 //! # Ok::<(), gist::Error>(())
 //! ```
 //!
-//! ## The analytic plane — resemblance, not pattern
-//!
-//! Exact search answers *where a pattern occurs*. The analytic verbs (ADR-377)
-//! answer the questions regex cannot: what resembles this file ([`relate`]),
-//! which files jointly explain a piece of text, where a pasted snippet came
-//! from, and what moves if a symbol changes ([`compose`]). All seventeen return
-//! the *same* self-describing row, so there is one decoder and one cursor rather
-//! than seventeen result types:
-//!
-//! ```no_run
-//! let kin = gist::relate::similar("src/lib.rs").min_grade(gist::Grade::Strong).rows()?;
-//! for row in kin.iter() {
-//!     let row = row?;
-//!     println!("{:?}  {:?}", row.text("path"), row.real("distance"));
-//! }
-//!
-//! // `foreign` distinguishes "your text isn't in this repo" from "no results".
-//! let picks = gist::relate::pack("how does the resident session reconcile freshness").rows()?;
-//! eprintln!("{} foreign fingerprints", picks.stats().foreign);
-//! # Ok::<(), gist::Error>(())
-//! ```
-//!
-//! A [`Row`] **borrows** the cursor it came from, so the compiler — not a doc
-//! comment — is what stops one outliving its arena; [`Row::to_owned`] is the
-//! explicit exit. [`Rows::batches`] pulls many rows per crossing and several
-//! batches may be alive at once. See [`runtime`] for the transport ladder and
-//! [`index`] for the artifacts that make a warm answer possible.
-//!
 //! ## Why subprocess, not FFI
 //!
 //! The engine fails loud on unsupported input via `die()` → `process::exit(2)`,
@@ -71,17 +49,17 @@
 //! archive, so it lifts out cleanly for an OSS release.
 //!
 //! The binary is resolved at call time: env `GIST_BIN`, then `gist` on `PATH`,
-//! then the repo's `zig-out/bin/gist`. Build it with `make install-gist`.
+//! then the repo's `zig-out/bin/gist`. Build it with `zig build`.
 //!
 //! ## The `native` feature — an in-process warm engine
 //!
-//! Opt into `native` and the crate additionally links the self-contained
-//! `libirregex` shared library and exposes the pull-cursor surface (ADR-352): a
-//! warm [`Engine`] held open across many queries, each yielding a pull [`Cursor`]
-//! that iterates owned [`Match`] records, with a thread-safe [`CancelToken`] and
-//! per-operation [`Run`] budgets. It never `die()`s — every failure is the same
-//! typed [`Error`]. The `build.rs` resolves the library beside the kernel (or at
-//! `$GIST_LIB_DIR`); build it with `make install-gist`.
+//! Opt into `native` and the crate additionally links `libgist` + `libirregex`
+//! and exposes the pull-cursor surface: a warm [`Engine`] held open across many
+//! queries, each yielding a pull [`Cursor`] that iterates owned [`Match`]
+//! records, with a thread-safe [`CancelToken`] and per-operation [`Run`] budgets.
+//! It never `die()`s — every failure is the same typed [`Error`]. The `build.rs`
+//! resolves the libraries beside the kernel (or at `$GIST_LIB_DIR`); build them
+//! with `zig build`.
 //!
 //! ```no_run
 //! # #[cfg(feature = "native")] {
@@ -94,22 +72,20 @@
 //! # Ok::<(), gist::Error>(())
 //! ```
 
-pub mod compose;
-pub mod contract;
 pub mod exact;
 pub mod index;
-pub mod relate;
-pub mod runtime;
 
-pub use contract::{Channel, Grade, Match, MatchKind, RankKind, Ranked, Submatch, Unit, Variant};
 pub use exact::{Axis, Group, SearchEngine, SearchRequest, Tally, tally, tally_by};
 #[cfg(feature = "native")]
 pub use exact::{Batches, CancelToken, Cursor, DEFAULT_BATCH, Engine, Run};
-pub use runtime::{
+pub use irregex::contract::{
+    Channel, Grade, Match, MatchKind, RankKind, Ranked, Submatch, Unit, Variant,
+};
+pub use irregex::runtime::{
     Batch, Error, OwnedRow, OwnedValue, Result, Row, RowSeq, Rows, Stats, Texts, Tier, Value,
 };
 #[cfg(unix)]
-pub use runtime::{Session, default_socket_path, warm_eligible};
+pub use irregex::runtime::{Session, default_socket_path, warm_eligible};
 
 /// Find `pattern`, returning structured [`Match`] records. For anything beyond a
 /// bare pattern (paths, case-folding, globs, context…) build a [`SearchRequest`].
@@ -138,12 +114,12 @@ pub fn count(pattern: impl Into<SearchRequest>) -> Result<usize> {
 
 /// Search `pattern`, then tally the matches along `by` — "find, then see the
 /// distribution" in one call. For scoped roots, globs, or other options, build a
-/// [`SearchRequest`] and call [`SearchRequest::summary`].
+/// [`SearchRequest`] and call [`tally`] on its [`SearchRequest::run`] result.
 ///
 /// # Errors
 /// See [`SearchRequest::run`].
 pub fn summary(pattern: impl Into<SearchRequest>, by: Axis) -> Result<Tally> {
-    pattern.into().summary(by)
+    Ok(tally(pattern.into().run()?, by))
 }
 
 /// The engine's definition-first `--rank` view: the top-`limit` files for
@@ -153,7 +129,8 @@ pub fn summary(pattern: impl Into<SearchRequest>, by: Axis) -> Result<Tally> {
 /// # Errors
 /// See [`SearchRequest::run`].
 pub fn rank(pattern: impl Into<SearchRequest>, limit: u32) -> Result<Vec<Ranked>> {
-    pattern.into().rank(limit)
+    let req = pattern.into();
+    exact::rank_list(&req, limit)
 }
 
 /// The persisted-index freshness report (`gist status`).
@@ -161,7 +138,7 @@ pub fn rank(pattern: impl Into<SearchRequest>, limit: u32) -> Result<Vec<Ranked>
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves, [`Error::Io`] on spawn failure.
 pub fn status() -> Result<String> {
-    runtime::shell::status()
+    irregex::runtime::shell::status()
 }
 
 /// The driven binary's semver.
@@ -169,7 +146,7 @@ pub fn status() -> Result<String> {
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves, [`Error::Io`] on spawn failure.
 pub fn version() -> Result<String> {
-    runtime::shell::version()
+    irregex::runtime::shell::version()
 }
 
 /// Absolute path to the resolved `gist` binary.
@@ -177,5 +154,5 @@ pub fn version() -> Result<String> {
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves.
 pub fn binary() -> Result<std::path::PathBuf> {
-    runtime::shell::binary()
+    irregex::runtime::shell::binary()
 }

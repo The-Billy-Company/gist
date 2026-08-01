@@ -2,25 +2,34 @@
 doc_radar:
   counts:
     - description: "one README per module directory under src/"
-      glob: "pkg/kernels/irregex/bindings/rust/src/*/README.md"
-      equals: 6
+      glob: "bindings/rust/src/*/README.md"
+      equals: 2
   sentinels:
-    - description: "the analytic verb families are exported from the facade"
-      file: pkg/kernels/irregex/bindings/rust/src/lib.rs
-      contains: ["pub mod relate", "pub mod compose", "pub mod index"]
+    - description: "gist exposes only exact search and index lifecycle"
+      file: bindings/rust/src/lib.rs
+      contains: ["pub mod exact", "pub mod index"]
+      absent: ["pub mod relate", "pub mod compose", "pub mod contract", "pub mod runtime"]
     - description: "the native feature is opt-in, not assumed"
-      file: pkg/kernels/irregex/bindings/rust/Cargo.toml
+      file: bindings/rust/Cargo.toml
       contains: ["[features]", "native"]
+    - description: "gist depends on the irregex substrate crate"
+      file: bindings/rust/Cargo.toml
+      contains: ["irregex ="]
 ---
 
 # gist — the importable Rust search API
 
 ## What it is
 
-The Rust face of [GIST](../../README.md), Billy's dogfooded, `ripgrep`-parity
+The Rust face of [GIST](../../README.md), the dogfooded, `ripgrep`-parity
 code-search kernel. One clean `search()` (plus `files()`, `count()`, `status()`)
 that any Rust automation can call instead of hand-rolling `std::process::Command`
 argv and `--json` parsing per site.
+
+The shared substrate — contracts, row protocol, transports, typed failures —
+lives in the sibling [`irregex`](../../../irregex/bindings/rust/) crate. Kinship
+and composed verbs are their own crates (`relate`, `blast`); depending on `gist`
+does not make them reachable.
 
 ```rust
 for m in gist::search(r"func\s+\w+\(")? {
@@ -38,25 +47,25 @@ let scoped = gist::SearchRequest::new("Wallet")      // the deep builder
 
 ## Why it exists — and why subprocess, not FFI
 
-This crate and the Python `billy-irregex` package realize the **same**
-`SearchRequest → Match` contract (`../../contract/search_api.toml`, ADR-352) over
+This crate and the Python `gist` package realize the **same**
+`SearchRequest → Match` contract (`../../../irregex/contract/engine.toml`) over
 the **same** certified `gist` binary. It builds the exact rg-parity argv the CLI
 accepts, runs the binary with `--json`, and parses the JSON-lines stream — so
 results come from the same engine the CLI uses, never a second matcher.
 
-Subprocess is the default transport (ADR-352): the CLI engine fails loud on
+Subprocess is the default transport: the CLI engine fails loud on
 unsupported input via `die()` → `process::exit(2)`, which would terminate a host
 that linked _it_ in-process. Here a bad pattern exits the _child_ and surfaces as a
 typed `Error::UnsupportedPattern` — the host is never touched.
 
 The binary is resolved at call time: env `GIST_BIN`, then `gist` on `PATH`, then
-the repo's `zig-out/bin/gist`. Build it with `make install-gist`.
+the repo's `zig-out/bin/gist`. Build it with `zig build`.
 
 ## In-process warm engine — the `native` feature
 
-The pull-cursor C ABI (ADR-352) is the graduation rung, and it never `die()`s:
+The pull-cursor C ABI is the graduation rung, and it never `die()`s:
 every failure is the same typed `Error`. Build with `--features native` and the
-crate additionally links the self-contained `libirregex` and exposes a warm
+crate additionally links `libgist` + `libirregex` and exposes a warm
 `Engine` held open across queries, each yielding a pull `Cursor` of owned
 `Match` records — the callback-free sibling of the daemon `Session`:
 
@@ -66,150 +75,23 @@ for m in engine.search(&gist::SearchRequest::new("TODO"))? {
     let m = m?;                                            // Iterator<Item = Result<Match>>
     println!("{}:{}: {}", m.path, m.line_number, m.text);
 }
-
-let tok = engine.cancel_token()?;                          // trip from another thread
-let cur = engine.run(&req, gist::Run::default().max_results(100).cancel(&tok))?;
-for batch in cur.batches(64) { /* amortize the FFI crossing */ }
 ```
 
-`Engine::search` is serialized (single-writer), but the cursors it returns own
-their records and iterate independently. An option the ABI can't carry
-(glob/type scoping, multiline, a non-linear engine) is a typed
-`Error::Unrepresentable` — use `SearchRequest::run` (subprocess) for the full CLI
-surface. The `build.rs` resolves `libirregex` beside the kernel or at
-`$GIST_LIB_DIR`; build it with `make install-gist`.
+## Cross-crate wiring
 
-## Warm path — persistent `Session` (ADR-352 rung 2.5, Unix)
+```toml
+# In this checkout:
+irregex = { version = "0.1.0", path = "../../../irregex/bindings/rust" }
 
-A `Session` keeps a Unix-socket connection to a running `gist serve` daemon warm
-across many calls, so an eligible query skips the cold subprocess's process +
-index-mmap + candidate-read startup:
-
-```rust
-let mut s = gist::Session::default_socket();   // $GIST_SESSION_SOCK or the repo default
-let hot   = s.files(&gist::SearchRequest::new("TODO"))?;   // -l, warm
-let total = s.count(&gist::SearchRequest::new("panic"))?;  // --count-matches, warm
+# Once published:
+# cargo add irregex
+# cargo add gist   # pulls irregex as a normal crates.io dependency
 ```
 
-It is **fail-open by construction**: no daemon listening, an ineligible request
-(`gist::warm_eligible(&req)` is `false` for scoped roots, globs/types, context,
-or any rich flag), or a wire hiccup transparently falls back to the
-byte-identical cold subprocess. The wire protocol is the same one
-`src/exec/session/conduit/protocol/protocol.zig` defines and the Zig
-CLI + Python clients speak, so all three frame-match against the one daemon.
+## Layout
 
-## Find, then aggregate
-
-`search`/`files`/`count` answer _where_ a pattern occurs. `summary` answers _how
-it is distributed_ — the question an agent asks next — by searching, then
-grouping the matches into buckets ranked by count:
-
-```rust
-// busiest directories first
-for g in gist::summary("TODO", gist::Axis::Dir)?.top(5) {
-    println!("{:4}  {}", g.count(), g.key);
-}
-
-// which ADRs does the tree cite most? — bucket by the literal that matched
-let cited = gist::summary(r"ADR-\d+", gist::Axis::Match)?;
-
-// a custom axis is any Fn(&Match) -> String
-let by_component = gist::tally_by(gist::search("panic")?, |m| {
-    m.path.split('/').next().unwrap_or("").to_owned()
-});
-```
-
-`Axis` is the named set — `File` · `Dir` · `Ext` · `Match` — and `tally_by` takes
-any `Fn(&Match) -> String` for a custom one. `tally(matches, axis)` is the pure
-core: it aggregates any `Match` sequence you already have (so it composes with
-`search` and is unit-testable without the binary), and only `MatchKind::Match`
-lines are counted — `-A/-B/-C` context lines never inflate a tally. Aggregation
-is a result-side layer: it does **not** widen `SearchRequest` (the contract stays
-match-finding-only) and never runs a second matcher.
-
-## Which hit matters most — the ranked view
-
-`rank` is gist's one native shape with no rg equivalent: the definition-first
-[RRF view](../../README.md#gist-in-brief) that puts a symbol's declaration ahead of its
-200 call sites and **demotes generated files** (which the repo forbids editing, so
-they're never the target):
-
-```rust
-for r in gist::rank("SearchRequest", 8)? {
-    println!("{:>3} [{}]  {}:{}", r.count, r.kind.as_str(), r.path, r.line_number);
-}
-
-let authored: Vec<_> = gist::rank("apperr.New", 20)?
-    .into_iter()
-    .filter(|r| !r.generated())     // skip codegen
-    .collect();
-```
-
-Each `Ranked` row carries the engine's own `def`/`use`/`gen` classification
-(`RankKind`) — read straight from `--rank`, **never reclassified in Rust**, so
-"what is generated" can't fork from the engine (`src/kernel/rank/signals.zig`). Ranking
-reads the persisted index, so it needs one built (`make install-gist`); with no
-index there is nothing to rank and the result is empty. The `limit` caps the rows
-(`0` = the engine default of 20).
-
-## Beyond pattern — the analytic verbs
-
-Exact search needs you to know how the thing is spelled. The seventeen analytic
-verbs (ADR-377) do not: they price texts against each other by how cheaply one
-compresses the other, and answer _what resembles this_, _which files explain
-this_, _where did this come from_, _what moves if I change this_.
-
-```rust
-// what resembles this file — graded, so background can't pass as kinship
-for row in gist::relate::similar("src/lib.rs").min_grade(gist::Grade::Strong).rows()?.iter() {
-    let row = row?;
-    println!("{:?} {:?}", row.text("path"), row.real("distance"));
-}
-
-// the non-redundant reading set for a task, each pick priced by marginal bits
-let picks = gist::relate::pack("how does the resident session reconcile freshness").rows()?;
-println!("{} foreign fingerprints", picks.stats().foreign);   // "not in this repo" ≠ "no results"
-
-// both engines at once: forks among only the files that match this symbol
-let fam = gist::compose::family("SearchRequest").root("libs").min_echo(0.15).rows()?;
-```
-
-All seventeen return **the same self-describing row**, so there is one decoder
-and one cursor rather than seventeen result types. A `Row` borrows the cursor's
-arena — the borrow checker, not a doc comment, is what stops one outliving the
-next pull — and `to_owned()` is the explicit exit. `rows.batches(64)` amortizes
-the FFI crossing, and several batches from one cursor may be alive at once.
-
-Absence is real: a field the engine did not set is `None`, never `0.0`, because
-`distance = 0.0` means _identical_. `Stats` carries `tier` (live · atlas ·
-shelf · subprocess), `foreign`, and `omitted` (a budget truncated the tail).
-
-**Transport is invisible.** With `--features native` and a `libirregex` that
-exports the analytic plane, everything above runs in-process; otherwise it runs
-through the certified CLI and lowers the same NDJSON into the same rows. An
-engine answering `IRREGEX_STALE` is _declining_, not failing, so the next tier
-answers and no caller sees it. The one loud refusal is a schema-digest mismatch,
-which names the schema that drifted rather than mis-decoding a row.
-
-## Standalone by design
-
-By **default** this crate links no native archive — it drives a process — so it
-needs neither `make build-gist` nor `zig-out/`, and the whole `bindings/rust/`
-tree lifts out cleanly for the public OSS release (own `Cargo.lock` + toolchain,
-excluded from the repo workspace). The opt-in `native` feature is where it joins
-the sibling C-ABI bindings (`principia` / `lamina` / `billog`) and links
-`libirregex`.
-
-```bash
-cd pkg/kernels/irregex/bindings/rust
-cargo test                    # subprocess: behavioral + rg-parity (skips without gist/rg)
-cargo test --features native  # + in-process Engine/Cursor parity vs cold (needs libirregex)
-cargo clippy --all-features   # clean
-```
-
-## Prior art
-
-Drives the same engine as `rg` (the tool it is a drop-in for); the
-request/result contract mirrors ripgrep's `--json` record stream. The Python
-face lives at [`../python`](../python), the Go face at [`../go`](../go); all
-realize the one `SearchRequest → Match` contract over the same engine.
+| Path | Job |
+|---|---|
+| `src/exact/` | `SearchRequest` re-export, aggregate, rank, native cursor |
+| `src/index/` | trigram / atlas / shelf lifecycle helpers |
+| `../irregex/bindings/rust` | substrate this crate depends on |

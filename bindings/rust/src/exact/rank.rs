@@ -8,34 +8,35 @@
 //! The crate's public shape stays [`Ranked`] rather than raw rows. The typed
 //! record is strictly more usable here — the schema has five fixed fields and
 //! every one of them is always meaningful — and it keeps a caller who has been
-//! using [`SearchRequest::rank`] since ADR-352 working unchanged.
+//! using [`crate::rank`] working unchanged.
 
 use std::path::PathBuf;
 
 use super::SearchRequest;
-use crate::contract::{RankKind, Ranked};
-use crate::runtime::relay::{Bin, Invocation, Shape};
-use crate::runtime::{Query, Result, Row, Wire, answer, struct_size, sys};
+use irregex::contract::{RankKind, Ranked};
+use irregex::runtime::relay::{Bin, Invocation, Shape};
+use irregex::runtime::{Query, Result, Row, Wire, answer, struct_size, sys};
 
 /// The `[row_schemas].ranked` id, and `[analytic.verbs].rank`'s op.
 const OP_RANK: u32 = 17;
 
-pub(crate) struct Rank<'a> {
+/// Rank `request`, then lower the rows into the typed record.
+pub(crate) fn rank_list(request: &SearchRequest, limit: u32) -> Result<Vec<Ranked>> {
+    Rank { request, limit }.list()
+}
+
+struct Rank<'a> {
     request: &'a SearchRequest,
     limit: u32,
 }
 
 impl<'a> Rank<'a> {
-    pub(crate) fn new(request: &'a SearchRequest, limit: u32) -> Self {
-        Self { request, limit }
-    }
-
     /// Rank, then lower the rows into the typed record.
     ///
     /// A row missing a non-optional field is decode corruption on the wire tier
     /// and simply an unranked file on the CLI tier, so the fallible fields
     /// default rather than abort a whole answer over one line.
-    pub(crate) fn list(&self) -> Result<Vec<Ranked>> {
+    fn list(&self) -> Result<Vec<Ranked>> {
         let rows = answer(self)?;
         rows.iter()
             .map(|row| {

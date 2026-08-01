@@ -1,4 +1,4 @@
-// In-process Engine/Cursor tests over the pull-cursor C ABI (ADR-352).
+// In-process Engine/Cursor tests over the pull-cursor C ABI.
 //
 // The oracle is the certified `gist` binary: the test execs `gist --json` over
 // the same throwaway corpus and asserts the Go binding's records are
@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	irregex "irregex/bindings/go"
-	"irregex/bindings/go/runtime"
+	"github.com/The-Billy-Company/irregex/bindings/go/analytic"
+	"github.com/The-Billy-Company/irregex/bindings/go/runtime"
 )
 
 // gistBin resolves the certified binary: $GIST_BIN, then the kernel's built
@@ -67,7 +67,7 @@ func corpus(t *testing.T) string {
 
 // cold execs `gist --json` with the argv equivalent of req over root and parses
 // the record stream — the cross-face oracle.
-func oracle(t *testing.T, bin, root string, req irregex.Request) []irregex.Match {
+func oracle(t *testing.T, bin, root string, req analytic.Request) []analytic.Match {
 	t.Helper()
 	args := []string{"--json"}
 	add := func(on bool, flag string) {
@@ -108,9 +108,9 @@ func oracle(t *testing.T, bin, root string, req irregex.Request) []irregex.Match
 	return parseJSON(t, out)
 }
 
-func parseJSON(t *testing.T, stream []byte) []irregex.Match {
+func parseJSON(t *testing.T, stream []byte) []analytic.Match {
 	t.Helper()
-	var out []irregex.Match
+	var out []analytic.Match
 	for line := range strings.SplitSeq(string(stream), "\n") {
 		if line == "" {
 			continue
@@ -131,20 +131,20 @@ func parseJSON(t *testing.T, stream []byte) []irregex.Match {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			continue
 		}
-		kind := irregex.KindMatch
+		kind := analytic.KindMatch
 		switch rec.Type {
 		case "match":
 		case "context":
-			kind = irregex.KindContext
+			kind = analytic.KindContext
 		default:
 			continue
 		}
 		text := strings.TrimSuffix(strings.TrimSuffix(rec.Data.Lines.Text, "\n"), "\r")
-		var subs []irregex.Submatch
+		var subs []analytic.Submatch
 		for _, s := range rec.Data.Submatches {
-			subs = append(subs, irregex.Submatch{Text: s.Match.Text, Start: s.Start, End: s.End})
+			subs = append(subs, analytic.Submatch{Text: s.Match.Text, Start: s.Start, End: s.End})
 		}
-		out = append(out, irregex.Match{
+		out = append(out, analytic.Match{
 			Path:       rec.Data.Path.Text,
 			LineNumber: rec.Data.LineNumber,
 			Text:       text,
@@ -156,9 +156,9 @@ func parseJSON(t *testing.T, stream []byte) []irregex.Match {
 }
 
 // drain iterates a cursor to exhaustion, failing on a mid-stream error.
-func drain(t *testing.T, c *Cursor) []irregex.Match {
+func drain(t *testing.T, c *Cursor) []analytic.Match {
 	t.Helper()
-	var got []irregex.Match
+	var got []analytic.Match
 	for c.Next() {
 		got = append(got, c.Match())
 	}
@@ -173,8 +173,8 @@ func requireBin(t *testing.T) string {
 	bin := gistBin()
 	if bin == "" {
 		// Fail closed — the cold oracle is load-bearing for these bindings.
-		// Build with `make build-gist` or set GIST_BIN; do not Skip (test-bandaid).
-		t.Fatal("gist binary required (build with `make build-gist` or set GIST_BIN)")
+		// Build with `zig build` or set GIST_BIN; do not Skip (test-bandaid).
+		t.Fatal("gist binary required (build with `zig build` or set GIST_BIN)")
 	}
 	return bin
 }
@@ -189,7 +189,7 @@ func TestEngineSearchEqualsCold(t *testing.T) {
 	defer eng.Close()
 
 	no := false
-	cases := []irregex.Request{
+	cases := []analytic.Request{
 		{Pattern: "TODO"},
 		{Pattern: "TODO", Fixed: true},
 		{Pattern: "TODO", IgnoreCase: true},
@@ -213,14 +213,14 @@ func TestEngineSearchEqualsCold(t *testing.T) {
 }
 
 // normalize collapses nil vs empty submatch slices so DeepEqual compares content.
-func normalize(ms []irregex.Match) []irregex.Match {
+func normalize(ms []analytic.Match) []analytic.Match {
 	for i := range ms {
 		if ms[i].Submatches == nil {
-			ms[i].Submatches = []irregex.Submatch{}
+			ms[i].Submatches = []analytic.Submatch{}
 		}
 	}
 	if ms == nil {
-		return []irregex.Match{}
+		return []analytic.Match{}
 	}
 	return ms
 }
@@ -231,13 +231,13 @@ func TestAllIteratesSameStream(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	c1, _ := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
+	c1, _ := eng.Search(t.Context(), analytic.Request{Pattern: "TODO"})
 	defer c1.Close()
 	scanner := drain(t, c1)
 
-	c2, _ := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
+	c2, _ := eng.Search(t.Context(), analytic.Request{Pattern: "TODO"})
 	defer c2.Close()
-	var ranged []irregex.Match
+	var ranged []analytic.Match
 	for m, err := range c2.All() {
 		if err != nil {
 			t.Fatal(err)
@@ -255,7 +255,7 @@ func TestMaxCountStopsButMatched(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	cur, err := eng.Search(t.Context(), irregex.Request{Pattern: "TODO", MaxCount: 1})
+	cur, err := eng.Search(t.Context(), analytic.Request{Pattern: "TODO", MaxCount: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,12 +276,12 @@ func TestMatchedTracksAnyHit(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	hit, _ := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
+	hit, _ := eng.Search(t.Context(), analytic.Request{Pattern: "TODO"})
 	defer hit.Close()
 	if !hit.Matched() {
 		t.Fatal("expected a match")
 	}
-	miss, _ := eng.Search(t.Context(), irregex.Request{Pattern: "absent_needle_xyzzy"})
+	miss, _ := eng.Search(t.Context(), analytic.Request{Pattern: "absent_needle_xyzzy"})
 	defer miss.Close()
 	if got := drain(t, miss); len(got) != 0 {
 		t.Fatalf("expected empty, got %v", got)
@@ -299,12 +299,12 @@ func TestCanceledContextSurfacesErr(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err := eng.Search(ctx, irregex.Request{Pattern: "TODO"})
+	_, err := eng.Search(ctx, analytic.Request{Pattern: "TODO"})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 	// The engine stays healthy: a fresh search still returns the full set.
-	cur, err := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
+	cur, err := eng.Search(t.Context(), analytic.Request{Pattern: "TODO"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestDeadlineIsHonored(t *testing.T) {
 	// An already-past deadline surfaces as DeadlineExceeded, never a hang.
 	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
 	defer cancel()
-	_, err := eng.Search(ctx, irregex.Request{Pattern: "TODO"})
+	_, err := eng.Search(ctx, analytic.Request{Pattern: "TODO"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded, got %v", err)
 	}
@@ -335,7 +335,7 @@ func TestUnsupportedPatternIsError(t *testing.T) {
 	eng, _ := Open(root)
 	defer eng.Close()
 
-	_, err := eng.Search(t.Context(), irregex.Request{Pattern: `(a)\1`})
+	_, err := eng.Search(t.Context(), analytic.Request{Pattern: `(a)\1`})
 	if !errors.Is(err, runtime.ErrUnsupportedPattern) {
 		t.Fatalf("expected runtime.ErrUnsupportedPattern, got %v", err)
 	}
@@ -344,11 +344,11 @@ func TestUnsupportedPatternIsError(t *testing.T) {
 func TestRecordsOutliveHandles(t *testing.T) {
 	requireBin(t)
 	root := corpus(t)
-	var records []irregex.Match
+	var records []analytic.Match
 	func() {
 		eng, _ := Open(root)
 		defer eng.Close()
-		cur, _ := eng.Search(t.Context(), irregex.Request{Pattern: "TODO"})
+		cur, _ := eng.Search(t.Context(), analytic.Request{Pattern: "TODO"})
 		records = drain(t, cur)
 		cur.Close()
 	}()

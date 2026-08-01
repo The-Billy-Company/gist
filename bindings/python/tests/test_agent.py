@@ -1,7 +1,7 @@
-"""The agent / code-place adapter maps one request shape (ADR-352, plan step 5).
+"""The agent / code-place adapter maps one request shape (plan step 5).
 
 `request_from_tool` is the single seam that turns a tool-boundary payload —
-Billy's `fs_search(place, query, glob, context_lines, semantic, at)` or a coding
+An agent `fs_search(place, query, glob, context_lines, semantic, at)` or a coding
 agent's search call — into the unified `SearchRequest`, while leaving *where the
 tree lives* and *how it's ranked* to the place adapter (outside GIST).
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from irregex import request_from_tool
-from irregex.exact.request import SearchRequest
+from gist import request_from_tool
+from irregex.request import SearchRequest
 
 
 def test_canonical_fields_pass_through() -> None:
@@ -46,7 +46,7 @@ def test_single_glob_string_becomes_tuple() -> None:
 
 
 def test_missing_pattern_is_a_loud_error() -> None:
-    """ADR-352 / agent.py: pattern|query must be non-empty — no silent default."""
+    """agent.py: pattern|query must be non-empty — no silent default."""
     with pytest.raises(ValueError, match="non-empty") as missing:
         request_from_tool({"glob": "*.py"})
     assert "pattern" in str(missing.value)

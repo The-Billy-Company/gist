@@ -1,44 +1,49 @@
-# Importable Python face of irregex (ADR-352). Zero REQUIRED runtime dependencies:
-# the default transport is a pure-Python wrapper over the certified `gist`
-# binary + `--json` (resolved at call time — env `GIST_BIN`, PATH, or the repo's
-# `zig-out/bin/gist`; `make install-gist` builds it). The persistent `Session`
-# additionally OPPORTUNISTICALLY uses an in-process cffi transport (ADR-352
-# rung 3, `irregex/_ffi.py` over `libirregex.{dylib,so}`) when BOTH `cffi` and the
-# built shared library are present in the host process — e.g. the AI service,
-# which already depends on `cffi` via the sibling kernels. `cffi` is never
-# required: `_ffi` fails open to the subprocess when it (or the library) is
-# absent, so the shipped wheel stays pure-Python and dependency-free.
-#
-# Root uv workspace member: local consumers resolve this source editably.
-# Runtime engine availability remains separate (GIST_BIN/PATH/in-repo build).
+# Importable Python face of gist search. Depends on the shared `irregex`
+# substrate (row protocol, request types, shell/daemon/native transports).
+# Local checkouts resolve the path editably; a published wheel depends on the
+# PyPI `irregex` distribution. Runtime engine availability remains separate
+# (GIST_BIN / PATH / in-repo zig-out).
 
 [project]
-name = "billy-irregex"
+name = "gist"
 version = "0.1.0"                                                               # x-release-please-version
-description = "Importable Python API for irregex search and kinship (ADR-352)."
+description = "Importable Python API for gist exact search."
 requires-python = ">=3.14,<3.15"
 license = "Apache-2.0"
-dependencies = [  ]
-
-[project.scripts]
-# The `gist` and `relate` binaries remain the command-line products.
+dependencies = [
+  "irregex",
+]
 
 [build-system]
 requires = [ "hatchling" ]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = [ "irregex" ]
+packages = [ "gist" ]
+
+[tool.uv.sources]
+irregex = { path = "../../../irregex/bindings/python", editable = true }
 
 [dependency-groups]
 dev = [
   "pytest>=9.0",
   "ruff>=0.15",
+  # Test-only, never a runtime dependency: the in-process tier is opportunistic
+  # and fails open to the subprocess without it (see the header). In billy it
+  # arrived transitively from the sibling cffi kernels; a standalone checkout has
+  # no such sibling, so without this the whole FFI parity plane silently skips.
+  "cffi>=1.17",
 ]
 
 [tool.pytest.ini_options]
 testpaths = [ "tests" ]
 
-# Inherits select / line-length / isort / per-file-ignores from the root.
 [tool.ruff]
-extend = "../../../../../pyproject.toml"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["gist", "irregex"]

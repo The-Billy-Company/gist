@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"irregex/bindings/go/runtime"
+	"github.com/The-Billy-Company/irregex/bindings/go/runtime"
 )
 
 // fixture is a corpus with its own artifact home, so a lifecycle test never
@@ -19,6 +19,11 @@ func fixture(t *testing.T) *Corpus {
 	}
 	root := t.TempDir()
 	t.Setenv("GIST_DIR", t.TempDir())
+	// A private artifact home is only half of the isolation: a resident session
+	// left over from another tree is still reachable, and this suite is about what
+	// a lifecycle verb writes to disk in ITS home, not about warm dispatch. Stand
+	// the daemon down so the subject is the artifacts.
+	t.Setenv("GIST_NO_AUTOSERVE", "1")
 	var body strings.Builder
 	body.WriteString("package sample\n\n")
 	for i := 1; i <= 11; i++ {

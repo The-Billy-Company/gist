@@ -4,11 +4,11 @@ doc_radar:
     - file: engine.go
       contains:
         - "func Open(roots ...string) (*Engine, error)"
-        - "func (e *Engine) Search(ctx context.Context, req irregex.Request) (*Cursor, error)"
-        - "func (e *Engine) Files(ctx context.Context, req irregex.Request) ([]string, error)"
-        - "func (e *Engine) Count(ctx context.Context, req irregex.Request) (int, error)"
-        - "func (e *Engine) Rank(ctx context.Context, req irregex.Request, top int) ([]Ranked, error)"
-        - "func (c *Cursor) All() iter.Seq2[irregex.Match, error]"
+        - "func (e *Engine) Search(ctx context.Context, req analytic.Request) (*Cursor, error)"
+        - "func (e *Engine) Files(ctx context.Context, req analytic.Request) ([]string, error)"
+        - "func (e *Engine) Count(ctx context.Context, req analytic.Request) (int, error)"
+        - "func (e *Engine) Rank(ctx context.Context, req analytic.Request, top int) ([]Ranked, error)"
+        - "func (c *Cursor) All() iter.Seq2[analytic.Match, error]"
 -->
 
 # `exact` — pattern search
@@ -20,7 +20,7 @@ times, each query yielding a pull `Cursor` you drive scanner-style or range over
 eng, _ := exact.Open("services/backend")
 defer eng.Close()
 
-cur, err := eng.Search(ctx, irregex.Request{Pattern: `func\s+\w+`, IgnoreCase: true})
+cur, err := eng.Search(ctx, analytic.Request{Pattern: `func\s+\w+`, IgnoreCase: true})
 defer cur.Close()
 for cur.Next() {
     m := cur.Match()
@@ -31,7 +31,7 @@ if err := cur.Err(); err != nil { /* mid-stream fault */ }
 for m, err := range cur.All() { /* … */ }   // or range-over-func
 ```
 
-`NextBatch(dst []irregex.Match)` fills a caller slice for the allocation-sensitive
+`NextBatch(dst []analytic.Match)` fills a caller slice for the allocation-sensitive
 path; `Next` is that with a 64-record buffer of its own. Records are copied into
 Go-owned values as they are yielded, so a `Match` outlives both handles.
 

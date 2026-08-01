@@ -1,4 +1,4 @@
-"""Behavioral + rg-parity tests for the importable search API (ADR-352).
+"""Behavioral + rg-parity tests for the importable search API.
 
 These drive the real `gist` binary over a throwaway corpus, so they skip cleanly
 where no binary is built. The parity tests additionally require `rg` on PATH and
@@ -8,15 +8,15 @@ contract the whole kernel rests on.
 
 from __future__ import annotations
 
-from dataclasses import replace
 import shutil
 import subprocess
+from dataclasses import replace
 
 import pytest
 
-import irregex
-from irregex.exact.request import MatchKind, SearchEngine, SearchRequest
-from irregex.runtime.errors import UnsupportedPatternError
+import gist
+from irregex.request import MatchKind, SearchEngine, SearchRequest
+from irregex.runtime.errors import BadPatternError, UnsupportedPatternError
 from irregex.runtime.shell import _parse_json
 
 
@@ -24,8 +24,8 @@ def _binary_available() -> bool:
     if shutil.which("gist") is not None:
         return True
     try:
-        irregex.binary()
-    except irregex.GistNotFoundError:
+        gist.binary()
+    except gist.GistNotFoundError:
         return False
     return True
 
@@ -48,7 +48,7 @@ def corpus(tmp_path):
 
 @needs_gist
 def test_search_returns_structured_matches(corpus) -> None:
-    matches = irregex.search("TODO", cwd=corpus)
+    matches = gist.search("TODO", cwd=corpus)
     assert matches, "expected TODO matches"
     assert all(m.kind is MatchKind.MATCH for m in matches)
     hit = next(m for m in matches if m.path.endswith("a.py"))
@@ -62,13 +62,13 @@ def test_search_returns_structured_matches(corpus) -> None:
 @needs_gist
 def test_structured_search_is_not_truncated_by_cli_output_budget(corpus, monkeypatch) -> None:
     monkeypatch.setenv("GIST_MAX_OUTPUT_BYTES", "64")
-    matches = irregex.search("TODO", cwd=corpus)
+    matches = gist.search("TODO", cwd=corpus)
     assert {match.path for match in matches} == {"a.py", "b.py", "pkg/d.py"}
 
 
 @needs_gist
 def test_files_lists_matching_paths(corpus) -> None:
-    hits = irregex.files("TODO", cwd=corpus)
+    hits = gist.files("TODO", cwd=corpus)
     assert any(p.endswith("a.py") for p in hits)
     assert not any(p.endswith("c.txt") for p in hits)
 
@@ -76,45 +76,81 @@ def test_files_lists_matching_paths(corpus) -> None:
 @needs_gist
 def test_count_sums_matching_lines(corpus) -> None:
     # a.py:1, b.py:1, pkg/d.py:1 (uppercase TODO) — lowercase 'todo' excluded.
-    assert irregex.count("TODO", cwd=corpus) == 3
+    assert gist.count("TODO", cwd=corpus) == 3
 
 
 @needs_gist
 def test_count_matches_sums_occurrences(corpus) -> None:
-    assert irregex.count_matches("TODO", cwd=corpus) == 4
+    assert gist.count_matches("TODO", cwd=corpus) == 4
 
 
 @needs_gist
 def test_ignore_case_widens(corpus) -> None:
-    assert irregex.count("TODO", ignore_case=True, cwd=corpus) == 4
+    assert gist.count("TODO", ignore_case=True, cwd=corpus) == 4
 
 
 @needs_gist
 def test_no_match_is_empty_not_error(corpus) -> None:
-    assert irregex.search("zzz_no_such_token_zzz", cwd=corpus) == []
+    assert gist.search("zzz_no_such_token_zzz", cwd=corpus) == []
 
 
 @needs_gist
 def test_unsupported_pattern_raises_not_kills(corpus) -> None:
     pattern = r"(?<=return )TODO"
     with pytest.raises(UnsupportedPatternError):
-        irregex.search(pattern, cwd=corpus)
-    assert irregex.search(pattern, engine=SearchEngine.PCRE2, cwd=corpus)
-    assert irregex.search(pattern, engine="auto", cwd=corpus)
+        gist.search(pattern, cwd=corpus)
+    assert gist.search(pattern, engine=SearchEngine.PCRE2, cwd=corpus)
+    assert gist.search(pattern, engine="auto", cwd=corpus)
+
+
+@needs_gist
+@pytest.mark.parametrize(
+    "pattern",
+    [r"[abc", r"a{2,1}", r"a\1", r")("],
+    ids=["unclosed-class", "reversed-repeat", "dangling-backref", "unopened-group"],
+)
+def test_a_malformed_pattern_is_not_an_unsupported_one(corpus, pattern) -> None:
+    """The two exit-2 classes are told apart, and by the right evidence.
+
+    Both used to arrive as `UnsupportedPatternError`, which told a caller to
+    retry on PCRE2 — advice that cannot work here, since PCRE2 is precisely what
+    refused these. So the retry the sibling class earns must also FAIL, or the
+    distinction is decorative: that is what the second half asserts.
+
+    `a\\1` is the case worth having: ripgrep tells you to try `--pcre2` for it,
+    and following that advice fails, because there is no group 1 to refer to.
+    """
+    with pytest.raises(BadPatternError):
+        gist.search(pattern, cwd=corpus)
+    for engine in (SearchEngine.PCRE2, "auto"):
+        with pytest.raises(gist.GistError):
+            gist.search(pattern, engine=engine, cwd=corpus)
+
+
+@needs_gist
+def test_the_malformed_class_is_a_sibling_not_a_subclass(corpus) -> None:
+    """A caller who catches `UnsupportedPatternError` to retry must NOT catch a
+    malformed pattern, or it retries forever on something no engine can take."""
+    assert not issubclass(BadPatternError, UnsupportedPatternError)
+    with pytest.raises(BadPatternError) as bad:
+        gist.search(r"[abc", cwd=corpus)
+    # The message has to be worth reading: the defect, and where it is.
+    assert "terminating ]" in str(bad.value)
+    assert "byte" in str(bad.value)
 
 
 @needs_gist
 def test_multiline_dotall_and_unicode_semantics_are_first_class(corpus) -> None:
-    matches = irregex.search(r"def alpha.*TODO", multiline_dotall=True, cwd=corpus)
+    matches = gist.search(r"def alpha.*TODO", multiline_dotall=True, cwd=corpus)
     assert len(matches) == 1
     assert "\n" in matches[0].text
-    assert irregex.count("CAFÉ", ignore_case=True, unicode=True, cwd=corpus) == 2
-    assert irregex.count("CAFÉ", ignore_case=True, unicode=False, cwd=corpus) == 1
+    assert gist.count("CAFÉ", ignore_case=True, unicode=True, cwd=corpus) == 2
+    assert gist.count("CAFÉ", ignore_case=True, unicode=False, cwd=corpus) == 1
 
 
 @needs_gist
 def test_context_lines_are_context_kind(corpus) -> None:
-    matches = irregex.search("alpha", before=1, after=1, cwd=corpus)
+    matches = gist.search("alpha", before=1, after=1, cwd=corpus)
     assert any(m.kind is MatchKind.CONTEXT for m in matches)
 
 
@@ -122,7 +158,7 @@ def test_context_lines_are_context_kind(corpus) -> None:
 @needs_rg
 def test_files_parity_with_ripgrep(corpus) -> None:
     for pattern in ("TODO", r"def\s+\w+", "class"):
-        gist_hits = set(irregex.files(pattern, cwd=corpus))
+        gist_hits = set(gist.files(pattern, cwd=corpus))
         proc = subprocess.run(  # noqa: S603 — fixed argv
             [shutil.which("rg"), "-l", pattern, "."],
             capture_output=True,
@@ -139,7 +175,7 @@ def test_files_parity_with_ripgrep(corpus) -> None:
 @needs_rg
 def test_full_structured_match_parity_with_ripgrep(corpus) -> None:
     request = SearchRequest(pattern="TODO", paths=(".",), before=1, after=1)
-    gist_matches = irregex.run(request, cwd=corpus)
+    gist_matches = gist.run(request, cwd=corpus)
     proc = subprocess.run(  # noqa: S603 — fixed argv
         [shutil.which("rg"), *request.to_argv(), "--json", "--regexp", request.pattern, "."],
         capture_output=True,

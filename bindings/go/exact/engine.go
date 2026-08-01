@@ -10,7 +10,7 @@
 // about speed, never about the result.
 //
 // Records are Go-owned values copied off whichever transport produced them, so a
-// [irregex.Match] outlives the cursor and the engine.
+// [analytic.Match] outlives the cursor and the engine.
 package exact
 
 import (
@@ -22,8 +22,8 @@ import (
 	"strings"
 	"sync"
 
-	irregex "irregex/bindings/go"
-	"irregex/bindings/go/runtime"
+	"github.com/The-Billy-Company/irregex/bindings/go/analytic"
+	"github.com/The-Billy-Company/irregex/bindings/go/runtime"
 )
 
 // batch is the records-per-pull [Cursor.Next] fills under the hood — enough to
@@ -83,15 +83,15 @@ func (e *Engine) Close() error {
 // Search runs req and returns a pull [Cursor]. The ctx is honored at record
 // boundaries by both tiers: its deadline becomes the scan's wall-clock budget,
 // and cancelling it stops an in-process scan cooperatively and kills a child.
-func (e *Engine) Search(ctx context.Context, req irregex.Request) (*Cursor, error) {
+func (e *Engine) Search(ctx context.Context, req analytic.Request) (*Cursor, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if native := e.warm(); native != nil {
-		cur, err := native.Search(ctx, req)
+		cur, err := searchNative(ctx, native, req)
 		switch {
 		case err == nil:
-			return &Cursor{records: cur, buf: make([]irregex.Match, batch)}, nil
+			return &Cursor{records: cur, buf: make([]analytic.Match, batch)}, nil
 		case ctx.Err() != nil:
 			return nil, err
 		}
@@ -103,7 +103,7 @@ func (e *Engine) Search(ctx context.Context, req irregex.Request) (*Cursor, erro
 }
 
 // Files lists the paths with at least one matching line (`-l`), sorted.
-func (e *Engine) Files(ctx context.Context, req irregex.Request) ([]string, error) {
+func (e *Engine) Files(ctx context.Context, req analytic.Request) ([]string, error) {
 	out, err := e.lines(ctx, req, "-l")
 	if err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ func (e *Engine) Files(ctx context.Context, req irregex.Request) ([]string, erro
 // Count totals the matching lines across the searched tree — one line counted
 // once however many times the pattern hits it, the semantic every count surface
 // in this kernel shares.
-func (e *Engine) Count(ctx context.Context, req irregex.Request) (int, error) {
+func (e *Engine) Count(ctx context.Context, req analytic.Request) (int, error) {
 	out, err := e.lines(ctx, req, "--count", "--no-filename")
 	if err != nil {
 		return 0, err
@@ -134,7 +134,7 @@ func (e *Engine) Count(ctx context.Context, req irregex.Request) (int, error) {
 type Ranked struct {
 	Path       string
 	LineNumber int64
-	Kind       irregex.RankKind
+	Kind       analytic.RankKind
 	Count      int64
 	Snippet    string
 }
@@ -144,10 +144,10 @@ type Ranked struct {
 // files demoted. This is gist's one shape with no ripgrep equivalent; top <= 0
 // takes the engine's default. Ranking reads the persisted index, so with none
 // there is nothing to rank and the answer is empty.
-func (e *Engine) Rank(ctx context.Context, req irregex.Request, top int) ([]Ranked, error) {
+func (e *Engine) Rank(ctx context.Context, req analytic.Request, top int) ([]Ranked, error) {
 	rows, err := runtime.Run(ctx, runtime.Query{
-		Op:     irregex.OpRank,
-		Params: irregex.Rank{Pattern: req.Pattern, Top: top, Fixed: req.Fixed, IgnoreCase: req.IgnoreCase},
+		Op:     analytic.OpRank,
+		Params: analytic.Rank{Pattern: req.Pattern, Top: top, Fixed: req.Fixed, IgnoreCase: req.IgnoreCase},
 		Roots:  e.roots,
 		Dir:    e.dir,
 	})
@@ -160,7 +160,7 @@ func (e *Engine) Rank(ctx context.Context, req irregex.Request, top int) ([]Rank
 		if err != nil {
 			return out, err
 		}
-		kind, _ := irregex.ParseRankKind(row.Enum("kind").Label)
+		kind, _ := analytic.ParseRankKind(row.Enum("kind").Label)
 		out = append(out, Ranked{
 			Path:       row.Text("path"),
 			LineNumber: row.Int("line_number"),
@@ -174,7 +174,7 @@ func (e *Engine) Rank(ctx context.Context, req irregex.Request, top int) ([]Rank
 
 // lines runs one presentation-shaped query through the child, whose rendered
 // answers (a path list, a per-file count) the pull ABI does not carry.
-func (e *Engine) lines(ctx context.Context, req irregex.Request, flags ...string) ([]string, error) {
+func (e *Engine) lines(ctx context.Context, req analytic.Request, flags ...string) ([]string, error) {
 	argv := append(slices.Clone(flags), req.Argv(e.roots...)[1:]...) // [1:] drops Argv's --json
 	out, err := runtime.Spawn(ctx, runtime.ToolGist, argv, e.dir)
 	if err != nil {
@@ -195,16 +195,16 @@ func (e *Engine) lines(ctx context.Context, req irregex.Request, flags ...string
 // off the hot path. Free it with [Cursor.Close].
 type Cursor struct {
 	records records
-	buf     []irregex.Match
-	held    []irregex.Match
-	cur     irregex.Match
+	buf     []analytic.Match
+	held    []analytic.Match
+	cur     analytic.Match
 	err     error
 	done    bool
 }
 
 // records is one search's supply, whichever tier produced it.
 type records interface {
-	NextBatch(dst []irregex.Match) (int, error)
+	NextBatch(dst []analytic.Match) (int, error)
 	Matched() bool
 	Close() error
 }
@@ -232,12 +232,12 @@ func (c *Cursor) Next() bool {
 }
 
 // Match is the record the last [Cursor.Next] landed on.
-func (c *Cursor) Match() irregex.Match { return c.cur }
+func (c *Cursor) Match() analytic.Match { return c.cur }
 
 // NextBatch fills dst with up to len(dst) records and returns how many it wrote;
 // 0 is a clean end of stream. Records are Go-owned, so a caller may keep every
 // batch it pulls.
-func (c *Cursor) NextBatch(dst []irregex.Match) (int, error) {
+func (c *Cursor) NextBatch(dst []analytic.Match) (int, error) {
 	if c.err != nil {
 		return 0, c.err
 	}
@@ -266,22 +266,22 @@ func (c *Cursor) Matched() bool { return c.records.Matched() }
 
 // All ranges over the remaining records. The final yield carries any error with a
 // zero Match; a clean end yields nothing extra.
-func (c *Cursor) All() iter.Seq2[irregex.Match, error] {
-	return func(yield func(irregex.Match, error) bool) {
+func (c *Cursor) All() iter.Seq2[analytic.Match, error] {
+	return func(yield func(analytic.Match, error) bool) {
 		for c.Next() {
 			if !yield(c.cur, nil) {
 				return
 			}
 		}
 		if c.err != nil {
-			yield(irregex.Match{}, c.err)
+			yield(analytic.Match{}, c.err)
 		}
 	}
 }
 
 // Collect drains the cursor into one slice.
-func (c *Cursor) Collect() ([]irregex.Match, error) {
-	var out []irregex.Match
+func (c *Cursor) Collect() ([]analytic.Match, error) {
+	var out []analytic.Match
 	for c.Next() {
 		out = append(out, c.cur)
 	}
@@ -300,7 +300,7 @@ func (c *Cursor) Close() error {
 
 // cold answers one search by running `gist --json` and decoding its record
 // stream, which is ripgrep's JSON-lines shape.
-func (e *Engine) cold(ctx context.Context, req irregex.Request) (*Cursor, error) {
+func (e *Engine) cold(ctx context.Context, req analytic.Request) (*Cursor, error) {
 	out, err := runtime.Spawn(ctx, runtime.ToolGist, req.Argv(e.roots...), e.dir)
 	if err != nil {
 		return nil, err
@@ -309,15 +309,15 @@ func (e *Engine) cold(ctx context.Context, req irregex.Request) (*Cursor, error)
 	if err != nil {
 		return nil, err
 	}
-	return &Cursor{records: &coldRecords{rest: found, any: len(found) > 0}, buf: make([]irregex.Match, batch)}, nil
+	return &Cursor{records: &coldRecords{rest: found, any: len(found) > 0}, buf: make([]analytic.Match, batch)}, nil
 }
 
 type coldRecords struct {
-	rest []irregex.Match
+	rest []analytic.Match
 	any  bool
 }
 
-func (c *coldRecords) NextBatch(dst []irregex.Match) (int, error) {
+func (c *coldRecords) NextBatch(dst []analytic.Match) (int, error) {
 	n := copy(dst, c.rest)
 	c.rest = c.rest[n:]
 	return n, nil
@@ -349,8 +349,8 @@ type record struct {
 	} `json:"data"`
 }
 
-func decodeRecords(stdout string) ([]irregex.Match, error) {
-	var out []irregex.Match
+func decodeRecords(stdout string) ([]analytic.Match, error) {
+	var out []analytic.Match
 	for line := range strings.SplitSeq(stdout, "\n") {
 		if line == "" || line[0] != '{' {
 			continue
@@ -359,22 +359,22 @@ func decodeRecords(stdout string) ([]irregex.Match, error) {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			return nil, err
 		}
-		kind := irregex.KindMatch
+		kind := analytic.KindMatch
 		switch rec.Type {
 		case "match":
 		case "context":
-			kind = irregex.KindContext
+			kind = analytic.KindContext
 		default:
 			continue
 		}
-		subs := make([]irregex.Submatch, 0, len(rec.Data.Submatches))
+		subs := make([]analytic.Submatch, 0, len(rec.Data.Submatches))
 		for _, s := range rec.Data.Submatches {
-			subs = append(subs, irregex.Submatch{Text: s.Match.Text, Start: s.Start, End: s.End})
+			subs = append(subs, analytic.Submatch{Text: s.Match.Text, Start: s.Start, End: s.End})
 		}
 		if len(subs) == 0 {
 			subs = nil
 		}
-		out = append(out, irregex.Match{
+		out = append(out, analytic.Match{
 			Path:       rec.Data.Path.Text,
 			LineNumber: rec.Data.LineNumber,
 			Text:       strings.TrimSuffix(strings.TrimSuffix(rec.Data.Lines.Text, "\n"), "\r"),

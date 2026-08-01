@@ -1,4 +1,4 @@
-//! Ranked-view integration tests (ADR-352).
+//! Ranked-view integration tests.
 //!
 //! The pure row-grammar parse is unit-tested inside `src/contract.rs` (the
 //! parser is crate-private). Here the integration layer builds a throwaway index

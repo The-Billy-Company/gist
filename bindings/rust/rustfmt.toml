@@ -3,7 +3,7 @@
 # Every Rust crate root has its `rustfmt.toml` symlinked to this file so that
 # editors which resolve config from the crate root (rust-analyzer, IntelliJ)
 # see the same shape as `cargo fmt` invoked from the CLI / CI. Don't fork
-# per crate — see .cursor/rules/rust-services.mdc.
+# per crate — keep one shared rustfmt.toml for every crate in this package.
 #
 # Stable options only. The workspace pins `channel = "1.96.0"` via
 # rust-toolchain.toml; turning on `unstable_features = true` (which would

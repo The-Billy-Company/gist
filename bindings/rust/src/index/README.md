@@ -2,7 +2,7 @@
 doc_radar:
   sentinels:
     - description: "the three persisted artifacts of the two engines"
-      file: pkg/kernels/irregex/bindings/rust/src/index/mod.rs
+      file: bindings/rust/src/index/mod.rs
       contains: ["Trigrams", "Atlas", "Shelf"]
 ---
 
