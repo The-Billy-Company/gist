@@ -9,7 +9,7 @@
 # standard — never inventing cycles when the PMU is unavailable.
 #
 # Usage (from repo root or anywhere):
-#   bash pkg/kernels/irregex/bench/certificate/mint/splice.sh
+#   bash bench/certificate/mint/splice.sh
 #
 # Env:
 #   CERT_SUDO=auto|1|0   auto (default): use `sudo -n` when it works;
@@ -19,8 +19,8 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL="$(cd "${HERE}/../../.." && pwd)"
-REPO="$(cd "${KERNEL}/../../.." && pwd)"
+# mint/ → certificate/ → bench/ → package root (this repo).
+REPO="$(cd "${HERE}/../../.." && pwd)"
 OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
 CERT="${OUT}/CERTIFICATE.md"
 CERT_SUDO="${CERT_SUDO:-auto}"
@@ -37,13 +37,13 @@ note() { echo "certify_layers: $*"; }
 
 # ── build ReleaseFast lab binaries (install only — `lab` does not auto-run) ──
 note "building lab binaries (ReleaseFast)…"
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast lab) || die "lab build failed"
+(cd "${REPO}" && zig build -Doptimize=ReleaseFast lab) || die "lab build failed"
 
-PORTBOUND="${KERNEL}/zig-out/bin/gist-portbound"
-ROOFLINE="${KERNEL}/zig-out/bin/gist-roofline"
-LOWERBOUND="${KERNEL}/zig-out/bin/gist-lowerbound"
-CREST="${KERNEL}/zig-out/bin/crest"
-CODEX_SCALE="${KERNEL}/zig-out/bin/codex-scale"
+PORTBOUND="${REPO}/zig-out/bin/gist-portbound"
+ROOFLINE="${REPO}/zig-out/bin/gist-roofline"
+LOWERBOUND="${REPO}/zig-out/bin/gist-lowerbound"
+CREST="${REPO}/zig-out/bin/crest"
+CODEX_SCALE="${REPO}/zig-out/bin/codex-scale"
 for bin in "${PORTBOUND}" "${ROOFLINE}" "${LOWERBOUND}" "${CREST}" "${CODEX_SCALE}"; do
   [[ -x "${bin}" ]] || die "missing executable ${bin}"
 done
@@ -129,7 +129,7 @@ note "Layer E — crest sieve production proof (fail-closed)…"
 [[ -s "${CREST_RAW}" ]] || die "crest proof did not emit ${CREST_RAW}"
 cp -f "${CREST_RAW}" "${OUT}/crest.csv"
 if crest_machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else crest_machine="$(uname -m)"; fi
-zig_version="$(cd "${KERNEL}" && zig version)" || die "zig version unavailable"
+zig_version="$(cd "${REPO}" && zig version)" || die "zig version unavailable"
 python3 "${HERE}/../report/crest.py" \
   --certificate "${CERT}" \
   --csv "${OUT}/crest.csv" \
@@ -177,7 +177,7 @@ done <<< "${layer_headers}"
 
 # Optional publish into the committed artifact dir (crate-relative).
 if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
-  pub="${KERNEL}/${CERT_PUBLISH_DIR}"
+  pub="${REPO}/${CERT_PUBLISH_DIR}"
   mkdir -p "${pub}/raw"
   # Bundle-wide files first, then every layer side-car the shared roster names —
   # so a new layer publishes its receipt without a second list to remember.

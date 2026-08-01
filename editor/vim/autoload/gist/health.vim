@@ -16,7 +16,7 @@ function! gist#health#report() abort
           \ empty(l:said) ? 'version unknown' : l:said[-1]))
   else
     call s:add(l:out, 'error', printf('`%s` not found on $PATH', l:bin),
-          \ 'run `make install-gist`, or set g:gist_binary to the full path')
+          \ 'run `zig build -Doptimize=ReleaseFast` (gist package) + install onto PATH, or set g:gist_binary to the full path')
     return l:out
   endif
 
@@ -30,7 +30,7 @@ function! gist#health#report() abort
     else
       call s:add(l:out, 'warn', printf('`%s` not found — :Gist%s is disabled',
             \ l:sibling, l:name ==# 'relate' ? 'Similar' : 'Blast'),
-            \ '`make install-gist` installs all three')
+            \ 'build the gist package (`zig build -Doptimize=ReleaseFast`) and install the three binaries onto PATH')
     endif
   endfor
 

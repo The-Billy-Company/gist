@@ -1,31 +1,32 @@
 ---
 doc_radar:
   paths_exist:
-    - pkg/kernels/irregex/src/surface/face/gist/main.zig
-    - pkg/kernels/irregex/contract/search_api.toml
-    - pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
+    - src/surface/face/gist/main.zig
+    - contract/surface.toml
+    - ../irregex/contract/engine.toml
+    - bench/certificate/artifact/CERTIFICATE.md
   sentinels:
-    - file: pkg/kernels/irregex/src/exec/cold/argv/catalog.zig
+    - file: ../irregex/src/exec/cold/argv/catalog.zig
       contains:
         - "pub const flag_catalog"
         - "unsupported_fail_loud"
-    - file: pkg/kernels/irregex/bench/conformance/gates/contract/ci_order.sh
+    - file: ../irregex/bench/conformance/gates/contract/ci_order.sh
       contains:
         - "pcre parity -P"
         - "index-elision parity"
         - "macro certificate"
-    - file: pkg/kernels/irregex/contract/search_api.toml
+    - file: contract/surface.toml
       contains:
         - 'subprocess = { status = "authoritative"'
     - description: "canary for the Layer A (index-on) 12-class win range quoted below — a re-mint moves both bounds, and breaking here is the signal to restate them"
-      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
+      file: bench/certificate/artifact/CERTIFICATE.md
       contains:
         - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
         - "machine: **Apple M4 Max**"
         - "8.93x"
         - "5.78x"
     - description: "canary for the Layer I (scanner-only) sweep and geomean this file leads with, and the Layer J scale caveat that bounds both"
-      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
+      file: bench/certificate/artifact/CERTIFICATE.md
       contains:
         - "24 win · 0 parity · 0 loss"
         - "the scanner alone is **1.93× faster than ripgrep**"
@@ -66,17 +67,17 @@ stand in for novelty and benchmark speed does not stand in for correctness.
 | `bench/gates/` + `bench/rgsuite/` + `bench/certify/`     | correctness-before-speed gates, mined rg parity, Dominance-and-Fit Certificate |
 
 Novel math that rides inside gist (forced-class-run pruning) is documented
-separately in [`../crest/`](../crest/PROOF.md) — not duplicated here.
+separately in `irregex/research/crest/` — not duplicated here.
 
 ## Run
 
 ```bash
-make install-gist                 # ReleaseFast binaries + PATH + trigram index
+zig build                 # ReleaseFast binaries + PATH + trigram index
 gist 'SearchRequest' --rank       # everyday agent search
 gist '[0-9a-f]{12}'               # crest sieve elides pruned reads
 gist --schema                     # authoritative public compatibility contract
-cd pkg/kernels/irregex && zig build test
-make bench-gist-certify           # refresh Certificate layers (see TESTING.md)
+zig build test
+bash bench/certificate/mint/mint.sh           # refresh Certificate layers (see TESTING.md)
 ```
 
 ## Measured (committed Certificate artifact)
@@ -98,7 +99,7 @@ a `-c` lane where nothing can short-circuit) — 0 parity, 0 losses, every cell
 at p < 0.001 — for a **1.93× geomean**. The index is then worth a further 3.1×
 on top of that, which is where Layer A's wider range comes from.
 
-**Where the corpus stops generalizing.** Both layers are minted on the Billy
+**Where the corpus stops generalizing.** Both layers are minted on the source
 monorepo (20,660 files / 204.6 MiB) on an Apple M4 Max — the workload the tool
 is built for, and therefore not a neutral proof. Layer J re-runs the field at
 352,316 files / 5.5 GiB of Linux/LLVM/Go/Rust, where csearch still takes the
@@ -106,14 +107,14 @@ cheap-literal classes (gist wins 5, ties 2, loses 5) and peak RSS, not time, is
 the binding ceiling.
 
 All of these are measurements from
-[`bench/certify/artifact/CERTIFICATE.md`](../../bench/certify/artifact/CERTIFICATE.md),
+[`bench/certify/artifact/CERTIFICATE.md`](../../bench/certificate/artifact/CERTIFICATE.md),
 not universal constants. Correctness gates always run before performance gates
 (`bench/gates/ci_order.sh`).
 
 ## Status
 
 **Shipped.** Dogfooded as the agents' everyday exact/regex locator
-(`make install-gist`; workspace rule: gist not ripgrep). Start with the
+(`zig build`; workspace rule: gist not ripgrep). Start with the
 positive case in [`CLAIM.md`](CLAIM.md), audit its ancestry in
 [`PRIOR_ART.md`](PRIOR_ART.md), then test every assertion against
 [`TESTING.md`](TESTING.md) and the four-bucket `gist --schema` contract.

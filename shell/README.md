@@ -2,14 +2,14 @@
 doc_radar:
   sentinels:
     - description: "the installer mints each artifact from the binary and links it where the shell already looks — never a checked-in copy to drift"
-      file: pkg/kernels/irregex/shell/install.sh
+      file: shell/install.sh
       contains: ["--generate", "GIST_SHELL_INSTALL", "command -v", "ln -sfn"]
     - description: "every shell the primer renders for is placed by name"
-      file: pkg/kernels/irregex/shell/install.sh
+      file: shell/install.sh
       contains: ["complete-zsh", "complete-bash", "complete-fish", "complete-powershell", "man/man1/gist.1"]
-    - description: "install-gist runs this after linking the binaries"
-      file: scripts/act/workspace/taskrunner/taskrun/rows/builds/_gist.py
-      contains: "pkg/kernels/irregex/shell/install.sh"
+    - description: "zig build runs this after linking the binaries"
+      file: build.zig
+      contains: "shell/install.sh"
 ---
 
 # `shell/` — the manual and the completions
@@ -17,13 +17,13 @@ doc_radar:
 The shell end of [`gist`](../src/surface/face/gist/README.md), the way
 [`editor/`](../editor/) is the Vim end. Nothing here is written by hand: every
 artifact is minted by `gist --generate` from the same flag table
-[`catalog.zig`](../src/exec/cold/argv/catalog.zig) declares and
-[`grammar.zig`](../src/exec/cold/argv/grammar.zig) dispatches argv on,
+`irregex/src/exec/cold/argv/catalog.zig` declares and
+`irregex/src/exec/cold/argv/grammar.zig` dispatches argv on,
 rendered by [`cli/primer/`](../src/surface/cli/primer/README.md). A flag cannot
 exist in the parser and be missing from a menu.
 
 ```bash
-make install-gist          # builds, links the binaries, then runs this
+zig build          # builds, links the binaries, then runs this
 GIST_SHELL_INSTALL=0 …     # decline just this part
 gist --generate man        # or mint one artifact yourself
 ```
@@ -75,7 +75,7 @@ the category, and spends the saved effort on three things:
 - **Derived mutual exclusion.** `-i`/`-s`/`-S` rule each other out because they
   write the same field in the parser, not because someone remembered.
 
-`make test-gist-shell` is the standing proof: each shell parses its own
+the shell-completion suite under `shell/` is the standing proof: each shell parses its own
 artifact, mandoc lints the page, every flag is shown to be filed in exactly one
 caption, and the suite fails if any generated file would run a program at tab
 time.

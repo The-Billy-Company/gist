@@ -1,4 +1,4 @@
-//! gist resident session — the UDS wire-protocol codec suite (ADR-352 rung 2.5).
+//! gist resident session — the UDS wire-protocol codec suite.
 //!
 //! Pure encode/decode over byte slices (no socket). Round-trips are lossless;
 //! malformed frames are hard errors.

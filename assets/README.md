@@ -2,7 +2,7 @@
 doc_radar:
   counts:
     - description: "checked-in README figures stay as the five published PNGs"
-      glob: pkg/kernels/irregex/assets/*.png
+      glob: assets/*.png
       unit: files
       equals: 5
 ---

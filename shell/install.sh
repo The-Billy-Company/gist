@@ -15,7 +15,7 @@ set -uo pipefail
 warn() { printf '\033[0;33m!\033[0m  %s\n' "${1}"; }
 note() { printf '\033[0;32m✓\033[0m  %s\n' "${1}"; }
 
-# Announced rather than silent: this runs inside `make install-gist`, where an
+# Announced rather than silent: this runs inside `zig build`, where an
 # inherited opt-out would otherwise look identical to the feature not existing.
 if [[ ${GIST_SHELL_INSTALL:-1} == 0 ]]; then
   warn "GIST_SHELL_INSTALL=0 — leaving the manual and completions uninstalled"

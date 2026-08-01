@@ -256,7 +256,7 @@ endfunction
 function! gist#binary() abort
   let l:bin = gist#opt('binary')
   if executable(l:bin) | return l:bin | endif
-  call gist#warn(printf('gist: `%s` is not on $PATH — run `make install-gist`, '
+  call gist#warn(printf('gist: `%s` is not on $PATH — run `zig build -Doptimize=ReleaseFast` (gist package) + install onto PATH, '
         \ . 'or set g:gist_binary', l:bin))
   return ''
 endfunction

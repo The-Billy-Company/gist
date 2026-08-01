@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gist resident-session latency gate (ADR-352 rung 2.5).
+"""gist resident-session latency gate.
 
 The warm certificate (`certify_session.sh`) times the honest product path — a
 persistent client dialing a `gist serve` daemon once and replaying a slate over

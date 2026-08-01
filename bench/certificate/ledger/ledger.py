@@ -68,7 +68,7 @@ from layers import LAYERS
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[5]  # bench/certificate/ledger -> certificate -> bench -> irregex -> kernels -> libs -> repo
+REPO = HERE.parents[2]  # ledger → certificate → bench → package root
 LEDGER = HERE / "ledger.jsonl"
 RENDER = HERE / "LEDGER.md"
 CERTIFICATE = "CERTIFICATE.md"
@@ -173,7 +173,7 @@ def read_mint(bundle: Path, *, note: str = "", text: str | None = None) -> Mint 
         try:
             loaded = json.loads(meta.read_text())
             machine = loaded if isinstance(loaded, dict) else {}
-        except OSError, json.JSONDecodeError:
+        except (OSError, json.JSONDecodeError):
             machine = {}
 
     headers = [ln for ln in text.splitlines() if ln.startswith("#")]
@@ -365,7 +365,7 @@ def backfill(root: Path, limit: int) -> int:
             text=True,
             stderr=subprocess.DEVNULL,
         )
-    except OSError, subprocess.CalledProcessError:
+    except (OSError, subprocess.CalledProcessError):
         print("no git history available — nothing to backfill", file=sys.stderr)
         return 0
 
@@ -380,7 +380,7 @@ def backfill(root: Path, limit: int) -> int:
                 text=True,
                 stderr=subprocess.DEVNULL,
             )
-        except OSError, subprocess.CalledProcessError:
+        except (OSError, subprocess.CalledProcessError):
             continue
         mint = read_mint(root, text=text)
         if mint is None or mint.digest in known:

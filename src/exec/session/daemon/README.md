@@ -2,12 +2,12 @@
 doc_radar:
   counts:
     - description: "daemon is serve + client only"
-      glob: pkg/kernels/irregex/src/exec/session/daemon/*/
+      glob: src/exec/session/daemon/*/
       equals: 2
       unit: dirs
   sentinels:
     - description: "warm path stays fail-open to cold"
-      file: pkg/kernels/irregex/src/exec/session/daemon/client/client.zig
+      file: src/exec/session/daemon/client/client.zig
       contains: [".cold", "attempt"]
 ---
 
@@ -15,7 +15,7 @@ doc_radar:
 
 Moved here from `exec/session/daemon/` so the resident session owns its
 transport. The CLI's optional accelerator: a
-[`ResidentSession`](../warm/resident.zig) stays warm behind a Unix socket so
+`ResidentSession` (`irregex/src/exec/session/warm/resident.zig`) stays warm behind a Unix socket so
 the next eligible `gist <pattern>` can skip process + index-mmap +
 candidate-read startup — and still emit **cold's own bytes and exit code**.
 

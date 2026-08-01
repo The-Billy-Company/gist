@@ -2,16 +2,16 @@
 doc_radar:
   sentinels:
     - description: "evaluator keeps its closed verb set + contract-bound schema"
-      file: pkg/kernels/irregex/bench/dominance/evaluate/evaluate.py
+      file: bench/dominance/evaluate/evaluate.py
       contains: ['sub.add_parser("run"', 'sub.add_parser("verify"', 'sub.add_parser("compare"', 'sub.add_parser("brief"']
     - description: "verifier enforces the parity precondition + fail-closed operational gates"
-      file: pkg/kernels/irregex/bench/dominance/evaluate/report.py
+      file: bench/dominance/evaluate/report.py
       contains: ["_verify_parity_gate", "_verify_operational", "verify_claims"]
 ---
 
 # `bench/evaluate/` — the gist operational-envelope matrix
 
-The [Dominance-and-Fit Certificate](../certify/) is the deep, narrow proof of how
+The [Dominance-and-Fit Certificate](../../certificate/) is the deep, narrow proof of how
 good and how measurably bounded Gist is **at full speed**: cold fresh-process
 dominance vs ripgrep, single-thread cycles/byte, the warm resident-daemon tier,
 rg drop-in correctness, and the port/roofline/lower-bound/crest layers. This
@@ -23,7 +23,7 @@ and **concurrency** (aggregate qps + tail under many-agent load).
 It never re-times cold/warm query dominance or restates a correctness number —
 those live in the certificate, and duplicating them here would only invite
 drift. It is one closed-verb CLI over the regimes frozen in
-[`../../contract/performance_evidence.toml`](../../contract/performance_evidence.toml),
+`irregex/contract/performance_evidence.toml`,
 reusing the existing race registry (`_compete.sh`), the hyperfine harness, and
 the certificate statistics rather than re-encoding them.
 
@@ -87,5 +87,5 @@ refused at publish and the bundle is flagged `exploratory` so it can never
 masquerade as evidence. Mac-arm64 and Anvil-linux-x86_64 stay in separate
 per-machine directories — never averaged into one blended number.
 
-See [ADR-352](../../../../../docs/architecture/3-decisions/352-gist-unified-search-api.md)
-and the certificate's [`certify/README.md`](../certify/README.md).
+See `irregex/contract/engine.toml`
+and the certificate's [`certificate/README.md`](../../certificate/README.md).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gist RESIDENT-SESSION certificate — the honest warm-product path (ADR-352 rung 2.5).
+# gist RESIDENT-SESSION certificate — the honest warm-product path.
 #
 # The cold certificate (`../certify/`) proves gist's fresh-process query is at
 # parity-or-faster than ripgrep. The warm head-to-head (`../races/headtohead.sh`)
@@ -22,7 +22,7 @@
 #     We measure and label whatever THIS platform delivers, and the latency gate
 #     (`gate_session.py`) enforces a floor ONLY on the armed path.
 #
-# Usage:  cd pkg/kernels/irregex && bench/session/certify_session.sh
+# Usage:  bench/session/certify_session.sh
 #         RUNS=12 WARMUP=3 bench/session/certify_session.sh   # tune rg timing
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -160,7 +160,7 @@ open(path, "a").write("\n")
 PY
 
 {
-  echo "# gist resident-session certificate (ADR-352 rung 2.5)"
+  echo "# gist resident-session certificate"
   echo
   echo "- **path measured:** persistent client → \`gist serve\` daemon over a Unix socket,"
   echo "  one connection reused across the whole slate (no per-query process spawn)."

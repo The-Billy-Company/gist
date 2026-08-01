@@ -31,10 +31,23 @@ import tomllib
 
 
 HERE = Path(__file__).resolve().parent
-KERNEL = HERE.parents[2]
-REPO = KERNEL.parents[2]
-CONTRACT = KERNEL / "contract" / "performance_evidence.toml"
+KERNEL = HERE.parents[2]  # evaluate → dominance → bench → package root
+REPO = KERNEL
 ARTIFACT = HERE / "artifact"
+
+
+def _climb_file(*rel_parts: str) -> Path:
+    """Probe every ancestor for *rel_parts; also try irregex/<rel> for a sibling checkout."""
+    for ancestor in (HERE, *HERE.parents):
+        for prefix in (Path(), Path("irregex")):
+            cand = ancestor / prefix.joinpath(*rel_parts)
+            if cand.is_file():
+                return cand
+    # Last resort: historical in-tree location (fails loudly on read if absent).
+    return KERNEL / Path(*rel_parts)
+
+
+CONTRACT = _climb_file("contract", "performance_evidence.toml")
 
 _SEMVER_OR_SHA = ("sha256:", "v", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
 

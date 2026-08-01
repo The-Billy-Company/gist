@@ -111,7 +111,7 @@ def _load(results_dir: Path, cls: str, cell: str) -> list[float]:
         return []
     try:
         return load_times_ms(path)
-    except json.JSONDecodeError, KeyError, IndexError:
+    except (json.JSONDecodeError, KeyError, IndexError):
         return []
 
 
@@ -201,7 +201,7 @@ def _mined(path: Path) -> dict[str, int] | None:
     """Bucket tally from `run.py`'s results.json (its own PASS/ORDER/FAIL vocabulary)."""
     try:
         recs = json.loads(path.read_text())
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return None
     tally: dict[str, int] = {}
     for r in recs:

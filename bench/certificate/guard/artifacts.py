@@ -41,7 +41,7 @@ from layers import REQUIRED_LAYER_FILES, REQUIRED_LAYER_HEADERS
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[5]  # ... -> repo root
+REPO = HERE.parents[2]  # guard → certificate → bench → package root
 
 REQUIRED_FILES = (
     "CERTIFICATE.md",

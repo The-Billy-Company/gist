@@ -1,29 +1,29 @@
 ---
 doc_radar:
   occurrences:
-    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
-    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
+    - {file: ../irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
+    - {file: ../irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
   sentinels:
-    - file: pkg/kernels/irregex/src/exec/cold/engine/serial.zig
+    - file: ../irregex/src/exec/cold/engine/serial.zig
       contains: ["used purely to ELIDE reads", "never to change the file set"]
-    - file: pkg/kernels/irregex/src/kernel/regex/pcre2/literal.zig
+    - file: ../irregex/src/kernel/regex/pcre2/literal.zig
       contains: ["pub fn required"]
-    - file: pkg/kernels/irregex/src/kernel/rank/signals.zig
+    - file: ../irregex/src/kernel/rank/signals.zig
       contains: ["pub fn declarationConfidence", "pub fn shapeFingerprint", "pub fn isGenerated"]
-    - file: pkg/kernels/irregex/src/kernel/math/crest.zig
+    - file: ../irregex/src/kernel/math/crest.zig
       contains: ["pub const Vector", "pub fn crest"]
-    - file: pkg/kernels/irregex/contract/search_api.toml
+    - file: contract/surface.toml
       contains:
         - 'subprocess = { status = "authoritative"'
         - 'uds = { status = "operational-accelerator"'
         - 'ffi = { status = "operational-accelerator"'
     - description: "every measured number this page quotes is still the one the certificate carries"
-      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
+      file: bench/certificate/artifact/CERTIFICATE.md
       contains:
         - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
         - "7.5× geomean end-to-end speedup"
     - description: "the warm claim is sourced from the armed resident-session certificate, never the cold race"
-      file: pkg/kernels/irregex/bench/dominance/session/session_meta.json
+      file: bench/dominance/session/session_meta.json
       contains: ['"armed": true', '"geomean_speedup": 565.6']
 ---
 
@@ -34,7 +34,7 @@ doc_radar:
 compatibility contract: `gist --schema` (rendered from
 `src/exec/cold/argv/args.zig` `flag_catalog`). Prior art:
 `PRIOR_ART.md`; evidence inventory: `TESTING.md`. Novel crest math:
-[`../crest/PROOF.md`](../crest/PROOF.md).
+`irregex/research/crest/PROOF.md`.
 
 **Gist is grep rebuilt around the coding-agent loop.** It keeps ripgrep's
 familiar command shape and a fail-closed correctness contract, then makes the
@@ -190,7 +190,7 @@ It soundly prunes literal-free class repetitions that substring indexes cannot
 express. On the committed narrow-class slate, it turns a trigram blind spot
 into a 7.5× geomean end-to-end speedup. The theorem, calculus, count-cousin
 ablation, adversarial prior-art review, and corpus proof live in
-[`../crest/`](../crest/).
+`irregex/research/crest/`.
 
 ### New boundary
 

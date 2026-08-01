@@ -12,7 +12,7 @@ Two modes, with floors from `ratio_baseline.json`:
   --live
       Re-measure a slim cold slate (gist + rg only, hyperfine min-of-N) on this
       machine and assert the same floors. Hardware cancels because both tools
-      run back-to-back. Opt-in via ``GIST_BENCH=1`` / ``make bench-gist-ratio``.
+      run back-to-back. Opt-in via ``GIST_BENCH=1`` / ``python3 bench/certificate/guard/ratio.py``.
 
 Floors sit below the published certificate with noise margin. A real cold-path
 regression drops a ratio under its floor and fails; refreshing floors after a
@@ -21,7 +21,7 @@ deliberate certify republish is the intentional escape hatch.
 Usage:
   python3 bench/certificate/guard/ratio.py
   python3 bench/certificate/guard/ratio.py --live --force
-  GIST_BENCH=1 make bench-gist-ratio
+  GIST_BENCH=1 python3 bench/certificate/guard/ratio.py
 """
 
 from __future__ import annotations
@@ -40,8 +40,8 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ARTIFACT = HERE.parent / "artifact"
 BASELINE = HERE / "ratio_baseline.json"
-KERNEL = HERE.parents[2]
-REPO = KERNEL.parents[2]
+KERNEL = HERE.parents[2]  # guard → certificate → bench → package root
+REPO = KERNEL
 MACRO = ARTIFACT / "certify_macro.csv"
 COMPETE = HERE.parents[1] / "dominance" / "races" / "field.sh"
 

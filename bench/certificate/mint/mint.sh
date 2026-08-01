@@ -19,7 +19,7 @@
 # Usage:  bench/certify/certify.sh            (RUNS=20 WARMUP=3 by default)
 #         RUNS=40 bench/certify/certify.sh    (tighten the CIs)
 #         CERT_SUDO=1 CERT_PUBLISH_DIR=bench/certify/artifact …
-#         make bench-gist-certify             (B–E refresh; CERT_FULL=1 = this)
+#         bash bench/certificate/mint/mint.sh             (B–E refresh; CERT_FULL=1 = this)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../../dominance/races/field.sh
@@ -258,7 +258,7 @@ def version(path: str) -> str:
     # have side effects. Neither csearch nor zoekt carries a version flag, and
     # asking a SEARCH tool for one is actively unsafe: `csearch version` treats
     # `version` as the regexp and prints a matching corpus line, which scraped a
-    # bogus `26.3.0` out of Billy's own source before this order was fixed.
+    # bogus `26.3.0` out of this package's own source before this order was fixed.
     if go := shutil.which("go"):
         for line in run([go, "version", "-m", path], 20).splitlines():
             field = line.split()
@@ -450,8 +450,8 @@ python3 "${HERE}/../../conformance/gates/oracle/index_size_accounting.py" \
 echo "splicing Layers B/B′/C/D…"
 CERT_OUT="${OUT}" bash "${HERE}/splice.sh" || exit 1
 
-# Warm tier — the resident-daemon regime an agent actually drives (ADR-352 rung
-# 2.5). Additive: splices a marked section into CERTIFICATE.md + emits
+# Warm tier — the resident-daemon regime an agent actually drives.
+# Additive: splices a marked section into CERTIFICATE.md + emits
 # certify_warm.csv. Never blocks the mint (a missing daemon/rival is honestly
 # reported), so the cold Layers A–E stay the reproducibility-gated headline.
 echo "racing the warm tier (resident daemon)…"

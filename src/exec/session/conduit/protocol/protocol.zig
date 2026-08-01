@@ -1,4 +1,4 @@
-//! gist resident session — the Unix-domain-socket wire protocol (ADR-352 rung 2.5).
+//! gist resident session — the Unix-domain-socket wire protocol.
 //!
 //! Length-prefixed framing over a stream socket: `[u32 len][u8 opcode][payload…]`,
 //! where `len` counts the opcode + payload. One request per query, one response

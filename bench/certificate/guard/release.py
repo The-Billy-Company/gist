@@ -55,7 +55,7 @@ import sys
 
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[5]  # bench/certificate/guard -> certificate -> bench -> irregex -> kernels -> libs -> repo
+REPO = HERE.parents[2]  # guard → certificate → bench → package root
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
@@ -72,7 +72,7 @@ def _read_machine(bundle: Path) -> dict[str, object] | None:
         return None
     try:
         data = json.loads(path.read_text())
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
 
@@ -201,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     if not discover_bundles(root):
         message = (
             f"no certificate bundles under {root} — release not set up. "
-            "Mint on each machine: CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify "
+            "Mint on each machine: CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 bash bench/certificate/mint/mint.sh "
             "(Linux: CERT_PUBLISH_DIR=bench/certificate/artifact/linux-x86_64 "
             "bash bench/certificate/mint/mint.sh)"
         )

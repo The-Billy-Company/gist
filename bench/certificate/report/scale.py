@@ -76,7 +76,7 @@ def _rows(path: Path, delimiter: str = "\t") -> tuple[list[dict], dict[str, str]
 def _num(row: dict, key: str) -> float:
     try:
         return float(row[key])
-    except TypeError, ValueError, KeyError:
+    except (TypeError, ValueError, KeyError):
         return 0.0
 
 

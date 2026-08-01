@@ -1,26 +1,26 @@
 <!--
 doc_radar:
   paths_exist:
-    - pkg/kernels/irregex/src/exec/session/warden/warden.zig
-    - pkg/kernels/irregex/src/exec/session/warden/ration.zig
-    - pkg/kernels/irregex/src/exec/session/warden/standdown.zig
+    - src/exec/session/warden/warden.zig
+    - src/exec/session/warden/ration.zig
+    - src/exec/session/warden/standdown.zig
   sentinels:
-    - file: pkg/kernels/irregex/src/exec/session/warden/warden.zig
+    - file: src/exec/session/warden/warden.zig
       description: the ration is charged wholesale into per-thread lanes, swept back before any refusal, with relief tried before a refusal
       contains: ["pub fn attend", "fn charge", "fn beg", "fn sweep", "fn refill", "const Lane", "align(std.atomic.cache_line)"]
-    - file: pkg/kernels/irregex/src/exec/session/warden/ration.zig
+    - file: src/exec/session/warden/ration.zig
       description: a machine share AND a work-shaped ceiling, both fail-closed to zero
       contains: ["commons_fraction", "resident_ceiling", "arming_floor", "GIST_MEMORY_MB"]
-    - file: pkg/kernels/irregex/src/exec/session/warden/standdown.zig
+    - file: src/exec/session/warden/standdown.zig
       description: the brake records the budget it refused so it cannot latch
       contains: ["ration_bytes=", "pub fn standing", "pub fn lift"]
-    - file: pkg/kernels/irregex/src/exec/session/daemon/serve/serve.zig
+    - file: src/exec/session/daemon/serve/serve.zig
       description: the daemon allocates through the meter, not through its raw gpa
       contains: ["Warden.init", "warden.attend", "standdown.mark"]
-    - file: pkg/kernels/irregex/src/exec/session/answer/keep.zig
+    - file: src/exec/session/answer/keep.zig
       description: the keep can be surrendered under pressure without deadlocking
       contains: ["pub fn surrender", "tryLock"]
-    - file: pkg/kernels/irregex/bench/rungs/warden/bench.zig
+    - file: bench/rungs/warden/bench.zig
       description: the cost of the bound is gated, decomposed against a no-op wrapper, not merely reported
       contains: ["budget_parallel_ns", "budget_serial_ns", "const Passthru", "WardenOverheadRegressed"]
 -->
@@ -55,7 +55,7 @@ habit of its authors.
 
 What it deliberately does not cover: `content.shard` bytes reached through an
 mmap are page-cache pages the kernel evicts under pressure, and
-[`../conduit/shm.zig`](../conduit/shm.zig)'s per-answer handoff buffers are
+`irregex/src/exec/session/conduit/shm.zig`'s per-answer handoff buffers are
 unmapped when the answer ends. Neither is heap this process must account for.
 
 ## Refusal is routing, not failure
@@ -65,7 +65,7 @@ is a fatal surprise and here is the ordinary warm→cold declinature this whole
 tier is built on. The resident path is an accelerator; the cold walk answers
 every query correctly; no resident allocation sits on a path that panics on OOM.
 A session that cannot fit hands its work back to the tier that never needed to —
-the same fail-closed edge [`../watch/budget.zig`](../watch/budget.zig) takes when
+the same fail-closed edge `irregex/src/exec/session/watch/budget.zig` takes when
 it arms zero watches.
 
 Relief comes first, because some of what a session holds is pure cache. The
@@ -101,7 +101,7 @@ Measured by the meter itself on this repo (~21k indexed files, 223 MB
 | Transient load crest        | 2793 MB |
 
 The crest is ~5× the steady state because the warm trigram build is out-of-place:
-[`../../../corpus/index/trigrams/trigram.zig`](../../../corpus/index/trigrams/trigram.zig)
+`irregex/src/corpus/index/trigrams/trigram.zig`
 extracts ~138 M postings at 8 bytes each into per-shard buffers and
 counting-sorts them into a second buffer the same size, so the build transiently
 costs two ~1.1 GB posting arrays on top of the mirror.

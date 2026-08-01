@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gist certify — warm-tier dominance post-processor (ADR-352 rung 2.5, resident daemon).
+"""gist certify — warm-tier dominance post-processor (resident daemon).
 
 `certify_warm.sh` drives the resident `gist serve` daemon and dumps one hyperfine
 JSON per (probe class, cell) — cell ∈ {warm, cold, csearch, zoekt, rg}. This reads
@@ -44,7 +44,7 @@ def _load(results_dir: Path, cls: str, cell: str) -> list[float]:
         return []
     try:
         return load_times_ms(path)
-    except json.JSONDecodeError, KeyError, IndexError:
+    except (json.JSONDecodeError, KeyError, IndexError):
         return []
 
 

@@ -1,12 +1,12 @@
 <!--
 doc_radar:
   paths_exist:
-    - pkg/kernels/irregex/src/exec/session/conduit/protocol/protocol.zig
+    - src/exec/session/conduit/protocol/protocol.zig
   sentinels:
-    - file: pkg/kernels/irregex/contract/irregex.ward
+    - file: contract/irregex.ward
       contains: ["seal exec/session/conduit/protocol through protocol.zig"]
       description: The directory is a sealed deep module, so a caller cannot bind to half the versioned contract
-    - file: pkg/kernels/irregex/src/exec/session/conduit/protocol/protocol.zig
+    - file: src/exec/session/conduit/protocol/protocol.zig
       contains: ["protocol_version: u8 = 9"]
       absent: ["MONOLITHIC"]
       description: The entry file owns the negotiated version and is no longer a registered monolith
@@ -18,7 +18,7 @@ One contract, five chapters. Everything the resident daemon and its clients say
 to each other is gated on a single negotiated `protocol_version`, so the pieces
 below are internals of one agreement rather than five independent modules — the
 directory is **sealed** in
-[`contract/irregex.ward`](../../../../../../contract/irregex.ward), and
+[`contract/gist.ward`](../../../../../contract/gist.ward), and
 `protocol.zig` is the only door.
 
 | Module                         | Chapter                                                                                                                                                                                                                                                            |

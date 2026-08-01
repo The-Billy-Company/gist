@@ -10,7 +10,7 @@ accelerators never overrule current bytes.
 **Verdict:** COMPOSITION, not algorithmic novelty for the trigram family
 (adversarial landscape review kept current with the shipped surface). Every
 ingredient is deliberately standard except the crest sieve (separate dossier:
-[`../crest/PRIOR_ART.md`](../crest/PRIOR_ART.md)). This file is the paper
+`irregex/research/crest/PRIOR_ART.md`). This file is the paper
 trail of **citations that appear in the shipped gist code and READMEs**, plus
 neighboring families we measured and left. The precise claim and non-claims
 live in `CLAIM.md`. Every external source is listed with a link and
@@ -35,7 +35,7 @@ annotation in [§ References](#references).
 
 Codex FM-index math, Hyperscan-vs-`patterns`, and compression kinship are
 **relate** (and the shared `src/kernel/codex/` module) — see
-[`../relate/PRIOR_ART.md`](../relate/PRIOR_ART.md), not this file.
+`relate/research/relate/PRIOR_ART.md`, not this file.
 
 ---
 
@@ -56,7 +56,7 @@ Gist is:
   multi-repository search, permissions, semantic metadata, navigation,
   governance, and transformation workflows that Gist does not attempt;
 - **not compression-as-search or corpus quotation**; those are `relate`
-  (LZJD / Ziv–Merhav / codex shelf) — see [`../relate/PRIOR_ART.md`](../relate/PRIOR_ART.md).
+  (LZJD / Ziv–Merhav / codex shelf) — see `relate/research/relate/PRIOR_ART.md`.
 
 Unicode case folding and `\b`/`\w` word semantics are **default-on** (rg
 parity); `(?-u)` / `--no-unicode` selects ASCII-byte semantics.
@@ -184,8 +184,8 @@ keeps live source files authoritative for grep-shaped search and uses its
 trigram/crest indexes only to avoid reads that cannot match. (`gist codex`
 is a thin lifecycle face over the shared codex shelf; the FM-index
 bibliography and `relate quote` story live in
-[`../relate/PRIOR_ART.md`](../relate/PRIOR_ART.md) § Corpus quotation and
-[`src/kernel/codex/README.md`](../../src/kernel/codex/README.md) — not here.)
+`relate/research/relate/PRIOR_ART.md` § Corpus quotation and
+`relate/src/kernel/codex/README.md` — not here.)
 
 ---
 
@@ -263,7 +263,7 @@ its limits:
 The whole trigram/n-gram _presence_ family — csearch, pg_trgm, RE2's
 prefilter, Zoekt, Blackbird, gist's own — shares one blind spot: literal-free
 class repetitions concede a full scan. That hole is Crest's object — see
-[`../crest/PRIOR_ART.md`](../crest/PRIOR_ART.md).
+`irregex/research/crest/PRIOR_ART.md`.
 
 ---
 

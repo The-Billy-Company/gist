@@ -50,7 +50,7 @@ pub const Opcode = enum(u8) {
     // The annals consult (`gist index` amend fast path): "which corpus files
     // changed at/after instant S?" — answered only when the daemon's
     // never-drained watcher ledger (`annals.zig`) can causally vouch, which both
-    // syscall-synchronous backends (Linux inotify, macOS kqueue — ADR-372) can.
+    // syscall-synchronous backends (Linux inotify, macOS kqueue) can.
     // ADDITIVE like `query_ext`: an old daemon's `UnexpectedFrame` drop / `decline`
     // sends the client to its proven fallback (journal replay → stat walk).
     changed = 14, // C→S: [i64 since_ns]

@@ -2,26 +2,26 @@
 doc_radar:
   counts:
     - description: "the plugin's autoload modules — one per concern (job, sink, args, hint, kin, health)"
-      glob: pkg/kernels/irregex/editor/vim/autoload/gist/*.vim
+      glob: editor/vim/autoload/gist/*.vim
       unit: files
       equals: 6
   occurrences:
     - description: "every action is a <Plug> mapping, so every key is re-bindable"
-      file: pkg/kernels/irregex/editor/vim/plugin/gist.vim
+      file: editor/vim/plugin/gist.vim
       pattern: 'nnoremap <silent> <Plug>\(gist-|xnoremap <silent> <Plug>\(gist-'
       min: 8
   sentinels:
     - description: "the installer links the plugin into the pack/*/start contract of an editor that already exists"
-      file: pkg/kernels/irregex/editor/install.sh
+      file: editor/install.sh
       contains: ["pack/gist/start", "GIST_VIM_INSTALL", "command -v"]
     - description: "the job layer hands every runtime a null stdin — gist inherits rg's rule that a readable non-tty stdin is the corpus, so an open pipe would hang a pathless search"
-      file: pkg/kernels/irregex/editor/vim/autoload/gist/job.vim
+      file: editor/vim/autoload/gist/job.vim
       contains: ["'stdin':     'null'", "'in_io':     'null'"]
     - description: "help is a real Vim help file, reachable as :help gist"
-      file: pkg/kernels/irregex/editor/vim/doc/gist.txt
+      file: editor/vim/doc/gist.txt
       contains: "*gist.txt*"
     - description: "the Lua leg is linted as Neovim rather than skipped — the repo's root Lua runtime is the Redis sandbox, where `vim` does not exist"
-      file: pkg/kernels/irregex/editor/vim/lua/selene.toml
+      file: editor/vim/lua/selene.toml
       contains: 'std = "lua51+nvim"'
 ---
 
@@ -33,7 +33,7 @@ pattern cannot ask (`relate similar`, `irregex blast`) on the same keys.
 
 ## Getting it
 
-Nothing, if you already had Vim installed when you ran `make install-gist` —
+Nothing, if you already had Vim installed when you ran `zig build` —
 it links this directory into each editor's `pack/*/start/` and mints the help
 tags. `GIST_VIM_INSTALL=0` declines. By hand it is one symlink:
 
@@ -91,14 +91,14 @@ mapping. A default key is only claimed if it is still free.
 | `autoload/gist/health.vim` | the health report, shared by `:GistHealth` and `lua/gist/health.lua`                                       |
 | `lua/gist/health.lua`      | the Neovim `:checkhealth` renderer — the findings stay in Vimscript so the two editors can't disagree      |
 | `lua/selene.toml`          | lints that one Lua file as Neovim, not as the Redis sandbox the repo's root config assumes                 |
-| `lua/nvim.yml`             | the `vim.*` surface the shim is allowed to touch; an undeclared reach fails `make lint-selene`             |
+| `lua/nvim.yml`             | the `vim.*` surface the shim is allowed to touch; an undeclared reach fails Selene against `editor/vim/lua/nvim.yml`             |
 | `doc/gist.txt`             | `:help gist`                                                                                               |
 | `test/gist_test.vim`       | the headless suite                                                                                         |
 
 ## Testing
 
 ```bash
-make test-gist-vim   # the same suite in Vim and Neovim; self-skips if neither is installed
+the editor suite under editor/vim   # the same suite in Vim and Neovim; self-skips if neither is installed
 ```
 
 It writes a corpus to a temp directory with its own `$GIST_DIR`, so it never

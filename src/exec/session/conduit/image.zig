@@ -3,7 +3,7 @@
 //!
 //! The wire version proves two peers FRAME alike. It cannot prove they ANSWER
 //! alike. A correctness fix that changes what a warm answer IS — a freshness
-//! barrier that stops vouching an epoch it never counted (ADR-372) — moves no
+//! barrier that stops vouching an epoch it never counted — moves no
 //! frame, so it earns no version bump, and a daemon started before the fix goes
 //! on serving freshly-rebuilt clients for as long as it stays resident. The
 //! failure that motivated this was exactly that: a fix landed, the binary was
@@ -175,7 +175,7 @@ fn compute(io: std.Io) u64 {
     const exe = selfPath(io, &buf) orelse return unknown;
     // `statPath` follows the final link deliberately: the installed `gist` is a
     // symlink onto `zig-out/bin/gist`, and it is the TARGET a rebuild rewrites.
-    // `lstat` here would stamp the link's own mtime — which `make install-gist`
+    // `lstat` here would stamp the link's own mtime — which `zig build`
     // also rewrites, on its own schedule, making two peers on ONE binary
     // disagree.
     const st = inode.statPath(exe) orelse return unknown;

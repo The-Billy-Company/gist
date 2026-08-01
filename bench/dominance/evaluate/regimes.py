@@ -13,7 +13,7 @@ drift from the certified race commands. Timing is `hyperfine --export-json`
 (same runner the certificate uses); statistics come from `certify_stats` so the
 whole evidence stack tells one statistical story.
 
-Lanes, mapped to the regimes in `contract/performance_evidence.toml`:
+Lanes, mapped to the regimes in `irregex/contract/performance_evidence.toml`:
   * ``parity``       byte-exact gist ≡ rg on BOTH engines — a build-sanity
                      PRECONDITION for the timed lanes, not a published claim.
   * ``lifecycle``    full build, first-query, incremental add/edit/delete/rename.
@@ -44,8 +44,8 @@ import time
 
 
 HERE = Path(__file__).resolve().parent
-KERNEL = HERE.parents[2]
-REPO = KERNEL.parents[2]
+KERNEL = HERE.parents[2]  # evaluate → dominance → bench → package root
+REPO = KERNEL
 COMPETE = KERNEL / "bench" / "dominance" / "races" / "field.sh"
 CERTIFY = KERNEL / "bench" / "certificate" / "report" / "stats.py"
 

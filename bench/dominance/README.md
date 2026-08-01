@@ -12,6 +12,7 @@ a single mean.
 | [`partition/`](partition/README.md) | the corpus-partition lane — `--docs` against the `-t` union a human hand-assembles, the one question no rival tool has a flag for, gated on population as well as latency                                                                                          |
 | [`evaluate/`](evaluate/README.md) | the operational envelope — which regimes the dominance claim is certified over, with its own freshness contract                                                                                                                                                      |
 
-`races/field.sh` is the keystone: it derives `KERNEL`/`REPO`, builds the rival
-roster, and exports the timing primitives, so gates in `conformance/` and lanes
-in `certificate/mint/` source it rather than re-deriving the field.
+`races/field.sh` is the keystone: it derives the package-root `REPO`
+(`KERNEL` is a compat alias), builds the rival roster, and exports the timing
+primitives, so gates in `conformance/` and lanes in `certificate/mint/` source
+it rather than re-deriving the field.

@@ -15,14 +15,14 @@
 # (wall-clock full-scan vs sieve-survivors, same matcher both sides).
 #
 # Usage (from repo root or anywhere):
-#   bash pkg/kernels/irregex/bench/certificate/mint/crest.sh
+#   bash bench/certificate/mint/crest.sh
 # Env:
 #   CERT_OUT=DIR   certificate dir (default: <repo>/.local/gist-verify)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL="$(cd "${HERE}/../../.." && pwd)"
-REPO="$(cd "${KERNEL}/../../.." && pwd)"
+# mint/ → certificate/ → bench/ → package root (this repo).
+REPO="$(cd "${HERE}/../../.." && pwd)"
 OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
 CERT="${OUT}/CERTIFICATE.md"
 CREST_CSV="${OUT}/crest.csv"
@@ -39,14 +39,14 @@ note() { echo "certify_crest: $*"; }
 # The standalone proof owns its complete raw evidence package under
 # .local/crest-evidence; copy the aggregate into the certificate bundle.
 note "building + running the crest production proof (fail-closed)…"
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast crest) \
+(cd "${REPO}" && zig build -Doptimize=ReleaseFast crest) \
   || die "crest proof failed — a soundness violation aborts the certificate; do NOT weaken the sieve, fix the calculus"
 [[ -s "${CREST_RAW}" ]] || die "crest proof did not emit ${CREST_RAW}"
 cp -f "${CREST_RAW}" "${CREST_CSV}"
 
 # Measured-on-this-machine provenance (same brand string the other layers use).
 if machine="$(sysctl -n machdep.cpu.brand_string 2> /dev/null)"; then :; else machine="$(uname -m)"; fi
-zig="$(cd "${KERNEL}" && zig version)"
+zig="$(cd "${REPO}" && zig version)"
 
 python3 "${HERE}/../report/crest.py" \
   --certificate "${CERT}" \

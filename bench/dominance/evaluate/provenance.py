@@ -4,7 +4,7 @@
 A performance number is only evidence if a third party can say *on what*. This
 module captures the machine, the corpus, and the tool identities that produced a
 bundle — the superset of the certify `machine.json` keys required by
-`contract/performance_evidence.toml` `[provenance]`.
+`irregex/contract/performance_evidence.toml` `[provenance]`.
 
 It is deliberately importable + stdlib-only: the evaluator (`evaluate.py`), the
 verifier (`report.py`), and the Anvil remote runner all read the SAME capture,
@@ -28,10 +28,25 @@ import re
 import subprocess
 
 
-KERNEL = Path(__file__).resolve().parents[3]  # bench/dominance/evaluate/ -> irregex root
-REPO = KERNEL.parents[2]
+KERNEL = Path(__file__).resolve().parents[3]  # evaluate → dominance → bench → package root
+REPO = KERNEL
 
-# Machine-key contract (mirrors performance_evidence.toml [provenance].machine_keys).
+
+def _climb_file(*rel_parts: str) -> Path | None:
+    """Probe every ancestor for *rel_parts; also try irregex/<rel> for a sibling checkout."""
+    override = os.environ.get("IRREGEX_CONTRACT", "").strip()
+    if override and rel_parts[-1] == "engine.toml":
+        p = Path(override)
+        return p if p.is_file() else None
+    here = Path(__file__).resolve().parent
+    for ancestor in (here, *here.parents):
+        for prefix in (Path(), Path("irregex")):
+            cand = ancestor / prefix.joinpath(*rel_parts)
+            if cand.is_file():
+                return cand
+    return None
+
+# Machine-key contract (mirrors irregex/contract/performance_evidence.toml [provenance].machine_keys).
 MACHINE_KEYS = (
     "machine_id",
     "cpu_model",
@@ -57,7 +72,7 @@ def _cmd(*args: str) -> str:
     """Return stripped stdout of a command, or '' on any failure."""
     try:
         return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()
-    except OSError, subprocess.CalledProcessError:
+    except (OSError, subprocess.CalledProcessError):
         return ""
 
 
@@ -91,7 +106,7 @@ def _ram_bytes() -> int:
         return int(darwin)
     try:
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    except OSError, ValueError:
+    except (OSError, ValueError):
         return 0
 
 
@@ -125,15 +140,16 @@ def gist_versions(gist_bin: Path | None) -> tuple[str, str]:
         if m := re.search(r"abi[ =:]+v?(\d+)", out, re.IGNORECASE):
             abi = m.group(1)
     if not engine or not abi:
-        contract = KERNEL / "contract" / "search_api.toml"
-        try:
-            text = contract.read_text()
-            if not engine and (m := re.search(r'engine_version\s*=\s*"([^"]+)"', text)):
-                engine = m.group(1)
-            if not abi and (m := re.search(r"abi_version\s*=\s*(\d+)", text)):
-                abi = m.group(1)
-        except OSError:
-            pass
+        contract = _climb_file("contract", "engine.toml")
+        if contract is not None:
+            try:
+                text = contract.read_text()
+                if not engine and (m := re.search(r'engine_version\s*=\s*"([^"]+)"', text)):
+                    engine = m.group(1)
+                if not abi and (m := re.search(r"abi_version\s*=\s*(\d+)", text)):
+                    abi = m.group(1)
+            except OSError:
+                pass
     return engine or "unknown", abi or "unknown"
 
 

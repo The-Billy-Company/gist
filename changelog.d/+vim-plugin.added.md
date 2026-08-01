@@ -1,5 +1,5 @@
 gist ships an **editor face**: a Vim and Neovim plugin (`editor/vim/`) that
-`make install-gist` links into `pack/*/start/` for whichever editors are
+`zig build` links into `pack/*/start/` for whichever editors are
 already on the machine. Nothing is added to a vimrc, `:help gist` is minted at
 install time, and a checkout that moves updates the plugin with it.
 
@@ -32,7 +32,7 @@ editor chose for itself — Vim's built-in grep or the ripgrep line Neovim
 writes when rg is on `$PATH` — because a `'grepprg'` in a vimrc is a decision,
 not a gap to fill.
 
-`make test-gist-vim` runs the suite in both editors against a temp corpus with
+`zig build test` (plus the editor suite under `editor/vim/`) runs the suite in both editors against a temp corpus with
 its own `$GIST_DIR`; both must pass, since the two runtimes disagree about
 jobs, quickfix, and completion often enough that one proves nothing about the
 other.

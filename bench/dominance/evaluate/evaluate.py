@@ -43,15 +43,21 @@ import regimes  # noqa: E402
 import report  # noqa: E402
 
 
-KERNEL = HERE.parents[2]
-REPO = KERNEL.parents[2]
+KERNEL = HERE.parents[2]  # evaluate → dominance → bench → package root
+REPO = KERNEL
 RAW_ROOT = REPO / ".local" / "gist-evaluation"
 ARTIFACT = HERE / "artifact"
 
 # The scoped corpus + heavy-dir excludes mirror `bench/races/_compete.sh` (its ROOTS
 # fallback set + XDIRS) so the frozen snapshot is the SAME logical corpus the tools
 # would otherwise search live — the evaluator just measures it where it can't churn.
-CORPUS_ROOTS = ("services", "libs", "clients", "contracts", "scripts", "quality")
+# Historical monorepo slices when present; else the whole package (mirrors field.sh).
+_MONOREPO_ROOTS = ("services", "libs", "clients", "contracts", "scripts", "quality")
+CORPUS_ROOTS = (
+    _MONOREPO_ROOTS
+    if all((REPO / r).is_dir() for r in _MONOREPO_ROOTS)
+    else (".",)
+)
 CORPUS_EXCLUDES = (
     "node_modules",
     "target",

@@ -13,7 +13,7 @@ The matrix measures the OPERATIONAL ENVELOPE only (lifecycle / resource / scale 
 concurrency); cold/warm query dominance is the certificate's and is not asserted
 here.
 
-Run:  python3 -m pytest pkg/kernels/irregex/bench/dominance/evaluate/test_evaluate.py
+Run:  python3 -m pytest bench/dominance/evaluate/test_evaluate.py
 """
 
 # ruff: noqa: S101 — a pytest module (asserts are the assertion mechanism);

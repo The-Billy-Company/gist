@@ -1,27 +1,31 @@
 ---
 doc_radar:
   sentinels:
-    - description: "public C ABI keeps open/search/close + version symbols"
-      file: pkg/kernels/irregex/include/irregex.h
-      contains: ["irregex_abi_version", "irregex_open", "irregex_search", "irregex_close"]
-    - description: "Zig root re-exports the same session surface"
-      file: pkg/kernels/irregex/src/root.zig
-      contains: "pub const irregex = struct"
+    - description: "public C ABI keeps open/search/close + session version symbols"
+      file: include/gist.h
+      contains: ["gist_abi_version", "gist_open", "gist_search", "gist_close", "gist_run"]
+    - description: "Zig root exports the same session surface"
+      file: src/root.zig
+      contains: ["export fn gist_open", "export fn gist_run", "export fn gist_abi_version"]
 ---
 
-# `include/` — public C ABI (`libirregex`)
+# `include/` — public C ABI (`libgist`)
 
 The flat, versioned header non-Zig hosts compile against. One file:
-[`irregex.h`](irregex.h). Implementation lives in
-[`../src/surface/ffi/`](../src/surface/ffi/); `src/root.zig` re-exports the
-symbols the shared library ships.
+[`gist.h`](gist.h). It `#include`s `<irregex.h>` for the substrate (status
+codes, fault pull, row cursor). Implementation lives in
+[`../src/surface/ffi/`](../src/surface/ffi/); `src/root.zig` exports the
+`gist_*` symbols the shared library ships. Link `libgist` and `libirregex`.
 
 ## What the ABI covers
 
-- **Introspection** — `irregex_abi_version`, `irregex_version`,
-  `irregex_trigram_count` (allocation-free parity oracle).
-- **In-process warm session** — `irregex_open` / `irregex_search` /
-  `irregex_close` streaming matches to a callback (ADR-352 rung 3).
+- **Introspection** — `gist_abi_version` (session axis), `gist_trigram_count`.
+  Engine version / PCRE version / schema digest come from `libirregex`.
+- **In-process warm session** — `gist_open` / `gist_search` / `gist_close`.
+- **Pull cursor** — `gist_engine_open` / `gist_search_cursor` / `gist_cursor_*`.
+- **Rank producer** — `gist_run` for `GIST_OP_RANK`, returning an
+  `irregex_rows *` walked by `irregex_rows_*` from `libirregex`. Kinship and
+  sweep are `relate_run` in `relate.h`; compose is `blast_run` in `blast.h`.
 
 Index **build** lifecycle stays a Zig/CLI surface. A session searches the
 live tree; it does not mint a new persisted index.
@@ -32,8 +36,10 @@ live tree; it does not mint a new persisted index.
   typed failure so the host answers cold.
 - Match-callback pointers are valid only for the duration of the callback.
 - `nroots == 0` means a rootless CWD walk, cold-identical.
-- Bump `irregex_abi_version` on any breaking change; additive symbols do not.
+- Bump `gist_abi_version` on any breaking session change; additive symbols do
+  not. The engine plane versions independently via `irregex_abi_version`.
 
-Contract pin: `[meta].abi_version` in
-[`../contract/search_api.toml`](../contract/search_api.toml). Python cffi
-bindings: [`../bindings/python/`](../bindings/python/).
+Contract pin: `[meta].abi_version` in the sibling kernel checkout's
+`irregex/contract/engine.toml`
+(or set `IRREGEX_ENGINE_CONTRACT`). Python cffi bindings:
+[`../bindings/python/`](../bindings/python/).

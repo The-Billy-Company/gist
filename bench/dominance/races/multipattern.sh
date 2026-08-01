@@ -339,7 +339,7 @@ hits="$(bash -c "${gist_e2e}" 2> /dev/null | wc -l | tr -d ' ')"
 # Deliberately NOT gated against rg here, though rg is still timed below. rg
 # walks the live tree while `relate patterns` answers over the indexed corpus,
 # and the two corpora genuinely differ: the indexer prunes `vendor/` where the
-# walk keeps it (470 of rg's 592 `graphify` files), so `gist -F -l graphify`
+# walk keeps it (470 of rg's 592 hits for a vendored literal), so a like-for-like
 # reports 592 and `relate patterns` reports 122. Gating on rg equality would
 # either fail forever on a scope difference or, worse, invite someone to "fix" it
 # by intersecting with `paths.list` — a stale snapshot that also drops every file

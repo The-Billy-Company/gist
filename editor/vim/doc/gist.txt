@@ -43,7 +43,7 @@ Three things it insists on:
 ==============================================================================
 2. GETTING STARTED                                            *gist-install*
 
-`make install-gist` links this plugin into the |packages| directory of every
+`zig build` links this plugin into the |packages| directory of every
 editor it finds — Vim, Neovim, or both — so if you had Vim installed when you
 installed gist, you are already done: open a file and press <Leader>gg on a
 word. Nothing was added to a vimrc, and `git pull` in the checkout updates the
@@ -51,15 +51,15 @@ plugin. Set GIST_VIM_INSTALL=0 in the environment to decline that.
 
 To do it by hand, a symlink is the whole install: >
 
-	ln -s /path/to/pkg/kernels/irregex/editor/vim \
+	ln -s /path/to/editor/vim \
 	      ~/.vim/pack/gist/start/gist                       " Vim
-	ln -s /path/to/pkg/kernels/irregex/editor/vim \
+	ln -s /path/to/editor/vim \
 	      ~/.local/share/nvim/site/pack/gist/start/gist     " Neovim
 <
 or point a plugin manager at that directory. The plugin generates its own
 |:helptags| on first load, so `:help gist` works immediately.
 
-The binary itself comes from `make install-gist`, which puts `gist`, `relate`
+The binary itself comes from `zig build`, which puts `gist`, `relate`
 and `irregex` on your $PATH. Run |:GistHealth| to confirm all of it.
 
 Requirements: Vim 8.0+ or Neovim for streaming results; anything older still
@@ -261,7 +261,7 @@ g:gist_map_prefix	Prefix for them. Default: "<Leader>g".
 					                *g:gist_relate_binary*
 					               *g:gist_irregex_binary*
 g:gist_relate_binary	The sibling binaries |:GistSimilar| and |:GistBlast|
-g:gist_irregex_binary	call. Defaults: "relate" and "irregex".
+g:gist_blast_binary	call. Defaults: "relate" and "blast".
 
 ==============================================================================
 6. HINTS AND RETRIES                                             *gist-hints*
@@ -385,7 +385,7 @@ selections — the questions a line-at-a-time exact pattern cannot ask.
 Run |:GistHealth| first (`:checkhealth gist` in Neovim). It answers the four
 questions that account for nearly every problem:
 
-  "gist not found"	The binary is not on $PATH. `make install-gist`, or
+  "gist not found"	The binary is not on $PATH. `zig build`, or
 			set |g:gist_binary| to the full path.
 
   "no trigram index"	Searches still answer correctly, just without the

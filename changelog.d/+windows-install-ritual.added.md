@@ -1,4 +1,4 @@
-`install.ps1` is the Windows half of `make install-gist`. A Windows user could
+`install.ps1` is the Windows half of `zig build`. A Windows user could
 build the three binaries and had to place them, put them on PATH, and find the
 completions themselves — the one-shot setup existed only as a Makefile target
 shelling POSIX tools. The script installs all three executables, persists the

@@ -1,5 +1,5 @@
 //! gist resident session — the durable "do not spawn me again" note a daemon
-//! leaves when it will not fit its memory ration (ADR-352 rung 2.5).
+//! leaves when it will not fit its memory ration.
 //!
 //! A ceiling alone is not a memory protection. A daemon that meets the ration
 //! while loading its mirror exits, the next query finds no rendezvous and

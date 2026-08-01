@@ -4,7 +4,7 @@
 Build and install gist, relate and irregex on Windows.
 
 .DESCRIPTION
-The Windows counterpart of `make install-gist`, and it has to be a script of its
+The Windows counterpart of `zig build`, and it has to be a script of its
 own rather than a line in a Makefile because there is no `make` here and the two
 POSIX installers (`shell/install.sh`, `editor/install.sh`) are bash. Same four
 jobs, in the same order: build the binaries, put them somewhere already on PATH,

@@ -163,7 +163,7 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   the warm tier is upgraded to a per-class Mann-Whitney dominance verdict.
 - New Go binding (`bindings/go/`, module
   `irregex/bindings/go`) over the pull-cursor C ABI
-  (ADR-352) — a cgo wrapper linking the self-contained `libirregex.a`, in its
+  (ADR-352) — a cgo wrapper linking the self-contained `libgist.a`, in its
   own `go.mod` so it never enters the `CGO_ENABLED=0` static Cloud Run services
   (ADR-110). A warm `Engine` opened over roots (none = the rootless CWD walk)
   runs many `Search(ctx, Request)` queries, each materializing a pull `Cursor`
@@ -229,7 +229,7 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   OPTIONAL and the wheel stays pure-Python and dependency-free (opt out with
   `GIST_NO_FFI`, override the library with `GIST_LIB`). Handles are bounded and
   keyed by `(process CWD, roots)`, preventing scope reuse; each
-  `irregex_search` runs over its own per-call arena, so overlapping calls can't
+  `gist_search` runs over its own per-call arena, so overlapping calls can't
   corrupt one another's scratch. Proven by `tests/test_ffi_parity.py` (FFI ≡
   cold: records, files, count, explicit relative/file/absolute roots,
   read-your-writes, deletion reconcile, unsupported→cold, ABI parity).
@@ -367,7 +367,7 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
   unchanged. Python `SearchRequest.max_count` becomes `int | None` so the falsy
   `-m0` is distinguishable from unset. Both flags are UDS- and FFI-eligible:
   the
-  size-checked `irregex_search` options contract carries quiet plus the
+  size-checked `gist_search` options contract carries quiet plus the
   `u64` per-file cap. Smart-case is
   FFI-eligible too: C carries the raw bit and Zig's `effectiveIgnoreCase`
   remains

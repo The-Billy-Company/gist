@@ -4,7 +4,7 @@ The **splicers** — one per certificate section. Each reads a lane's raw CSV/JS
 and renders its fail-closed table into `CERTIFICATE.md`. They are flat siblings
 on purpose: every `<x>.py` does `sys.path.insert(0, HERE)` then `from stats
 import …`, so `stats.py` (the stdlib mirror of
-[`../../apparatus/harness/stats.zig`](../../apparatus/harness/stats.zig) —
+`irregex/bench/apparatus/harness/stats.zig` —
 per-class bootstrap-CI median + Mann-Whitney) must stay beside them.
 
 | File                                                                        | Section it splices                                                |

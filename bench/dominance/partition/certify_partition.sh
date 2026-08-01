@@ -40,7 +40,7 @@
 #   rescued        files gist classifies as docs that no rg type name can reach
 #                  (extensionless documents promoted by location or name)
 #
-# Usage:  cd pkg/kernels/irregex && bench/dominance/partition/certify_partition.sh
+# Usage:  bench/dominance/partition/certify_partition.sh
 #         RUNS=12 WARMUP=3 bench/dominance/partition/certify_partition.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"

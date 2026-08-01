@@ -1,5 +1,5 @@
 //! gist resident session — the metered allocator a daemon's memory must pass
-//! through (ADR-352 rung 2.5).
+//! through.
 //!
 //! `ration.zig` decides how many bytes a resident session may hold. This decides
 //! that it CANNOT hold more, which is a different and much stronger claim: not a

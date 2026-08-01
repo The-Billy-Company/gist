@@ -13,9 +13,9 @@ ledger closes that gap: one append-only row per publish.
 | `test_ledger.py` | unit test                                                                                                                                                                                                                |
 
 ```bash
-make bench-gist-ledger                                 # survey: is the on-disk certificate recorded?
-make bench-gist-ledger ARGS="verify"                   # fail-closed on unrecorded drift
-make bench-gist-ledger ARGS="verify --require-layers"  # …and on an incomplete mint
+python3 bench/certificate/ledger/ledger.py                                 # survey: is the on-disk certificate recorded?
+python3 bench/certificate/ledger/ledger.py verify                   # fail-closed on unrecorded drift
+python3 bench/certificate/ledger/ledger.py verify --require-layers  # …and on an incomplete mint
 ```
 
 `verify` fails on **unrecorded drift**; a missing layer is always reported but

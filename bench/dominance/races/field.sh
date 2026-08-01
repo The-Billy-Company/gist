@@ -50,12 +50,16 @@ export GIST_UNCAP=1
 
 # ── locations ────────────────────────────────────────────────────────────────
 COMPETE_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KERNEL="$(cd "${COMPETE_HERE}/../../.." && pwd)" # races/ → dominance/ → bench/ → gist root
-REPO="$(cd "${KERNEL}/../../.." && pwd)"
-# Corpus base: the tree every tool actually SEARCHES. Defaults to the repo, but the
-# evaluator points it at an immutable copy-on-write snapshot (GIST_CORPUS_ROOT) so a
-# live coworking tree can't churn under a parity/timing capture. Only the search base
-# moves — the built binary, persisted index, and competitor indices stay under REPO.
+# races/ → dominance/ → bench/ → package root (this repo).
+REPO="$(cd "${COMPETE_HERE}/../../.." && pwd)"
+# Compat alias: lanes historically called the package root KERNEL (nested under
+# a monorepo). Both names now mean this checkout.
+KERNEL="${REPO}"
+# Corpus base: the tree every tool actually SEARCHES. Defaults to this package,
+# but the evaluator can point it at an immutable copy-on-write snapshot
+# (GIST_CORPUS_ROOT) so a live coworking tree can't churn under a parity/timing
+# capture. Only the search base moves — the built binary, persisted index, and
+# competitor indices stay under REPO.
 CORPUS="${GIST_CORPUS_ROOT:-${REPO}}"
 OUT="${GIST_DIR:-${REPO}/.local/gist-verify}" # gist's persisted index + paths.list live here (GIST_DIR-relocatable)
 COMPETE_DIR="${REPO}/.local/gist-compete"     # competitor indices live here
@@ -65,7 +69,7 @@ CSEARCH_IDX="${COMPETE_DIR}/csearch.idx"
 ZOEKT_DIR="${COMPETE_DIR}/zoekt"
 PATHS_LIST="${OUT}/paths.list"
 # Corpus scope: $GIST_ROOTS override (`:`/`,`/space separated), else the
-# historical published-corpus roots when they all exist here (the Billy
+# historical published-corpus roots when they all exist here (the source
 # monorepo), else the whole tree — mirrors `corpus.resolveRoots`.
 if [[ -n "${GIST_ROOTS:-}" ]]; then
   read -ra ROOTS <<< "${GIST_ROOTS//[:,]/ }"
@@ -94,10 +98,10 @@ XDIRS=(node_modules target .venv venv __pycache__ .zig-cache zig-out dist
 # rivals' corpus is not the like-for-like this file claims (measured: +2,488
 # files, all build output, 1.47x on gist's `literal-rare` cell). Re-apply them
 # as the glob equivalent of what XDIRS already gives the other no-gitignore
-# tools. NOT the whole of XDIRS: `vendor` holds 664 tracked Billy files
-# (`scripts/vendor/graphify`), so a bare exclude would push gist BELOW the
-# indexed corpus. Mix output is anchored per `mix.exs` root for the same reason
-# rule-of-five anchors it — `deps`/`doc` are too generic to exclude by name.
+# tools. NOT the whole of XDIRS: a tracked `vendor/` tree can hold source the
+# index admits, so a bare exclude would push gist BELOW the indexed corpus.
+# Mix output is anchored per `mix.exs` root for the same reason — `deps`/`doc`
+# are too generic to exclude by name.
 _scope_globs() {
   local g="--glob=!out/" m
   while IFS= read -r m; do
@@ -167,7 +171,7 @@ compete_kind() { # echoes indexed|unindexed for a tool id
 # masking it). `codesign --sign -` re-stamps the copy so it runs on first exec.
 # No-op where codesign is absent (Linux). Returns 1 if no binary was found.
 compete_install_gist_bin() {
-  local exe_src="${KERNEL}/zig-out/bin/gist"
+  local exe_src="${REPO}/zig-out/bin/gist"
   [[ -x "${exe_src}" ]] || {
     echo "  no installed gist CLI at ${exe_src} — run zig build first"
     return 1
@@ -176,7 +180,7 @@ compete_install_gist_bin() {
   cp "${exe_src}" "${GIST_BIN}"
   command -v codesign > /dev/null 2>&1 && codesign --force --sign - "${GIST_BIN}" > /dev/null 2>&1
   # Stage the relate face beside it when built (same cp + re-sign rationale).
-  local relate_src="${KERNEL}/zig-out/bin/relate"
+  local relate_src="${REPO}/zig-out/bin/relate"
   if [[ -x "${relate_src}" ]]; then
     cp "${relate_src}" "${RELATE_BIN}"
     command -v codesign > /dev/null 2>&1 && codesign --force --sign - "${RELATE_BIN}" > /dev/null 2>&1
@@ -185,7 +189,7 @@ compete_install_gist_bin() {
 }
 
 compete_build_gist_index() {
-  (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast) || return 1
+  (cd "${REPO}" && zig build -Doptimize=ReleaseFast) || return 1
   compete_install_gist_bin || return 1
   (cd "${CORPUS}" && "${GIST_BIN}" index) || return 1
 }

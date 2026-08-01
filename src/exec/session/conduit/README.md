@@ -1,26 +1,26 @@
 <!--
 doc_radar:
   paths_exist:
-    - pkg/kernels/irregex/src/exec/session/conduit/protocol/protocol.zig
-    - pkg/kernels/irregex/src/exec/session/conduit/wire.zig
-    - pkg/kernels/irregex/src/exec/session/conduit/shm.zig
-    - pkg/kernels/irregex/src/exec/session/conduit/spawn.zig
-    - pkg/kernels/irregex/src/exec/session/conduit/image.zig
-    - pkg/kernels/irregex/src/exec/session/conduit/vigil.zig
+    - src/exec/session/conduit/protocol/protocol.zig
+    - src/exec/session/conduit/wire.zig
+    - src/exec/session/conduit/shm.zig
+    - src/exec/session/conduit/spawn.zig
+    - src/exec/session/conduit/image.zig
+    - src/exec/session/conduit/vigil.zig
   sentinels:
-    - file: pkg/kernels/irregex/src/exec/session/conduit/vigil.zig
+    - file: src/exec/session/conduit/vigil.zig
       contains: ["IOCTL_AFD_POLL", "pub fn wait", "pub const Bell", "pub const Pair"]
       description: The readiness seam — one wait over listener + idle clients + worker bell, and the socket pair the bell needs because AFD cannot watch a pipe
-    - file: pkg/kernels/irregex/src/exec/session/conduit/protocol/protocol.zig
+    - file: src/exec/session/conduit/protocol/protocol.zig
       contains: ["protocol_version: u8 = 9", "cap_fd_transport", "caps_supported", "image: u64"]
       description: The negotiated contract head the entry file owns — version, the additive HELLO capability byte, and the READY build stamp
-    - file: pkg/kernels/irregex/src/exec/session/conduit/image.zig
+    - file: src/exec/session/conduit/image.zig
       contains: ["pub fn stamp", "pub fn agrees", "pub fn replaced", "pub fn hosts", "pub const unknown"]
       description: The build-identity surface — equality decides warm-or-cold, a rewritten executable retires its own daemon, and the stamp order is only the tiebreak for a daemon that cannot observe that
-    - file: pkg/kernels/irregex/src/exec/session/conduit/protocol/opcodes.zig
+    - file: src/exec/session/conduit/protocol/opcodes.zig
       contains: ["chunk = 11", "chunk_fd = 12", "recall = 17", "retain = 19"]
       description: The opcode spine is one enum in one file, so an opcode byte is minted exactly once
-    - file: pkg/kernels/irregex/src/exec/session/conduit/protocol/query.zig
+    - file: src/exec/session/conduit/protocol/query.zig
       contains: ["known_flags", "flag_word", "flag_invert", "flag_smart_case", "flag_quiet", "flag_max_count_present"]
       description: The query flags byte is fully assigned and lives with the codec that reads it
 -->
@@ -38,7 +38,7 @@ grammar `protocol/` defines.
 | [`protocol/`](protocol/) | The versioned UDS grammar, entered through `protocol.zig` and sealed: the length-prefixed frame codec (`[u32 len][u8 opcode][payload]`) + `SCM_RIGHTS` fd send/recv, fail-closed on oversized/truncated/unknown frames. A `lines` answer streams as `chunk` frames + a terminal `result` — unless the client advertised `cap_fd_transport` in its HELLO **and** the answer clears the `fd_transport_floor` (1 MiB), in which case it arrives as one `chunk_fd` frame carrying `{length, matched}` while the rendered bytes ride an anonymous-shm fd over the same `sendmsg` control channel. That capability is advertised, not assumed — a Windows client has no `SCM_RIGHTS` to advertise, never sets the bit, and is served the same bytes as `chunk` frames, which is why the whole fd path is additive rather than a platform fork. A `-q` answer is a single terminal `result` carrying one matched bit. See its own README for the chapter-per-opcode-family layout. |
 | [`wire.zig`](wire.zig)   | The opcode-agnostic half of that grammar: framing, transport, and the `recvFramed` reader both frame paths share. Also owns `armNoSigpipe`, the single Darwin `SO_NOSIGPIPE` site, so a dead peer can never take the daemon down with a signal. Its leaf byte I/O is where the platform stops being assumed: POSIX keeps raw `read`/`write` on the descriptor, Windows goes through `std`'s socket vtable, and every frame above is the same bytes either way.                                                                                                                                                                                                                                                                     |
 | [`vigil.zig`](vigil.zig) | The **readiness** question `loop.zig` asks of its listener, its idle clients, and its worker bell — `poll(2)` on POSIX, AFD's `IOCTL_AFD_POLL` on Windows, which is the same question (a handle set, an interest mask each, a timeout in the request) so the poll set, routing, worker pool, and two-stage idle policy port unchanged rather than forking into a second accept loop. The bell lives here too, because AFD knows only sockets: a pipe bell would be invisible to the Win32 wait, so the bell is a socket **pair** on both platforms — one fewer difference, not one more.                                                                                                                                            |
-| [`shm.zig`](shm.zig)     | The anonymous shared-memory buffer a large `lines` answer rides instead of the socket — bounded to the exact rendered length on both platforms (Linux `memfd` + seal · macOS `shm_open`→`ftruncate`→`shm_unlink`). Fail-**open**: every fallible call returns an error the caller turns back into byte-identical `chunk` frames. Windows hosts a resident session and is deliberately **not** here: it cannot pass a descriptor over the socket at all, so a handle-based buffer would be a second protocol rather than a second spelling, and its answers ride `chunk` frames.                                                                                                                                                     |
+| `irregex/src/exec/session/conduit/shm.zig`     | The anonymous shared-memory buffer a large `lines` answer rides instead of the socket — bounded to the exact rendered length on both platforms (Linux `memfd` + seal · macOS `shm_open`→`ftruncate`→`shm_unlink`). Fail-**open**: every fallible call returns an error the caller turns back into byte-identical `chunk` frames. Windows hosts a resident session and is deliberately **not** here: it cannot pass a descriptor over the socket at all, so a handle-based buffer would be a second protocol rather than a second spelling, and its answers ride `chunk` frames.                                                                                                                                                     |
 | [`spawn.zig`](spawn.zig) | Detached daemon auto-spawn, shared by both resident CLIs: only the mechanism lives here — `fork` → detach → `execv` on POSIX, a `DETACHED_PROCESS` `CreateProcessW` on Windows, which needs no double-fork because a Windows child was never in its parent's process group to leave. Each CLI keeps its own eligibility policy and socket probe, because the warm path only pays off if a daemon is already running and an agent's reflex is a one-shot command.                                                                                                                                                                                                                                                                   |
 | [`image.zig`](image.zig) | Which **build** is on each end of the handshake — the executable's mtime, latched by the daemon at boot so its answer predates any rebuild landing while it stays resident, and reported in READY. That mtime is an **identity, not an order** (Zig's install preserves the cache artifact's timestamp, so switching builds moves it backwards), so a client on another build just runs cold. What retires the obsoleted daemon is `replaced`: it re-stats its own path and stands down once the bytes it runs are gone — `hosts` is only the tiebreak for a daemon that cannot observe that. Fail-open: a target that cannot name its own executable stamps `unknown`, and `unknown` abstains from every judgment.             |
 
@@ -71,7 +71,7 @@ installed, vouching for a build the answering process has never run.
 
 Declining is only half an answer, though, because nothing would then retire the
 obsolete daemon: the idle TTL wants ten _continuous_ minutes of quiet, which a
-tree with ~10 coworker agents querying it never gets, so one `make install-gist`
+tree with ~10 coworker agents querying it never gets, so one `zig build`
 would strand the warm tier for the rest of the day.
 
 The temptation is to let the newer peer stop the older one, and for the wire
@@ -113,6 +113,6 @@ has no comparable image, reports `unknown`, and is served exactly as before.
 
 Because the grammar is a cross-language contract, `protocol/` is the source of
 truth for all three bindings — see
-[`bindings/rust/src/runtime/session.rs`](../../../../../bindings/rust/src/runtime/session.rs)
+[`bindings/rust/src/runtime/session.rs`](../../../../bindings/rust/src/runtime/session.rs)
 and the Python daemon client. Bumping `protocol_version` is a contract change,
 not an implementation detail.

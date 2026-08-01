@@ -1,7 +1,7 @@
 " gist/kin.vim — the two questions an exact pattern can't ask.
 "
-" `make install-gist` puts three binaries on PATH, and the other two answer
-" what grep cannot: `irregex blast SYMBOL` is the live blast radius of a
+" `zig build` puts three binaries on PATH, and the other two answer
+" what grep cannot: `blast blast SYMBOL` is the live blast radius of a
 " symbol (its definition, dependents, dependencies, structural twins, ripple,
 " and the comments that name it) read from CURRENT bytes, and `relate similar
 " FILE` is the compression-nearest neighborhood of the buffer you are in.
@@ -25,7 +25,7 @@ let s:groups = [
 function! gist#kin#blast(symbol, argv) abort
   let l:symbol = empty(a:symbol) ? expand('<cword>') : a:symbol
   if empty(l:symbol) | return gist#warn('gist: no symbol under the cursor') | endif
-  let l:bin = gist#kin#binary('irregex')
+  let l:bin = gist#kin#binary('blast')
   if empty(l:bin) | return | endif
   let l:said = {'out': [], 'err': []}
   call gist#say(printf('gist: blast %s …', l:symbol))
@@ -121,11 +121,11 @@ function! gist#kin#command(verb, args) abort
         \ : gist#kin#similar(l:subject, l:argv)
 endfunction
 
-" relate and irregex ride alongside gist; name the fix when one is missing.
+" relate and blast ride alongside gist; name the fix when one is missing.
 function! gist#kin#binary(name) abort
   let l:bin = get(g:, 'gist_' . a:name . '_binary', a:name)
   if executable(l:bin) | return l:bin | endif
-  call gist#warn(printf('gist: %s is not on $PATH — run `make install-gist`', a:name))
+  call gist#warn(printf('gist: %s is not on $PATH — run `zig build -Doptimize=ReleaseFast` (gist package) + install onto PATH', a:name))
   return ''
 endfunction
 

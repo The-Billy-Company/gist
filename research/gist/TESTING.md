@@ -1,21 +1,21 @@
 ---
 doc_radar:
   occurrences:
-    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
-    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
-    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "NA"', equals: 14}
-    - {file: pkg/kernels/irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 21}
-    - {file: pkg/kernels/irregex/bench/conformance/shapes/shapes.toml, pattern: '\[\[shape\]\]', equals: 27}
-    - {file: pkg/kernels/irregex/bench/conformance/shapes/shapes.toml, pattern: 'select = "degenerate"', min: 1}
+    - {file: bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
+    - {file: bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
+    - {file: bench/conformance/rgsuite/results.json, pattern: '"bucket": "NA"', equals: 14}
+    - {file: bench/conformance/rgsuite/results.json, pattern: '"bucket": "SKIP"', equals: 21}
+    - {file: bench/conformance/shapes/shapes.toml, pattern: '\[\[shape\]\]', equals: 27}
+    - {file: bench/conformance/shapes/shapes.toml, pattern: 'select = "degenerate"', min: 1}
   sentinels:
-    - file: pkg/kernels/irregex/bench/conformance/gates/contract/ci_order.sh
+    - file: bench/conformance/gates/contract/ci_order.sh
       contains:
         - "rgsuite parity (check_results.py)"
         - "CLI-shape matrix parity (shapes.py)"
         - "warm session floors (gate_session.py --committed)"
         - "CLI-shape matrix floors (shapes.py gate)"
     - description: "canary for the Layer C roofline placement quoted in §6 — a re-mint moves it, and breaking here is the signal to restate it"
-      file: pkg/kernels/irregex/bench/certificate/artifact/CERTIFICATE.md
+      file: bench/certificate/artifact/CERTIFICATE.md
       contains: "61.6 GB/s = 77% of the 79.8 GB/s single-core pure-read roof"
 ---
 
@@ -49,12 +49,12 @@ The properties under test are:
 
 Kernel, corpus, index, search, runtime, and CLI packages carry Zig tests for
 the load-bearing rules: trigram extraction, query planning, freshness
-overlay, crest sieve (see also [`../crest/TESTING.md`](../crest/TESTING.md)),
+overlay, crest sieve (see also `irregex/research/crest/TESTING.md`),
 rank fusion inputs, argv catalog buckets, resident/cold parity, daemon
 lifecycle, watcher behavior, and FFI smoke (real C compile/link/run against
 `libirregex`).
 
-Reproduce from `pkg/kernels/irregex/`:
+Reproduce from ``:
 
 ```bash
 zig build test
@@ -92,7 +92,7 @@ Companion suites exercise surfaces the mined replay cannot freeze cleanly:
 - `transforms.py`: preprocessing, binary handling, transcoding, and compressed
   inputs, once per walk engine.
 
-Reproduce from `pkg/kernels/irregex/bench/conformance/rgsuite/`:
+Reproduce from `bench/conformance/rgsuite/`:
 
 ```bash
 python3 run.py
@@ -139,7 +139,7 @@ were already being timed had their slowness charged to true-match volume. The
 probe set therefore carries a **standing requirement** to span the needle space
 and always keep a degenerate, low-match case — the one shape whose slowness has
 no second explanation. See
-[`bench/conformance/shapes/README.md`](../../bench/conformance/shapes/README.md).
+`irregex/bench/conformance/shapes/README.md`.
 
 ---
 
@@ -161,7 +161,7 @@ Some standalone gates documented in `bench/gates/README.md` are useful
 focused proofs but are not all scheduled by `ci_order.sh`.
 
 ```bash
-# from pkg/kernels/irregex/
+# from 
 ./bench/gates/ci_order.sh
 # escape hatch (no tracked rgsuite gaps remain, so this is now a no-op):
 ./bench/gates/ci_order.sh --allow-known
@@ -223,13 +223,13 @@ Important limits:
   can do less work on non-adversarial inputs.
 
 Committed artifact:
-[`bench/certify/artifact/CERTIFICATE.md`](../../bench/certify/artifact/CERTIFICATE.md).
+[`bench/certify/artifact/CERTIFICATE.md`](../../bench/certificate/artifact/CERTIFICATE.md).
 Do not hand-edit — re-run to refresh. Repo-level entry:
 
 ```bash
-make bench-gist-certify
+bash bench/certificate/mint/mint.sh
 # full mint + publish:
-CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 make bench-gist-certify
+CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 bash bench/certificate/mint/mint.sh
 ```
 
 The current driver runs `certify_layers.sh` to splice B/B′/C/D after Layer A;
@@ -244,7 +244,7 @@ being presented as universal constants.
 Class-repetition pruning soundness (`matched ⇒ ¬pruned`) is Crest's
 obligation: corpus-wide fail-closed harness (`zig build crest`), randomized
 adversarial sweeps, count-cousin ablation. Inventory:
-[`../crest/TESTING.md`](../crest/TESTING.md). Gist's product gates treat a
+`irregex/research/crest/TESTING.md`. Gist's product gates treat a
 missing/invalid crest sidecar as sieve-off, never as authority to prune.
 
 ---

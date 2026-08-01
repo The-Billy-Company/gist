@@ -1,21 +1,21 @@
 <!--
 doc_radar:
   sentinels:
-    - file: pkg/kernels/irregex/bench/dominance/session/session_baseline.json
+    - file: bench/dominance/session/session_baseline.json
       contains: ["armed_geomean_floor"]
-    - file: pkg/kernels/irregex/bench/dominance/session/gate_session.py
+    - file: bench/dominance/session/gate_session.py
       contains: ["--committed", "--live", "report-only"]
 -->
 
 # bench/session
 
 The **resident-session** certificate — the honest warm-product half of gist's
-performance story (ADR-352 rung 2.5). It is the third leg of a triangle:
+performance story. It is the third leg of a triangle:
 
 | Harness                                            | Path measured                                                  | The number it earns                                        |
 | -------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------- |
-| [`../certify/`](../certify/README.md)              | cold fresh-process query vs the field                          | gist is at parity-or-faster than `rg` on every regex class |
-| [`../races/headtohead.sh`](../races/headtohead.sh) | gist's **in-process** engine                                   | the microsecond ceiling (no transport, no spawn)           |
+| [`../../certificate/`](../../certificate/README.md)              | cold fresh-process query vs the field                          | gist is at parity-or-faster than `rg` on every regex class |
+| [`../races/warm.sh`](../races/warm.sh) | gist's **in-process** engine                                   | the microsecond ceiling (no transport, no spawn)           |
 | **`bench/session/`**                               | **persistent client → `gist serve` daemon over a Unix socket** | the number a long-lived client actually sees               |
 
 The cold certificate re-pays process + index-mmap + candidate-read startup on
@@ -42,7 +42,7 @@ path — the only honest basis for a warm-speedup claim — and gates it fail-cl
      set, not `rg`'s. Both counts (`d_files`, `rg_files`) sit in the table so the
      speedup is never mistaken for like-for-like. Exact warm==cold==oracle parity
      is gated **hermetically** by the Zig suite (`serve_test`, `resident_test`,
-     [`freshness_test`](../../src/exec/session/reconcile/reconcile_test.zig)) — not by a live-tree
+     `freshness_test` (`irregex/src/exec/session/reconcile/reconcile_test.zig`)) — not by a live-tree
      count race.
   2. The microsecond fast path is armed only where a filesystem watcher proves
      quiescence (**Linux inotify** and **macOS kqueue** today; every other
@@ -53,8 +53,7 @@ path — the only honest basis for a warm-speedup claim — and gates it fail-cl
 Even unarmed, the resident path wins: an unarmed macOS certificate measures a
 **7.2× geomean** over `rg` cold, because `rg` re-walks and re-scans the whole
 monorepo (~350 ms) every call while the daemon pays only the reconcile walk
-(~45 ms) plus an in-RAM index query. Both platforms now arm — macOS via kqueue
-([ADR-372](../../../../../docs/architecture/3-decisions/372-macos-kqueue-freshness-barrier.md)),
+(~45 ms) plus an in-RAM index query. Both platforms now arm — macOS via kqueue,
 Linux via inotify — so that walk disappears on a quiescent tree and the
 committed figure is an armed one.
 
@@ -70,7 +69,7 @@ committed figure is an armed one.
 | `session_meta.json`       | provenance the gate reads (`armed`, `watcher`, `platform`, `geomean_speedup`)                                     |
 
 ```bash
-cd pkg/kernels/irregex
+# from package root
 bench/session/certify_session.sh              # remeasure + republish (RUNS=8 WARMUP=2 default)
 python3 bench/session/gate_session.py         # committed floor (hermetic)
 GIST_BENCH=1 python3 bench/session/gate_session.py --live   # + live remeasure on this box

@@ -1,12 +1,12 @@
 <!--
 doc_radar:
   sentinels:
-    - file: pkg/kernels/irregex/bench/dominance/partition/gate_partition.py
+    - file: bench/dominance/partition/gate_partition.py
       contains: ["--committed", "--live", "keep_disabled", "min_walk_agreement"]
-    - file: pkg/kernels/irregex/bench/dominance/partition/certify_partition.sh
+    - file: bench/dominance/partition/certify_partition.sh
       contains: ["GIST_NO_KEEP=1", "--type-list --docs", "over-claimed", "rescued"]
     - description: "both populations the lane measures are really built"
-      file: pkg/kernels/irregex/bench/dominance/partition/certify_partition.sh
+      file: bench/dominance/partition/certify_partition.sh
       contains: ["classify tracked", "classify fixture"]
 -->
 
@@ -105,7 +105,7 @@ their docs sets is a diff of two trees under one heading.
 ## Running it
 
 ```bash
-cd pkg/kernels/irregex
+# from package root
 bench/dominance/partition/certify_partition.sh          # mint (needs rg + hyperfine)
 python3 bench/dominance/partition/gate_partition.py     # assert the published lane
 GIST_BENCH=1 python3 bench/dominance/partition/gate_partition.py --live   # re-mint, then assert
@@ -115,7 +115,7 @@ GIST_BENCH=1 python3 bench/dominance/partition/gate_partition.py --live   # re-m
 
 Totality, disjointness, `--no-X` complement, `-t`/`-T` alias parity, and
 warm≡cold set equality are **set invariants over the live tree**, and they belong
-to [`../../conformance/gates/parity/partition_parity.sh`](../../conformance/gates/parity/partition_parity.sh),
+to `irregex/bench/conformance/gates/parity/partition_parity.sh`,
 which asserts them without timing anything. A latency lane is the wrong place to
 prove a set identity. The mint here still refuses to publish a timing when cold
 and warm disagree, so a violation cannot reach these floors in the first place.
