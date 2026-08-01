@@ -115,7 +115,7 @@ GIST_BENCH=1 python3 bench/dominance/partition/gate_partition.py --live   # re-m
 
 Totality, disjointness, `--no-X` complement, `-t`/`-T` alias parity, and
 warm≡cold set equality are **set invariants over the live tree**, and they belong
-to `irregex/bench/conformance/gates/parity/partition_parity.sh`,
+to `bench/conformance/gates/parity/partition_parity.sh`,
 which asserts them without timing anything. A latency lane is the wrong place to
 prove a set identity. The mint here still refuses to publish a timing when cold
 and warm disagree, so a violation cannot reach these floors in the first place.

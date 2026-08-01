@@ -1,0 +1,102 @@
+{
+  "_comment": "Per-shape committed floors for `matrix.py gate`. win \u2192 0.75\u00d7 the measured speedup (\u22651.0); parity \u2192 a fixed 0.75\u00d7 band; loss \u2192 recorded, report-only (currently none declared). Refresh with `GIST_BENCH=1 matrix.py bench --publish` after a deliberate change.",
+  "warmup": 2,
+  "runs": 8,
+  "floors": {
+    "literal-rare-files": {
+      "expect": "win",
+      "floor": 6.8,
+      "measured": 9.066
+    },
+    "literal-common-files": {
+      "expect": "win",
+      "floor": 3.38,
+      "measured": 4.5
+    },
+    "literal-rare-count": {
+      "expect": "win",
+      "floor": 6.68,
+      "measured": 8.904
+    },
+    "literal-rare-lines": {
+      "expect": "win",
+      "floor": 6.74,
+      "measured": 8.991
+    },
+    "literal-rare-only-matching": {
+      "expect": "win",
+      "floor": 5.97,
+      "measured": 7.966
+    },
+    "word-common-files": {
+      "expect": "win",
+      "floor": 4.85,
+      "measured": 6.466
+    },
+    "ignore-case-rare-files": {
+      "expect": "win",
+      "floor": 4.9,
+      "measured": 6.531
+    },
+    "maxcount-common-lines": {
+      "expect": "win",
+      "floor": 3.23,
+      "measured": 4.31
+    },
+    "invert-count-subtree": {
+      "expect": "win",
+      "floor": 1.71,
+      "measured": 2.282
+    },
+    "regex-anchored-rare-files": {
+      "expect": "win",
+      "floor": 3.77,
+      "measured": 5.029
+    },
+    "regex-alternation-files": {
+      "expect": "win",
+      "floor": 6.56,
+      "measured": 8.744
+    },
+    "glob-go-rare-files": {
+      "expect": "win",
+      "floor": 5.85,
+      "measured": 7.804
+    },
+    "type-go-rare-files": {
+      "expect": "win",
+      "floor": 5.68,
+      "measured": 7.576
+    },
+    "subtree-rare-lines": {
+      "expect": "win",
+      "floor": 8.05,
+      "measured": 10.729
+    },
+    "pcre-lookahead-rare-files": {
+      "expect": "win",
+      "floor": 6.34,
+      "measured": 8.45
+    },
+    "pcre-lookahead-common-files": {
+      "expect": "win",
+      "floor": 3.52,
+      "measured": 4.698
+    },
+    "pcre-backref-files": {
+      "expect": "win",
+      "floor": 12.08,
+      "measured": 16.103
+    },
+    "multiline-rare-files": {
+      "expect": "win",
+      "floor": 3.17,
+      "measured": 4.22
+    },
+    "multiline-common-lazy-dotstar-files": {
+      "expect": "win",
+      "floor": 3.05,
+      "measured": 4.065
+    }
+  }
+}

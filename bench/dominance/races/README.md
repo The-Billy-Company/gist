@@ -79,7 +79,7 @@ bench/dominance/races/scanner.sh    # SCANNER: gist --no-index vs rg, interleave
 ```
 
 Layer I of the certificate is minted from that last race plus the
-`irregex/bench/conformance/rgsuite` conformance lanes. One line wires it (the
+`bench/conformance/rgsuite` conformance lanes. One line wires it (the
 parent owns the mint; this is the invocation it needs):
 
 ```bash

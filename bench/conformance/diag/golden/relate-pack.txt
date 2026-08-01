@@ -1,0 +1,1 @@
+pack: N files indexed · N candidate(s) · N refreshed · N pick(s) cover N% of N priced bits · N foreign chunk(s) · N ms

@@ -1,0 +1,1 @@
+context: N files · N candidate(s) [any] · N pick(s) cover N% of N priced bits · N foreign chunk(s) · load N ms · pack N ms

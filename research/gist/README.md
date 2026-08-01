@@ -10,7 +10,7 @@ doc_radar:
       contains:
         - "pub const flag_catalog"
         - "unsupported_fail_loud"
-    - file: ../irregex/bench/conformance/gates/contract/ci_order.sh
+    - file: bench/conformance/gates/contract/ci_order.sh
       contains:
         - "pcre parity -P"
         - "index-elision parity"

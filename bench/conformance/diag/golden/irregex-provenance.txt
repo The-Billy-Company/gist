@@ -1,0 +1,2 @@
+provenance: N file(s) changed since the shelf was built — `relate index --shelf` refreshes
+provenance: N phrase(s) located · N drifted · N skipped (escape/<NB) · N files in shelf · load+parse N ms

@@ -1,8 +1,8 @@
 ---
 doc_radar:
   occurrences:
-    - {file: ../irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
-    - {file: ../irregex/bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
+    - {file: bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
+    - {file: bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
   sentinels:
     - file: ../irregex/src/exec/cold/engine/serial.zig
       contains: ["used purely to ELIDE reads", "never to change the file set"]

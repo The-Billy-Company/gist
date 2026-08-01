@@ -1,0 +1,91 @@
+# rgsuite coverage manifest — complete obligation accounting.
+#
+# `run.py` replays every mined case it CAN lower to a single argv against live
+# ripgrep and buckets it in `results.json` (PASS / ORDER / FAIL / NA). The rest —
+# and every remaining FAIL — are accounted for here, so the 446 mined obligations
+# have ZERO unexplained gaps. `check_results.py` enforces the accounting: every
+# SKIP is claimed by exactly one `[[companion]]` / `[[boundary]]` / `[[irreplayable]]`
+# entry, every FAIL by exactly one `[[deferred]]` entry, no case is double-credited,
+# and no entry names a case the spec doesn't contain. The four dispositions:
+#
+#   companion    — the miner couldn't lower the upstream `rgtest!` to one argv
+#                  (a control-flow / fixture-helper loop), but gist HAS the feature
+#                  it exercises, proven byte-for-byte by a sibling parity harness
+#                  that drives the same flags. The SKIP is credited to that proof.
+#   boundary     — a purposeful, documented divergence gist declines by design;
+#                  the adverse proof is the loud decline itself (`_oracle` /
+#                  `run.py` re-bucketing, or gist's own exit-2 diagnostic).
+#   irreplayable — the mined spec's own JSON encoding cannot represent the case
+#                  (e.g. a non-UTF-8 filename); gist handles it, but no replay
+#                  is expressible in this harness's format.
+#   deferred     — a real divergence gist should still close, tracked to the plan
+#                  phase that owns the fix. An EXPLAINED gap, never a silent accept.
+
+# ─────────────────────────── companion proofs ───────────────────────────
+
+[[companion]]
+proof = "transforms.py"
+feature = "-z/--search-zip decompression (every codec) and --pre/--pre-glob preprocessing"
+note = "transforms.py mints a corpus per codec (gz/bz2/xz/lz4/lzma/br/zst/uncompress) and per --pre pipeline, then diffs gist vs rg byte-for-byte on both engines. --pre is proven for BOTH invocation styles: a path-argument wrapper (gzip -dc \"$1\") and an argv-ignoring stdin-only preprocessor (exec cat), the latter proving gist feeds the file's bytes on the child's stdin exactly as rg does."
+cases = [
+  "compressed_gzip",
+  "compressed_bzip2",
+  "compressed_xz",
+  "compressed_lz4",
+  "compressed_lzma",
+  "compressed_brotli",
+  "compressed_zstd",
+  "compressed_uncompress",
+  "compressed_failing_gzip",
+  "preprocessing",
+  "preprocessing_glob",
+]
+
+[[companion]]
+proof = "flags.py"
+feature = "--sort/--sortr ordering across every key (path/modified/accessed/created) + --sort-files"
+note = "flags.py drives `sort:<key>`/`sortr:<key>` (and the `--sort-files` alias) with distinct-birthtime fixtures, and the serial engine carries the `cmpFiles`/`pathLess` sort-comparator unit tests."
+cases = [
+  "sort_files",
+  "sort_accessed",
+  "sortr_accessed",
+  "f2361_sort_nested_files",
+]
+
+[[companion]]
+proof = "modes.py"
+feature = "--json record stream, including an invalid-UTF-8 payload"
+note = "modes.py drives `--json` across core/multiline/pcre modes and a `badutf.txt` fixture, diffing gist's JSON-lines stream against rg after normalizing only the wall-clock duration fields."
+cases = [
+  "notutf8",
+  "notutf8_file",
+]
+
+# ─────────────────────────── design boundaries ───────────────────────────
+
+[[boundary]]
+reason = "global gitignore (git core.excludesFile / $XDG_CONFIG_HOME) is machine-external state a locator must not read"
+adverse = "_oracle.UNSUPPORTED_IGNORE_* + run.py `exercises_ignore` design-boundary re-bucketing (NA)"
+cases = [ "r3179_global_gitignore_cwd" ]
+
+[[boundary]]
+reason = "IMPROVEMENT (not a gap): as a code locator, gist's --binary searches past a NUL and prints every matching line — a superset of ripgrep's opaque 'binary file matches' summary — so `rg -a` (search-as-text) is the correct byte-for-byte oracle. Proven in transforms.py (bin:--binary / bin:-uuu); default flag-free detection still equals plain rg (both summarize)."
+adverse = "run.py `_cmp_stdout` binary re-bucketing (NA); serial.zig binary_detect path"
+cases = [ "matching_files_inconsistent_with_count" ]
+
+# ─────────────────────────── irreplayable upstream ───────────────────────────
+
+[[irreplayable]]
+reason = "the case creates a file named with invalid UTF-8 (`foo\\xffbar`); the mined spec encodes every path as a UTF-8 JSON string and cannot represent it. gist is byte-oriented and searches such paths (read/slurp), but no replay is expressible in this format."
+cases = [ "r210" ]
+
+[[irreplayable]]
+reason = "rg 15.2's GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM test (#3275): its determinism rides a `format!`-built config file that embeds a RUN-TIME absolute `core.excludesFile` path plus a `GIT_CONFIG_GLOBAL` env var — neither the config content nor the env is expressible in the self-contained, path-relative mined spec (the miner flags the config `dir.create` unresolved). Doubly out of replay: even fully materialized it is the SAME design boundary as `r3179_global_gitignore_cwd` — global/machine-external git config is state a monorepo locator must not read (its results must not depend on each of ~10 coworkers' personal ~/.config/git/ignore), so gist declines it by design. run.py SKIPs any record whose fixture the miner could not fully build."
+cases = [ "r3275_git_global_config_env" ]
+
+# ─────────────────────────── deferred divergences ───────────────────────────
+#
+# EMPTY — the zero-gap target is reached: every supported-surface case PASSes
+# (409/409), so no divergence remains to defer. `check_results.py` (without
+# `--allow-fail`) requires this list to stay empty; a NEW `[[deferred]]` entry
+# is only ever a temporary, phase-tracked record of a real, still-open FAIL.

@@ -139,7 +139,7 @@ were already being timed had their slowness charged to true-match volume. The
 probe set therefore carries a **standing requirement** to span the needle space
 and always keep a degenerate, low-match case — the one shape whose slowness has
 no second explanation. See
-`irregex/bench/conformance/shapes/README.md`.
+`bench/conformance/shapes/README.md`.
 
 ---
 

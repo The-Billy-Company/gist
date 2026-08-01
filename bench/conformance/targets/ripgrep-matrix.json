@@ -1,0 +1,66 @@
+{
+  "_comment": [
+    "ripgrep's release matrix, recorded as data so the comparison is auditable rather than asserted.",
+    "Every field below was read from the two sources named in `provenance` on the date recorded there;",
+    "nothing here is inferred. `declared` rows come from the workflow's build matrix; `published` says",
+    "whether 15.2.0 actually shipped an asset for that triple.",
+    "",
+    "Two facts worth reading before comparing: (1) every row is built `--features pcre2` with",
+    "PCRE2_SYS_STATIC=1, so there is NO per-target PCRE2 asymmetry in ripgrep's releases -- the whole",
+    "published matrix has PCRE2. (2) The declared matrix is 14 triples but 15.2.0 published 13:",
+    "i686-unknown-linux-gnu is declared, was published through 15.1.0, and is absent from 15.2.0",
+    "(`fail-fast: false` lets the release ship without a row that failed).",
+    "",
+    "`build_host` records which OS runner each row needs. This is the axis where cross-compilation",
+    "actually shows: ripgrep's matrix spans four distinct runner images plus `cross`'s Docker",
+    "containers, so no single machine produces it."
+  ],
+  "provenance": {
+    "release_assets": {
+      "url": "https://api.github.com/repos/BurntSushi/ripgrep/releases/latest",
+      "tag": "15.2.0",
+      "published_at": "2026-07-15T16:26:10Z",
+      "read_on": "2026-07-27",
+      "asset_count_excluding_sha256_and_deb": 13
+    },
+    "release_workflow": {
+      "url": "https://raw.githubusercontent.com/BurntSushi/ripgrep/15.2.0/.github/workflows/release.yml",
+      "read_on": "2026-07-27",
+      "pcre2_evidence": "env PCRE2_SYS_STATIC: 1 (line 61) + `cargo build --profile release-lto --features pcre2` (line 185), unconditional across every matrix row",
+      "cross_evidence": "CROSS_VERSION v0.2.5; `CARGO=cross` for every ubuntu-latest row (lines 154-167); qemu smoke via ghcr.io/cross-rs containers (lines 233-265)",
+      "runner_images": ["ubuntu-latest", "macos-latest", "windows-latest", "windows-11-arm"]
+    },
+    "asset_history": {
+      "url": "https://api.github.com/repos/BurntSushi/ripgrep/releases?per_page=6",
+      "read_on": "2026-07-27",
+      "observation": "i686-unknown-linux-gnu present in 14.0.3, 14.1.0, 14.1.1, 15.0.0, 15.1.0; absent in 15.2.0"
+    }
+  },
+  "verification_tier": {
+    "_comment": [
+      "What ripgrep's own release proves per target, so the certificate compares like with like.",
+      "Non-emulated rows execute the fresh binary to generate completions + the man page; emulated",
+      "rows do the same under qemu in a cross container. Either way the executed evidence is",
+      "`--version` and `--generate`: the release pipeline never runs a search on the cross targets.",
+      "That is not a criticism -- it is the baseline our `conforms` tier is measured against."
+    ],
+    "executed_check": "--version and --generate {complete-bash,complete-fish,complete-powershell,complete-zsh,man}",
+    "search_conformance_per_target": false
+  },
+  "targets": [
+    { "triple": "x86_64-unknown-linux-musl",     "os": "linux",   "arch": "x86_64",  "bits": 64, "abi": "musl",        "pcre2": true, "declared": true, "published": true,  "build_host": "ubuntu-latest",  "emulated_smoke": null },
+    { "triple": "i686-unknown-linux-gnu",        "os": "linux",   "arch": "x86",     "bits": 32, "abi": "gnu",         "pcre2": true, "declared": true, "published": false, "build_host": "ubuntu-latest",  "emulated_smoke": "i386" },
+    { "triple": "aarch64-unknown-linux-gnu",     "os": "linux",   "arch": "aarch64", "bits": 64, "abi": "gnu",         "pcre2": true, "declared": true, "published": true,  "build_host": "ubuntu-latest",  "emulated_smoke": "qemu-aarch64" },
+    { "triple": "aarch64-unknown-linux-musl",    "os": "linux",   "arch": "aarch64", "bits": 64, "abi": "musl",        "pcre2": true, "declared": true, "published": true,  "build_host": "ubuntu-latest",  "emulated_smoke": "qemu-aarch64" },
+    { "triple": "armv7-unknown-linux-gnueabihf", "os": "linux",   "arch": "arm",     "bits": 32, "abi": "gnueabihf",   "pcre2": true, "declared": true, "published": true,  "build_host": "ubuntu-latest",  "emulated_smoke": "qemu-arm" },
+    { "triple": "armv7-unknown-linux-musleabihf","os": "linux",   "arch": "arm",     "bits": 32, "abi": "musleabihf",  "pcre2": true, "declared": true, "published": true,  "build_host": "ubuntu-latest",  "emulated_smoke": "qemu-arm" },
+    { "triple": "armv7-unknown-linux-musleabi",  "os": "linux",   "arch": "arm",     "bits": 32, "abi": "musleabi",    "pcre2": true, "declared": true, "published": true,  "build_host": "ubuntu-latest",  "emulated_smoke": "qemu-arm" },
+    { "triple": "s390x-unknown-linux-gnu",       "os": "linux",   "arch": "s390x",   "bits": 64, "abi": "gnu",         "pcre2": true, "declared": true, "published": true,  "build_host": "ubuntu-latest",  "emulated_smoke": "qemu-s390x" },
+    { "triple": "x86_64-apple-darwin",           "os": "macos",   "arch": "x86_64",  "bits": 64, "abi": "darwin",      "pcre2": true, "declared": true, "published": true,  "build_host": "macos-latest",   "emulated_smoke": null },
+    { "triple": "aarch64-apple-darwin",          "os": "macos",   "arch": "aarch64", "bits": 64, "abi": "darwin",      "pcre2": true, "declared": true, "published": true,  "build_host": "macos-latest",   "emulated_smoke": null },
+    { "triple": "x86_64-pc-windows-msvc",        "os": "windows", "arch": "x86_64",  "bits": 64, "abi": "msvc",        "pcre2": true, "declared": true, "published": true,  "build_host": "windows-latest", "emulated_smoke": null },
+    { "triple": "x86_64-pc-windows-gnu",         "os": "windows", "arch": "x86_64",  "bits": 64, "abi": "gnu",         "pcre2": true, "declared": true, "published": true,  "build_host": "windows-latest", "emulated_smoke": null },
+    { "triple": "aarch64-pc-windows-msvc",       "os": "windows", "arch": "aarch64", "bits": 64, "abi": "msvc",        "pcre2": true, "declared": true, "published": true,  "build_host": "windows-11-arm", "emulated_smoke": null },
+    { "triple": "i686-pc-windows-msvc",          "os": "windows",  "arch": "x86",    "bits": 32, "abi": "msvc",        "pcre2": true, "declared": true, "published": true,  "build_host": "windows-latest", "emulated_smoke": null }
+  ]
+}

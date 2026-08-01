@@ -197,7 +197,7 @@ one file of each other — expected, since the rival is derived from gist's own 
 types — which is why the mechanism is measured where it can't drift.
 
 Both halves are gated permanently:
-`irregex/bench/conformance/gates/parity/partition_parity.sh`
+`bench/conformance/gates/parity/partition_parity.sh`
 proves the set identities over the live tree on every `zig build test`, and
 [`bench/dominance/partition/`](bench/dominance/partition/README.md)
 holds the speed floors and the classification contract.
@@ -305,7 +305,7 @@ a fixture where the two answers differ).
 
 Both of those denominators are ripgrep's own, which is their ceiling as well as
 their authority. So a third lane,
-`irregex/bench/conformance/rgsuite/fuzz.py`,
+`bench/conformance/rgsuite/fuzz.py`,
 generates what nobody curated: a random pattern × flag set × a hostile corpus
 (invalid UTF-8, NUL bytes, a 4 MiB line, a symlink cycle, an unreadable file,
 catastrophic-backtracking patterns), demanding byte-identical agreement while
@@ -610,7 +610,7 @@ pass, and with zero FAIL rows the strict `check_results.py` gate is green
 without `--allow-fail`.
 
 Reproduce the cited results from
-`irregex/bench/conformance/rgsuite`:
+`bench/conformance/rgsuite`:
 
 ```bash
 python3 run.py
@@ -622,7 +622,7 @@ python3 fuzz.py --iterations 6000 --seed 20260727   # the residual lane
 ```
 
 The permanent integration order is documented in
-`irregex/bench/conformance/gates`: correctness gates run before
+`bench/conformance/gates`: correctness gates run before
 performance gates, so a faster wrong answer cannot earn a benchmark win.
 
 Performance claims come from the committed fail-closed certificate: fresh

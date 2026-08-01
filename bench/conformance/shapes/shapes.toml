@@ -1,0 +1,392 @@
+# gist CLI-shape admission matrix.
+#
+# One machine-readable row per SUPPORTED CLI shape gist claims, spanning the
+# dimensions a locator's behavior actually turns on: `mode` (linear / -U / -P),
+# match `flags`, walk `scope`, `emit` shape, `select`ivity, and pattern `kind`.
+# `matrix.py` lowers each row into a REAL argv it drives through three paths —
+# gist cold-indexed, gist cold-unindexed (`--no-index`), and ripgrep — so
+# eligibility and index-elision are MEASURED, never inferred:
+#
+#   * `matrix.py parity`  asserts gist-idx == gist-noidx == rg at each row's `bar`
+#                         (set / lines / count / exit). This is the parity-first
+#                         gate — a shape that diverges never earns a perf verdict.
+#   * `matrix.py bench`   times gist-idx vs rg with the SAME bootstrap-CI +
+#                         Mann-Whitney machinery the certificate uses
+#                         (`certify/certify_stats.py`), one fail-closed verdict
+#                         per row, and (with --publish) refreshes matrix_baseline.json.
+#   * `matrix.py gate`    asserts the committed per-shape floors, with one honest
+#                         asymmetry: a row DECLARED `expect="loss"` is report-only
+#                         (a declared hole lives in its own row on purpose, so an
+#                         aggregate can never bury it — currently none: every
+#                         shape is a declared win), while any
+#                         `expect="win"`/`"parity"` row regressing below its floor
+#                         is a hard failure.
+#
+# Patterns are chosen for known corpus selectivity (rare = one service symbol,
+# common = a ubiquitous keyword) so the selectivity dimension is real, not a label.
+# Roots default to the six host source roots (mirrors corpus.resolveRoots and
+# _compete.sh); a row may override `roots` to exercise a bounded subtree.
+#
+# ONE WORD OF WARNING ABOUT `select`, PAID FOR IN A REAL DEFECT
+# -------------------------------------------------------------
+# `select` used to mean only "how many true matches does this pattern have" —
+# `rare` = few, `common` = many. That collapses TWO independent costs into one
+# label, and the collapse hid a live bug for months: the literal kernel picks two
+# byte offsets of the needle to filter 64-byte blocks on, and its selection
+# COLLAPSED to the adjacent pair (0,1) for any needle whose bytes all had equal
+# corpus rarity — which is most lowercase identifiers. Cost: 18.1 GB/s literal
+# scan where 35.5 GB/s was achievable on code (13.1 vs 33.4 GB/s on prose).
+#
+# Every literal row in this file was `rare` or `common`, so neither the failure
+# nor its absence could be read off the table:
+#   * the "rare literal" class was represented by `pgxpool` alone — a LUCKY
+#     needle, because `pg` is a genuinely rare digraph, so it selects a good pair
+#     and looks fast. The class's best case stood in for the class.
+#   * the degenerate needles WERE in the suite (`error`, `func`) but wore the
+#     label `common`, so their slowness was charged to having many true matches
+#     rather than to the prefilter failing.
+#
+# So `select` now names the PREFILTER's signal, not the match count:
+#   selective    the needle carries a discriminating rare byte → a healthy
+#                selector finds a good offset pair. `pgxpool` (rare `pg`).
+#   degenerate   every byte is equally common → a marginal-rarity selector has
+#                NO signal to work with. This is where the kernel fails.
+#   rare/common  legacy match-volume labels, kept so committed floors keyed on
+#                these ids stay readable.
+# A degenerate row with FEW true matches is the load-bearing one: slowness there
+# can ONLY mean the prefilter failed, because there is no real work to blame.
+
+default_roots = [ "services", "libs", "clients", "contracts", "scripts", "quality" ]
+
+# ─────────────────────────── mode: linear default ───────────────────────────
+
+[[shape]]
+id = "literal-rare-files"
+pattern = "WalletService"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "rare", kind = "literal" }
+
+# WHAT THIS ROW ACTUALLY MEASURES (the id is load-bearing — committed floors in
+# baseline.json / shapes.csv key on it, so it is NOT renamed): `error` is not just
+# common, it is DEGENERATE — e,r,r,o,r are all high-frequency bytes, so a
+# marginal-rarity offset selector has no signal and collapses to the adjacent pair
+# (0,1). This row therefore charges TWO costs to one number: many true matches AND
+# a failed prefilter. Historically its slowness was read as the former, which is
+# exactly how the selector-collapse defect stayed hidden. Read it together with
+# `literal-degenerate-files` (few matches, same tie condition) — that row isolates
+# the prefilter, this one does not and never could.
+[[shape]]
+id = "literal-common-files"
+pattern = "error"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "common", kind = "literal" }
+
+[[shape]]
+id = "literal-rare-count"
+pattern = "WalletService"
+gist = [ "-F", "-c" ]
+rg = [ "-F", "-c" ]
+bar = "count"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "count", select = "rare", kind = "literal" }
+
+[[shape]]
+id = "literal-rare-lines"
+pattern = "WalletService"
+gist = [ "-F", "-n" ]
+rg = [ "-F", "-n" ]
+bar = "lines"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "lines", select = "rare", kind = "literal" }
+
+[[shape]]
+id = "literal-rare-only-matching"
+pattern = "WalletService"
+gist = [ "-F", "-o" ]
+rg = [ "-F", "-o" ]
+bar = "lines"
+expect = "win"
+dims = { mode = "linear", flags = "only-matching", scope = "rootless", emit = "lines", select = "rare", kind = "literal" }
+
+[[shape]]
+id = "word-common-files"
+pattern = "ctx"
+gist = [ "-w", "-l" ]
+rg = [ "-w", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "word", scope = "rootless", emit = "files", select = "common", kind = "literal" }
+
+[[shape]]
+id = "ignore-case-rare-files"
+pattern = "walletservice"
+gist = [ "-i", "-l" ]
+rg = [ "-i", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "ignore-case", scope = "rootless", emit = "files", select = "rare", kind = "literal" }
+
+[[shape]]
+id = "maxcount-common-lines"
+pattern = "error"
+gist = [ "-F", "-m", "1", "-n" ]
+rg = [ "-F", "-m", "1", "-n" ]
+bar = "lines"
+expect = "win"
+dims = { mode = "linear", flags = "max-count", scope = "rootless", emit = "lines", select = "common", kind = "literal" }
+
+[[shape]]
+id = "invert-count-subtree"
+pattern = "import"
+gist = [ "-F", "-v", "-c" ]
+rg = [ "-F", "-v", "-c" ]
+bar = "count"
+expect = "win"
+roots = [ "services/backend/gateway" ]
+dims = { mode = "linear", flags = "invert", scope = "subtree", emit = "count", select = "common", kind = "literal" }
+
+[[shape]]
+id = "regex-anchored-rare-files"
+pattern = 'func \w+\(ctx'
+gist = [ "-l" ]
+rg = [ "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "plain", scope = "rootless", emit = "files", select = "rare", kind = "anchored-regex" }
+
+[[shape]]
+id = "regex-alternation-files"
+pattern = "TODO|FIXME|XXX"
+gist = [ "-l" ]
+rg = [ "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "plain", scope = "rootless", emit = "files", select = "common", kind = "alternation" }
+
+# ───────────── selector quality: the needle space, not the match count ────────
+#
+# STANDING REQUIREMENT ON THIS SET: the literal rows must always span the needle
+# space, and must always include at least one DEGENERATE, LOW-MATCH case. Dropping
+# the pair below re-opens the blind spot described in the header — a future edit
+# that removes them is a coverage regression, not a cleanup.
+#
+# These rows are the PRODUCT path (cold-indexed), so their job here is twofold:
+# (a) `parity` proves a degenerate needle still returns rg's exact set — a selector
+#     that picks the wrong offset pair is a CORRECTNESS bug before it is a speed
+#     bug, and this is where that would surface; and
+# (b) they put the needle classes in the registry so the set is auditable.
+# The TIMING isolation lives in the no-index scanner lane
+# (`bench/dominance/races/scanner.sh`, SELECTOR_PROBES), because the trigram index
+# elides most of the corpus for a low-match needle and the scan kernel — the thing
+# whose prefilter can collapse — barely runs on the indexed path. Measured on this
+# tree: trap/control ratio 1.04 indexed vs 1.00 un-indexed, i.e. the indexed lane
+# is dominated by walk + candidate IO and cannot see the defect at all.
+#
+# Match counts below were measured over the six default roots at authoring time
+# (`gist -F -o` for matches, `-F -l` for files); they drift with the corpus and are
+# recorded to show the trap really is low-match, not as a pinned assertion.
+
+# THE REGRESSION GUARD for the selector-collapse defect. `stepSec` is 7 bytes of
+# pure letters, so every byte ties on corpus rarity and a marginal-rarity selector
+# has nothing to choose on — but it matches only ~75 times in ~28 files. That
+# combination is the whole point: there is almost no true work here, so if this row
+# is slow, the prefilter failed. Nothing else can explain it.
+# In the shipped pre-fix binary this needle ran 41% SLOWER than `pgxpool` below —
+# 19x fewer true matches, more wall time — which is the signature of the collapse.
+[[shape]]
+id = "literal-degenerate-files"
+pattern = "stepSec"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "degenerate", kind = "literal" }
+
+# THE LENGTH-MATCHED CONTROL for the row above: also 7 bytes, but `pg` is a
+# genuinely rare digraph, so a healthy selector finds a good offset pair. It has
+# ~1400 matches in ~589 files — 19x MORE true work than the trap. A healthy kernel
+# therefore puts these two close together (trap slightly slower at most, since `-l`
+# early-exits per matching file and the trap matches fewer files). The defect put
+# them 41% apart in the wrong direction. Same length + opposite prefilter signal is
+# what makes the ratio between them mean something.
+[[shape]]
+id = "literal-selective-control-files"
+pattern = "pgxpool"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "selective", kind = "literal" }
+
+# The four SAME-CLASS RUNS. Each needle draws every byte from one character class,
+# which is exactly the input where a byte-frequency table has no discriminating
+# signal — all offsets score alike and the selector must fall back on something
+# other than rarity. One row per class that ties, so a fallback that works for
+# letters but not for digits or punctuation cannot hide behind an average.
+[[shape]]
+id = "literal-lowerrun-files"
+pattern = "dialect"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "degenerate", kind = "lowercase-run" }
+
+[[shape]]
+id = "literal-upperrun-files"
+pattern = "PENDING"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "degenerate", kind = "uppercase-run" }
+
+[[shape]]
+id = "literal-digitrun-files"
+pattern = "1234567"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "degenerate", kind = "digit-run" }
+
+# Punctuation ties like letters do, but on a byte population with a very different
+# distribution — and `})`, the existing `literal-punct2` class, is only 2 bytes, so
+# it cannot show an offset-PAIR problem (there is exactly one pair). This one is 4
+# bytes, so a pair choice actually exists to get wrong.
+[[shape]]
+id = "literal-punctrun-files"
+pattern = "}));"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "degenerate", kind = "punctuation-run" }
+
+# THE POSITIONAL PAIR — a controlled experiment on END BIAS. Both needles are 7
+# bytes, both carry exactly ONE rare byte (`z`, the rarest lowercase letter), and
+# both are low-match. The ONLY difference is where the rare byte sits: offset 0 in
+# `zeroing`, offset 6 in `dataviz`. A selector that quietly prefers one end of the
+# needle — a prefix bias, or the (0,1) collapse itself — makes these two diverge
+# while every other row stays quiet. Keep them as a pair; either one alone proves
+# nothing, because there is no baseline to compare the position against.
+[[shape]]
+id = "literal-headrare-files"
+pattern = "zeroing"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "head-rare", kind = "literal" }
+
+[[shape]]
+id = "literal-tailrare-files"
+pattern = "dataviz"
+gist = [ "-F", "-l" ]
+rg = [ "-F", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "rootless", emit = "files", select = "tail-rare", kind = "literal" }
+
+# ─────────────────────────── walk scope: glob / type / subtree ───────────────
+
+[[shape]]
+id = "glob-go-rare-files"
+pattern = "WalletService"
+gist = [ "-F", "-l", "-g", "*.go" ]
+rg = [ "-F", "-l", "-g", "*.go" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "glob", emit = "files", select = "rare", kind = "literal" }
+
+[[shape]]
+id = "type-go-rare-files"
+pattern = "WalletService"
+gist = [ "-F", "-l", "-t", "go" ]
+rg = [ "-F", "-l", "-t", "go" ]
+bar = "set"
+expect = "win"
+dims = { mode = "linear", flags = "fixed", scope = "type", emit = "files", select = "rare", kind = "literal" }
+
+[[shape]]
+id = "subtree-rare-lines"
+pattern = "WalletService"
+gist = [ "-F", "-n" ]
+rg = [ "-F", "-n" ]
+bar = "lines"
+expect = "win"
+roots = [ "services/backend/api" ]
+dims = { mode = "linear", flags = "fixed", scope = "subtree", emit = "lines", select = "rare", kind = "literal" }
+
+# ─────────────────────────── mode: -P PCRE2 ─────────────────────────────────
+
+[[shape]]
+id = "pcre-lookahead-rare-files"
+pattern = 'WalletService(?=[\s\S]*ctx)'
+gist = [ "-P", "-l" ]
+rg = [ "-P", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "pcre", flags = "lookahead", scope = "rootless", emit = "files", select = "rare", kind = "lookaround" }
+
+[[shape]]
+id = "pcre-lookahead-common-files"
+pattern = 'func \w+\((?=.*ctx)'
+gist = [ "-P", "-l" ]
+rg = [ "-P", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "pcre", flags = "lookahead", scope = "rootless", emit = "files", select = "common", kind = "lookaround" }
+
+# A pure backreference with NO extractable required literal — once a declared
+# structural loss (nothing for the trigram index to anchor on, so both engines
+# scanned the corpus with PCRE2 and split ~11 s of catastrophic backtracking on
+# one 3.6 MB base64 fixture). The PCRE2 shadow gate (`pcre2/shadow.zig`) turned
+# it: `\1` splices to a copy of its group's source, giving an assertion-free
+# linear over-approximation whose O(1)/byte DFA rejects every line PCRE2 would
+# have backtracked through — PCRE2 only confirms candidates. rg still pays the
+# full backtracking bill.
+[[shape]]
+id = "pcre-backref-files"
+pattern = '(\w{4,})\s+\1'
+gist = [ "-P", "-l" ]
+rg = [ "-P", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "pcre", flags = "backref", scope = "rootless", emit = "files", select = "common", kind = "backreference" }
+
+# ─────────────────────────── mode: -U multiline ─────────────────────────────
+
+# Once a declared loss (the -U emit ran on the serial engine, forfeiting the
+# parallel walk). Now: `-U` rides the parallel per-file pipeline, and an
+# assertion-free multiline pattern determinizes exactly (nothing positional to
+# resolve), so `bufMatch` answers from the byte-class DFA at O(1)/byte instead
+# of a Pike re-seed per position. Parity still gates it (byte-identical sets).
+[[shape]]
+id = "multiline-rare-files"
+pattern = 'WalletService[\s\S]{0,80}?\{'
+gist = [ "-U", "-l" ]
+rg = [ "-U", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "multiline", flags = "plain", scope = "rootless", emit = "files", select = "rare", kind = "cross-line" }
+
+# The COMMON lazy-dotstar cross-line span — once the table's deepest declared
+# loss (0.36x: serial -U emit + Pike whole-buffer scan vs rg's lazy DFA). The
+# parallel -U pipeline plus the assertion-free multiline DFA (with the `-l`
+# first-kept-span fast path in `Emitter.buffer`) turned it; kept as its own row
+# so any regression in the -U emit model surfaces here first.
+[[shape]]
+id = "multiline-common-lazy-dotstar-files"
+pattern = 'import \([\s\S]*?\)'
+gist = [ "-U", "-l" ]
+rg = [ "-U", "-l" ]
+bar = "set"
+expect = "win"
+dims = { mode = "multiline", flags = "lazy-dotstar", scope = "rootless", emit = "files", select = "common", kind = "cross-line" }

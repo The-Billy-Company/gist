@@ -1,0 +1,1 @@
+patterns: N pattern(s) · N/N files · N row(s) · N ms
