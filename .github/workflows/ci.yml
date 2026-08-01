@@ -1,0 +1,402 @@
+# What has to be true before a change lands.
+#
+# Four faces plus three discipline gates, seven jobs, deliberately not one: a
+# Zig engine regression and a Rust clippy nit are different news, and a single
+# job would report them as the same red X.
+#
+# Unlike the substrate underneath it, this package cannot build from its own
+# clone, and the four build jobs here pay for that in the same way. The three
+# gates at the bottom — `fmt`, `certificate`, `changelog` — do not, and each says
+# so by taking a bare checkout: they read this repository's files rather than
+# configuring a build, so no sibling has to resolve for them. `build.zig.zon`
+# resolves `irregex` as a sibling path dependency, and so do all three bindings
+# independently — the Go `replace`, the uv source, and the Rust path dep each
+# spell `../../../irregex/...`. `actions/checkout` refuses a `path:` outside the
+# workspace, so `path: ../irregex` is not available; instead BOTH repositories
+# are checked out into subdirectories of the workspace, which makes them
+# siblings of each other and every one of those relative paths resolve as
+# written.
+# Nothing in the package is patched for CI, which is the point: what builds here
+# is the layout a contributor actually clones.
+#
+# The sibling is taken at its default branch rather than a pinned commit,
+# because a path dependency has no pin to honor — a release pins url+hash
+# through the publish script, and that is a different artifact than this gate.
+# The default `GITHUB_TOKEN` is enough to read it while it is public; were it
+# ever made private, every one of these checkouts would need a token with
+# access to it instead.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A force-push mid-run should cancel the run it obsoleted, not race it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Matches `minimum_zig_version` in build.zig.zon and the sibling's own pin —
+  # the two packages compile into one artifact, so they cannot disagree about
+  # the compiler. A drift *below* the floor is not silently possible: Zig itself
+  # refuses to build a package whose declared minimum is above the compiler in
+  # hand, so this value can only ever be deliberately ahead of the floor.
+  ZIG_VERSION: 0.16.0
+  # Every binding is a subprocess transport over the built binary rather than a
+  # linked archive, and each resolves `$GIST_BIN` before anything else. This is
+  # the one place gist's CI is shaped differently from the substrate's, where
+  # the bindings link a vendored archive and need no toolchain at all: here all
+  # three suites need a real `zig build` first, and the Go suite fails rather
+  # than skips without one.
+  GIST_BIN: ${{ github.workspace }}/gist/zig-out/bin/gist
+
+jobs:
+  engine:
+    # Both host families, because the build branches on them: macOS re-archives
+    # through `libtool` for ld64's alignment rules, and the resident tier's Unix
+    # sockets behave differently enough to be worth exercising on each.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: gist
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gist
+      - uses: actions/checkout@v4
+        with:
+          repository: The-Billy-Company/irregex
+          path: irregex
+          token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      # Compile-only first: when this fails, the test log below is noise, and
+      # the failure is one line rather than a suite's worth of scrollback.
+      - run: zig build check
+      - run: zig build test
+
+  python:
+    # 3.12 is the declared floor and is load-bearing (PEP 695 syntax reaches
+    # this package through the substrate it imports), so it is tested rather
+    # than assumed. There is no upper pin: a published library has no business
+    # refusing next year's interpreter, and the way to keep that true is to
+    # notice when it breaks.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gist
+      - uses: actions/checkout@v4
+        with:
+          repository: The-Billy-Company/irregex
+          path: irregex
+          token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: astral-sh/setup-uv@v5
+      # ripgrep is the oracle for the parity tests, not a convenience: without
+      # it on PATH they take their documented skip branch, and a parity gate
+      # that skips is a parity gate that has stopped gating. The corpus those
+      # tests build is a handful of files and three patterns, so the comparison
+      # does not turn on which rg release the image happens to carry.
+      - name: install the parity oracle
+        run: command -v rg || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep; }
+      # The product's own libraries, and the substrate's from ITS checkout.
+      # `tests/test_packaging.py` stages `libgist` and `libirregex` side by side
+      # and opens the product in a clean child process — the gate on the
+      # loader-relative rpath — and it looks for the substrate under the sibling
+      # checkout's `zig-out`, not the copy this build installs into ours. So
+      # both builds are required for that assertion to run at all.
+      - name: zig build (this package)
+        run: zig build
+        working-directory: gist
+      - name: zig build (the sibling substrate)
+        run: zig build
+        working-directory: irregex
+      - run: uv run --python ${{ matrix.python }} pytest -q
+        working-directory: gist/bindings/python
+
+  go:
+    # A Zig step, unlike the substrate's Go job: that module carries a prebuilt
+    # archive per platform so `go get` needs no toolchain, and installing Zig
+    # there would test a path consumers never take. This module is the opposite
+    # shape — pure Go with no cgo, answering every verb by running the
+    # certified binary — so the binary IS the dependency, and `engine_test.go`
+    # deliberately fails rather than skips when it is absent.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gist
+      - uses: actions/checkout@v4
+        with:
+          repository: The-Billy-Company/irregex
+          path: irregex
+          token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: actions/setup-go@v5
+        with:
+          # Workspace-relative on purpose: this input is read by the action, not
+          # by a shell, so it does not follow a step's working directory.
+          go-version-file: gist/bindings/go/go.mod
+      - name: zig build
+        run: zig build
+        working-directory: gist
+      - run: go vet ./...
+        working-directory: gist/bindings/go
+      # The `index` suite additionally reaches for a `relate` binary, which
+      # ships from its own checkout and is not one this package can produce.
+      # That arm takes its documented skip; the search arms, which are what this
+      # module exists for, do not.
+      - run: go test ./...
+        working-directory: gist/bindings/go
+
+  rust:
+    # Same reasoning as Go: the default feature set links no archive and drives
+    # the certified binary, so `zig build` is what makes the suite non-vacuous.
+    # The opt-in `native` feature is the graduation rung and is not this gate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gist
+      - uses: actions/checkout@v4
+        with:
+          repository: The-Billy-Company/irregex
+          path: irregex
+          token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: install the parity oracle
+        run: command -v rg || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep; }
+      - name: zig build
+        run: zig build
+        working-directory: gist
+      # rust-toolchain.toml pins the channel; installing it explicitly would
+      # override the pin the repository already made.
+      - run: rustup show
+        working-directory: gist/bindings/rust
+      - run: cargo fmt --check
+        working-directory: gist/bindings/rust
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: gist/bindings/rust
+      - run: cargo test
+        working-directory: gist/bindings/rust
+
+  fmt:
+    # Zig was the one language here whose formatter nothing checked, while Rust
+    # got `cargo fmt --check` in the job above. That gap is not academic: `zig
+    # fmt` pads a column-aligned multiline literal into a grid, so a rename that
+    # shrinks the widest cell leaves every row beneath it one space too wide, in
+    # files nobody touched. Drift like that wants a red X that says "formatting",
+    # not one buried in a build log.
+    #
+    # Its own job for the same reason the other four are separate. Folding it
+    # into `engine` would run it twice for a verdict that cannot differ by host;
+    # folding it into `rust` would hide a Zig result inside a Rust job.
+    #
+    # The one job here with a bare checkout and no `working-directory`. Every
+    # other job in this file pays for the sibling path dependency described at
+    # the top of the file, because every other job configures a build; this one
+    # reads files and never asks Zig to resolve `irregex` at all. Giving it the
+    # two-checkout preamble anyway would spend a clone to make a job look like
+    # its neighbours. It also means `git ls-files` below means THIS repository
+    # rather than whichever checkout landed at the workspace root.
+    #
+    # Pinned to the ZIG_VERSION everything else builds with, because the
+    # formatter's output is a property of the compiler release — checking against
+    # a different Zig would be checking against a different grid.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: zig fmt --check
+        run: |
+          set -euo pipefail
+          # Enumerated rather than spelled out as a path list, because a path
+          # list drifts the same silent way the formatting does — it goes stale
+          # the moment a directory is added or renamed, and stale in the
+          # direction that checks less. This package is a live demonstration of
+          # both halves: `tools/` looks like it would hold Zig and holds only
+          # Python, while `build.zig` sits at the root, so the obvious
+          # hand-written `src/ bench/` would check neither.
+          #
+          # Tracked plus untracked-not-ignored is every Zig file this repository
+          # owns. What that leaves out is exactly the ignored trees — `zig-out/`,
+          # `.zig-cache/`, and the fetched `zig-pkg/`, which parks a whole
+          # `build.zig` of its own — so the exclusions are named in `.gitignore`
+          # and reviewable there, rather than being whatever happened to fall
+          # outside an argument list.
+          #
+          # The existence test is for a working tree mid-edit, where the index
+          # can still name a file someone has deleted; CI's checkout never has
+          # one, and a stale index should not read as a formatting failure.
+          files=()
+          while IFS= read -r f; do
+            if [ -f "$f" ]; then files+=("$f"); fi
+          done < <(git ls-files -co --exclude-standard '*.zig')
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::found no .zig files — the enumeration is broken, not the tree" >&2
+            exit 1
+          fi
+          echo "checking ${#files[@]} files"
+          zig fmt --check "${files[@]}"
+
+  certificate:
+    # The certificate machinery — the mint ledger, the cross-machine release
+    # gate, and the report post-processors — is Python, and nothing was running
+    # its tests. That is the subsystem that decides whether a published
+    # dominance claim is well-formed, so a silent break in it does not surface
+    # until a mint, which is exactly when nobody wants to be debugging it.
+    #
+    # A bare checkout, no Zig, and no sibling, for a reason worth stating plainly
+    # because it is the thing most likely to be "fixed" later into something
+    # slower: none of these tests build or drive a gist binary. They are hermetic
+    # by construction — every certificate, bundle, and residual record is
+    # synthesized into a tmpdir — and their own docstrings say so. Adding a
+    # `zig build` here would buy nothing and cost the ecosystem checkout.
+    #
+    # It also means the job does not depend on minted artifacts, which matters
+    # right now: the published bundles under `bench/certificate/artifact/` were
+    # purged and gitignored because they had been minted over a corpus that is
+    # not public. The machinery is intact and the tests never wanted the
+    # artifacts; this job is the standing proof of that separation.
+    #
+    # Stdlib-only Python by design, so uv is here to pin an interpreter rather
+    # than to install anything: `--no-project` keeps it from discovering
+    # `bindings/python`'s pyproject and building a wheel this job has no use for.
+    # 3.12 is the floor the rest of the repository declares.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # Enumerated, not listed, for the same reason the formatter's file set is:
+      # a written-down list of suites silently stops covering the one added next
+      # week. Every suite here is a plain `unittest.main()` script, so running it
+      # as `python <path>` is enough — Python puts the script's own directory on
+      # `sys.path`, which is how each one resolves the module it is testing.
+      #
+      # One suite reaches outside this subtree, and it is worth knowing before
+      # reading a red X: `report/test_scanner_residual.py` puts
+      # `bench/conformance/rgsuite/` on `sys.path` and drives `fuzz._klass` to
+      # prove every residual class the harness can emit has prose in the
+      # reporter. That coupling is the test's whole point — the vocabulary has
+      # two owners and drift between them is otherwise silent — but it does mean
+      # a change to the fuzz harness can fail this job. When that happens the
+      # answer is to reconcile the two, not to drop the suite from the glob.
+      - name: certificate and ledger suites
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tests=(bench/certificate/*/test_*.py)
+          if [ ${#tests[@]} -eq 0 ]; then
+            echo "::error::found no certificate suites — the enumeration is broken, not the tree" >&2
+            exit 1
+          fi
+          echo "running ${#tests[@]} suites"
+          for t in "${tests[@]}"; do
+            echo "── $t"
+            uv run --no-project --python 3.12 python "$t"
+          done
+      # A suite proves the behaviour it covers; this proves the modules it does
+      # NOT reach. Some are covered transitively and need no help — `test_release`
+      # imports `release`, which imports `artifacts`, which imports `layers`, so
+      # a broken import in any of those three already fails the step above. What
+      # nothing reaches is `ratio.py` and the nine report post-processors
+      # (`codex`, `indexq`, `multipattern`, `portable`, `rank`, `relate`, `scale`,
+      # `stats`, `warm`): a bad import or a syntax error in one of those would sit
+      # undetected until a mint shelled it, which is the worst moment to find out.
+      # Importing is the cheapest assertion that the whole subsystem is still
+      # loadable, and it is enumerated so a new module joins the gate by existing.
+      - name: every certificate module still imports
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 python - <<'PY'
+          import importlib, pathlib, sys
+
+          root = pathlib.Path("bench/certificate")
+          modules = sorted(
+              p for p in root.glob("*/*.py") if not p.name.startswith("test_")
+          )
+          if not modules:
+              sys.exit("found no certificate modules — the enumeration is broken, not the tree")
+          for path in modules:
+              # Each module is a script that imports its siblings by bare name,
+              # so its own directory is the import root — the same resolution a
+              # `python <script>` run gets for free.
+              sys.path.insert(0, str(path.parent))
+              importlib.import_module(path.stem)
+              sys.path.pop(0)
+              print(f"  ok  {path}")
+          print(f"{len(modules)} modules import cleanly")
+          PY
+
+  changelog:
+    # Neither repository had anything checking its news fragments, and the
+    # failure mode is quiet by construction: `towncrier build --draft` will
+    # cheerfully render a clean changelog while silently dropping any file whose
+    # name it does not recognize. A fragment typed `.fixd.md` instead of
+    # `.fixed.md` is not an error to towncrier — it is simply not a fragment, so
+    # it renders nothing, exits 0, and stays invisible until someone notices the
+    # entry missing from a release.
+    #
+    # So `--draft` on its own is NOT the gate, and adding it alone would have
+    # been a green tick over exactly the defect it was supposed to catch. The
+    # strictness comes from `ignore` in `towncrier.toml`: setting that key (even
+    # to an empty list) flips towncrier from skipping unparseable filenames to
+    # failing on them, with a message naming the file. That puts the fragment
+    # grammar in towncrier's hands rather than in a bespoke filename parser here
+    # — the same reason the formatter's file set comes from `git ls-files`
+    # instead of a path list. There is no second spelling to keep in sync, and a
+    # contributor running `towncrier build --draft` locally now gets the same
+    # error CI does.
+    #
+    # `towncrier check` is deliberately not what this runs: that verb asks
+    # whether a branch ADDED a fragment, which is a contribution policy. This
+    # job only asks whether the fragments that exist are well-formed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: every fragment is one towncrier recognizes
+        run: |
+          set -euo pipefail
+          # The version is a placeholder — `--draft` writes nothing, and the
+          # number only shows up in the heading it renders to stdout.
+          draft=$(uv run --no-project --with towncrier towncrier build --draft --version 0.0.0)
+          printf '%s\n' "$draft"
+          # The vacuous-green guard, in the same spirit as the formatter's "found
+          # no .zig files". A misconfigured `directory`, or a fragment directory
+          # towncrier cannot read, renders "No significant changes." and exits 0
+          # — a passing gate over nothing. Conditioning on fragments actually
+          # being present on disk keeps this honest right after a release, when
+          # an empty `changelog.d` and an empty draft are the correct answer.
+          # `README.md` is the one non-fragment `.md` the convention allows, and
+          # it is in the `ignore` list for that reason.
+          fragments=$(find changelog.d -maxdepth 1 -name '*.md' ! -name 'README.md' | wc -l | tr -d ' ')
+          echo "changelog.d holds ${fragments} fragment(s)"
+          if [ "$fragments" -gt 0 ] && printf '%s' "$draft" | grep -q 'No significant changes'; then
+            echo "::error::${fragments} fragments on disk but towncrier rendered none — the wiring is broken, not the tree" >&2
+            exit 1
+          fi

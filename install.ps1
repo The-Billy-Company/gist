@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-Build and install gist, relate and irregex on Windows.
+Build and install gist on Windows.
 
 .DESCRIPTION
 The Windows counterpart of `zig build`, and it has to be a script of its
@@ -30,7 +30,7 @@ rather than a preference:
 Idempotent: re-run it to refresh after a rebuild. Nothing here needs elevation.
 
 .PARAMETER Prefix
-Where the three binaries are placed. Default `%LOCALAPPDATA%\Programs\gist` — the
+Where the binary is placed. Default `%LOCALAPPDATA%\Programs\gist` — the
 per-user location Windows itself uses for user-scope installs: no elevation, and
 not roamed to other machines the way `%APPDATA%` is.
 
@@ -66,7 +66,10 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $root = $PSScriptRoot
-$binaries = @('gist', 'relate', 'irregex')
+# What this package's build actually installs. `relate` and `irregex` used to be
+# built here too, and ship from their own checkouts since the split — asking for
+# them by name from this `zig-out` throws before anything is placed.
+$binaries = @('gist')
 
 function Write-Note { param([string] $Message) Write-Host "$([char]0x2713)  $Message" -ForegroundColor Green }
 function Write-Warn { param([string] $Message) Write-Host "!  $Message" -ForegroundColor Yellow }
@@ -136,10 +139,10 @@ function Remove-Placed {
 # ── build ────────────────────────────────────────────────────────────────
 $zig = Get-Command zig -ErrorAction SilentlyContinue
 if (-not $zig) {
-    Write-Warn "zig not installed - install Zig 0.16 (this repo pins it in .mise.toml); skipping gist"
+    Write-Warn "zig not installed - install the version build.zig.zon declares as minimum_zig_version; skipping gist"
     exit 0
 }
-Write-Host "building gist + relate + irregex..."
+Write-Host "building gist..."
 # From the package root rather than through `--build-file`, so `zig-out` lands
 # where every other entry point expects it and a caller's own directory cannot
 # change what gets built.
@@ -213,7 +216,7 @@ if (-not $NoShell -and $env:GIST_SHELL_INSTALL -ne '0') {
             Write-Note "  already sourced from your `$PROFILE"
         } else {
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $PROFILE) | Out-Null
-            Add-Content -LiteralPath $PROFILE -Value @('', '# gist completions (placed by irregex install.ps1)', $line)
+            Add-Content -LiteralPath $PROFILE -Value @('', '# gist completions (placed by gist install.ps1)', $line)
             Write-Note "  sourced from your `$PROFILE - open a new terminal to use it"
         }
     }

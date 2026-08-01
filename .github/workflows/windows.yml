@@ -1,0 +1,475 @@
+# Native Windows CI.
+#
+# Why a native lane at all, when Zig cross-compiles Windows for free.
+# `-Dtarget=x86_64-windows` would prove the Win32 arms under
+# src/exec/session/conduit/ *compile*, and this package's build graph does not
+# even carry that gate — `zig build check` is a host-only compile of the tests.
+# But compiling was never the interesting half. It cannot prove that
+# `NtCreateFile` with a RootDirectory handle actually descends a real NTFS tree,
+# that `GetFinalPathNameByHandle` agrees with the spelling a caller passed in,
+# or that the rg exit-code contract survives a real console. Compilation is a
+# claim about the source; only a Windows kernel can answer the question. Until
+# this lane existed, the Windows rows of the portability matrix could reach
+# "conforms under Wine" and no further.
+#
+# Both architectures, because they are separate risks and the familiar one is
+# the less interesting one: x64 is what most users have, arm64 is where the
+# memory model is weakly ordered — an acquire/release pair that x86's total
+# store order forgives becomes load-bearing there, and the latch in
+# src/exec/session/conduit/image.zig is exactly that shape.
+#
+# Two checkouts, for the reason ci.yml explains at length: `irregex` is a
+# sibling path dependency and `actions/checkout` will not place a repository
+# outside the workspace, so both land in subdirectories and become siblings of
+# each other there.
+name: windows
+
+on:
+  # No `paths:` filter, on either trigger. In the monorepo this file was
+  # extracted from, one was needed and then had to be replaced by a cheap
+  # gating job, because a workflow-level path filter suppresses the run — and
+  # therefore the status — on an out-of-scope PR, leaving branch protection
+  # waiting forever on a context nobody will report. Here the repository IS the
+  # package: there is no such thing as a PR that cannot affect it, so the
+  # filter has nothing to express and the gating job it forced is gone with it.
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Kept in step with ci.yml, and asserted against the package's own declared
+  # floor by the provisioning step below rather than trusted. The download index
+  # needs an exact version, so this cannot simply be derived from a *minimum*.
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  native:
+    name: zig build test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    # `-Dtest-shards` defaults to 2x the core count, and a standard Windows
+    # runner has 4 cores where the dev boxes have 10+. The daemon block on top
+    # of that polls for a real process to come up. Budget for both rather than
+    # for the local wall clock.
+    timeout-minutes: 60
+    strategy:
+      # One architecture's failure must not cancel the other's — seeing the two
+      # disagree is the entire reason both are here.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            zig_arch: x86_64
+            runner: windows-2025
+          # GitHub's Windows-on-ARM hosted runner. Free for public repositories;
+          # available on Team/Enterprise plans for private ones.
+          - arch: arm64
+            zig_arch: aarch64
+            runner: windows-11-arm
+    defaults:
+      run:
+        working-directory: gist
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gist
+      - uses: actions/checkout@v4
+        with:
+          repository: The-Billy-Company/irregex
+          path: irregex
+
+      # Zig comes from the official download index and is sha256-verified
+      # against it, rather than pulled through a setup action: this is twenty
+      # lines of PowerShell, and it keeps one more third-party action out of the
+      # supply chain of a gate that can block a merge.
+      #
+      # The version is cross-checked against `minimum_zig_version` so the pin
+      # above cannot silently drift away from what the package declares it
+      # needs. On the POSIX lane that check is free — Zig refuses a compiler
+      # below the declared floor — but this step chooses the compiler it
+      # downloads, so nothing would otherwise notice the two disagreeing.
+      - name: Provision Zig
+        shell: pwsh
+        run: |
+          $ver = '${{ env.ZIG_VERSION }}'
+          $floor = Select-String -Path build.zig.zon -Pattern '\.minimum_zig_version = "([^"]+)"'
+          if (-not $floor) { throw 'no minimum_zig_version in build.zig.zon' }
+          $declared = $floor.Matches[0].Groups[1].Value
+          if ($declared -ne $ver) { throw "workflow pins zig $ver, build.zig.zon declares $declared" }
+          $target = '${{ matrix.zig_arch }}-windows'
+
+          $index = Invoke-RestMethod -Uri 'https://ziglang.org/download/index.json'
+          $release = $index.$ver
+          if (-not $release) { throw "ziglang.org's index carries no $ver" }
+          $build = $release.$target
+          if (-not $build) { throw "$ver has no $target build" }
+
+          $zip = Join-Path $env:RUNNER_TEMP 'zig.zip'
+          Invoke-WebRequest -Uri $build.tarball -OutFile $zip
+          $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLower()
+          if ($got -ne $build.shasum) { throw "sha256 mismatch: got $got, index says $($build.shasum)" }
+
+          # Extract into a dedicated directory and discover the archive's own
+          # root rather than reconstructing its name — the convention has
+          # already changed once (0.16 reordered it to arch-os-version).
+          $into = Join-Path $env:RUNNER_TEMP 'zig'
+          Expand-Archive -LiteralPath $zip -DestinationPath $into -Force
+          $root = (Get-ChildItem -Directory -LiteralPath $into | Select-Object -First 1).FullName
+          if (-not $root) { throw "the archive extracted no directory into $into" }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $root
+
+          # Prove the binary that landed is the one the pin asked for, before any
+          # build step can attribute a failure to the wrong compiler.
+          $reported = & (Join-Path $root 'zig.exe') version
+          if ($reported -ne $ver) { throw "provisioned zig reports $reported, pin says $ver" }
+          Write-Host "zig $ver ($target) verified and on PATH"
+
+      # The whole suite, natively: the inline unit tests across the resident
+      # session (the conduit's rendezvous, image and vigil; the warden's ration
+      # and stand-down), the CLI surface, and the FFI contract. On a POSIX host
+      # the conduit's Windows arms are comptime-pruned, so most of what this
+      # step exists to exercise is not even compiled anywhere else; here they
+      # are the arms that run.
+      - name: zig build test
+        run: zig build test
+
+      # The artifacts an install ships — the CLI plus the staticlib and dynlib
+      # the C ABI and the Python/Rust faces link against. The installed CLI is
+      # already ReleaseFast by default (`-Dcli-optimize`); this raises
+      # everything else with it, because Debug passing while ReleaseFast fails
+      # is a real and recurring shape (safety-checked arithmetic, reads of
+      # `undefined`), so it gets built as it ships.
+      - name: zig build (ReleaseFast)
+        run: zig build -Doptimize=ReleaseFast
+
+      # The conformance gate that ports. It is self-oracling — the
+      # index-accelerated answer is diffed against gist's own `--no-index` full
+      # read, not against ripgrep — so it needs no competitor on PATH, which is
+      # exactly what makes it runnable on a platform where the competitor is not
+      # packaged. Git Bash ships on both runner images; the script resolves
+      # `gist.exe` itself, including the Windows suffix.
+      - name: index-elision parity (index changes speed, never results)
+        shell: bash
+        run: ./bench/conformance/gates/parity/index_elision_parity.sh
+
+      # End-to-end over this checkout: a real NTFS tree with real depth, which
+      # no fixture reproduces. Every assertion is a contract fact rather than a
+      # count, so a concurrently-edited tree cannot make it flaky.
+      - name: CLI smoke (walk, exit codes, status)
+        shell: pwsh
+        run: |
+          # A non-zero exit is DATA here, not a failure: gist's contract is rg's,
+          # where 1 means "ran fine, matched nothing". GitHub's pwsh wrapper sets
+          # $ErrorActionPreference='Stop', and PowerShell 7.3+ couples that to
+          # native exit codes — so without this line the exit-1 assertion below
+          # would throw before it could be read.
+          $PSNativeCommandUseErrorActionPreference = $false
+          $gist = Join-Path (Get-Location) 'zig-out\bin\gist.exe'
+          if (-not (Test-Path -LiteralPath $gist)) { throw "no gist.exe at $gist" }
+
+          # A literal that provably exists in this tree — and, fittingly, the very
+          # seam that decides how gist behaves on this platform.
+          $hits = & $gist 'resident_sessions' src
+          if ($LASTEXITCODE -ne 0) { throw "expected exit 0 for a matching pattern, got $LASTEXITCODE" }
+          if (-not $hits) { throw 'exit 0 but no output — the walk descended nothing' }
+
+          # A pattern nothing can match: clean no-match is exit 1 with a silent
+          # stdout. The coaching hints go to stderr, which is why stdout emptiness
+          # is the assertion even though the log will show those hints.
+          $miss = & $gist 'zzz_no_such_symbol_zzz' src
+          if ($LASTEXITCODE -ne 1) { throw "expected exit 1 for a clean no-match, got $LASTEXITCODE" }
+          if ($miss) { throw 'a no-match run wrote to stdout' }
+
+          # An unopenable explicit path is rg's error class — exit 2, never a
+          # silent no-match. Windows reaches FileNotFound through NtCreateFile
+          # instead of openat, so this is a different code path arriving at the
+          # same contract, which is exactly what a native lane is for.
+          & $gist 'anything' 'gist_definitely_nonexistent_path_xyz' 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 2) { throw "expected exit 2 for an unopenable path, got $LASTEXITCODE" }
+
+          # Machine lifecycle: valid JSON whether or not an index exists. A fresh
+          # runner has none, so this pins the `unavailable` state specifically —
+          # the one a caller is most likely to hit blind.
+          $status = & $gist status --json
+          if ($LASTEXITCODE -ne 0) { throw "status --json exited $LASTEXITCODE" }
+          $parsed = $status | ConvertFrom-Json
+          if ($parsed.schema_version -ne 1) { throw "status --json schema_version was '$($parsed.schema_version)'" }
+          if (-not $parsed.state) { throw 'status --json carried no state' }
+          Write-Host "gist ok on ${{ matrix.arch }}: state=$($parsed.state) roots=$($parsed.roots -join ',')"
+          exit 0
+
+      # The Win32-only behaviors, on the kernel that actually has them. Every
+      # assertion below is a divergence this platform really produced, not a
+      # restatement of the code: `\`-joined walker paths silently defeated any
+      # ignore rule written THROUGH a separator and made `--max-depth` count the
+      # wrong components; `--one-file-system` had no volume id to compare, so it
+      # was inert; a console reports no `TERM`, which read as "no color"; and
+      # Windows has no `$XDG_CONFIG_HOME`, so preferences had nowhere to be found.
+      # Asserted over a purpose-built tree instead of this checkout, so every
+      # claim is a contract fact and none of it can go flaky.
+      - name: Win32 contract (separators, ignore, depth, volume, config, color)
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $gist = Join-Path (Get-Location) 'zig-out\bin\gist.exe'
+          if (-not (Test-Path -LiteralPath $gist)) { throw "no gist.exe at $gist" }
+
+          # Known shape: a match at the root, one two directories down, and one
+          # the rule below names through a separator.
+          $tree = Join-Path $env:RUNNER_TEMP 'win32-contract'
+          Remove-Item -Recurse -Force -LiteralPath $tree -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path (Join-Path $tree 'keep\deep') | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $tree 'drop') | Out-Null
+          'NEEDLE_HERE' | Set-Content -LiteralPath (Join-Path $tree 'top.txt')
+          'NEEDLE_HERE' | Set-Content -LiteralPath (Join-Path $tree 'keep\deep\hit.txt')
+          'NEEDLE_HERE' | Set-Content -LiteralPath (Join-Path $tree 'drop\hit.txt')
+          # `.ignore`, not `.gitignore`: gitignore files are only honored inside a
+          # git repository (rg's own rule), and this tree deliberately isn't one.
+          'drop/hit.txt' | Set-Content -LiteralPath (Join-Path $tree '.ignore')
+
+          Push-Location $tree
+          try {
+            # One spelling everywhere, so a captured expectation, a script, and an
+            # agent read the same bytes on every platform.
+            $found = (& $gist 'NEEDLE_HERE' . -l --no-heading) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "walk exited $LASTEXITCODE" }
+            if ($found -notmatch 'keep/deep/hit\.txt') { throw "no /-joined nested path in:`n$found" }
+            if ($found -match '\\') { throw "a native separator reached output:`n$found" }
+
+            # The rule with a separator in it applies — and applies only to what
+            # it names.
+            if ($found -match 'drop/hit\.txt') { throw "an ignore rule spelled with / did not apply:`n$found" }
+            if ($found -notmatch 'top\.txt') { throw "that ignore rule over-matched:`n$found" }
+
+            # Depth counts components, so it has to count the same ones the
+            # renderer and the ignore matcher just agreed on.
+            $shallow = (& $gist 'NEEDLE_HERE' . -l --no-heading --max-depth 1) -join "`n"
+            if ($shallow -notmatch 'top\.txt') { throw "--max-depth 1 lost the root match: $shallow" }
+            if ($shallow -match 'keep/deep') { throw "--max-depth 1 descended anyway: $shallow" }
+
+            # Without a volume id this flag prunes everything or nothing. One
+            # volume here, so its answer must be the unrestricted answer.
+            $bounded = (& $gist 'NEEDLE_HERE' . -l --no-heading --one-file-system) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "--one-file-system exited $LASTEXITCODE" }
+            if ($bounded -notmatch 'keep/deep/hit\.txt') { throw "--one-file-system pruned its own volume: $bounded" }
+
+            # Color is a console capability here, never a TERM string.
+            $painted = (& $gist 'NEEDLE_HERE' top.txt --color=always --no-heading) -join ''
+            if ($painted -notmatch "$([char]27)\[") { throw '--color=always emitted no ANSI escape' }
+          } finally { Pop-Location }
+
+          # Preferences have a home: %LOCALAPPDATA%\gist\preferences. `in_force`
+          # must stay false into a pipe — the boundary that keeps a machine-local
+          # file structurally invisible to scripts and agents.
+          $cfg = Join-Path $env:RUNNER_TEMP 'win32-cfghome'
+          New-Item -ItemType Directory -Force -Path (Join-Path $cfg 'gist') | Out-Null
+          '--count' | Set-Content -LiteralPath (Join-Path $cfg 'gist\preferences')
+          $prev = $env:LOCALAPPDATA
+          $env:LOCALAPPDATA = $cfg
+          try {
+            $conf = & $gist config --json | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) { throw "config --json exited $LASTEXITCODE" }
+            if (-not $conf.preferences) { throw 'no preferences found under %LOCALAPPDATA%' }
+            if ($conf.preferences.in_force) { throw 'preferences applied to a piped run' }
+          } finally { $env:LOCALAPPDATA = $prev }
+          Write-Host 'Win32 contract holds on ${{ matrix.arch }}'
+
+      # The resident tier and its freshness watcher, end to end on the platform
+      # whose transport is entirely different code. Cross-compilation proves the
+      # AFD readiness wait, the socket byte I/O, the share-mode singleton, the
+      # detached CreateProcessW spawn and the ReadDirectoryChangesW subscription
+      # all COMPILE; only a Windows kernel can say whether a client and a daemon
+      # actually meet over an AF_UNIX socket, and whether a completion packet
+      # arrives in time to keep a warm answer honest.
+      #
+      # Every assertion is a contract fact rather than a timing, so the lane
+      # cannot go flaky on a slow runner: warm must AGREE with cold byte for byte
+      # (an accelerator that changes results is not one), and after a mutation the
+      # warm answer must have moved (read-your-writes across the barrier). The one
+      # thing that is polled rather than asserted is the daemon coming up, and
+      # failing to come up is a hard failure rather than a silent cold fallback —
+      # a cold fallback is precisely what would make this step vacuous.
+      - name: resident tier + watcher (warm answers, read-your-writes)
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $gist = Join-Path (Get-Location) 'zig-out\bin\gist.exe'
+          if (-not (Test-Path -LiteralPath $gist)) { throw "no gist.exe at $gist" }
+
+          $tree = Join-Path $env:RUNNER_TEMP 'warm-tier'
+          Remove-Item -Recurse -Force -LiteralPath $tree -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path (Join-Path $tree 'sub') | Out-Null
+          'NEEDLE_HERE' | Set-Content -LiteralPath (Join-Path $tree 'a.txt')
+          'NEEDLE_HERE' | Set-Content -LiteralPath (Join-Path $tree 'sub\b.txt')
+
+          # Its own artifact home, so this step never contends with another and
+          # the daemon it starts is unambiguously the one it started.
+          $env:GIST_DIR = Join-Path $env:RUNNER_TEMP 'warm-artifacts'
+          Push-Location $tree
+          try {
+            & $gist index
+            if ($LASTEXITCODE -ne 0) { throw "index exited $LASTEXITCODE" }
+
+            $cold = (& $gist 'NEEDLE_HERE' . -l --no-heading --no-index) -join "`n"
+            if ($LASTEXITCODE -ne 0) { throw "cold reference walk exited $LASTEXITCODE" }
+
+            $daemon = Start-Process -FilePath $gist -ArgumentList 'serve' -PassThru -WindowStyle Hidden
+            try {
+              # The singleton and the socket both have to be real before a client
+              # can be served, and neither is instantaneous on a 4-core runner.
+              $resident = 'none'
+              foreach ($attempt in 1..40) {
+                Start-Sleep -Milliseconds 500
+                $status = & $gist status --json | ConvertFrom-Json
+                if ($status.resident -and $status.resident -ne 'none') { $resident = $status.resident; break }
+              }
+              if ($resident -ne 'ours') { throw "the daemon never became resident (status reported '$resident')" }
+
+              # `GIST_TRACE=warm` names which path answered, on stderr, without
+              # touching stdout - so the same run yields both the verdict and the
+              # bytes to compare.
+              $env:GIST_TRACE = 'warm'
+              $trace = Join-Path $env:RUNNER_TEMP 'warm-trace.txt'
+              $warm = (& $gist 'NEEDLE_HERE' . -l --no-heading 2> $trace) -join "`n"
+              if ($LASTEXITCODE -ne 0) { throw "warm query exited $LASTEXITCODE" }
+              $lens = (Get-Content -Raw -LiteralPath $trace)
+              if ($lens -notmatch '\[warm\]') { throw "the daemon was resident but the query ran cold:`n$lens" }
+
+              # The whole claim of the tier: identical answers, faster. A warm
+              # answer that differs from the cold one is a correctness bug that a
+              # speed benchmark would happily report as a win.
+              if ($warm -ne $cold) { throw "warm and cold disagree:`nwarm:`n$warm`ncold:`n$cold" }
+
+              # And now the watcher. A write, then a query with no sleep and no
+              # index refresh: the completion packet has to be drained by the
+              # flushSync barrier the daemon crosses before dispatch, or this
+              # answers the tree as it was.
+              'NEEDLE_HERE' | Set-Content -LiteralPath (Join-Path $tree 'sub\c.txt')
+              $after = (& $gist 'NEEDLE_HERE' . -l --no-heading) -join "`n"
+              if ($LASTEXITCODE -ne 0) { throw "post-write query exited $LASTEXITCODE" }
+              if ($after -notmatch 'sub/c\.txt') { throw "a file written before the query is missing from it:`n$after" }
+
+              # The reverse direction, which a create-only watcher would pass by
+              # accident: the match must LEAVE when the bytes do.
+              Remove-Item -LiteralPath (Join-Path $tree 'sub\c.txt') -Force
+              $gone = (& $gist 'NEEDLE_HERE' . -l --no-heading) -join "`n"
+              if ($gone -match 'sub/c\.txt') { throw "a deleted file survived in the warm answer:`n$gone" }
+
+              # An in-place content edit changes no directory membership at all,
+              # so it is the case a coarse watcher misses entirely.
+              'nothing to find' | Set-Content -LiteralPath (Join-Path $tree 'sub\b.txt')
+              $edited = (& $gist 'NEEDLE_HERE' . -l --no-heading) -join "`n"
+              if ($edited -match 'sub/b\.txt') { throw "an in-place edit was not seen:`n$edited" }
+              if ($edited -notmatch 'a\.txt') { throw "the edit answer lost an untouched match:`n$edited" }
+            } finally {
+              Remove-Item Env:\GIST_TRACE -ErrorAction SilentlyContinue
+              if (-not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force -ErrorAction SilentlyContinue }
+            }
+          } finally { Pop-Location; Remove-Item Env:\GIST_DIR -ErrorAction SilentlyContinue }
+          Write-Host 'resident tier + watcher hold on ${{ matrix.arch }}'
+
+      # The install ritual itself, because a binary nobody can run is not
+      # shipped. The POSIX side is bash and there is no make here, so Windows
+      # has its own entry point (install.ps1) and it needs the same standing as
+      # the POSIX one: proven by running it, on a runner that has never seen
+      # gist, and asserting the three things a person actually gets — the binary
+      # lands, it is reachable by NAME rather than by path, and the completion
+      # the shell loads parses in the shell that loads it.
+      #
+      # Deliberately without -NoProfileEdit: the profile write is the part most
+      # likely to break silently, so it runs here, on a disposable runner, rather
+      # than first on someone's machine.
+      - name: install.ps1 (binary, PATH, completions)
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $prefix = Join-Path $env:RUNNER_TEMP 'gist-install'
+          ./install.ps1 -Prefix $prefix -NoIndex
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 exited $LASTEXITCODE" }
+
+          # One binary, not three: `relate` and `irregex` ship from their own
+          # checkouts now, and this package's build produces exactly `gist.exe`.
+          $exe = Join-Path $prefix 'gist.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "gist.exe was not installed to $prefix" }
+
+          # Reachable by name, not by path: the installer updates this session's
+          # own $env:Path as well as the persisted user one, because the block a
+          # shell was launched with is a copy.
+          # Not `$x?.Source`: `?` is a legal character in a PowerShell variable
+          # name, so null-conditional access needs `${x}?.Source` and reads worse
+          # than the two lines it saves.
+          $command = Get-Command gist -ErrorAction SilentlyContinue
+          if (-not $command) { throw 'gist is not resolvable by name after install' }
+          $resolved = $command.Source
+          gist --version | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "the installed gist would not report a version" }
+
+          # The persisted PATH is what a NEW terminal reads, and it is the half a
+          # session-local fixup would hide.
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';' | ForEach-Object { $_.TrimEnd('\') }) -notcontains $prefix.TrimEnd('\')) {
+            throw "install.ps1 did not persist $prefix to the user PATH"
+          }
+
+          # The completion has to parse in PowerShell itself - a generated script
+          # that only looks right is the failure mode a file-existence check
+          # cannot see.
+          $completion = Join-Path $env:LOCALAPPDATA 'gist\gist.ps1'
+          if (-not (Test-Path -LiteralPath $completion)) { throw "no completion at $completion" }
+          $errors = $null
+          $tokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile($completion, [ref] $tokens, [ref] $errors) | Out-Null
+          if ($errors) { throw "the generated completion does not parse: $($errors -join '; ')" }
+          if (-not (Select-String -LiteralPath $PROFILE -SimpleMatch $completion -Quiet)) {
+            throw 'install.ps1 did not source the completion from $PROFILE'
+          }
+
+          # Re-running must be a no-op rather than a second PATH entry or a second
+          # profile line - the shape every idempotent installer gets wrong once.
+          ./install.ps1 -Prefix $prefix -NoIndex
+          if ($LASTEXITCODE -ne 0) { throw "the second install.ps1 exited $LASTEXITCODE" }
+          $again = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $count = ($again -split ';' | Where-Object { $_.TrimEnd('\') -eq $prefix.TrimEnd('\') }).Count
+          if ($count -ne 1) { throw "re-running install.ps1 left $count PATH entries for $prefix" }
+          $sourced = (Select-String -LiteralPath $PROFILE -SimpleMatch $completion).Count
+          if ($sourced -ne 1) { throw "re-running install.ps1 left $sourced profile lines" }
+          Write-Host "install.ps1 holds on ${{ matrix.arch }} (gist at $resolved)"
+
+  # One job collapsing both legs into a single verdict, kept even though the
+  # monorepo's reason for it is gone. The reason that survives is a plain
+  # GitHub fact rather than anything about this repository: a matrix job never
+  # reports a status under its bare id, only one context per leg
+  # (`windows / zig build test (x64)`), so requiring `native` in branch
+  # protection would wait on a context nobody ever reports. Requiring the two
+  # leg contexts directly also works, but re-spells the matrix inside a
+  # settings page, where editing the matrix silently stops being blocking.
+  # This job is one stable name that survives a matrix edit.
+  #
+  # Unlike the version this was ported from, `skipped` is NOT a pass here.
+  # There, a PR could legitimately be out of scope for the kernel; here nothing
+  # gates the legs, so a leg that did not run is a Windows lane that was not
+  # proven, and it must not read as green.
+  verdict:
+    needs: [native]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: verdict
+        env:
+          RESULT: ${{ needs.native.result }}
+        run: |
+          set -euo pipefail
+          if [ "${RESULT}" = "success" ]; then
+            echo "native Windows lanes passed on both architectures"
+          else
+            echo "native Windows lanes concluded '${RESULT}'" >&2
+            exit 1
+          fi
