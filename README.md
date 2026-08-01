@@ -775,6 +775,50 @@ The binaries default to ReleaseFast regardless of the build's own
 optimize mode (`-Dcli-optimize` overrides); the test binary stays
 ReleaseSafe, so the suite that tries to break the checks keeps them.
 
+### Running one test, and the cache trap underneath it
+
+`-Dtest-filter=<substring>` narrows the suite and `-Dtest-shards=1` puts
+it back into one process. The harness is `brigade.zig`, which this package
+takes from the irregex dependency rather than owning, so the trap below is
+the same one that repo documents at more length - it is restated here
+because you will hit it here, running these tests.
+
+**`zig build test` caches the test run, and the environment is part of the
+cache key.** The filter reaches the harness as `BRIGADE_FILTER`, an
+environment variable set on the run step, and Zig hashes a run step's
+environment along with its argv. First run under a given environment
+executes; every later run under an environment already used is served from
+cache - step skipped, nothing executed, exit 0 in about the time a no-op
+build takes (~0.3 s here).
+
+A cache hit still reports a test count, which is what makes it dangerous.
+`--summary all` prints `1/1 tests passed` either way, and the only token
+that distinguishes them is `cached` against `success <n>ms`:
+
+```
++- test shard 0/1 success 3ms     # ran
++- test shard 0/1 cached          # did NOT run, still "1/1 tests passed"
+```
+
+So `zig build test` cannot answer whether the tree is sensitive to an
+environment variable: the natural probe runs with the variable, then
+without it to confirm, and the confirming leg revisits an environment it
+has already seen, making it a replay that is green by construction. To
+probe an environment variable, drive the compiled binary directly - it has
+no build-cache layer and executes every time:
+
+```bash
+env FORCE=$RANDOM zig build test -Dtest-filter='<name>' -Dtest-shards=1 --verbose
+#   ... BRIGADE_SHARD=0/1 BRIGADE_FILTER=<name> ./.zig-cache/o/<hash>/test
+
+BRIGADE_SHARD=0/1 BRIGADE_FILTER='<name>' BRIGADE_TIMES=1 \
+  ./.zig-cache/o/<hash>/test
+```
+
+`BRIGADE_TIMES=1` prints one line per test, which is the evidence a run
+happened. A filter matching nothing fails loudly rather than passing
+empty, so a stale filter cannot read as a clean run.
+
 Dev model is sibling checkouts: `build.zig.zon` path-deps on `../irregex`
 and `../relate`, and releases pin url + hash. A consuming monorepo may
 wrap `zig build` to symlink the binaries onto PATH.
