@@ -50,7 +50,7 @@ def main() -> int:
     ap.add_argument(
         "--index-dir",
         type=Path,
-        default=Path(os.environ.get("GIST_INDEX_DIR", REPO_ROOT / ".local" / "gist-verify")),
+        default=Path(os.environ.get("GIST_INDEX_DIR", REPO_ROOT / ".gist")),
     )
     ap.add_argument(
         "--csearch",
@@ -68,7 +68,7 @@ def main() -> int:
     idir: Path = args.index_dir
     if not idir.is_dir():
         print(
-            f"no index dir at {idir} — run `gist index` first (writes .local/gist-verify/)",
+            f"no index dir at {idir} — run `gist index` first (writes .gist/)",
             file=sys.stderr,
         )
         return 2

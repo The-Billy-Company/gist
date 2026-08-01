@@ -424,7 +424,7 @@ def check_dataviz(d: Path) -> list[str]:
 def main() -> int:
     """Run artifact and/or dataviz reproducibility checks."""
     ap = argparse.ArgumentParser()
-    ap.add_argument("--artifacts-dir", type=Path, default=REPO / ".local" / "gist-verify")
+    ap.add_argument("--artifacts-dir", type=Path, default=REPO / ".gist")
     ap.add_argument(
         "--dataviz-dir",
         type=Path,

@@ -4,7 +4,7 @@ The **minting scripts** — the executable half of the certificate. `mint.sh` is
 the one entry point (`bash bench/certificate/mint/mint.sh`); the rest are lanes it splices
 in. Every lane sources the competitor field at
 [`../../dominance/races/field.sh`](../../dominance/races/field.sh) and writes its
-splicer's output into `.local/gist-verify/CERTIFICATE.md`.
+splicer's output into `.gist/CERTIFICATE.md`.
 
 | File        | Lane                                                                                                                                                                             |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

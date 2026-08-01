@@ -3,7 +3,7 @@
 # long-lived agent-session model) vs every unindexed scanner at its warm fastest.
 #
 # gist: warm resident-index full pipeline (filter + parallel verify), p50 of 200
-#       runs, emitted to .local/gist-verify/bench.csv by `zig build bench`.
+#       runs, emitted to .gist/bench.csv by `zig build bench`.
 # unindexed (rg, ugrep, ag, GNU grep, git grep): their happy path — fixed-string
 #       list-files, warmed, hyperfine mean. They always re-walk + re-read (no
 #       resident index); gist answers from RAM.

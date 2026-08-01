@@ -384,7 +384,7 @@ def main() -> int:
 
     work = Path(tempfile.mkdtemp(prefix="gist-idxpcre-"))
     atexit.register(lambda: shutil.rmtree(work, ignore_errors=True))
-    # Hermetic index home — never touch a coworker's real .local/gist-verify.
+    # Hermetic index home — never touch a coworker's real .gist.
     os.environ["GIST_DIR"] = str(work / "gist-dir")
     corpus = work / "corpus"
     gen_corpus(corpus)

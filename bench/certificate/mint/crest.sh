@@ -17,13 +17,13 @@
 # Usage (from repo root or anywhere):
 #   bash bench/certificate/mint/crest.sh
 # Env:
-#   CERT_OUT=DIR   certificate dir (default: <repo>/.local/gist-verify)
+#   CERT_OUT=DIR   certificate dir (default: <repo>/.gist)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # mint/ → certificate/ → bench/ → package root (this repo).
 REPO="$(cd "${HERE}/../../.." && pwd)"
-OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
+OUT="${CERT_OUT:-${REPO}/.gist}"
 CERT="${OUT}/CERTIFICATE.md"
 CREST_CSV="${OUT}/crest.csv"
 CREST_RAW="${REPO}/.local/crest-evidence/crest.csv"

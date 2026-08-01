@@ -24,12 +24,12 @@ needs_gist = pytest.mark.skipif(not _binary_available(), reason="no gist binary"
 
 
 def test_parse_status_returns_every_structured_field() -> None:
-    report = """{"schema_version":1,"state":"ready","index":{"path":".local/gist-verify/index.gist","paths_file":".local/gist-verify/paths.list","files_indexed":28194,"distinct_trigrams":518707,"postings":35129882,"index_bytes":44564480,"paths_bytes":1677722},"freshness":{"anchor_unix_ns":1234,"age_seconds":96.0},"roots":["services","libs","clients"]}"""
+    report = """{"schema_version":1,"state":"ready","index":{"path":".gist/index.gist","paths_file":".gist/paths.list","files_indexed":28194,"distinct_trigrams":518707,"postings":35129882,"index_bytes":44564480,"paths_bytes":1677722},"freshness":{"anchor_unix_ns":1234,"age_seconds":96.0},"roots":["services","libs","clients"]}"""
     assert parse_status(report) == IndexStatus(
         schema_version=1,
         state=IndexState.READY,
-        path=".local/gist-verify/index.gist",
-        paths_file=".local/gist-verify/paths.list",
+        path=".gist/index.gist",
+        paths_file=".gist/paths.list",
         files=28194,
         trigrams=518707,
         postings=35129882,

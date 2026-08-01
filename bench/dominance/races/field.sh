@@ -61,8 +61,8 @@ KERNEL="${REPO}"
 # capture. Only the search base moves — the built binary, persisted index, and
 # competitor indices stay under REPO.
 CORPUS="${GIST_CORPUS_ROOT:-${REPO}}"
-OUT="${GIST_DIR:-${REPO}/.local/gist-verify}" # gist's persisted index + paths.list live here (GIST_DIR-relocatable)
-COMPETE_DIR="${REPO}/.local/gist-compete"     # competitor indices live here
+OUT="${GIST_DIR:-${REPO}/.gist}"          # gist's persisted index + paths.list live here (GIST_DIR-relocatable)
+COMPETE_DIR="${REPO}/.local/gist-compete" # competitor indices live here
 GIST_BIN="${REPO}/.local/gist-bin"
 RELATE_BIN="${REPO}/.local/relate-bin" # the compression-search face (similar/dups/patterns)
 CSEARCH_IDX="${COMPETE_DIR}/csearch.idx"

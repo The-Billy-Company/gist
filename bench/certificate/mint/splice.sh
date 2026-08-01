@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # certify_layers.sh — populate Layers B / B′ / C / D into CERTIFICATE.md.
 #
-# Layer A (micro + macro) must already exist at .local/gist-verify/CERTIFICATE.md
+# Layer A (micro + macro) must already exist at .gist/CERTIFICATE.md
 # (minted by `zig build certify` / `bench/certify/certify.sh`). This script is
 # the automatic second half: build the lab binaries, measure what this machine
 # can measure (PMU under passwordless/forced sudo when available), splice every
@@ -15,13 +15,13 @@
 #   CERT_SUDO=auto|1|0   auto (default): use `sudo -n` when it works;
 #                        1: allow an interactive sudo prompt;
 #                        0: never escalate (wall-clock / cross-check only).
-#   CERT_OUT=DIR         certificate dir (default: <repo>/.local/gist-verify)
+#   CERT_OUT=DIR         certificate dir (default: <repo>/.gist)
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # mint/ → certificate/ → bench/ → package root (this repo).
 REPO="$(cd "${HERE}/../../.." && pwd)"
-OUT="${CERT_OUT:-${REPO}/.local/gist-verify}"
+OUT="${CERT_OUT:-${REPO}/.gist}"
 CERT="${OUT}/CERTIFICATE.md"
 CERT_SUDO="${CERT_SUDO:-auto}"
 CREST_RAW="${REPO}/.local/crest-evidence/crest.csv"

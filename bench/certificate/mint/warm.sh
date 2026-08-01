@@ -42,7 +42,7 @@
 #     stale), just not maximally fast — that honesty is stated in the certificate.
 #
 # Usage:  bench/certificate/mint/warm.sh          (RUNS=30 WARMUP=5 by default)
-#         CERT_OUT=DIR  certificate dir (default <repo>/.local/gist-verify)
+#         CERT_OUT=DIR  certificate dir (default <repo>/.gist)
 # Assumes mint.sh already built the gist index + csearch/zoekt indexes this run
 # (it calls this script after the cold race); rebuilds the gist bin/index if missing.
 set -uo pipefail

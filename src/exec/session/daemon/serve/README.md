@@ -95,7 +95,7 @@ every platform for the keep to mean the same thing everywhere.
 
 ## One socket, one tree
 
-`socketPath` resolves `$GIST_SESSION_SOCK`, else `.local/gist-verify/gistd.sock`.
+`socketPath` resolves `$GIST_SESSION_SOCK`, else `.gist/gistd.sock`.
 
 Because that default sits _inside_ the artifact directory, an absolute
 `$GIST_DIR` shared by two checkouts aims both at one **rendezvous** — and a warm

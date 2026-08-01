@@ -238,7 +238,7 @@ fn usage() void {
         \\  GIST_HINTS=0            mute stderr hints (results are untouched either way)
         \\  GIST_UNCAP=1            lift the ~25k-token soft output cap (also: --uncap)
         \\  GIST_MAX_OUTPUT_TOKENS / GIST_MAX_OUTPUT_BYTES   resize the output budget
-        \\  GIST_DIR                artifact home (default .local/gist-verify)
+        \\  GIST_DIR                artifact home (default .gist)
         \\  GIST_SKIP / <GIST_DIR>/skips.list   extra skip dirs for the corpus walks
         \\                          (index/freshness/relate only — search keeps rg parity)
         \\

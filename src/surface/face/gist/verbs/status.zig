@@ -316,8 +316,8 @@ test "human renderer preserves the established report bytes" {
     const output = try renderHuman(t.allocator, .{
         .state = .ready,
         .index = .{
-            .path = ".local/gist-verify/index.gist",
-            .paths_file = ".local/gist-verify/paths.list",
+            .path = ".gist/index.gist",
+            .paths_file = ".gist/paths.list",
             .files_indexed = 2,
             .distinct_trigrams = 3,
             .postings = 4,
@@ -329,7 +329,7 @@ test "human renderer preserves the established report bytes" {
     });
     defer t.allocator.free(output);
     try t.expectEqualStrings(
-        \\gist index — .local/gist-verify/index.gist
+        \\gist index — .gist/index.gist
         \\  files indexed     2
         \\  distinct trigrams 3
         \\  postings          4  (2 trigram·doc pairs per file)

@@ -8,10 +8,10 @@
 #
 # Exports:
 #   KERNEL      — package root (build.zig.zon), climbed from HERE
-#   REPO        — corpus envelope (GIST_CORPUS_ROOT, else monorepo/billy, else KERNEL)
+#   REPO        — corpus envelope (GIST_CORPUS_ROOT, else KERNEL)
 #   PRODUCT     — checkout that owns the gist binary (sibling gist, else KERNEL)
 #   KINSHIP     — checkout that owns the relate binary (sibling relate, else PRODUCT)
-#   GIST_VERIFY — GIST_DIR or ${REPO}/.local/gist-verify (artifact home)
+#   GIST_VERIFY — GIST_DIR or ${REPO}/.gist (artifact home)
 
 _gist_climb_pkg() {
   local d="$1"
@@ -25,25 +25,16 @@ _gist_climb_pkg() {
   return 1
 }
 
+# The corpus is an input, not something to go looking for. This used to sniff for
+# the monorepo the package was extracted from and then for a checkout of it beside
+# this one, which meant a gate's corpus silently became whatever private tree
+# happened to sit next door — unreproducible, and different on every machine. Set
+# GIST_CORPUS_ROOT to say what to measure over (`bench/apparatus/corpora/fetch.sh`
+# in the `gist` package pins public ones); absent that, a package measures itself.
 _gist_corpus_root() {
   local pkg="$1"
   if [[ -n "${GIST_CORPUS_ROOT:-}" ]]; then
     (cd "${GIST_CORPUS_ROOT}" && pwd)
-    return 0
-  fi
-  # Former monorepo nest: $REPO/pkg/kernels/<pkg>
-  local parent grand great
-  parent="$(basename "$(dirname "$pkg")")"
-  grand="$(basename "$(dirname "$(dirname "$pkg")")")"
-  great="$(cd "${pkg}/../../.." 2>/dev/null && pwd)" || great=""
-  if [[ "$parent" == kernels && "$grand" == libs && -n "$great" &&
-    -d "${great}/services" && -d "${great}/libs" ]]; then
-    printf '%s\n' "$great"
-    return 0
-  fi
-  # Sibling billy checkout beside this package
-  if [[ -d "${pkg}/../monorepo/services" && -d "${pkg}/../monorepo/libs" ]]; then
-    (cd "${pkg}/../billy" && pwd)
     return 0
   fi
   printf '%s\n' "$pkg"
@@ -79,5 +70,5 @@ gist_resolve_roots() {
   REPO="$(_gist_corpus_root "$KERNEL")"
   PRODUCT="$(_gist_product_root "$KERNEL")"
   KINSHIP="$(_gist_kinship_root "$KERNEL")"
-  GIST_VERIFY="${GIST_DIR:-${REPO}/.local/gist-verify}"
+  GIST_VERIFY="${GIST_DIR:-${REPO}/.gist}"
 }

@@ -76,7 +76,7 @@ cd "${CORPUS}" || exit 1
   echo "gist index failed"
   exit 1
 }
-[[ -f .local/gist-verify/built.ns ]] || {
+[[ -f .gist/built.ns ]] || {
   echo "no freshness anchor (built.ns) after index"
   exit 1
 }
@@ -112,7 +112,7 @@ fresh_serial() { # final compatibility check for run.zig's synchronous overlay
 }
 
 assert_preserved_mtime_uses_ctime() { # <path>
-  python3 - "$1" .local/gist-verify/built.ns << 'PY'
+  python3 - "$1" .gist/built.ns << 'PY'
 import os
 import struct
 import sys
@@ -162,7 +162,7 @@ fresh "preserved-mtime SAME-SIZE overwrite is found via ctime"
 # `>`). The ctime equality leg is isolated next by temporarily setting the
 # anchor to the file's unforgeable post-write ctime.
 printf 'mtime_boundary_token\n' > libs/mtime_equal.txt
-python3 - libs/mtime_equal.txt .local/gist-verify/built.ns << 'PY'
+python3 - libs/mtime_equal.txt .gist/built.ns << 'PY'
 import os
 import struct
 import sys
@@ -177,11 +177,11 @@ if path.stat().st_mtime_ns != anchor:
 PY
 fresh "mtime == anchor is conservatively live" mtime_boundary_token
 
-cp .local/gist-verify/built.ns "${REF}/built.ns"
+cp .gist/built.ns "${REF}/built.ns"
 cp -p libs/ctime_equal.txt "${REF}/ctime_equal.ref"
 printf 'ctime_boundary_token\n' > libs/ctime_equal.txt
 touch -r "${REF}/ctime_equal.ref" libs/ctime_equal.txt
-python3 - libs/ctime_equal.txt .local/gist-verify/built.ns << 'PY'
+python3 - libs/ctime_equal.txt .gist/built.ns << 'PY'
 import os
 import struct
 import sys
@@ -195,7 +195,7 @@ if not stat.st_mtime_ns < stat.st_ctime_ns:
 anchor_path.write_bytes(struct.pack("<q", stat.st_ctime_ns))
 PY
 fresh "ctime == anchor is conservatively live" ctime_boundary_token
-cp "${REF}/built.ns" .local/gist-verify/built.ns
+cp "${REF}/built.ns" .gist/built.ns
 
 fresh_serial "serial fresh.candidates remains compatible"
 
@@ -241,7 +241,7 @@ echo "### foreign artifacts — a directory built over ANOTHER tree accelerates 
 # live: the content shard must not serve the corpus's `base.txt` bytes, the
 # anchor must not "prove" `plain.txt` unchanged and elide the real hit, and the
 # phantom walk must not descend a `libs/sub/` that exists only over there.
-ART="${CORPUS}/.local/gist-verify"
+ART="${CORPUS}/.gist"
 foreign_out="$(cd "${FOREIGN}" && GIST_DIR="${ART}" "${GIST}" rg -l --sort path -e needle . 2> "${REF}/foreign.err")"
 foreign_exit=$?
 foreign_ref="$(cd "${FOREIGN}" && rg -l --sort path -e needle . 2> /dev/null)"

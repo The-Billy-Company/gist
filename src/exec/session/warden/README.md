@@ -217,7 +217,7 @@ A daemon that loads says what the load cost, because the crest is the number a
 ration has to accommodate and it is invisible otherwise:
 
 ```
-gist serve: warm on .local/gist-verify/gistd.sock (0 roots, 8 workers,
+gist serve: warm on .gist/gistd.sock (0 roots, 8 workers,
             held 583 MB of a 4096 MB ration, load crest 2793 MB)
 ```
 
