@@ -2,162 +2,91 @@
 doc_radar:
   sentinels:
     - description: "C ABI session symbols stay exported from the package root"
-      file: pkg/kernels/irregex/src/root.zig
-      contains: ["export fn irregex_open", "export fn irregex_search", "export fn irregex_close"]
-    - description: "public header mirrors the session surface plus the last-fault pull"
-      file: pkg/kernels/irregex/include/irregex.h
-      contains: ["int32_t irregex_open(", "int32_t irregex_search(", "void irregex_close(", "int32_t irregex_last_fault("]
-    - description: "the seam owns the one Fault → Status translation and the pull that carries the detail (ADR-373 law 7)"
-      file: pkg/kernels/irregex/src/surface/ffi/contract.zig
-      contains: ["pub fn ofFault", "pub fn disposition", "pub fn lastFault"]
-    - description: "ADR-373 law 6: the push entry points never terminate the embedding host"
-      file: pkg/kernels/irregex/src/surface/ffi/session.zig
+      file: src/root.zig
+      contains: ["export fn gist_open", "export fn gist_search", "export fn gist_close", "export fn gist_run"]
+    - description: "public header declares the session surface and includes the substrate"
+      file: include/gist.h
+      contains: ["int32_t gist_open(", "int32_t gist_search(", "void gist_close(", "int32_t gist_run(", "#include <irregex.h>"]
+    - description: "gist's contract keeps search-owned types and re-exports the substrate"
+      file: src/surface/ffi/contract.zig
+      contains: ["pub const SearchOptions", "pub const SearchRequest", "pub const flag_quiet", "const substrate"]
+    - description: "push entry points never terminate the embedding host"
+      file: src/surface/ffi/session.zig
       absent: ["std.process.exit", "@panic", "catch unreachable"]
-    - description: "ADR-373 law 6: the pull entry points never terminate the embedding host"
-      file: pkg/kernels/irregex/src/surface/ffi/cursor.zig
+    - description: "pull entry points never terminate the embedding host"
+      file: src/surface/ffi/cursor.zig
       absent: ["std.process.exit", "@panic", "catch unreachable"]
-    - description: "ADR-373 rung 1: the cold file-set walk the warm session reuses answers OOM with a value"
-      file: pkg/kernels/irregex/src/exec/cold/quarry/walk.zig
-      contains: ["pub fn defaultFileSetExtras", "Oom!FileSet"]
-    - description: "ADR-373 rung 1: the ignore matcher's construction is fallible, not fatal"
-      file: pkg/kernels/irregex/src/corpus/tree/ignore.zig
-      contains: ["Oom!Ignore", "Oom!void"]
     - description: "the seam's adverse allocation-failure suite drives the entry under a failing allocator"
-      file: pkg/kernels/irregex/src/surface/ffi/oom_test.zig
+      file: src/surface/ffi/oom_test.zig
       contains: ["FailingAllocator", "session.openWith", "OutOfMemory"]
 ---
 
-# surface/ffi — in-process C-ABI search session (ADR-352 rung 3)
+# surface/ffi — in-process C-ABI search session
 
 The package binding for non-Zig hosts. `session.zig` exposes
-`irregex_open` / `irregex_search` / `irregex_close` so a caller (the Python `cffi` transport in
-`bindings/python/irregex/runtime/native.py`, or any C host) can hold one corpus warm **in its
-own process** and stream match records over a callback — no subprocess, Unix
-socket, `stdout`, or `exit`.
+`gist_open` / `gist_search` / `gist_close` so a caller (the Python `cffi`
+transport in `bindings/python/gist/runtime/native.py`, or any C host) can hold
+one corpus warm **in its own process** and stream match records over a callback
+— no subprocess, Unix socket, `stdout`, or `exit`.
 
 It is the in-process sibling of the socket-served resident daemon
-([`../exec/session/daemon/serve`](../exec/session/daemon/serve)) and draws on the same shared
-search core ([`../../kernel/query/query.zig`](../../kernel/query/query.zig)),
-so an in-process answer is byte-identical to cold `gist --json` and to the UDS
-daemon.
+([`../../exec/session/daemon/serve`](../../exec/session/daemon/serve)) and draws
+on the same shared search core in the `irregex` package, so an in-process answer
+is byte-identical to cold `gist --json` and to the UDS daemon.
 
 ## Why this face exists
 
-[ADR-352](../../../../../../docs/architecture/3-decisions/352-gist-unified-search-api.md)
-gates the C search ABI on one property: **a bad query must never terminate the
+The C search ABI is gated on one property: **a bad query must never terminate the
 embedding host.** The whole warm path returns typed status codes instead of
 calling `die()` / `exit`. `IRREGEX_STALE` means "answer cold"; it is never a
 dead process. The cold CLI keeps its fatal shell; this path does not touch it.
 
 ## Shape
 
-Two planes share the session handle. The **exact plane** (ADR-352) streams
-match records through a push callback; the **analytic plane** (ADR-377)
-materializes a kinship/retrieval/composed answer into a pull cursor of
-self-describing rows.
+Two planes share the session handle. The **exact plane** streams match records
+through a push callback (or a pull cursor). The **rank producer** materializes
+the definition-first view of an exact query into a pull cursor of
+self-describing rows — produced here, walked by `libirregex`. Kinship and
+sweep live in `librelate`; compose lives in `libblast`.
 
-### Exact plane — push callback
+### Exact plane
 
-| Symbol                                         | Role                                                                           |
-| ---------------------------------------------- | ------------------------------------------------------------------------------ |
-| `irregex_open(roots, nroots, out)`             | stand up a warm session (its own I/O + corpus + index)                         |
-| `irregex_search(s, pattern, len, opts, cb, …)` | execute one complete size-checked shape and stream typed match/context records |
-| `irregex_close(s)`                             | tear down corpus, index, I/O pool, and handle                                  |
+| Symbol | Role |
+| --- | --- |
+| `gist_open` / `gist_search` / `gist_close` | push-callback warm session |
+| `gist_engine_open` / `gist_search_cursor` / `gist_cursor_*` | pull-cursor sibling |
 
-### Analytic plane — pull cursor (ADR-377)
+### Rank producer
 
-| Symbol                                      | Role                                                                                       |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `irregex_analytic_open(s, op, params, out)` | materialize one analytic verb's answer into a cursor; 17 verbs share the entry via op enum |
-| `irregex_analytic_next(cursor, out)`        | pull the next self-describing row; rows stay valid until the cursor closes                 |
-| `irregex_analytic_close(cursor)`            | release the cursor's arena                                                                 |
+| Symbol | Role |
+| --- | --- |
+| `gist_run(engine, GIST_OP_RANK, params, cancel, out)` | materialize rank into an `irregex_rows *` |
+| `irregex_rows_next` / `_next_batch` / `_stats` / `_close` | walk that cursor (`libirregex`) |
 
-A verb this build cannot answer in-process returns `IRREGEX_STALE` — the same
-fail-open declinature as the exact plane. Bindings shell the CLI for that verb
-unchanged, and graduate verb by verb without re-plumbing transport.
+A verb this build cannot answer in-process returns `IRREGEX_STALE`. Bindings
+shell the CLI for that verb unchanged. An op this library does not own is
+`IRREGEX_INVALID`.
 
 ### Files
 
-The three `export fn` shims for the exact plane live in [`../../root.zig`](../../root.zig).
+The `export fn` shims live in [`../../root.zig`](../../root.zig).
 
-| File             | Owns                                                                                                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `session.zig`    | Handle lifecycle + exact-plane request execution                                                                                                           |
-| `contract.zig`   | Stable statuses, flags, options, and `extern` layouts for the exact plane                                                                                  |
-| `relay.zig`      | Translates resident match records across the exact-plane callback boundary                                                                                 |
-| `cursor.zig`     | The exact-plane's pull cursor (materializes a search into a positioned iterator)                                                                           |
-| `analytic.zig`   | Analytic-plane C-ABI dispatch — one entry per op, materializes into a pull cursor of `rows.Row`s                                                           |
-| `rows.zig`       | Stable C-ABI data contract for analytic rows — one self-describing layout for all 17 verbs                                                                 |
-| `schema.gen.zig` | Generated schema tables (from [`pkg/kernels/irregex/tools/build_schema_tables.py`](../../../tools/build_schema_tables.py) via `contract/search_api.toml`) |
-| `oom_test.zig`   | Adverse allocation-failure suite — drives entry points under a failing allocator                                                                           |
+| File | Owns |
+| --- | --- |
+| `session.zig` | Handle lifecycle + exact-plane request execution |
+| `contract.zig` | Search-owned types + flags; re-exports substrate status/fault |
+| `relay.zig` | Translates resident match records across the callback boundary |
+| `cursor.zig` | Exact-plane pull cursor |
+| `analytic.zig` | Rank dispatch — builds an `irregex.ffi.answer.Answer` |
+| `oom_test.zig` | Adverse allocation-failure suite |
 
-C declarations mirror the contract in
-[`../../../include/irregex.h`](../../../include/irregex.h), exercised by
-the C-ABI smoke test in [`../../../build.zig`](../../../build.zig).
+Row layout, schema table, and the answer cursor live in
+`@import("irregex").ffi` (`rows` / `answer`). C declarations mirror
+[`../../../include/gist.h`](../../../include/gist.h).
 
 ## Error channels
 
-[ADR-373](../../../../../../docs/architecture/3-decisions/373-irregex-error-channels.md)
-splits an outcome three ways, and `contract.zig` is where that split becomes a
-status. `Disposition` makes the contract's own `disposition` column executable,
-so the distinction a consumer would otherwise re-derive from the sign of an
-integer is a property a switch proves: `IRREGEX_STALE` is negative but is a
-**declinature** — answer cold and get the identical result — while
-`Status.ofFault` maps every member of the kernel's taxonomy onto a `fault`
-status, exhaustively, so a new fault member is a compile error rather than a
-failure reported as a clean run.
-
-A status names a kind; `irregex_last_fault` names the incident (which fault,
-which file, which byte) — a **pull**, asked after a non-OK status, and
-deliberately not a second copy of assay's push sink, which this session scopes
-`.dark`. It is per thread and last-fault-wins, its `path` borrows thread-local
-storage until that thread's next call, and reading does not consume. Every
-entry that _starts_ work opens the window first, so asking after a successful
-call reports `IRREGEX_OK`; the destructors and both readers leave the slot
-alone, so a cleanup path can still report the fault that got it there.
-
-Allocation failure was the last channel this seam could not speak, and it is now
-closed at the only place it could be. The warm session reuses the cold walkers
-(`defaultFileSetExtras`, the swarm `collectFileSet`, the ignore matcher, the
-fused corpus loader), and those used to answer an out-of-memory with
-`process.exit(2)` — killing the embedding host from inside a call it had made,
-with the notice swallowed by this session's `dark` sink. They now **return**
-`error.OutOfMemory` (ADR-373 rung 1) and the terminal decision belongs to the
-caller: the command plane absorbs it at its own top level (`collectFiles`'
-`catch oom()`, so the CLI's exit 2 and OOM notice are byte-identical to before),
-while this seam reports `IRREGEX_OOM` with `name == "OutOfMemory"`.
-
-That line is held adversarially, not by inspection: `oom_test.zig` drives
-`irregex_open` and the cursor ABI's engine open under a failing allocator at
-every failure index, and sweeps the three walkers directly. Its assertions are
-only reachable because the process is still there to make them — a walker that
-went back to exiting would take the test binary down instead of failing it.
-
-### What a binding must get right about the pull
-
-Four traps, each one a way to hold the pull correctly at the C level and still
-be wrong one layer up:
-
-- **`struct_size` is the caller's job.** The layout is append-only, so the seam
-  refuses a struct it cannot identify: set it to your own `sizeof` before every
-  call or get `IRREGEX_INVALID` by design.
-- **`path` borrows thread-local storage** and dies at this thread's next call.
-  Copy it into owned memory _before_ returning across any boundary, and note it
-  is not NUL-terminated — use `path_len`. Repository paths are not guaranteed
-  UTF-8, so decode lossily (Python: `surrogateescape`; Rust: `OsStr`), never
-  strictly.
-- **The slot is per thread, not per handle.** A detail fetched from a different
-  thread than the failing call correctly reports `IRREGEX_OK`. Anything running
-  the FFI in a thread pool or executor must read the detail on the thread that
-  made the failing call, before it returns to the pool.
-- **`IRREGEX_STALE` must not become an error value.** Mirror `Disposition` and
-  branch on the channel rather than on the sign of the integer.
-
-And one loss of resolution to expect: `open_failed` carries three fault domains
-(`corpus`, `persist`, `wire`), so status alone cannot tell a corrupt artifact
-from a tree that would not open. Read `name` when the distinction matters.
-
-Every pointer handed to the callback (`path`, `line`, each submatch `text`)
-aliases session/scratch memory valid **only** for that callback invocation —
-the caller copies anything it keeps. Index _build_ stays a CLI verb; a session
-searches the live tree.
+Status codes and the last-fault pull are substrate vocabulary from
+`libirregex` (`IRREGEX_OK` … `IRREGEX_INVALID`, `irregex_last_fault`). This
+package translates search failures into that vocabulary once, in
+`contract.zig`'s re-exported `report` / `beginCall` helpers.

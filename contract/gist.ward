@@ -1,16 +1,16 @@
 // gist — import topology.
 //
-// The product chassis of the irregex ecosystem: the CLI vocabulary, the
-// resident daemon transport, the C-ABI plane, and the two product faces
-// (`gist` · `relate`). The engines beneath are sibling modules — `irregex`
-// (exact search) and `relate` (compression kinship) — reached only through
-// `@import("irregex")` / `@import("relate")`; a file import cannot cross a
-// package boundary. The composed face rides this package's chassis module
-// from `blast`. Judged by `ward verify`.
+// The product chassis of the irregex ecosystem: the resident daemon
+// transport, the C-ABI plane, the `--generate` primer, and the `gist` face.
+// The exact engine beneath is the sibling `irregex` module (reached only
+// through `@import("irregex")`; a file import cannot cross a package
+// boundary). The `relate` face and its CLI vocabulary moved into the
+// `relate` package; they import this chassis for the daemon and the answer
+// keep. Judged by `ward verify`.
 
 package gist {
     // root.zig is the chassis module's public face: it re-exports the cli,
-    // session, ffi, and face tiers (what the thin exe mains and `blast`
+    // session, ffi, and face tiers (what the thin exe main and dependents
     // consume) and aggregates the test step, so it alone may reach anywhere.
     root   src
     facade root.zig
@@ -18,10 +18,10 @@ package gist {
 
 // Tiers, low to high. An import may only point back up the page.
 tiers {
-    // Shared flag, grade, manifest and answer-keep vocabulary — the floor the
-    // transports and faces stand on. (`reprise.zig` is the answer keep's CLI
-    // half; its reach up into the daemon it rides is the ratified exception
-    // below, inherited from the pre-split contract.)
+    // The `--generate` primer — man page and shell completions rendered from
+    // the face's flag table. Shared face vocabulary (flags, manifest, grade,
+    // reprise) moved with the relate face into the `relate` package; what
+    // remains is the one generator only this product's man/completions need.
     cli         surface/cli/**
 
     // The resident session's transport primitives: the wire grammar, the
@@ -32,26 +32,28 @@ tiers {
     warden      exec/session/warden/**
 
     // The daemon proper — dial-or-spawn client and the serve loop over the
-    // resident core (which lives in `irregex`, reached as a module).
+    // resident core (which lives in `irregex`, reached as a module). The
+    // answer keep's frame types live here too; the relate face reaches them
+    // through `@import("gist").session.keep`, not a file import.
     daemon      exec/session/daemon/**
 
-    // C-ABI session + analytic plane — the `libirregex` surface the Python /
-    // Go / Rust bindings link.
+    // C-ABI session + rank producer — the `libgist` surface the Python /
+    // Go / Rust bindings link. Kinship/sweep live in relate's ffi; compose
+    // lives in blast's. This tier keeps the warm engine, the exact-plane
+    // cursors, and `gist_run` for `rank` alone.
     ffi         surface/ffi/**
 
-    // The two thin product faces. A face imports the chassis; the chassis
-    // never imports a face except through root's re-export shelf.
+    // The thin product face. A face imports the chassis; the chassis never
+    // imports a face except through root's re-export shelf.
     face        surface/face/**
 }
 
 // Guest lists: regions only the named importers may reach at all.
 
-// The two product faces are peers, not a stack. Each is one product with its
-// own CLI contract, and the whole point of two faces over one chassis is that
-// a change to gist's verbs cannot reach relate's. When both need the same
-// thing, it belongs under them, not in whichever one wrote it first.
-keep surface/face/gist/**   to root.zig
-keep surface/face/relate/** to root.zig
+// The face is this package's one product surface. Nothing else in the tree
+// reaches into it; a sibling face that wants the same helper takes it from
+// below (cli / session), not from beside.
+keep surface/face/gist/** to root.zig
 
 // The C-ABI plane is the package's other public face — for callers outside
 // Zig. Nothing inside the package consumes its own FFI shims; a Zig caller
@@ -89,30 +91,8 @@ forbid cycles across directories
 // matching is a hard failure, so paying the debt forces deleting the entry —
 // they shrink instead of accreting as folklore.
 
-// ── The resident answer keep's three edges. One fact stated three ways: the
-// answer keep is shared CLI vocabulary (it installs itself on irregex's
-// `outcome.departure` hook so every exit seals an answer in), but the
-// transport it rides lives two tiers up in the session.
-
-allow tier surface/cli/reprise.zig -> exec/session/daemon/client/keep.zig
-    because
-        \\The answer keep is a passenger on the resident daemon: it never
-        \\starts one, it only dials an existing socket to ask whether this
-        \\exact question was already answered against these exact bytes. It
-        \\lives in `cli/` because the departure hook — the exit path every
-        \\process shares — is what seals an answer in, but the transport it
-        \\dials is the session's. Retire by giving the keep's frame types a
-        \\home below `cli` (or moving reprise into the session outright, now
-        \\that outcome takes an installable departure), after which `cli`
-        \\depends on nothing above itself.
-
-allow tier surface/cli/reprise.zig -> exec/session/daemon/serve/serve.zig
-    because "Reads the serve loop's frame vocabulary. Retire with the reprise move above."
-
-allow seal surface/cli/reprise.zig -> exec/session/daemon/client/keep.zig
-    because
-        \\`client/` is sealed through `client.zig` so no caller can skip the
-        \\fail-open dial deadline. This reaches `keep.zig` beside it for the
-        \\keep's own frame types, not to dial — the deadline is untouched.
-        \\Retire either by re-exporting those types from `client.zig`, or with
-        \\the reprise move above, whichever lands first.
+// The answer-keep CLI passenger (`reprise.zig`) moved into the `relate`
+// package with the face that owns it. Its reach into `keep.zig` / `serve.zig`
+// is now a module import (`@import("gist").session.*`), so the three
+// file-import exceptions that used to live here are gone — the debt was
+// retired by the move, not waived.

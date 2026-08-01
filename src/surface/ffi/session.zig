@@ -1,4 +1,4 @@
-//! gist in-process FFI session — the C-ABI search entry (ADR-352 rung 3).
+//! gist in-process FFI session — the C-ABI search entry.
 //!
 //! `open` / `search` / `close` let a non-Zig host (the Python `cffi` binding,
 //! or any C caller) hold a gist corpus WARM in its own process and stream match
@@ -10,7 +10,7 @@
 //!
 //! ## Why this is the rung the C ABI graduated on
 //!
-//! ADR-352 gates the C search ABI on one property: a bad query must never
+//! The C search ABI is gated on one property: a bad query must never
 //! terminate the embedding host. The whole warm path — compile, trigram
 //! prefilter, per-line span emission — RETURNS typed errors instead of calling
 //! `die()`/`exit` (the cold CLI keeps its own fatal shell; this path does not
@@ -76,7 +76,7 @@ pub fn open(roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**Session) 
 /// failing allocator so a walk-time allocation failure is a status the caller
 /// reads rather than a hypothetical.
 pub fn openWith(alloc: std.mem.Allocator, roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**Session) Status {
-    // ADR-352's never-write contract, by construction: route every diagnostic
+    // Never-write, by construction: route every diagnostic
     // this process might emit (reconcile traces, degradation notices, summary
     // lines) to the dark sink, so no warm-path `assay.diag` can reach the
     // embedding host's stderr. Installed on first `open`; idempotent.

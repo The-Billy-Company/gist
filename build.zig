@@ -1,12 +1,12 @@
 //! gist build graph — the product chassis of the irregex ecosystem.
 //!
-//! Ships the two search binaries (`gist` · `relate`), the session-shaped
-//! C-ABI dual artifact (`libirregex.a` + `libirregex.{dylib,so}` +
-//! `include/irregex.h` — the ABI the Python/Go/Rust bindings dlopen/link),
-//! and the `gist` **module** (`@import("gist")`) the `blast` package rides
-//! for its CLI chassis. The engines are sibling-path deps: `irregex` (the
-//! exact library, carrying the PCRE2 floor) and `relate` (compression
-//! kinship, carrying libsais).
+//! Ships the `gist` search binary, the session-shaped C-ABI dual artifact
+//! (`libgist.a` + `libgist.{dylib,so}` + `include/gist.h`), and the `gist`
+//! **module** (`@import("gist")`) that `relate` and `blast` ride for the
+//! resident daemon and answer keep. The exact engine is a sibling-path dep
+//! (`irregex`, carrying the PCRE2 floor and `libirregex`). `libgist`
+//! dynamically links `libirregex` for the substrate symbols it no longer
+//! exports. The `relate` binary lives in the `relate` package.
 //!
 //! Product executables default to ReleaseFast via `-Doptimize=`; the test
 //! chassis mirrors the library's (kernelkit's shape): ReleaseSafe
@@ -23,12 +23,14 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{ .default_target = default_target });
     const optimize = b.standardOptimizeOption(.{});
 
-    // The engines beneath, at matching optimize. Each module carries its own
-    // C floor (PCRE2 under irregex, libsais under relate), so linking these
-    // links the whole stack.
-    const deps = engines(b, target, optimize);
+    // The engine beneath, at matching optimize. Its module carries the PCRE2
+    // floor, so linking this links the whole exact-search stack.
+    const irregex_dep = b.dependency("irregex", .{ .target = target, .optimize = optimize });
+    const deps = [_]std.Build.Module.Import{
+        .{ .name = "irregex", .module = irregex_dep.module("irregex") },
+    };
 
-    // ── the chassis module (`@import("gist")` — what `blast` rides) ──
+    // ── the chassis module (`@import("gist")` — what `relate` and `blast` ride) ──
     const chassis = b.addModule("gist", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -37,70 +39,114 @@ pub fn build(b: *std.Build) void {
         .imports = &deps,
     });
 
-    // ── the product binaries ──
-    // The CLIs are the product surface — the on-PATH binaries whose entire
-    // reason to exist is out-running ripgrep. A Debug build is 4–8× slower and
-    // reads to a caller like a hang, so the faces (and the chassis + engines
-    // they link, where the hot loops live) default to ReleaseFast regardless
-    // of the build-wide `-Doptimize` — a bare `zig build` must never install
-    // a slow debug `gist`. `-Dcli-optimize=Debug` still yields a debug CLI for
-    // engine debugging; tests / coverage / the C-ABI libs keep the standard
+    // ── the product binary ──
+    // The CLI is the product surface — the on-PATH binary whose entire reason
+    // to exist is out-running ripgrep. A Debug build is 4–8× slower and reads
+    // to a caller like a hang, so the face (and the chassis + engine it links,
+    // where the hot loops live) defaults to ReleaseFast regardless of the
+    // build-wide `-Doptimize` — a bare `zig build` must never install a slow
+    // debug `gist`. `-Dcli-optimize=Debug` still yields a debug CLI for engine
+    // debugging; tests / coverage / the C-ABI libs keep the standard
     // (safety-checked, DWARF-carrying) default optimize untouched.
     const cli_optimize = b.option(
         std.builtin.OptimizeMode,
         "cli-optimize",
         "optimize mode for the installed CLIs (default ReleaseFast — the product surface's whole point is speed)",
     ) orelse .ReleaseFast;
+    const cli_deps = if (cli_optimize == optimize) deps else engines(b, target, cli_optimize);
     const cli_chassis = if (cli_optimize == optimize) chassis else b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = cli_optimize,
         .pic = true,
-        .imports = &engines(b, target, cli_optimize),
+        .imports = &cli_deps,
     });
-    const faces = [_]struct { name: []const u8, source: []const u8 }{
-        .{ .name = "gist", .source = "src/surface/face/gist/main.zig" },
-        .{ .name = "relate", .source = "src/surface/face/relate/main.zig" },
-    };
-    for (faces) |face| {
-        // A face main is a thin exe root: real driver code is analyzed inside
-        // the chassis module (whose root is src/root.zig, so relative imports
-        // resolve) and reached as `@import("gist").faces.*`.
-        const exe = b.addExecutable(.{
-            .name = face.name,
-            .root_module = b.createModule(.{
-                .root_source_file = b.path(face.source),
-                .target = target,
-                .optimize = cli_optimize,
-                .imports = &(engines(b, target, cli_optimize) ++
-                    [_]std.Build.Module.Import{.{ .name = "gist", .module = cli_chassis }}),
-            }),
-        });
-        b.installArtifact(exe);
-    }
+    // A face main is a thin exe root: real driver code is analyzed inside
+    // the chassis module (whose root is src/root.zig, so relative imports
+    // resolve) and reached as `@import("gist").faces.*`.
+    const face_imports = cli_deps ++ [_]std.Build.Module.Import{.{ .name = "gist", .module = cli_chassis }};
+    const exe = b.addExecutable(.{
+        .name = "gist",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/surface/face/gist/main.zig"),
+            .target = target,
+            .optimize = cli_optimize,
+            .imports = &face_imports,
+        }),
+    });
+    b.installArtifact(exe);
 
-    // ── the C-ABI dual artifact (kernelkit's shape, stated here because the
-    // chassis module needs its engine imports) ──
-    // Dynamic lib (Python cffi dlopen); owns the header install. Named
-    // `irregex` — the ABI's symbols and header carry the ecosystem's name,
-    // and the bindings dlopen `libirregex` regardless of which package hosts
-    // the export shims.
-    const dynamic_lib = b.addLibrary(.{ .name = "irregex", .linkage = .dynamic, .root_module = chassis });
-    dynamic_lib.installHeader(b.path("include/irregex.h"), "irregex.h");
+    // ── the C-ABI dual artifact ──
+    // Dynamic lib (Python cffi dlopen); owns the header install. Named `gist`
+    // — its symbols and header are this product's. Substrate symbols resolve
+    // through a link against libirregex (dynamic), so libgist does not redefine
+    // them and a host that also links librelate still sees one vocabulary.
+    // Own module (not `chassis`) so the CLI/test binaries do not pick up the
+    // dylib link — they never call the C symbols.
+    const irregex_lib = irregex_dep.artifact("irregex");
+    const abi = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .pic = true,
+        .imports = &deps,
+    });
+    abi.linkLibrary(irregex_lib);
+    // A shipped dylib has to find its substrate beside itself. `linkLibrary`
+    // records only this build tree's own output dir — a RELATIVE
+    // `.zig-cache/o/<hash>` path, meaningless on a consumer's machine — so
+    // `dlopen("libgist.dylib")` from anywhere else cannot resolve
+    // `@rpath/libirregex.dylib` and fails at load. A loader-relative rpath makes
+    // the shape we actually ship ("both libraries in one lib dir") the loadable
+    // one, without naming an absolute path we do not own.
+    abi.addRPathSpecial(if (target.result.os.tag == .macos) "@loader_path" else "$ORIGIN");
+    const dynamic_lib = b.addLibrary(.{ .name = "gist", .linkage = .dynamic, .root_module = abi });
+    dynamic_lib.installHeader(b.path("include/gist.h"), "gist.h");
+    // A host that #includes <gist.h> also needs <irregex.h>; install the
+    // engine's header beside ours so one -I covers both.
+    dynamic_lib.installHeader(irregex_dep.path("include/irregex.h"), "irregex.h");
     b.installArtifact(dynamic_lib);
-    // Static lib (Go cgo / Rust build.rs). Zig's archiver leaves Mach-O
-    // members non-8-byte-aligned, which Apple's ld64 rejects in a cgo link;
-    // re-archive with `libtool -static` on macOS. Linux/LLD tolerates it.
+    // Static lib (Go cgo / Rust build.rs / C smoke). Zig's archiver leaves
+    // Mach-O members non-8-byte-aligned, which Apple's ld64 rejects in a cgo
+    // link; re-archive with `libtool -static` on macOS. Linux/LLD tolerates it.
+    // Static consumers link libgist.a AND libirregex.a themselves.
     if (target.result.os.tag == .macos) {
-        const obj = b.addObject(.{ .name = "irregex", .root_module = chassis });
+        // Its own module, deliberately WITHOUT `linkLibrary(irregex_lib)`. On a
+        // dylib that link is what makes libgist import the substrate instead of
+        // redefining it; on a relocatable object there is no import to make, so
+        // Zig folds the whole engine archive in — 9 MB of duplicated substrate
+        // that a host linking libirregex.a would then see twice, and whose
+        // folded relocations Apple's ld rejects outright (`invalid
+        // r_symbolnum=0`). Static consumers link both archives themselves,
+        // exactly as the comment above says.
+        const obj_mod = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = optimize,
+            .pic = true,
+            .imports = &deps,
+        });
+        const obj = b.addObject(.{ .name = "gist", .root_module = obj_mod });
         const repack = b.addSystemCommand(&.{ "libtool", "-static", "-o" });
-        const aligned_a = repack.addOutputFileArg("libirregex.a");
+        const aligned_a = repack.addOutputFileArg("libgist.a");
         repack.addArtifactArg(obj);
-        b.getInstallStep().dependOn(&b.addInstallLibFile(aligned_a, "libirregex.a").step);
+        b.getInstallStep().dependOn(&b.addInstallLibFile(aligned_a, "libgist.a").step);
     } else {
-        const static_lib = b.addLibrary(.{ .name = "irregex", .linkage = .static, .root_module = chassis });
+        const static_lib = b.addLibrary(.{ .name = "gist", .linkage = .static, .root_module = abi });
         b.installArtifact(static_lib);
     }
+    // Install libirregex.dylib into this prefix so a binding that only built
+    // gist still finds both libraries under zig-out/lib.
+    b.installArtifact(irregex_lib);
+    // The engine's macOS-aligned `.a` is an installLibFile product of the
+    // irregex package, not its named artifact. Copy it from the sibling
+    // zig-out after that package has been built (`cd ../irregex && zig build`)
+    // so Go cgo / C smoke can link both archives under this prefix.
+    const eng_static_src = b.pathFromRoot("../irregex/zig-out/lib/libirregex.a");
+    const copy_eng_static = b.addSystemCommand(&.{ "cp", "-f", eng_static_src });
+    const eng_static_out = copy_eng_static.addOutputFileArg("libirregex.a");
+    copy_eng_static.step.dependOn(&irregex_lib.step);
+    b.getInstallStep().dependOn(&b.addInstallLibFile(eng_static_out, "libirregex.a").step);
 
     // ── the test chassis ──
     const test_optimize = b.option(
@@ -155,16 +201,14 @@ pub fn build(b: *std.Build) void {
         .dependOn(&run_cov.step);
 }
 
-/// The two engine module imports at a given optimize, in the order every
-/// module here declares them.
+/// The engine module import at a given optimize.
 fn engines(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
-) [2]std.Build.Module.Import {
+) [1]std.Build.Module.Import {
     return .{
         .{ .name = "irregex", .module = b.dependency("irregex", .{ .target = target, .optimize = optimize }).module("irregex") },
-        .{ .name = "relate", .module = b.dependency("relate", .{ .target = target, .optimize = optimize }).module("relate") },
     };
 }
 

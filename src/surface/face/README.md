@@ -1,21 +1,10 @@
 ---
 doc_radar:
   counts:
-    - description: "cli keeps exactly three product faces: gist · relate · irregex"
-      glob: pkg/kernels/irregex/src/surface/face/*
+    - description: "gist keeps exactly one product face under this folder"
+      glob: src/surface/face/*
       unit: dirs
-      equals: 3
-  occurrences:
-    - description: "relate's seven verbs are declared once, and the unknown-verb line is rendered from them"
-      file: pkg/kernels/irregex/src/surface/face/relate/repertoire.zig
-      pattern: '\.run = '
-      equals: 7
-  sentinels:
-    - description: "every face's unknown verb reports the whole repertoire, from that one table"
-      file: pkg/kernels/irregex/src/surface/cli/manifest.zig
-      contains:
-        - "unknown verb '{s}'"
-        - "pub fn names("
+      equals: 1
 ---
 
 # `src/surface/face/` — the product faces
@@ -23,16 +12,15 @@ doc_radar:
 Thin argv faces over the shared floor. Every binary classifies flags, picks a
 verb, and shapes stdout/stderr — they do **not** own matching, walking, or
 index formats. If a decision changes what matches, it belongs under
-`kernel/`, `corpus/`, or `exec/`.
+`kernel/`, `corpus/`, or `exec/` in the engine packages.
 
 | Face                  | Binary    | Question it answers                                                                                                                                                                                                                                                   |
 | --------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [`gist/`](gist)       | `gist`    | Where is this exact pattern? (rg-DEFAULT locator + index/status/serve/codex lifecycle)                                                                                                                                                                                |
-| [`relate/`](relate)   | `relate`  | What is this text like / which files cover it / what forked? (compression-as-search)                                                                                                                                                                                  |
-| [`irregex/`](irregex) | `irregex` | The questions that need BOTH engines and CURRENT bytes: `provenance` (quotation attribution re-verified against live bytes) and `blast` (live blast radius of a symbol — no precomputed graph). The old `context`/`family` verbs became `relate --matching` (ADR-367) |
 
-`gist` and `relate` are the direct faces; `irregex` composes their kernels over
-one loaded corpus and forwards none of their verbs.
+The `relate` face lives in the `relate` package (`relate/src/surface/face/`);
+the composed `irregex` face lives in `blast`. Both import this chassis for
+the resident daemon and the answer keep.
 
 ## When to edit here
 
@@ -47,11 +35,10 @@ drift the cold/warm/FFI faces apart the moment one face forks them.
 
 - Unknown flags fail loud (exit 2), never look like a clean empty hit.
 - Results on stdout; diagnostics / coaching / timing on stderr.
-- Faces stay thin on purpose: cold search re-exports live under
-  `exec/cold/`; warm work lives under `exec/session/`.
-- Contract authority for request options and relate verbs:
-  [`../../../contract/search_api.toml`](../../../contract/search_api.toml).
+- Faces stay thin on purpose: cold search lives in `irregex`; warm work
+  lives under `exec/session/` here.
+- Contract authority for request options:
+  `irregex/contract/engine.toml`.
 
-See [`gist/README.md`](gist/README.md), [`relate/README.md`](relate/README.md),
-and [`irregex/README.md`](irregex/README.md) for the per-face verb map and
+See [`gist/README.md`](gist/README.md) for the per-face verb map and
 lifecycle.

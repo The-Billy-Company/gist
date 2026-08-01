@@ -2,15 +2,15 @@
 doc_radar:
   counts:
     - description: "primer is four Zig modules — Surface + three renderers"
-      glob: pkg/kernels/irregex/src/surface/cli/primer/*.zig
+      glob: src/surface/cli/primer/*.zig
       equals: 4
       unit: modules
   sentinels:
     - description: "one Surface drives every --generate target"
-      file: pkg/kernels/irregex/src/surface/cli/primer/primer.zig
+      file: src/surface/cli/primer/primer.zig
       contains: ["pub const Surface", "pub fn render", "pub fn emit", "complete-zsh"]
     - description: "the zsh menu is captioned per group and derives its exclusions, rather than dumping one flat table"
-      file: pkg/kernels/irregex/src/surface/cli/primer/zsh.zig
+      file: src/surface/cli/primer/zsh.zig
       contains: ["tag-order", "ignored-patterns", "group-name"]
 ---
 
@@ -70,4 +70,4 @@ A new flag group, value kind, or completion target. The face that _owns_ the
 flag still declares it in that face's repertoire / catalog; this package only
 renders a `Surface` it is handed. The consumer-side proof —
 each shell parsing its own artifact — lives in
-[`shell/check.sh`](../../../../shell/README.md), run by `make test-gist-shell`.
+[`shell/check.sh`](../../../../shell/README.md), run by the shell-completion suite under `shell/`.

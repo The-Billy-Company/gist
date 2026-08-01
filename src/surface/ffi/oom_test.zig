@@ -1,4 +1,4 @@
-//! Adverse allocation-failure suite for the C-ABI seam (ADR-373 law 1, rung 1).
+//! Adverse allocation-failure suite for the C-ABI seam (OOM returns a value, never aborts).
 //!
 //! irregex is a library: the host process owns the heap. So the question this
 //! file answers is not "does the walk work" but "what happens to the HOST when
@@ -144,7 +144,7 @@ test "the ignore matcher returns OutOfMemory rather than exiting the host" {
         defer heap.deinit();
         const a = heap.failing.allocator();
         // Root/ancestor tiers, then the per-directory chain and a membership
-        // question — the three allocating legs `irregex_open` drives.
+        // question — the three allocating legs `gist_open` drives.
         if (ignore.Ignore.init(a, io, .{}, roots)) |init_ok| {
             var ig = init_ok;
             ig.loadDir(root, root) catch |e| {
@@ -194,8 +194,8 @@ test "the cold file-set walk returns OutOfMemory rather than exiting the host" {
         heap.init(fail_at);
         defer heap.deinit();
         var extras: []const cold.Extra = &.{};
-        // `defaultFileSetExtras` is the exact walk behind `irregex_open` and
-        // behind every reconcile `irregex_search` performs.
+        // `defaultFileSetExtras` is the exact walk behind `gist_open` and
+        // behind every reconcile `gist_search` performs.
         if (cold.defaultFileSetExtras(heap.failing.allocator(), io, roots, &extras)) |set| {
             try t.expect(set.paths.len > 0);
         } else |e| {
@@ -240,7 +240,7 @@ test "the fused parallel loader returns OutOfMemory rather than exiting the host
     try t.expect(loads > 0);
 }
 
-test "irregex_open answers a walk-time OOM with IRREGEX_OOM and a named fault" {
+test "gist_open answers a walk-time OOM with IRREGEX_OOM and a named fault" {
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
@@ -287,7 +287,7 @@ test "irregex_open answers a walk-time OOM with IRREGEX_OOM and a named fault" {
                 try t.expectEqual(contract.Status.ok, contract.lastFault(&detail));
             },
             else => {
-                std.debug.print("irregex_open returned {t} at fail_index {d}\n", .{ st, fail_at });
+                std.debug.print("gist_open returned {t} at fail_index {d}\n", .{ st, fail_at });
                 return error.WrongStatusForOom;
             },
         }
@@ -316,7 +316,7 @@ test "the cursor ABI's engine open reports a walk-time OOM through the same seam
         } else |e| {
             if (e != error.OutOfMemory) continue; // some other tier declining
             contract.beginCall();
-            // `cursor.engineOpen`'s exact translation of that error.
+            // `libirregex`'s `corpus.open` translates that error exactly so.
             const st = contract.reportAny(e, .open_failed);
             try t.expectEqual(contract.Status.out_of_memory, st);
             var detail: contract.FaultDetail = undefined;
@@ -331,7 +331,7 @@ test "the cursor ABI's engine open reports a walk-time OOM through the same seam
 
 test "the exported entry reports a real allocation failure without exiting" {
     // No injected allocator: an impossible root count makes the C heap itself
-    // refuse, so this covers the literal `irregex_open` body on `c_allocator`.
+    // refuse, so this covers the literal `gist_open` body on `c_allocator`.
     defer assay.install(.{});
     var handle: *session.Session = undefined;
     const st = session.open(null, std.math.maxInt(usize) / 2, &handle);

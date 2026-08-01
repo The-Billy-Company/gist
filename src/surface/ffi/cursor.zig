@@ -1,4 +1,4 @@
-//! gist in-process FFI — the PULL-cursor surface (ADR-352).
+//! gist in-process FFI — the PULL-cursor surface.
 //!
 //! The rung-3 `open`/`search`/`close` triad (`session.zig`) streams matches to a
 //! host callback (PUSH). This module is its pull sibling over the curated Zig
@@ -8,7 +8,7 @@
 //! callback (Go's cgo, an async runtime, a REPL) still drives the warm engine.
 //!
 //! Every entry returns a `contract.Status` and never `die()`s — the same
-//! fail-closed property ADR-352 gated the search ABI on. Handles are opaque and
+//! fail-closed property the search ABI is gated on. Handles are opaque and
 //! owned: `Engine` and `CancelToken` are heap-boxed `api` values; a `Cursor`
 //! wrapper owns the facade cursor plus a reusable submatch scratch. Each has one
 //! NULL-safe destructor.
@@ -43,47 +43,11 @@ pub const Cursor = struct {
     }
 };
 
-/// Open a warm engine over `roots[0..nroots]` (NUL-terminated paths; `nroots ==
-/// 0` = the rootless CWD walk). Writes the handle to `out`; `.invalid` on a null
-/// `out` or a null `roots` with `nroots > 0`.
-pub fn engineOpen(roots_ptr: ?[*]const [*:0]const u8, nroots: usize, out: ?**api.Engine) Status {
-    contract.beginCall();
-    const slot = out orelse return .invalid;
-    const roots = gpa.alloc([]const u8, nroots) catch return contract.report(.{ .code = error.OutOfMemory });
-    defer gpa.free(roots);
-    if (nroots != 0) {
-        const rp = roots_ptr orelse return .invalid;
-        for (roots, 0..) |*r, i| r.* = std.mem.span(rp[i]);
-    }
-    const engine = api.Engine.open(gpa, roots) catch |e| return contract.reportAny(e, .open_failed);
-    slot.* = engine;
-    return .ok;
-}
-
-/// Tear down an engine opened by `engineOpen`.
-pub fn engineClose(engine: *api.Engine) void {
-    engine.close();
-}
-
-/// Allocate a fresh cancellation token (unset). Writes it to `out`.
-pub fn cancelNew(out: ?**api.CancelToken) Status {
-    contract.beginCall();
-    const slot = out orelse return .invalid;
-    const token = gpa.create(api.CancelToken) catch return contract.report(.{ .code = error.OutOfMemory });
-    token.* = .{};
-    slot.* = token;
-    return .ok;
-}
-
-/// Request cancellation — thread-safe; any thread may call it during a search.
-pub fn cancelRequest(token: *api.CancelToken) void {
-    token.cancel();
-}
-
-/// Free a token allocated by `cancelNew` (after every search using it returns).
-pub fn cancelFree(token: *api.CancelToken) void {
-    gpa.destroy(token);
-}
+// The engine a cursor is drawn from, and the token that cancels it, are opened
+// by `libirregex` (`irregex_engine_open` / `irregex_cancel_new`) rather than
+// here. Every package's producer takes one, and an engine can only be read by
+// the copy of the engine code that made it — so the opener is substrate, and
+// this file owns only what search does WITH the corpus it is handed.
 
 /// Run one search and materialize a pull cursor. Null / wrongly-sized / unknown
 /// options fail closed with `.invalid`; an unsupported pattern returns `.stale`
@@ -209,40 +173,5 @@ fn viewOf(rec: api.OwnedMatch, subs: [*]const contract.Submatch, nsubs: usize) c
         .submatches = subs,
         .nsubmatches = nsubs,
         .kind = @enumFromInt(@intFromEnum(rec.kind)),
-    };
-}
-
-test "a successful entry hands back no fault, however the previous call failed" {
-    const t = std.testing;
-    const fault = @import("irregex").fault;
-    const sc = fault.scope();
-    defer sc.end();
-
-    // The failure a host would have just been told about, still in the slot.
-    fault.install(.{ .code = error.Corrupt, .path = "kinship.atlas", .at = 7 });
-    var detail: contract.FaultDetail = .{ .struct_size = @sizeOf(contract.FaultDetail), .status = 0, .has_at = 0, .name = "", .path = null, .path_len = 0, .at = 0 };
-    try t.expectEqual(Status.match, contract.lastFault(&detail));
-
-    var token: *api.CancelToken = undefined;
-    try t.expectEqual(Status.ok, cancelNew(&token));
-    defer cancelFree(token);
-
-    // The assertion the scope policy exists for: no stale fault survives a call
-    // that succeeded. Without `beginCall` at this entry the pull still reports
-    // `Corrupt`, and a host would blame a clean run for an earlier failure.
-    try t.expectEqual(Status.ok, contract.lastFault(&detail));
-}
-
-/// A stable, static, NUL-terminated message for a status code — the pragmatic
-/// structured-error surface (a host maps the typed code; this names it for logs).
-pub fn statusMessage(code: i32) [*:0]const u8 {
-    return switch (code) {
-        @intFromEnum(Status.ok) => "ok: ran, no (further) match",
-        @intFromEnum(Status.match) => "match: a record is available",
-        @intFromEnum(Status.stale) => "stale: pattern outside linear syntax or freshness unprovable — answer cold",
-        @intFromEnum(Status.out_of_memory) => "out of memory",
-        @intFromEnum(Status.open_failed) => "open failed: could not stand up the warm corpus",
-        @intFromEnum(Status.invalid) => "invalid: null or wrongly-sized argument",
-        else => "unknown status",
     };
 }
