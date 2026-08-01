@@ -7,7 +7,6 @@
         // Sibling-checkout path deps (dev). Releases pin url+hash via the
         // publish script — see the ecosystem split plan.
         .irregex = .{ .path = "../irregex" },
-        .kernelkit = .{ .path = "../_buildkit" },
     },
     .paths = .{
         "build.zig",
