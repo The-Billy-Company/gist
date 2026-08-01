@@ -3,12 +3,17 @@
 # Local checkouts resolve the path editably; a published wheel depends on the
 # PyPI `irregex` distribution. Runtime engine availability remains separate
 # (GIST_BIN / PATH / in-repo zig-out).
+#
+# The floor tracks the `irregex` substrate's, since this package cannot import
+# without it; PEP 695 syntax here makes 3.12 a parse-level requirement too.
+# There is no upper bound: the monorepo this was extracted from pins one
+# interpreter, but a published library has no business refusing 3.15.
 
 [project]
 name = "gist"
 version = "0.1.0"                                                               # x-release-please-version
 description = "Importable Python API for gist exact search."
-requires-python = ">=3.14,<3.15"
+requires-python = ">=3.12"
 license = "Apache-2.0"
 dependencies = [
   "irregex",
