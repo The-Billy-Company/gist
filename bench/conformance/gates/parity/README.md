@@ -23,6 +23,20 @@ borrow and the invariants themselves are the specification. It is the gate that
 notices when `--docs` quietly starts returning _most_ of the paper trail — the
 classifier unit tests judge spellings, and a tree is where files go missing.
 
+`patterns_corpus_parity.sh` is the one gate here that **constrains its corpus**
+rather than building one, because its subject is a population over a real tree.
+Everything it needs is a declared knob — the pruned root, the plain root, and
+the slate of `<label> <pattern> [<scope>]` cases — so a package measuring itself
+fails every one of them, loudly and by design. `bench/apparatus/corpora/`
+generates a tree that supplies them all offline, and that is how to see it green:
+
+```bash
+bench/apparatus/corpora/fetch.sh torture
+(cd .local/gist-corpora/torture && gist index)
+GIST_CORPUS_ROOT="$PWD/.local/gist-corpora/torture" GIST_PARITY_SLATE=torture \
+  bench/conformance/gates/parity/patterns_corpus_parity.sh
+```
+
 `phantom_walk_parity.sh` is the differential twin of `index_elision_parity.sh`
 with the directory-membership snapshot as the subject instead of the trigram
 index, and it guards a claim that is easy to lose: the snapshot may only change
