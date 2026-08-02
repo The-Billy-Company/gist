@@ -59,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
-          declared=$(uv run --python 3.12 python -c \
+          declared=$(uv run --no-project --python 3.12 python -c \
             "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
           if [ "$tag" != "$declared" ]; then
             echo "::error::tag v$tag would publish gist-search $declared." \
@@ -77,10 +77,15 @@ jobs:
       # ended up saying. Assert on the built artifact rather than on the source,
       # because the source entry is supposed to be there and a release cannot be
       # taken back.
+      #
+      # `--no-project` for the same reason, here and in the tag check above: both
+      # scripts are stdlib, and syncing the project first would make them resolve
+      # that very path entry against a sibling checkout a release job has no
+      # reason to clone.
       - name: The published dependency must resolve from the index
         run: |
           set -euo pipefail
-          uv run --python 3.12 python - <<'PY'
+          uv run --no-project --python 3.12 python - <<'PY'
           import pathlib, re, sys, zipfile
           whl = next(pathlib.Path("dist").glob("*.whl"))
           zf = zipfile.ZipFile(whl)
