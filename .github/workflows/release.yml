@@ -93,23 +93,31 @@ jobs:
       - name: The published dependency must resolve from the index
         run: |
           set -euo pipefail
-          uv run --no-project --python 3.12 python - <<'PY'
+          uv run --no-project --python 3.12 --with packaging==25.0 python - <<'PY'
           import pathlib, re, sys, zipfile
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name
           whl = next(pathlib.Path("dist").glob("*.whl"))
           zf = zipfile.ZipFile(whl)
           name = next(n for n in zf.namelist() if n.endswith(".dist-info/METADATA"))
           text = zf.read(name).decode()
-          reqs = re.findall(r"^Requires-Dist:\s*(.+)$", text, re.M)
-          print("Requires-Dist:", reqs or "(none)")
-          substrate = [r for r in reqs if r.split()[0].split("[")[0].strip() == "irregex"]
+          lines = re.findall(r"^Requires-Dist:\s*(.+)$", text, re.M)
+          print("Requires-Dist:", lines or "(none)")
+          # `packaging` rather than string surgery, because a requirement's own
+          # grammar is what the index reads. Splitting on whitespace found the name
+          # only while the requirement carried no specifier: `irregex<2,>=1.0.0` has
+          # no space in it, so the moment a bound was added the name stopped
+          # matching and the gate reported the dependency missing.
+          reqs = [Requirement(line) for line in lines]
+          substrate = [r for r in reqs if canonicalize_name(r.name) == "irregex"]
           if not substrate:
               sys.exit("the wheel does not depend on irregex — the substrate would be missing")
-          bad = [r for r in reqs if "@" in r or "file://" in r]
-          if bad:
-              sys.exit(f"a direct/path reference would ship: {bad}")
-          if not any(re.search(r"(>=|==|~=)\s*\d", r) for r in substrate):
+          if direct := [str(r) for r in reqs if r.url]:
+              sys.exit(f"a direct/path reference would ship: {direct}")
+          floors = {">=", "==", "~=", ">"}
+          if not any(s.operator in floors for r in substrate for s in r.specifier):
               sys.exit(f"the substrate requirement has no lower bound, so a pre-rename "
-                       f"release can satisfy it: {substrate}")
+                       f"release can satisfy it: {[str(r) for r in substrate]}")
           print("dependency metadata is index-resolvable and bounded")
           PY
 
