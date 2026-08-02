@@ -9,8 +9,14 @@
         .irregex = .{ .path = "../irregex" },
         // The shard-aware test runner (build-time only, no artifact, no ABI).
         // Reached directly rather than through `irregex`, which used to carry
-        // a copy of it.
-        .brigade = .{ .path = "../brigade" },
+        // a copy of it. Pinned rather than path-dep'd, unlike the siblings
+        // above: those are co-developed and land together, so a checkout beside
+        // this one is the point, while the runner is a published package whose
+        // version this repository should choose deliberately.
+        .brigade = .{
+            .url = "https://github.com/The-Billy-Company/brigade/archive/505a57a9febf21757268bd8ac651c53d27896c79.tar.gz",
+            .hash = "brigade-0.1.0-1n1fSewLAQBenqvI3An0VUw24_TsuaT3mt1_4TfqWZwG",
+        },
     },
     .paths = .{
         "build.zig",
