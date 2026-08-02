@@ -28,6 +28,27 @@ python = "3.12.13"
 # `mise install` and it is there.
 "aqua:BurntSushi/ripgrep" = "15.2.0"
 
+# The discipline gate's binaries, mirroring what CI resolves so a local run and
+# a red X mean the same thing. markdownlint-cli2 and typos are the versions the
+# pinned actions bundle; golangci-lint is the `version:` its action is handed.
+# Bump one and bump the workflow in the same commit.
+#
+# The three binary rows lock a checksum per release platform; the npm row
+# locks a version and nothing else, because an npm package is not built per
+# platform and the registry tarball for an exact version is immutable.
+"npm:markdownlint-cli2" = "0.23.1"
+typos = "1.48.0"
+golangci-lint = "2.12.2"
+# CI uses the runner's preinstalled shellcheck, so this pin is about presence
+# rather than exactness: a shell gate a contributor cannot run locally is a
+# gate they meet for the first time in review.
+shellcheck = "0.11.0"
+
+# Deliberately absent: ruff, yamllint, taplo, editorconfig-checker, zizmor, towncrier.
+# CI installs each with `uv run --no-project --with <pkg>==<version>`, and
+# CONTRIBUTING tells you to type the same line - so the workflow already IS the
+# version authority. A second pin here could only disagree with it.
+
 [settings]
 # mise.lock is committed, so a contributor and CI resolve the same bytes.
 # mise.local.toml and mise.local.lock stay gitignored for machine overrides.
