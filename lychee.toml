@@ -18,4 +18,11 @@ exclude = [
   '^https://doi\.org/10\.1145/1571941\.1572114$',
   '^https://doi\.org/10\.1145/363347\.363387$',
   '^https://doi\.org/10\.3390/a14050133$',
+
+  # 429 from a shared runner. This is the only gnu.org citation in the tree, so
+  # the throttle is on the IP range the job happens to get rather than on
+  # anything this run did — per-host `concurrency` / `request_interval` have
+  # nothing to slow down, and lychee's retries already spend themselves against
+  # it. Excluding one URL keeps 429 fatal everywhere it would still be news.
+  '^https://www\.gnu\.org/software/grep/$',
 ]
