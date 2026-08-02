@@ -1,0 +1,26 @@
+# Blank issues are off, not to be difficult, but because the forms beside this
+# file ask for the things that decide whether a report is actionable: the exact
+# command line, the tree it ran against, and whether an index or a resident
+# session was warm. A search bug without those is a bug nobody can reproduce.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/The-Billy-Company/gist/security/advisories/new
+    about: >-
+      Never in a public issue. This opens a private thread only the maintainers
+      can read. SECURITY.md says what counts here - a hostile corpus is input,
+      not an edge case.
+
+  - name: A pattern matched the wrong thing
+    url: https://github.com/The-Billy-Company/irregex/issues/new/choose
+    about: >-
+      Spans, anchors, Unicode, case folding, and engine semantics belong to the
+      engine repository. If you are not sure whether it is the engine or the
+      face, file it here anyway and we will move it.
+
+  - name: Similarity, repetition, provenance, or blast radius
+    url: https://github.com/The-Billy-Company/relate/issues
+    about: >-
+      `relate` and `blast` are the sibling faces, each with its own repository.
+      This one is exact pattern search.

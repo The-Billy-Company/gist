@@ -1,0 +1,93 @@
+name: Bug report
+description: A crash, a hang, a wrong result, a build or install failure.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        If ripgrep would have done something different, the parity form asks
+        better questions than this one - use that instead.
+
+
+        If a hostile repository could trigger what you found - a crafted file
+        name, a committed `.irregex.toml`, a planted index - please treat it as
+        a security report and file it privately:
+        [SECURITY.md](https://github.com/The-Billy-Company/gist/blob/main/SECURITY.md).
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: >-
+        The command line exactly as run, and the shell that builds the corpus
+        if the tree matters. A reproduction we can paste into a terminal is
+        worth ten paragraphs of description.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output, error, or stack trace
+      description: >-
+        The whole thing, not the last line - stderr included. gist puts
+        coaching and budget notices on stderr, and they often name the cause.
+      render: text
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - searching (flags, output, exit codes)
+        - the persisted index or freshness (`gist index`, `gist status`)
+        - the resident session / daemon (`gist serve`)
+        - the ranked view (`--rank`)
+        - the codex (`gist codex ...`)
+        - the manual or shell completions (`--generate`)
+        - the Vim/Neovim plugin
+        - install or build (`zig build`, `install.ps1`)
+        - one of the bindings (Python / Rust / Go)
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: "`gist --version`"
+      description: Or the commit SHA if you built it yourself.
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: >-
+        OS, architecture, and how you installed it. If you built from source,
+        the Zig version and the optimize mode - releases are `ReleaseFast`,
+        where Zig's safety checks are off, so the mode changes what a bug looks
+        like.
+      placeholder: "Windows 11 arm64, built from source, Zig 0.16.0, ReleaseFast"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: Worth trying first
+      description: Not required, but each one narrows the search considerably.
+      options:
+        - label: "`--no-index` changes nothing (so it is not the accelerator)"
+        - label: "`-uu` changes nothing (so it is not hidden/ignored precedence)"
+        - label: "`GIST_NO_KEEP=1` changes nothing (so it is not a recalled answer)"

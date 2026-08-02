@@ -1,0 +1,86 @@
+name: Parity gap with ripgrep
+description: ripgrep does one thing here and gist does another.
+title: "parity: "
+labels: ["parity"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Keeping ripgrep's mental model is a product constraint, not a
+        resemblance, so a divergence is a bug by default. The exceptions are
+        deliberate and argued for in the README; everything else is this form.
+
+
+        The report we can act on in an hour is one where both commands are
+        written out and both outputs are pasted. The report we cannot act on is
+        "gist misses files".
+
+  - type: textarea
+    id: commands
+    attributes:
+      label: The two commands
+      description: >-
+        Both, exactly as run, from the same directory. If the corpus matters,
+        include the few lines of shell that build it - a tree we can recreate
+        beats a description of one.
+      render: shell
+      placeholder: |
+        rg   'Session' -t zig -l
+        gist 'Session' -t zig -l
+    validations:
+      required: true
+
+  - type: textarea
+    id: outputs
+    attributes:
+      label: What each one printed
+      description: >-
+        Both outputs, and both exit codes if they differ. `echo $?` after each.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: difference
+    attributes:
+      label: What the difference is
+      description: >-
+        Extra lines, missing lines, different order, different escaping,
+        different exit code. If a specific file is at issue, say which and why
+        you think it should or should not be there.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: accelerated
+    attributes:
+      label: Does `--no-index` change gist's answer?
+      description: >-
+        The single most useful thing you can tell us. The un-accelerated walk
+        is the oracle for the accelerated path: if they disagree, the bug is in
+        acceleration and is serious. If they agree, the bug is in the walk or
+        the matcher, and is a different investigation entirely.
+      options:
+        - "No - `--no-index` gives the same (wrong) answer"
+        - "Yes - `--no-index` matches ripgrep, the indexed run does not"
+        - "I have not tried it"
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "`gist --version` and `rg --version`."
+      placeholder: "gist 0.3.0 / ripgrep 14.1.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: status
+    attributes:
+      label: "`gist status --json`"
+      description: >-
+        Only if an index was involved. It says how fresh the artifact is and
+        which tree it was built over, which is often the whole answer.
+      render: json

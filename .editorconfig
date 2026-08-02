@@ -1,0 +1,112 @@
+# What your editor should do before a formatter ever runs.
+#
+# This file is not a second opinion. Every value below is the value the tool
+# that actually gates the file already emits - `zig fmt` for Zig and `.zon`,
+# `rustfmt` under bindings/rust/rustfmt.toml, `gofmt` for Go, ruff for Python,
+# `shfmt -i 2` for shell. An editor save and a `--check` run therefore cannot
+# disagree, which is the point: `zig fmt --check` is its own CI job here, and a
+# contributor should never learn about formatting drift from a red X when their
+# editor could have told them.
+#
+# `max_line_length` is deliberately absent. Wrap policy belongs to the
+# formatters, which know about string literals, URLs, and the column-aligned
+# tables this repository is full of; a flat cap here would only fight them.
+#
+# Spec: https://spec.editorconfig.org/
+
+root = true
+
+# Universal - applies to every text file in the tree.
+[*]
+charset                  = utf-8
+end_of_line              = lf
+insert_final_newline     = true
+trim_trailing_whitespace = true
+indent_style             = space
+indent_size              = 4
+
+# Zig, and the `.zon` manifests `zig fmt` also formats.
+[*.{zig,zon}]
+indent_style = space
+indent_size  = 4
+
+# The ward contract language (contract/gist.ward) - a house DSL with no
+# formatter, so this file IS its layout contract.
+[*.ward]
+indent_style = space
+indent_size  = 4
+
+# Rust: rustfmt `tab_spaces = 4`.
+[*.rs]
+indent_style = space
+indent_size  = 4
+
+# Go: gofmt writes hard tabs and there is no flag to talk it out of that.
+# `tab_width` is the editor's visual hint, not a claim about the bytes.
+[*.{go,mod,sum}]
+indent_style = tab
+indent_size  = 4
+tab_width    = 4
+
+# Python: ruff format, 4-space.
+[*.{py,pyi}]
+indent_style = space
+indent_size  = 4
+
+# C headers - the shipped ABI surface.
+[*.{c,h}]
+indent_style = space
+indent_size  = 4
+
+# Data and markup: 2-space, which is what taplo, prettier, and the GitHub
+# Actions schema all default to.
+[*.{toml,yml,yaml,json}]
+indent_style = space
+indent_size  = 2
+
+# Shell: matches `shfmt -i 2`. Covers the installers and the generated-menu
+# conformance script under shell/.
+[*.{sh,bash}]
+indent_style = space
+indent_size  = 2
+
+# PowerShell: 4-space is the community convention, and `install.ps1` is the one
+# file a Windows user reads before running it.
+[*.ps1]
+indent_style = space
+indent_size  = 4
+
+# The Vim/Neovim plugin. Vimscript is 2-space by convention (`:help
+# write-plugin`); the Lua half follows stylua's default of 2.
+[*.{vim,lua}]
+indent_style = space
+indent_size  = 2
+
+# Vim help files are column-sensitive: the tag columns and the modeline at the
+# bottom are load-bearing, and trailing whitespace inside a help table is not
+# always accidental.
+[editor/vim/doc/*.txt]
+indent_style             = unset
+indent_size              = unset
+trim_trailing_whitespace = false
+
+# Markdown keeps trailing whitespace: two trailing spaces are a hard line
+# break, and trimming them silently rewrites the rendered page.
+[*.md]
+trim_trailing_whitespace = false
+
+# Fixed-column data - the benchmark slates and the conformance corpora. Nothing
+# indents these, and an editor that re-aligns a column breaks the parser
+# reading them.
+[*.{csv,tsv,baseline}]
+indent_style             = unset
+indent_size              = unset
+trim_trailing_whitespace = false
+
+# The fetched package cache. Somebody else's bytes; re-indenting them on save
+# turns a dependency bump into an unreviewable diff.
+[zig-pkg/**]
+indent_style             = unset
+indent_size              = unset
+trim_trailing_whitespace = false
+insert_final_newline     = false

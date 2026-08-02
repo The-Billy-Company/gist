@@ -1,0 +1,23 @@
+# One identity per person, however git happened to be configured that day.
+#
+# This file only changes what git *reports* - `git shortlog -sne`, `git blame`,
+# `git log --use-mailmap`, and the contributor list GitHub renders. It rewrites
+# no history and no commit object.
+#
+# Two things put a person here. A laptop with no `user.email` set signs commits
+# as `<user>@<hostname>.local`, which is not an address and splits one
+# contributor into one row per machine. And a personal address that later
+# became a work address splits the same person in two. Both happened here.
+#
+# Left of the second `<...>` is the canonical identity; right of it is the
+# spelling found in history. Add a line rather than asking anyone to rewrite a
+# commit.
+#
+# Format: Proper Name <proper@email> <commit@email>
+# See `git help shortlog` (MAPPING AUTHORS).
+
+Griffin <griffin@billylives.com> <griffin@billylives.com>
+Griffin <griffin@billylives.com> <gjstrier@gmail.com>
+
+Alex Litovchenko <alitovchenko2003@gmail.com> <alexanderlitovchenko@Mac.lan>
+Alex Litovchenko <alitovchenko2003@gmail.com> <alexanderlitovchenko@Alexanders-New-MacBook-4.local>

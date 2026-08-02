@@ -1,0 +1,70 @@
+# How git should treat the bytes in this repository.
+#
+# Three jobs: keep line endings from becoming a diff, keep generated files out
+# of review and out of GitHub's language stats, and give git the hunk-header
+# rules that make a diff readable.
+#
+# NOT here on purpose: `export-ignore`. It would trim files out of the tarball
+# GitHub generates for a tag, and that tarball is what a downstream `zig fetch`
+# hashes - the url+hash pin in a consumer's `build.zig.zon` is a hash of those
+# bytes. Excluding `bench/` to save someone a download would invalidate every
+# pin that already exists. What ships in the Zig package is already decided,
+# deliberately and reviewably, by `.paths` in build.zig.zon.
+
+# ── Line endings ────────────────────────────────────────────────────────────
+# Normalize on commit, LF in the working tree on every platform - including
+# Windows, which this project builds and tests natively. The parity suite
+# compares gist's bytes against ripgrep's, so a checkout that silently
+# introduced CRLF would change the thing under test and fail the comparison for
+# a reason that has nothing to do with either tool.
+* text=auto eol=lf
+
+# The one exception, and it is a real one: a batch file is read by cmd.exe,
+# which has historically wanted CRLF. `install.ps1` does not - PowerShell is
+# fine with LF - so it stays under the rule above.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# ── Binary ──────────────────────────────────────────────────────────────────
+# The README figures under assets/.
+*.png binary
+
+# ── Generated ───────────────────────────────────────────────────────────────
+# Vim's help index, written by `:helptags`. Never edited, and a diff of it says
+# nothing a diff of `gist.txt` does not say better.
+editor/vim/doc/tags  linguist-generated -diff
+
+# Lockfiles: resolver output. Reviewed as a fact ("this version moved"), never
+# read line by line.
+*.lock  linguist-generated -diff
+
+# Anything projected from contract/*.toml, should the sync ever land its output
+# in the tree rather than checking it. Nothing matches today; the rule is here
+# so that the day one does, the diff worth reading is still the contract's.
+*.gen.zig      linguist-generated
+schema.gen.*   linguist-generated
+
+# NOT marked, because they never reach the tree: the manual and the shell
+# completions are rendered at install time by `gist --generate` from the same
+# flag catalog argv is parsed with. That is why a flag cannot exist in the
+# parser and be missing from a menu.
+
+# ── Diff drivers ────────────────────────────────────────────────────────────
+# Git ships hunk-header patterns for these; naming them here is what makes
+# `@@ ... fn whatever` appear above a hunk instead of a bare line number.
+*.go  diff=golang
+*.py  diff=python
+*.rs  diff=rust
+*.h   diff=cpp
+*.md  diff=markdown
+
+# Zig has no built-in driver. The attribute is inert until the pattern exists
+# in your own git config; CONTRIBUTING.md has the one-line command, and without
+# it this line simply falls back to git's default behaviour.
+*.zig diff=zig
+
+# ── Merge ───────────────────────────────────────────────────────────────────
+# The changelog is append-at-the-top and assembled by towncrier. Two branches
+# adding release sections conflict textually while agreeing semantically; a
+# union merge keeps both and lets the next `towncrier build` sort it out.
+CHANGELOG.md merge=union

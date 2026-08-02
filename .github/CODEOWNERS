@@ -1,0 +1,32 @@
+# Who gets asked to review what.
+#
+# GitHub matches the LAST rule that applies to a file, so the specific rules
+# live below the catch-all. Ownership here is a routing table, not a fence: a
+# pull request from anyone is welcome on any of these paths.
+
+*                       @GriffinCanCode
+
+# The face itself - argv, the daemon, the ranked view, the generators.
+/src/                   @GriffinCanCode
+
+# The two contracts. `gist.ward` is the import topology; `surface.toml` is the
+# flag catalog that `--schema`, the manual, and every shell completion are
+# rendered from, so a change here is a change to five surfaces at once.
+/contract/              @GriffinCanCode
+
+# Parity, conformance, and the certificate. A weakened gate is worse than an
+# absent one, because it looks like evidence.
+/bench/                 @GriffinCanCode
+/research/              @GriffinCanCode
+
+# Distribution: what lands on someone's PATH, in their editor, and in their
+# shell's completion directory.
+/install.ps1            @GriffinCanCode
+/editor/                @GriffinCanCode
+/shell/                 @GriffinCanCode
+
+/NOTICE                 @GriffinCanCode
+/LICENSE                @GriffinCanCode
+
+# Anything that can change what CI proves, including this file.
+/.github/               @GriffinCanCode
