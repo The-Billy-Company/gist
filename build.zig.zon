@@ -7,6 +7,10 @@
         // Sibling-checkout path deps (dev). Releases pin url+hash via the
         // publish script — see the ecosystem split plan.
         .irregex = .{ .path = "../irregex" },
+        // The shard-aware test runner (build-time only, no artifact, no ABI).
+        // Reached directly rather than through `irregex`, which used to carry
+        // a copy of it.
+        .brigade = .{ .path = "../brigade" },
     },
     .paths = .{
         "build.zig",

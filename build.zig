@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const brigade = @import("brigade");
 
 pub fn build(b: *std.Build) void {
     const default_target: std.Target.Query = if (builtin.target.os.tag == .macos)
@@ -296,29 +297,14 @@ pub fn build(b: *std.Build) void {
         break :blk twin;
     };
 
-    const shards = b.option(
-        usize,
-        "test-shards",
-        "how many parallel processes `zig build test` splits the unit-test binary across (default: 2x CPU count; 1 restores a single-process run)",
-    ) orelse @min(@max(std.Thread.getCpuCount() catch 1, 1) * 2, 64);
-    const brigade = irgx_dep.path("brigade.zig");
+    const bg = brigade.init(b, .{});
     const tests = b.addTest(.{
         .root_module = test_module,
-        .test_runner = .{ .path = brigade, .mode = .simple },
+        .test_runner = bg.runner(),
     });
-    const test_filter = b.option(
-        []const u8,
-        "test-filter",
-        "run only unit tests whose name contains one of these comma-separated substrings",
-    );
-    const test_skip = b.option(
-        []const u8,
-        "test-skip",
-        "skip unit tests whose name contains one of these comma-separated substrings",
-    );
 
     const test_step = b.step("test", "Run unit tests");
-    addShards(b, tests, test_step, shards, test_filter, test_skip);
+    bg.shard(test_step, tests, .{});
     // The lab harness compiles against both the engine and the daemon, so a
     // product refactor can break it in a way `zig build` alone would not catch.
     // (`stats.zig`'s verdict math is tested in the package that owns it.)
@@ -326,7 +312,7 @@ pub fn build(b: *std.Build) void {
 
     const debug_tests = if (test_module == chassis) tests else b.addTest(.{
         .root_module = chassis,
-        .test_runner = .{ .path = brigade, .mode = .simple },
+        .test_runner = bg.runner(),
     });
     b.step("check", "Compile tests without running (fast --watch -fincremental loop / ZLS)")
         .dependOn(&debug_tests.step);
@@ -334,7 +320,7 @@ pub fn build(b: *std.Build) void {
     const run_cov = b.addSystemCommand(&.{ "kcov", "--clean", "--include-pattern=src/" });
     run_cov.addArg(b.pathFromRoot(".local/coverage"));
     run_cov.addArtifactArg(debug_tests);
-    run_cov.setEnvironmentVariable("BRIGADE_SHARD", "0/1");
+    bg.whole(run_cov);
     b.step("coverage", "Run unit tests under kcov → .local/coverage/ (Cobertura XML)")
         .dependOn(&run_cov.step);
 }
@@ -350,24 +336,3 @@ fn engines(
     };
 }
 
-/// The shard fan-out, restated here rather than shared: `brigade.zig` comes
-/// from the `irregex` dependency, but the steps that hang off it are this
-/// build's own.
-fn addShards(
-    b: *std.Build,
-    tests: *std.Build.Step.Compile,
-    step: *std.Build.Step,
-    shards: usize,
-    filter: ?[]const u8,
-    skip: ?[]const u8,
-) void {
-    for (0..shards) |i| {
-        const run_shard = b.addRunArtifact(tests);
-        run_shard.setEnvironmentVariable("BRIGADE_SHARD", b.fmt("{d}/{d}", .{ i, shards }));
-        if (filter) |f| run_shard.setEnvironmentVariable("BRIGADE_FILTER", f);
-        if (skip) |s| run_shard.setEnvironmentVariable("BRIGADE_SKIP", s);
-        run_shard.expectExitCode(0);
-        run_shard.setName(b.fmt("{s} shard {d}/{d}", .{ step.name, i, shards }));
-        step.dependOn(&run_shard.step);
-    }
-}
