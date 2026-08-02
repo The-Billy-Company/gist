@@ -13,7 +13,7 @@ one of those is input.
 
 Use GitHub's private reporting - the **Security** tab on this repository,
 "Report a vulnerability" - which opens a thread only the maintainers can read.
-If that is unavailable to you, email **security@billylives.com**.
+If that is unavailable to you, email **<security@billylives.com>**.
 
 Please include:
 
@@ -74,7 +74,7 @@ bounce you.
   who could have run the binary anyway. Anything that lets a *different* local
   user drive it, read another user's results, or plant a socket the client
   connects to instead is a vulnerability. So is a client that fails *closed* in
-  a way that leaks - the documented behaviour is to fail open to a cold search.
+  a way that leaks - the documented behavior is to fail open to a cold search.
 - **The installers.** `install.ps1`, `editor/install.sh`, and `shell/install.sh`
   write to PATH, plugin directories, and completion directories. Writing
   anywhere other than the places they say, or being trickable into it, is in
@@ -88,7 +88,7 @@ bounce you.
 - **PCRE2 backtracking behind `-P`.** PCRE2 is a backtracking engine and a
   pattern with nested quantifiers can go exponential. That is the trade you opt
   into by passing the flag, and it is why the linear engines are the default.
-  Superlinear behaviour on the *linear* engine is a different story, and belongs
+  Superlinear behavior on the *linear* engine is a different story, and belongs
   in [`irregex`][irregex].
 - **Cost proportional to the corpus.** A big tree takes longer than a small one,
   and a pattern with no required trigram cannot be prefiltered. That is

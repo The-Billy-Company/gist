@@ -9,7 +9,7 @@
 # The bug this gate is the permanent guard for kept those two dimensions apart
 # for built-in names and merged them for custom ones. A `--type-add` name
 # selected with `-t` landed in the `-g` include set instead of the type set, so
-# `admits()` ANDed it against the built-ins beside it:
+# `admits()` ANDead it against the built-ins beside it:
 #
 #   gist --type-add 'tsx:*.tsx' -t go -t tsx   →  453 files, every one .tsx
 #   rg   --type-add 'tsx:*.tsx' -t go -t tsx   →  1082 files: 629 .go + 453 .tsx

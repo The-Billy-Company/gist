@@ -79,7 +79,7 @@ and this Code of Conduct reinforces encouraged behaviors and norms that can help
 avoid conflicts and minimize harm.
 
 When an incident does occur, it is important to report it promptly. To report a
-possible violation, email **griffin@billylives.com**, which reaches the
+possible violation, email **<griffin@billylives.com>**, which reaches the
 maintainer directly and privately. This project is small enough that the person
 reading your report is the person who can act on it.
 
@@ -148,14 +148,14 @@ the project in public or other spaces.
 
 This Code of Conduct is adapted from the [Contributor Covenant][homepage],
 version 3.0, permanently available at
-https://www.contributor-covenant.org/version/3/0/.
+<https://www.contributor-covenant.org/version/3/0/>.
 
 Contributor Covenant is stewarded by the Organization for Ethical Source and
 licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
 
 For answers to common questions, see the
 [FAQ](https://www.contributor-covenant.org/faq); translations are available at
-https://www.contributor-covenant.org/translations. The enforcement ladder was
+<https://www.contributor-covenant.org/translations>. The enforcement ladder was
 inspired by the work of Mozilla's code of conduct team.
 
 [homepage]: https://www.contributor-covenant.org

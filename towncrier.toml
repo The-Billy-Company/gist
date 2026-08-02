@@ -20,7 +20,7 @@ wrap = true
 # The two names below are the only non-fragments the directory is meant to hold;
 # neither exists here today, and they are listed so this file stays identical to
 # the sibling packages' rather than differing by an accident of history.
-ignore = [".gitkeep", "README.md"]
+ignore = [ ".gitkeep", "README.md" ]
 
 [[tool.towncrier.type]]
 directory = "added"

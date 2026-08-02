@@ -38,6 +38,7 @@ bash unicode_parity.sh       # fold, classes, boundaries, the (?-u) opt-out
 bash index_elision_parity.sh # the index changes speed, never results
 bash phantom_walk_parity.sh  # the snapshot changes syscalls, never results
 bash partition_parity.sh     # --docs/--code/--data are total and disjoint
+bash type_union_parity.sh    # every -t on the line reaches the answer
 bash patterns_corpus_parity.sh  # relate patterns ≡ the gist -l population
 ```
 

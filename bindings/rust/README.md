@@ -1,4 +1,4 @@
-# gist — the importable Rust search API
+# gist - indexed code search for Rust
 
 ## What it is
 

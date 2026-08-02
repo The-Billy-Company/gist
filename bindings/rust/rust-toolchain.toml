@@ -1,4 +1,8 @@
+# Pins the toolchain for work inside this directory, so `cargo fmt` and
+# `cargo clippy` give the same answer for everyone. It does not constrain a
+# crate that depends on this one; the supported floor for that is
+# `rust-version` in Cargo.toml.
 [toolchain]
 channel = "1.96.0"
 profile = "minimal"
-components = [ "rustfmt", "clippy", "rust-src" ]
+components = [ "rustfmt", "clippy" ]

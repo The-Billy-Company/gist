@@ -1,0 +1,64 @@
+{
+  // Keep generated and fetched trees out of the watcher. The Rust target can
+  // park a whole semver-checks copy of this repository; watching it doubles
+  // the tree and turns source-control decorations stale.
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.venv/**": true,
+    "**/__pycache__/**": true,
+    "**/.ruff_cache/**": true,
+    "**/.zig-cache/**": true,
+    "**/bindings/rust/target/**": true,
+    "**/zig-out/**": true,
+    "**/zig-pkg/**": true
+  },
+  "search.exclude": {
+    "**/.venv": true,
+    "**/__pycache__": true,
+    "**/.ruff_cache": true,
+    "**/.zig-cache": true,
+    "**/bindings/rust/target": true,
+    "**/zig-out": true,
+    "**/zig-pkg": true
+  },
+  "search.followSymlinks": false,
+
+  // .editorconfig owns indentation and line endings. Content guessing must not
+  // overrule the checked-in contract, and formatting stays an explicit action.
+  "editor.detectIndentation": false,
+  "editor.formatOnSave": false,
+  "files.eol": "\n",
+
+  "[go]": {
+    "editor.defaultFormatter": "golang.go",
+    "editor.formatOnSave": false,
+    "editor.insertSpaces": false
+  },
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": false
+  },
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": false
+  },
+  "[toml]": {
+    "editor.defaultFormatter": "tamasfe.even-better-toml",
+    "editor.formatOnSave": false
+  },
+  // ZLS delegates formatting to Zig. That is byte-for-byte CI parity only when
+  // it resolves the repository's pinned Zig 0.16.0, not a stray Homebrew Zig.
+  "[zig]": {
+    "editor.defaultFormatter": "ziglang.vscode-zig",
+    "editor.formatOnSave": false
+  },
+  "[shellscript]": {
+    "editor.defaultFormatter": "mads-hartmann.bash-ide-vscode",
+    "editor.formatOnSave": false
+  },
+  "bashIde.shfmt.languageDialect": "bash",
+  "bashIde.shfmt.binaryNextLine": true,
+  "bashIde.shfmt.caseIndent": true,
+  "bashIde.shfmt.spaceRedirects": true,
+  "bashIde.shfmt.simplifyCode": false
+}

@@ -4,7 +4,7 @@
 
 Irregex is the tool I developed at the Billy Company to replace ripgrep as our default grep tool. It is a modern regular expression engine that is designed to be accurate without compromising performance when large amount of agents are writing simultaneously to one tree.
 
-It is written in Zig, and it is a major improvement in the code search field in terms of performance but also in terms of ergonomics. 
+It is written in Zig, and it is a major improvement in the code search field in terms of performance but also in terms of ergonomics.
 
 ## Installation
 
@@ -12,9 +12,9 @@ You build it, and that is one command rather than an apology for missing
 packaging: Zig ships its own cross-compiler, and the vendored C rides along
 with the same invocation.
 
-```
-$ zig build -Doptimize=ReleaseFast   # Zig 0.16.0
-$ zig-out/bin/gist index             # ~3s, and now every query is warm
+```bash
+zig build -Doptimize=ReleaseFast   # Zig 0.16.0
+zig-out/bin/gist index             # ~3s, and now every query is warm
 ```
 
 Nothing else is required. There is no configure step, no system PCRE2 to
@@ -38,11 +38,11 @@ This is the short version. `gist --help` and `gist --schema` are the exhaustive 
 
 `gist` is the search face and the one you will live in. No verb, no setup:
 
-```
-$ gist "hello world"
+```bash
+gist "hello world"
 ```
 
-Recursion is the default. So is obeying `.gitignore`, so is stepping around hidden files and binary data, and matches land on stdout as `path:line:match`. 
+Recursion is the default. So is obeying `.gitignore`, so is stepping around hidden files and binary data, and matches land on stdout as `path:line:match`.
 
 The reflexes carry over whole: `-i` for case insensitive, `-S` for smart case, `-w` for whole words, `-v` to invert, `-C3` when you need the neighborhood, `-l` for filenames only, `-c` for counts, `-F` when the pattern is punctuation rather than regex. The `-u` family runs the other way, each one buying back a category the defaults threw away: ignore files, then hidden files, then binary data.
 
@@ -50,7 +50,7 @@ That is the floor, and I will come back to how strictly it is held.
 
 **Ranked search.** Sometimes I want the best hit, not every hit. `--rank` leaves the pattern and path semantics untouched and changes only the shape of the answer, fusing lexical density, declaration confidence, match rarity, path shallowness, and a demotion for generated files:
 
-```
+```console
 $ gist 'func NewServer' --rank
  1. src/server/server.go:42       [def]  ×1  func NewServer(port int) *Server {
  2. src/server/server_test.go:18  [use]  ×6  srv := NewServer(0)
@@ -60,48 +60,48 @@ Definition first, call sites after, codegen sunk. It is heuristic text ranking r
 
 **Docs or code.** The other native axis is one `-t` cannot express. `-t` answers "which language is this," and nobody asks that. The question people actually ask is whether they are reading the paper trail or the implementation, so that is its own partition: `docs`, `code`, `data`, total and disjoint over every path, with `--no-` complements that are exact.
 
-```
-$ gist SessionStore --docs      # only prose: what was written ABOUT it
-$ gist SessionStore --no-docs   # only the implementation and its payload
-$ gist retry_budget --data      # only config: json, yaml, toml, lockfiles
+```bash
+gist SessionStore --docs      # only prose: what was written ABOUT it
+gist SessionStore --no-docs   # only the implementation and its payload
+gist retry_budget --data      # only config: json, yaml, toml, lockfiles
 ```
 
 **Scope.** Underneath those, the ordinary narrowing. Positional paths shrink the walk; globs and types shrink it further.
 
-```
-$ gist session src/server       # explicit scope
-$ gist session -g '*.sql'       # one glob
-$ gist session -g '!vendor/**'  # negate it and the glob subtracts instead
-$ gist session -tgo -tpy        # type filters compose; -T subtracts one
+```bash
+gist session src/server       # explicit scope
+gist session -g '*.sql'       # one glob
+gist session -g '!vendor/**'  # negate it and the glob subtracts instead
+gist session -tgo -tpy        # type filters compose; -T subtracts one
 ```
 
 `gist --type-list` prints the registry - a strict superset of ripgrep's, so anything parsing rg's format parses this - and `--type-add 'notes:docs/**'` invents a type for the length of one run.
 
 **Pattern semantics, and backtracking.** The default engine is a linear Thompson/Pike matcher in the RE2 tradition, so a pathological pattern cannot detonate on you, and Unicode is on by default: folding, classes, `\p{Han}` properties, and word boundaries all reason over codepoints rather than bytes. Lookaround and backreferences are not linearly expressible, so they get a vendored PCRE2 10.47 with JIT.
 
-```
-$ gist 'foo(?=bar)' -P             # PCRE2 semantics, on demand
-$ gist 'foo(?=bar)' --engine auto  # linear first, escalate only if the pattern needs it
+```bash
+gist 'foo(?=bar)' -P             # PCRE2 semantics, on demand
+gist 'foo(?=bar)' --engine auto  # linear first, escalate only if the pattern needs it
 ```
 
 Both backends ride the same trigram prefilter, which makes this the only *indexed* PCRE search I am aware of: the lookaround still skips the files that provably cannot match. `--no-unicode`, or a leading `(?-u)`, drops to byte and ASCII semantics when that is what you meant.
 
 **The index is optional.** Everything above works with no setup at all; without an index gist walks the live tree and reaches the same answer, just slower. With one, it skips the files that cannot contain the query's required trigrams and checks every survivor against current bytes.
 
-```
-$ gist index           # build/refresh the persisted trigram index, ~3s
-$ gist status --json   # is one ready, how fresh, how big
-$ gist serve           # the resident warm session, though it self-spawns
-$ gist codex count 'literal'   # exact corpus-wide count, zero source I/O
+```bash
+gist index           # build/refresh the persisted trigram index, ~3s
+gist status --json   # is one ready, how fresh, how big
+gist serve           # the resident warm session, though it self-spawns
+gist codex count 'literal'   # exact corpus-wide count, zero source I/O
 ```
 
 The rule underneath all of it: the tree tells the truth. An accelerator may decline, and it does, constantly - a changed file, a stale anchor, a doubtful watcher - but it may never invent a file set or hand back a stale line. `--no-index` forces the pure live walk, and it is the differential oracle the indexed path is tested against.
 
 **Unix philosophy.** Results go to stdout as rg-shaped bytes. Everything else - timings, freshness notes, no-match suggestions, budget warnings - goes to stderr, so a pipe never sees a word gist said about itself. Exit codes are honest, and they are ripgrep's:
 
-```
-$ gist zzz src/ ; echo $?        # 1 - a clean search, no match. an answer.
-$ gist --nonsense foo ; echo $?  # 2 - not an answer
+```bash
+gist zzz src/ ; echo $?        # 1 - a clean search, no match. an answer.
+gist --nonsense foo ; echo $?  # 2 - not an answer
 ```
 
 A flag gist does not recognize, or a pattern the chosen engine cannot express, is an error. It is never a convincing empty result, because a silent zero is the one failure an agent cannot detect.
@@ -117,41 +117,41 @@ Output shape follows the reader, not a config file. A terminal gets ripgrep's gr
 My predecessor Andrew Gallant has an amazing description of how this machinery
 works, in the
 *[Anatomy of a grep](https://burntsushi.net/ripgrep/#anatomy-of-a-grep)*
-section of his 2016 post announcing ripgrep's benchmarks. 
+section of his 2016 post announcing ripgrep's benchmarks.
 
 It is, in my opinion,
 the easiest to read and by far the most useful for this discussion. What follows
 is a quick and less comprehensive summary; his remains the truer vivisection,
 and I gleaned mine from it.
 
-A grep does four things in order. 
+A grep does four things in order.
 
-- It decides **which files** to look at. 
-- It gets **their bytes** into memory. 
-- It decides **which of those bytes match**. 
-- Then it **prints**, in a shape somebody downstream can use. 
+- It decides **which files** to look at.
+- It gets **their bytes** into memory.
+- It decides **which of those bytes match**.
+- Then it **prints**, in a shape somebody downstream can use.
 
 That is the whole program, and every tool in the field is an argument about which of those four steps you  
 are allowed to skip.
 
 The step people underrate is the third one, because a grep is not a regex
-library wearing a command line. 
+library wearing a command line.
 
 Gallant makes this point directly: a grep is
 *line oriented*, and line orientation buys optimizations a general regex engine
-cannot make. 
+cannot make.
 
 Mike Haertel's [account of why GNU grep is
 fast](https://lists.freebsd.org/pipermail/freebsd-current/2010-August/019310.html)
 is the classic statement of it, and his first trick is a refusal: GNU grep is
-fast because it **avoids looking at every input byte**. 
+fast because it **avoids looking at every input byte**.
 
 It runs Boyer-Moore with
 an unrolled inner loop, spends fewer than three instructions on the bytes it
 does look at, and - the part that surprises people - deliberately does not split
 the input into lines, because finding the newlines would itself require touching
 every byte. It reads raw into a big buffer, skips through it, and goes looking
-for the bounding newlines only once it already has a match. 
+for the bounding newlines only once it already has a match.
 
 Haertel's summary of the whole discipline: "the key to making programs fast is to make them do practically nothing."
 
@@ -162,15 +162,13 @@ history is the story of that refusal getting more sophisticated.
 
 ## A Quick History and Introduction
 
-
-
 ### The algebra came first
 
 Search of this kind is downstream of a piece of pure mathematics. In a 1951
 RAND memorandum published in *Automata Studies* in 1956, Stephen Kleene
 described the "regular events" a finite-state machine can recognize and gave
 them an algebra: concatenation, alternation, and the closure that carries his
-name. 
+name.
 
 Rabin and Scott then proved in 1959 that letting the machine guess buys it
 nothing in power, since any nondeterministic automaton has a deterministic
@@ -217,12 +215,12 @@ What happened, per
 Lee McMahon wanted to search the Federalist Papers for authorship clues, and  
 `ed` - Thompson's own editor, which had perfectly good regular expressions -  
 loaded whole files into memory to support random-access editing and therefore  
-choked on a megabyte. 
+choked on a megabyte.
 
 Doug McIlroy, in his own telling, "asked Ken Thompson if  
 he could lift the regular expression recognizer out of the editor and make a  
 one-pass program to do it," and found a note the next morning announcing a  
-program named grep. 
+program named grep.
 
 But Thompson's version is better: he already had one. A  
 private tool called `s`, for search. He said he would think about McIlroy's  
@@ -250,12 +248,12 @@ Russ Cox put the linear road back on the map with
 *[Regular Expression Matching Can Be Simple And Fast](https://swtch.com/~rsc/regexp/regexp1.html)*
 and productionized it as [RE2](https://github.com/google/re2); Rust's
 [regex crate](https://github.com/rust-lang/regex) carried the same guarantee
-into ripgrep. 
+into ripgrep.
 
 That is the fork gist sits on deliberately: the default engine is
 linear in the Thompson/Pike tradition, so a pathological pattern cannot detonate,
 and the vendored [PCRE2](https://www.pcre.org/current/doc/html/) JIT is opted
-into with `-P` rather than disguised as linear. 
+into with `-P` rather than disguised as linear.
 
 Nobody gets to promise both without saying which one they gave you.
 
@@ -263,7 +261,7 @@ Nobody gets to promise both without saying which one they gave you.
 
 Gallant's taxonomy is the clearest one available, and it is his rather than  
 mine. Command-line search split into two families with different obsessions.  
-The grep-descended tools - GNU grep, `sift` - got very good at blowing through enormous files; they search what you point them at and treat file selection as your problem. 
+The grep-descended tools - GNU grep, `sift` - got very good at blowing through enormous files; they search what you point them at and treat file selection as your problem.
 
 The ack-descended tools - `ack`, `ag`, `ucg`, `pt` - inverted the
 priority: be smart about *which* files, read your source-control configuration,
@@ -317,7 +315,7 @@ which walks a color-trigram graph off the regex automaton.
 Google's own arc is documented in
 *[Software Engineering at Google*, ch. 17](https://abseil.io/resources/swe-book/html/ch17.html):
 trigrams, then suffix arrays, then sparse n-grams, each step a different bet on
-index size against query cost. 
+index size against query cost.
 
 The literature is equally explicit about the
 limits - [Cho & Rajagopalan (2002)](https://doi.org/10.1109/ICDE.2002.994755) on
@@ -330,9 +328,9 @@ modern n-gram selection.
 Two things are true of every member of that family, mine included. The first is
 a blind spot: they all test **presence**, so a pattern with no literal in it -
 `[0-9a-f]{12}`, which is what a hunt for a hash or a MAC address looks like -
-proves nothing about any file and concedes the entire corpus. 
+proves nothing about any file and concedes the entire corpus.
 
-That hole is what the crest sieve exists to close, and it is the one piece of mathematics here that is ours. 
+That hole is what the crest sieve exists to close, and it is the one piece of mathematics here that is ours.
 
 The second is an assumption: that the index is authoritative. Perfectly reasonable when you are a hosted mirror synced from a repository. Wrong, and quietly wrong, when the thing you are indexing is a working tree somebody is editing.
 
@@ -365,7 +363,7 @@ So gist is the third lineage's machinery held to the first two lineages'
 contract. The index and the sieve come from Cox and the papers around him; the
 argv, the ignore precedence, the exit codes, and the bytes on stdout are
 ripgrep's, byte for byte, measured against a live `rg` oracle rather than
-asserted. 
+asserted.
 
 That is the whole bet: an agent should be able to reach for the tool
 it already knows, get an answer that is current rather than merely quick, and
@@ -376,9 +374,7 @@ refuse to read, and Cox made it refuse to open the file. Each generation found a
 different thing not to look at. This one adds the newest refusal available: not
 looking again at what has not changed.
 
-## Deep Dives:
-
-
+## Deep Dives
 
 ## Ranking and Structure
 
@@ -388,17 +384,17 @@ Two mechanisms carry the weight here, and neither one is a pattern: ranking deci
 
 The lexical tiers answer which files match, unordered. Ranking orders them with weighted Reciprocal Rank Fusion (Cormack, Clarke, Büttcher, SIGIR 2009):
 
-```
+```text
 score(d) = Σᵢ  wᵢ / (k + rankᵢ(d))          k = 60
 ```
 
 It consumes *ranks*, not magnitudes, which is the whole design: match count, path depth, and a 0-to-3 declaration grade share no unit and never need one, and a new signal is purely additive.
 
-Six signals fuse - occurrence density, declaration confidence, match-line shape rarity, path depth, an authored boost, and an optional graph centrality handed in from outside. 
+Six signals fuse - occurrence density, declaration confidence, match-line shape rarity, path depth, an authored boost, and an optional graph centrality handed in from outside.
 
-The authored boost carries the heaviest weight of the six, above even the definition signal, on purpose: a generated file wins lexical density *and* the definition boost, since its stubs parse as declarations, so sinking it means outweighing both. 
+The authored boost carries the heaviest weight of the six, above even the definition signal, on purpose: a generated file wins lexical density *and* the definition boost, since its stubs parse as declarations, so sinking it means outweighing both.
 
-**Declaration confidence** reads word boundaries and geometry rather than a keyword list, so it grades a language it has never seen. 
+**Declaration confidence** reads word boundaries and geometry rather than a keyword list, so it grades a language it has never seen.
 
 **Shape rarity** is Shannon pricing at line scale: erase the vocabulary (query identifier → `Q`, others → `I`, strings → `S`, numbers → `N`), hash the residue, price it `log₂(N/df)`, so ubiquitous call-site geometry prices to zero while a rare shape keeps full credit.
 
@@ -427,12 +423,12 @@ minted by a build target, carries the machine and the corpus that produced it,
 and stops existing the moment it stops being true.
 
 The instrument is a **dominance-and-fit certificate**, built in layers A
-through L, cheapest evidence first. 
+through L, cheapest evidence first.
 
 Each layer either establishes measured
 dominance over a named baseline or measures fit against a stated bound; none of
 them claims universal or hardware optimality, because that is not a thing a
-benchmark can establish. 
+benchmark can establish.
 
 The statistic is the same everywhere and it is
 **fail-closed**: a win requires a lower median *and* a Mann-Whitney p < 0.05,
@@ -447,13 +443,11 @@ bootstrap, Apple M4 Max, and a second mint on an x86_64 Linux box.
 
 ### Three tiers, one verdict
 
-
 | tier                   | what is switched on                              | cells | verdict                    | vs ripgrep    |
 | ---------------------- | ------------------------------------------------ | ----- | -------------------------- | ------------- |
 | scanner (`--no-index`) | nothing. no index, no crest sidecar, no daemon   | 24    | 24 win · 0 parity · 0 loss | 1.93× geomean |
 | cold indexed           | persisted trigram index, fresh process per query | 12    | 12 win · 0 parity · 0 loss | 5.78×–8.93×   |
 | warm resident          | `gist serve`, armed watcher, RAM-resident corpus | 12    | 12 win · 0 parity · 0 loss | 33.7× geomean |
-
 
 Read the first row before the third, because it is the one that settles the
 obvious objection. "It only wins because it has an index" is the natural thing
@@ -475,13 +469,11 @@ instead of choosing the flattering one.
 Speed is the cheap claim. Being *identical to ripgrep* is the hard one, and it
 is measured against three denominators, two of which ripgrep owns:
 
-
 | lane                   | denominator                                                                   | result                                                                   |
 | ---------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | flag surface           | 186 documented flags, read at run time from rg's own completions and man page | 176 byte-identical · 10 declared boundary · **0 divergent · 0 rejected** |
 | rg's integration suite | ripgrep's own `tests/` corpus, mined into replayable records                  | 411/411 of the supported surface · 0 fail · 14 declared declines         |
 | differential fuzz      | 6,000 randomized pattern × flag × corpus triples over 6 adversarial corpora   | 5,967/6,000 byte-identical · **13 unresolved**                           |
-
 
 The first two lanes are at 100%, and that is simultaneously their strength and
 their ceiling: a curated denominator can only hold the cases somebody already
@@ -554,8 +546,6 @@ conforms too, through Wine, and is scored on its own rung strictly below
 native - a translation layer agreeing is not a kernel agreeing, and the
 scorer refuses to round it up.
 
-
-
 ### Where it loses
 
 Three places, and they are in the certificate rather than in a footnote.
@@ -582,9 +572,9 @@ bound is computed against two cores LLVM does model precisely, Zen 4 and
 Neoverse V2, and the Apple column stays empty. Blank, not estimated: a
 fabricated cycle count is worse than an absent one.
 
-```
-$ bash bench/certificate/mint/mint.sh                                     # layers A-G
-$ CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 bash bench/certificate/mint/mint.sh   # full mint
+```bash
+bash bench/certificate/mint/mint.sh                                     # layers A-G
+CERT_FULL=1 CERT_PUBLISH=1 CERT_SUDO=1 bash bench/certificate/mint/mint.sh   # full mint
 ```
 
 The certificate is a ratchet, not a trophy case. Each layer re-derives itself on

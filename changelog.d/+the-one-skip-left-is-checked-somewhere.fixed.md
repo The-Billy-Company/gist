@@ -7,7 +7,7 @@ CI. It is not gist's own code. `Corpus.Atlas` reads `relate status --json` -
 relate produces the artifacts *and* the document reporting whether they are
 ready - so the extracted half failed outright rather than passing:
 
-```
+```text
 --- FAIL: TestAtlasReportsNothingReadyWhenNothingIsBuilt
     atlas: irregex: no gist/relate/blast binary found: RELATE_BIN is unset,
     relate is not on PATH, and no build exists at any of: ...

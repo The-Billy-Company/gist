@@ -1,0 +1,7 @@
+# git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Add full commit SHAs for mass-format or migration commits below. The history
+# stays intact; blame walks through mechanical churn to the authored change.
+
+# style: ruff formats the bench and tooling python
+3b7ef85ca4ce0e858cabf3d7fe6fba6d8eaf0c35

@@ -489,7 +489,7 @@ test "serve: READY names the build that is answering" {
     // served warm, however well it frames.
     try std.testing.expect(!image.agrees(mine ^ 1, r.image));
 
-    // The same judgement as a REPORT. `gist status` runs this probe so a skew
+    // The same judgment as a REPORT. `gist status` runs this probe so a skew
     // is visible before it costs anyone an afternoon of cold queries; here the
     // daemon is this binary, so the honest answer is `ours`.
     try std.testing.expectEqual(client.Residency.ours, client.residency(gpa, io, daemon.socket));

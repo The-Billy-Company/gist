@@ -299,7 +299,7 @@ echo
 for row in "${CASES[@]}"; do
   read -r label pat scope <<< "${row}"
   if [[ -z "${pat}" ]]; then
-    printf "  FAIL  %-24s malformed row, want '<label> <pattern> [<scope>]'\n" "${label:-<unlabelled>}"
+    printf "  FAIL  %-24s malformed row, want '<label> <pattern> [<scope>]'\n" "${label:-<unlabeled>}"
     fails=$((fails + 1))
     continue
   fi

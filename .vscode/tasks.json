@@ -1,0 +1,70 @@
+{
+  // This clone builds against ../irregex. Tasks deliberately run the same
+  // commands CONTRIBUTING.md asks a contributor to run, with no editor-only
+  // wrapper that could disagree with CI.
+  "version": "2.0.0",
+  "presentation": {
+    "reveal": "always",
+    "panel": "dedicated",
+    "clear": true
+  },
+  "problemMatcher": [],
+  "tasks": [
+    {
+      "label": "zig: check",
+      "type": "shell",
+      "command": "zig build check",
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "zig: test",
+      "type": "shell",
+      "command": "zig build test",
+      "group": "test"
+    },
+    {
+      "label": "zig: test filtered",
+      "type": "shell",
+      "command": "zig build test -Dtest-filter=${input:testFilter}",
+      "group": "test"
+    },
+    {
+      "label": "zig: check watch",
+      "type": "shell",
+      "command": "zig build check --watch",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "zig: certify",
+      "type": "shell",
+      "command": "zig build certify",
+      "group": "test"
+    },
+    {
+      "label": "zig: bench",
+      "type": "shell",
+      "command": "zig build bench",
+      "group": "test"
+    },
+    {
+      "label": "shell: generated menus",
+      "type": "shell",
+      "command": "./shell/check.sh",
+      "group": "test"
+    },
+    {
+      "label": "vim: plugin suite",
+      "type": "shell",
+      "command": "vim -es -u NONE -i NONE -S editor/vim/test/gist_test.vim && nvim --headless -u NONE -i NONE -S editor/vim/test/gist_test.vim",
+      "group": "test"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "testFilter",
+      "type": "promptString",
+      "description": "Test-name substring; an empty match fails closed"
+    }
+  ]
+}

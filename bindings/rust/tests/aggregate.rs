@@ -33,7 +33,7 @@ fn context(path: &str, line: u64) -> Match {
     Match {
         path: path.to_owned(),
         line_number: line,
-        text: "# neighbourhood".to_owned(),
+        text: "# neighborhood".to_owned(),
         kind: MatchKind::Context,
         submatches: Vec::new(),
     }

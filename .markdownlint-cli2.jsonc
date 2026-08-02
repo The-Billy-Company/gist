@@ -1,0 +1,36 @@
+{
+  // Markdown is the largest authored surface here. There is no Prettier pass,
+  // so markdownlint owns layout as well as structure instead of delegating half
+  // its rules to a formatter nobody runs.
+  "$schema": "https://raw.githubusercontent.com/DavidAnson/markdownlint-cli2/v0.23.0/schema/markdownlint-cli2-config-schema.json",
+  "gitignore": true,
+  "globs": ["**/*.md"],
+  "ignores": [
+    "**/.venv/**",
+    "**/target/**",
+    "**/.zig-cache/**",
+    "**/zig-out/**",
+    "**/zig-pkg/**",
+    // towncrier assembles this one from changelog.d, and the fragments it
+    // consumes are deleted at release. So a style fix applied here can never
+    // reach the thing that wrote it, and the next release re-imports whatever
+    // the new fragments happened to use. Lint the source instead: the glob
+    // above already covers changelog.d/*.md, which is where news is authored.
+    "CHANGELOG.md"
+  ],
+  "config": {
+    "default": true,
+    "MD004": { "style": "consistent" },
+    "MD013": false,
+    "MD024": { "siblings_only": true },
+    "MD025": false,
+    "MD029": false,
+    "MD033": {
+      "allowed_elements": ["a", "br", "details", "div", "img", "p", "picture", "source", "span", "strong", "sub", "summary", "sup"]
+    },
+    "MD036": false,
+    "MD041": false,
+    "MD056": false,
+    "MD060": false
+  }
+}

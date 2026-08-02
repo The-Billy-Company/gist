@@ -1,0 +1,62 @@
+# TOML is executable contract here: package manifests, the public surface, and
+# the release-news grammar all pass through it. Formatting is explicit; schema
+# validation stays limited to schemas Taplo can resolve without false failures.
+
+include = [ "**/*.toml" ]
+exclude = [
+  "**/target/**",
+  "**/.venv/**",
+  "**/__pycache__/**",
+  "**/.ruff_cache/**",
+  "**/.zig-cache/**",
+  "**/zig-out/**",
+  "**/zig-pkg/**",
+  "mise.lock",
+  "**/Cargo.lock",
+]
+
+[formatting]
+align_entries = false
+align_comments = true
+array_trailing_comma = true
+array_auto_expand = true
+array_auto_collapse = false
+compact_arrays = false
+compact_inline_tables = false
+compact_entries = false
+inline_table_expand = true
+column_width = 100
+indent_tables = false
+indent_entries = false
+indent_string = "  "
+trailing_newline = true
+reorder_keys = false
+reorder_arrays = false
+reorder_inline_tables = false
+allowed_blank_lines = 2
+crlf = false
+
+[[rule]]
+include = [ ".taplo.toml", "**/.taplo.toml", "**/taplo.toml" ]
+[rule.schema]
+path = "taplo://taplo.toml"
+
+[[rule]]
+include = [ "**/rust-toolchain.toml" ]
+[rule.schema]
+url = "https://www.schemastore.org/rust-toolchain.json"
+
+[[rule]]
+include = [ "**/rustfmt.toml", "**/.rustfmt.toml" ]
+[rule.schema]
+url = "https://www.schemastore.org/rustfmt.json"
+
+[[rule]]
+include = [ ".mise.toml", "**/mise.toml", "**/.mise.toml" ]
+[rule.schema]
+url = "https://mise.jdx.dev/schema/mise.json"
+
+[[rule]]
+include = [ ".typos.toml", "**/typos.toml", "**/.typos.toml" ]
+[rule.schema]
+url = "https://raw.githubusercontent.com/crate-ci/typos/master/config.schema.json"

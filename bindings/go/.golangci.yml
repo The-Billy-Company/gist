@@ -1,0 +1,55 @@
+version: "2"
+
+# Six files form a subprocess binding, not a web service. Keep the compact set
+# that catches wrong returns, stale assignments, unsafe assertions, and modern
+# Go drift without importing handler or database policy that does not exist.
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - errorlint
+    - forcetypeassert
+    - nilerr
+    - nilnesserr
+    - unconvert
+    - predeclared
+    - usestdlibvars
+    - wastedassign
+    - copyloopvar
+    - intrange
+    - modernize
+    - nolintlint
+    - revive
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-no-explanation: []
+      allow-unused: false
+    revive:
+      rules:
+        - name: exported
+          arguments: ["disableStutteringCheck"]
+        - name: package-comments
+          disabled: true
+  exclusions:
+    rules:
+      # Test cleanup is best-effort after the assertion has already decided
+      # the verdict; promoting Close failures would replace the useful failure.
+      - linters: [errcheck]
+        path: _test\.go
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt

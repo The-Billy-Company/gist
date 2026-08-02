@@ -1,0 +1,23 @@
+# GitHub Actions is the only CI plane here, so its supply chain deserves the
+# same scrutiny as source. Hash pins are mandatory; Dependabot keeps them fresh.
+rules:
+  excessive-permissions:
+    remap:
+      severity: high
+  cache-poisoning:
+    remap:
+      severity: high
+  dependabot-cooldown:
+    config:
+      days: 7
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin
+  forbidden-uses:
+    config:
+      deny:
+        # CVE-2025-30066 rewrote published tags to exfiltrate runner secrets.
+        - tj-actions/*
+        # Multiple reviewdog actions suffered coordinated impostor commits.
+        - reviewdog/*

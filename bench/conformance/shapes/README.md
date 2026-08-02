@@ -74,10 +74,10 @@ the needle `stepSec` (7 B, few matches) ran **41% slower** than `pgxpool` (7 B,
 **The suite did not catch it, and that is the interesting part.** Two holes:
 
 - **The class was represented by its best case.** `pgxpool` was the only "rare
-  literal", and it is a *lucky* needle — `pg` is a genuinely rare digraph, so it
+  literal", and it is a _lucky_ needle — `pg` is a genuinely rare digraph, so it
   selects a good pair and looks fast. A degenerate needle was never asked.
-- **The suite could not tell the two costs apart.** Degenerate needles *were*
-  present (`error` here, `func` in the scanner lane) but labelled `common`, so
+- **The suite could not tell the two costs apart.** Degenerate needles _were_
+  present (`error` here, `func` in the scanner lane) but labeled `common`, so
   their slowness was charged to having many true matches rather than to the
   prefilter failing. Nothing in the table could separate "slow because there is
   real work" from "slow because the prefilter collapsed".
@@ -106,7 +106,7 @@ the trap matches fewer files). The defect put them 41% apart the wrong way.
 **And only from pairwise-interleaved samples.** Whichever needle is timed first
 pays a colder page cache, and on this tree that position effect alone moves the
 ratio across the alarm line: back-to-back blocks gave 1.031 with the trap first
-and 0.984 with the control first, and a cold start put the *same healthy binary*
+and 0.984 with the control first, and a cold start put the _same healthy binary_
 at 1.384 — indistinguishable from the 1.41 defect signature. Sampled alternately
 against each other: **1.007**. So never compute this ratio by dividing two rows of
 a results table; sample the trap and the control in one alternating loop.
@@ -115,7 +115,7 @@ One honest limit: **the cold-indexed lane here cannot see the timing defect.**
 The trigram index elides most of the corpus for a low-match needle, so the scan
 kernel barely runs — measured on this tree, trap/control is 1.04 indexed vs 1.00
 un-indexed. The timing isolation therefore lives in the no-index scanner lane
-(`bench/dominance/races/scanner.sh`, `SELECTOR_PROBES`); what these rows earn *here*
+(`bench/dominance/races/scanner.sh`, `SELECTOR_PROBES`); what these rows earn _here_
 is **parity** — a selector that picks the wrong offset pair is a correctness bug
 before it is a speed bug, and `matrix.py parity` is where that surfaces.
 

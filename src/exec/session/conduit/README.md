@@ -57,7 +57,7 @@ merely declined.
 
 A **build stamp** is not that kind of order. Zig's install copies the cache
 artifact with its timestamp preserved, so reinstalling one build reproduces its
-stamp and switching between two cached builds moves the mtime *backwards*: two
+stamp and switching between two cached builds moves the mtime _backwards_: two
 stamps can only answer "same build?", and a client waiting to be the newer one
 would wait forever. So retirement here is decided against the filesystem instead
 of against a peer. Our HELLO prompts the daemon to re-stat the executable it was
@@ -84,8 +84,6 @@ no kept answer and `cli/reprise.zig` already folds the caller's own build into
 the key. The **non-Zig bindings** never check it either: a Python or Rust caller
 has no comparable image, reports `unknown`, and is served exactly as before.
 
-Because the grammar is a cross-language contract, `protocol/` is the source of
-truth for all three bindings — see
-[`bindings/rust/src/runtime/session.rs`](../../../../bindings/rust/src/runtime/session.rs)
-and the Python daemon client. Bumping `protocol_version` is a contract change,
-not an implementation detail.
+`protocol/` is the native daemon's source of truth. The non-Zig bindings stay
+outside that wire contract and report an unknown image instead. Bumping
+`protocol_version` is a contract change, not an implementation detail.

@@ -1,0 +1,10 @@
+# Clippy levels live in Cargo.toml; this file only tunes the lints whose
+# behavior depends on project facts. Suggestions must respect the crate's
+# declared Rust floor, even when CI runs a newer pinned compiler.
+msrv = "1.85"
+check-incompatible-msrv-in-tests = true
+
+# Tests are allowed to unwrap their own fixtures. Shipping code is still held
+# by `cargo clippy --all-targets -- -D warnings`.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

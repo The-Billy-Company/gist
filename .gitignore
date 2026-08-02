@@ -19,6 +19,10 @@ dist/
 # gist's own artifact home: index, atlas, shelf, freshness anchor, daemon socket
 .gist/
 
+# The link checker's response cache. CI restores it from the actions cache
+# keyed on the Markdown; locally it is one run's memory of which URLs answered.
+.lycheecache
+
 # Upstream checkouts cloned by hand for the differential oracle (e.g. ripgrep)
 upstream/
 

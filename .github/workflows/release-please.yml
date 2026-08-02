@@ -40,15 +40,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      # Write to push the release branch and its version bumps; pull-requests to
-      # open and label the PR; issues to comment on the ones a release closes.
-      contents: write
-      pull-requests: write
-      issues: write
+      contents: write # Push the release branch and its version bumps.
+      pull-requests: write # Open and label the release PR.
+      issues: write # Comment on issues closed by the release.
     steps:
       # release-please reads the commit history through the GitHub API, so there
       # is nothing to check out and nothing to build.
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

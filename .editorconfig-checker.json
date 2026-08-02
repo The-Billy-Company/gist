@@ -1,0 +1,38 @@
+{
+  "_meta": [
+    "editorconfig-checker enforces the file-shape contract in .editorconfig.",
+    "Language formatters own exact indentation and wrapping; this gate owns",
+    "line endings, indentation kind, final newlines, trailing space, and UTF-8.",
+    "Markdown and fixed-column data are excluded because their trailing spaces",
+    "can be syntax or data. Generated caches are somebody else's bytes."
+  ],
+  "Verbose": false,
+  "Debug": false,
+  "IgnoreDefaults": false,
+  "SpacesAfterTabs": false,
+  "NoColor": false,
+  "Exclude": [
+    "/target/",
+    "/\\.venv/",
+    "/__pycache__/",
+    "/\\.ruff_cache/",
+    "/\\.zig-cache/",
+    "/zig-out/",
+    "/zig-pkg/",
+    "\\.png$",
+    "\\.csv$",
+    "\\.md$",
+    "editor/vim/doc/.*\\.txt$"
+  ],
+  "AllowedContentTypes": [],
+  "PassedFiles": [],
+  "Disable": {
+    "EndOfLine": false,
+    "Indentation": false,
+    "IndentSize": true,
+    "InsertFinalNewline": false,
+    "TrimTrailingWhitespace": false,
+    "MaxLineLength": true,
+    "Charset": false
+  }
+}

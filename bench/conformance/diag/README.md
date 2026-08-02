@@ -1,7 +1,7 @@
 # `bench/diag/` — the diagnostic-template golden net
 
-The safety net for routing every stderr diagnostic through
-[`src/assay/`](../../../src/assay/README.md). Each verb-summary / timing / trace
+The safety net for routing every stderr diagnostic through the shared `assay`
+surface. Each verb-summary / timing / trace
 line is a **format template** with volatile values (elapsed `ms`, live counts,
 the `atlas,`/`live,` provenance tag) punched in. `golden.py` runs each read-only
 verb, captures stderr, and **normalizes the volatile values away** — every digit

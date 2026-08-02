@@ -254,7 +254,7 @@ pub fn residency(gpa: std.mem.Allocator, io: std.Io, socket_path: []const u8) Re
 /// The handshake half of `residency`, over `status` rather than `hello`: the
 /// re-handshake frame latches no capabilities and — the part that matters here
 /// — is not the daemon's cue to re-examine its own executable, so a report
-/// cannot be what ends a daemon's life. Otherwise the same two judgements
+/// cannot be what ends a daemon's life. Otherwise the same two judgments
 /// `exchange` makes before it will trust a peer with a query.
 fn probeReady(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t, mine: u64) !Residency {
     try protocol.sendFrame(gpa, io, fd, .status, "");

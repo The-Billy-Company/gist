@@ -42,11 +42,11 @@ to filter 64-byte blocks on, and that selection collapsed to the adjacent pair
 identifiers. Measured cost: **18.1 GB/s literal scan where 35.5 GB/s was
 achievable** on code, **13.1 vs 33.4 GB/s** on prose; in the shipped binary
 `stepSec` (7 B, 464 true matches) ran **41% slower** than `pgxpool` (7 B, 8856
-true matches) — vastly more real work, less time. Every literal probe was labelled
+true matches) — vastly more real work, less time. Every literal probe was labeled
 `rare` or `common`, so two things went unseen: **`pgxpool` was an
 unrepresentatively lucky needle** for the rare class (`pg` is a genuinely rare
 digraph, so it selects well and looks fast) and stood in for the whole class; and
-the degenerate needles that *were* present (`error` here, `func` in the scanner
+the degenerate needles that _were_ present (`error` here, `func` in the scanner
 lane) had their slowness charged to having many true matches rather than to the
 prefilter collapsing.
 

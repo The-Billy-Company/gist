@@ -1,0 +1,21 @@
+# Shell is a first-class surface here: installers, generated-menu checks, parity
+# gates, and certificate runners. Each shebang chooses its dialect; sourced
+# helpers resolve beside the script that names them.
+external-sources=true
+source-path=SCRIPTDIR
+
+# These optional checks catch real control-flow and quoting defects without
+# imposing a cosmetic spelling on every variable reference.
+enable=add-default-case
+enable=avoid-negated-conditions
+enable=avoid-nullary-conditions
+enable=check-set-e-suppressed
+enable=check-sourced
+enable=check-unassigned-uppercase
+enable=deprecate-which
+enable=quote-safe-variables
+enable=useless-use-of-cat
+
+# SC2034 cannot see that roots.sh is sourced to publish PRODUCT/KINSHIP paths.
+# SC2055 misreads an intentional three-way equality check as boolean tautology.
+disable=SC2034,SC2055

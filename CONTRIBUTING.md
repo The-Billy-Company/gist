@@ -28,7 +28,7 @@ you like; we move it rather than bounce you.
 `build.zig.zon` path-depends on `../irregex`, and so do all three bindings
 independently. Clone them as siblings:
 
-```
+```text
 Billy-Company/
 ├── irregex/     ← the engine, required to build this
 ├── gist/        ← you are here
@@ -50,6 +50,7 @@ actually clone.
 | the Python binding | [uv](https://docs.astral.sh/uv/) | `requires-python` floor 3.12 |
 | the Rust binding | rustup | `bindings/rust/rust-toolchain.toml` |
 | the Go binding | Go | `bindings/go/go.mod` |
+| the discipline gate | markdownlint-cli2, typos, shellcheck, golangci-lint | the actions in [`ci.yml`](.github/workflows/ci.yml), mirrored into `.mise.toml` |
 
 If you run [mise](https://mise.jdx.dev), that whole table is one command:
 
@@ -132,7 +133,7 @@ default, and it is the standard a change is held to here:
 
 ## What CI will check
 
-Seven jobs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), split on
+Nine jobs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), split on
 purpose - a Zig engine regression and a Rust clippy nit are different news and
 deserve different red Xs - plus a native Windows lane in
 [`.github/workflows/windows.yml`](.github/workflows/windows.yml) on x64 **and**
@@ -141,9 +142,11 @@ arm64.
 | Job | What it holds |
 | --- | --- |
 | `engine` | `zig build check` + `zig build test` on Linux and macOS, then the `-t` union parity gate against a real ripgrep |
-| `python` / `go` / `rust` | each binding's suite; Python across 3.12, 3.13, and 3.14 |
+| `python` / `go` / `rust` | each binding's suite; Python across 3.12, 3.13, and 3.14. Each also holds its language surface: Ruff, golangci-lint, Clippy, and `cargo deny` over the crate's advisories, bans, licenses, and sources |
+| `discipline` | Markdown structure and links, spelling, YAML, TOML, EditorConfig, Python, shell, Go, and GitHub Actions security |
 | `fmt` | `zig fmt --check` over every tracked and untracked-not-ignored `.zig` file |
 | `certificate` | the mint ledger, the release gate, and the report post-processors - hermetic, and every module must still import |
+| `version` | every package-version mirror still agrees with `build.zig.zon` |
 | `changelog` | every fragment in `changelog.d/` is one towncrier recognizes |
 | `windows` | the real thing on a real kernel: `NtCreateFile` descending NTFS, path spellings round-tripping, exit codes surviving a console |
 
@@ -221,7 +224,7 @@ onto the release branch - the tag and the notes should land together.
 Commit subjects here are a conventional prefix plus a lowercase sentence that
 says what changed, in the voice of the change rather than the ticket:
 
-```
+```text
 fix: the Python binding maps one engine
 feat: the harness moves in with the daemon it drives
 ci: the repository gets CI, and it knows it has a sibling

@@ -7,6 +7,15 @@ yanked = "warn"
 
 [licenses]
 version = 2
+
+# This list is a policy - the licenses this project accepts - not a snapshot of
+# what today's dependency graph happens to pull. Most of it goes unmatched at
+# any given moment, and cargo-deny warns once per unused entry, which would
+# make a clean run look like five findings. Shrinking the list to silence that
+# would invert the point: the next permissively-licensed crate would fail CI
+# and get "fixed" by widening the list again, one entry at a time, with nobody
+# deciding anything.
+unused-allowed-license = "allow"
 allow = [
   "MIT",
   "Apache-2.0",

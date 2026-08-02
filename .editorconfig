@@ -1,12 +1,9 @@
 # What your editor should do before a formatter ever runs.
 #
-# This file is not a second opinion. Every value below is the value the tool
-# that actually gates the file already emits - `zig fmt` for Zig and `.zon`,
-# `rustfmt` under bindings/rust/rustfmt.toml, `gofmt` for Go, ruff for Python,
-# `shfmt -i 2` for shell. An editor save and a `--check` run therefore cannot
-# disagree, which is the point: `zig fmt --check` is its own CI job here, and a
-# contributor should never learn about formatting drift from a red X when their
-# editor could have told them.
+# This file is not a second opinion. Its values match the language formatters:
+# `zig fmt` for Zig and `.zon`, rustfmt, gofmt, Ruff for Python, and shfmt for
+# shell. editorconfig-checker now holds the shared byte shape in CI; an editor
+# save cannot quietly change indentation kind, line endings, or final newlines.
 #
 # `max_line_length` is deliberately absent. Wrap policy belongs to the
 # formatters, which know about string literals, URLs, and the column-aligned
@@ -58,8 +55,7 @@ indent_size  = 4
 indent_style = space
 indent_size  = 4
 
-# Data and markup: 2-space, which is what taplo, prettier, and the GitHub
-# Actions schema all default to.
+# Data and markup: 2-space, matching Taplo and the GitHub Actions conventions.
 [*.{toml,yml,yaml,json}]
 indent_style = space
 indent_size  = 2

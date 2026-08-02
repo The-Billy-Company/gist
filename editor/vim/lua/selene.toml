@@ -1,19 +1,11 @@
-# Per-folder override — the gist editor plugin's Lua leg runs inside Neovim
-# (LuaJIT 2.1), not the Redis 5.1 sandbox the root `selene.toml` targets.
-#
-# Same shape as the seccomp-smokes override: the root config excludes this
-# folder from the default sweep, and the `selene` catalog row runs a third
-# pass scoped here with `--config`. `--no-exclude` is what lets that pass see
-# files the root config filtered out.
-#
-# `nvim.yml` beside this file declares the surface the shim actually uses
-# (`vim.health.*`, `vim.fn`); `require` comes back from the `lua51` base,
-# which `redis.yml` had removed.
+# Neovim embeds LuaJIT 2.1, so the plugin checks against Lua 5.1 plus the
+# editor surface declared in `nvim.yml`. That keeps `require` available while
+# making misspelled `vim.health` and `vim.fn` calls real lint failures.
 
 std = "lua51+nvim"
 
 [lints]
-# A plugin's health check is the one place a global read is the point: it
+# A plugin health check is the one place a global read is the point: it
 # asks the editor what it is before reporting. Everything else here is local.
 global_usage = "allow"
 

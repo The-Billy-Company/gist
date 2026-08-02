@@ -12,7 +12,7 @@ bytes spelled "sock", the tail of this very path.
 It read as flakiness because whether a run lands in the window depends only on
 how long its artifact home happens to be — so it appeared under a test runner
 that names temp directories after the test, and never from a shell. This walks
-the whole neighbourhood on purpose: the bug lived in four lengths, and a fixture
+the whole neighborhood on purpose: the bug lived in four lengths, and a fixture
 that picked one path length would have missed it the same way everything else
 did.
 """

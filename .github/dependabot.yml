@@ -1,23 +1,9 @@
 # Automated dependency updates.
 #
-# One ecosystem, and the omissions are the interesting part.
-#
-# The three bindings each resolve the engine as a SIBLING PATH dependency - the
-# Go `replace`, the uv source, and the Rust path dep all spell
-# `../../../irregex/...`. Dependabot runs each update in a sandbox holding only
-# this repository, where that path does not exist, so a `cargo` / `gomod` / `uv`
-# entry here would not produce careful pull requests: it would produce a
-# recurring resolution error against a manifest that is correct. The bindings'
-# real third-party surface is small and deliberate (serde, pytest, tempfile),
-# and it moves when the engine's does - which Dependabot DOES watch, in the
-# repository that can actually resolve it.
-#
-# Zig is absent because Dependabot has no Zig ecosystem, and because this
-# package's only dependency is that same sibling.
-#
-# That leaves the one thing here nothing else watches, and the one most worth
-# watching: a compromised action is the supply-chain hole that runs with the
-# repository's own token.
+# Five manifests, four package ecosystems, one weekly window. The bindings keep
+# a sibling path to irregex for local work, but their registry versions and
+# third-party edges still deserve updates here. Zig stays manual because
+# Dependabot has no Zig ecosystem and its lone dependency is that sibling.
 version: 2
 
 updates:
@@ -32,3 +18,58 @@ updates:
     commit-message:
       prefix: "ci"
     labels: ["dependencies", "ci"]
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: cargo
+    directory: /bindings/rust
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      rust:
+        patterns: ["*"]
+    commit-message:
+      prefix: "build"
+    labels: ["dependencies", "rust"]
+    cooldown:
+      default-days: 7
+
+  # This pin is the compiler CI actually runs, not a second Rust dependency.
+  - package-ecosystem: rust-toolchain
+    directory: /bindings/rust
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "build"
+    labels: ["dependencies", "rust"]
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: gomod
+    directory: /bindings/go
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      go:
+        patterns: ["*"]
+    commit-message:
+      prefix: "build"
+    labels: ["dependencies", "go"]
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: uv
+    directory: /bindings/python
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: "build"
+    labels: ["dependencies", "python"]
+    cooldown:
+      default-days: 7

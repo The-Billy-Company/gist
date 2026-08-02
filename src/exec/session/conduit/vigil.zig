@@ -183,7 +183,7 @@ fn pollWait(watches: []Watch, timeout_ms: i32) WaitError!usize {
 
 /// Not in `std.os.windows`; declared here at the ABI it has everywhere. The
 /// event is reset before each request rather than after, so a previous wakeup
-/// that completed synchronously — signalling the event without anyone waiting on
+/// that completed synchronously — signaling the event without anyone waiting on
 /// it — cannot satisfy the next wait before the driver has written an answer.
 extern "ntdll" fn NtResetEvent(EventHandle: w.HANDLE, PreviousState: ?*w.LONG) callconv(.winapi) w.NTSTATUS;
 

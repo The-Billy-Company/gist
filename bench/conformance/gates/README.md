@@ -6,7 +6,7 @@ they oracle against**:
 
 | Folder                            | Oracles against                          | Files                                                                                                              |
 | --------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| [`parity/`](parity/README.md)     | `rg` (or gist itself)                    | `equality` · `index_elision_parity` · `line_parity` · `unicode_parity` · `patterns_corpus_parity` · `partition_parity` · `scan_regress` |
+| [`parity/`](parity/README.md)     | `rg` (or gist itself)                    | `equality` · `index_elision_parity` · `line_parity` · `unicode_parity` · `patterns_corpus_parity` · `partition_parity` · `type_union_parity` · `scan_regress` |
 | [`contract/`](contract/README.md) | gist's own behavioral promises           | `streams` · `enum_determinism` · `fail_closed` · `freshness_fs` · `ci_order`                                       |
 | [`oracle/`](oracle/README.md)     | an independent engine / accounting model | `indexed_pcre_oracle.py` · `index_size_accounting.py`                                                              |
 
@@ -127,8 +127,8 @@ bench/conformance/gates/parity/unicode_parity.sh
 `equality.sh` proves the path where the trigram index elides reads. A regex
 the index can't prefilter at all (`\w{3,8}`, `[a-f0-9]{2,}`, `panic|0x`, …)
 gets no elision — the unified `ripgrep/` engine reads and regex-scans every
-candidate itself over the live tree ([`src/exec/cold/engine/swarm/`](../../../src/exec/cold/engine/swarm)
-drives the fused work-stealing walk+read+scan fan-out), so `equality.sh`'s frozen-snapshot proof
+candidate itself over the live tree (irregex drives the fused
+work-stealing walk+read+scan fan-out), so `equality.sh`'s frozen-snapshot proof
 doesn't cover it — this script is the companion oracle:
 
 1. **soundness** — diffs gist's match-set against plain `rg (?-u)` over the

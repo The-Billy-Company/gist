@@ -95,7 +95,7 @@ fn once(arm: Arm, par: bool, sizes: []const usize, n: usize) u64 {
 }
 
 /// Best of `tries`, after a warmup pass, so first-touch page faults and a noisy
-/// neighbour cannot be charged to whichever arm happened to run first.
+/// neighbor cannot be charged to whichever arm happened to run first.
 fn best(arm: Arm, par: bool, sizes: []const usize, n: usize, tries: usize) f64 {
     _ = once(arm, par, sizes, n / 8);
     var lo: u64 = std.math.maxInt(u64);

@@ -1,0 +1,35 @@
+# Spellcheck authored source and prose. Benchmark tables and captured CLI
+# transcripts are evidence, not copy; changing a token there changes the case.
+[files]
+extend-exclude = [
+  "*.lock",
+  "*.png",
+  "bench/**/*.csv",
+  "bench/apparatus/corpora/**",
+  "bench/conformance/diag/golden/**",
+  "bench/conformance/rgsuite/spec.json",
+  "bench/conformance/rgsuite/results.json",
+]
+
+[default]
+locale = "en-us"
+extend-ignore-identifiers-re = [
+  "^[A-Za-z0-9]{20,}$",
+]
+
+[default.extend-words]
+# Search and systems vocabulary that the tokenizer mistakes for prose.
+mmaped = "mmaped"
+clen = "clen"
+noet = "noet"
+unparseable = "unparseable"
+writeable = "writeable"
+mis = "mis"
+controllen = "controllen"   # libc msghdr field; this spelling is the ABI.
+caf = "caf"                 # Prefix of café in Unicode parity fixtures.
+Nd = "Nd"                   # Unicode decimal-number category.
+ser = "ser"                 # Serial timing column and local.
+styl = "styl"               # Stylus file extension in ripgrep's type corpus.
+Fo = "Fo"                   # Deliberately fragmented regex in the parity corpus.
+PN = "PN"                   # PNG token split at the final G.
+runn = "runn"               # Deliberate misspelling in a contract-drift test.

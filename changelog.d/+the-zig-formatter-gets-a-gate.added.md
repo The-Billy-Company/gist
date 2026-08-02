@@ -1,6 +1,6 @@
 Zig is the language this package is written in and it was the only one here whose
 formatter nothing checked. Rust already got `cargo fmt --check` and `cargo clippy
--D warnings` on every push in the `rust` job; `zig fmt` was on the honour system.
+-D warnings` on every push in the `rust` job; `zig fmt` was on the honor system.
 irregex, relate and blast each grew a `fmt` job for this already, so gist was the
 last one running without.
 

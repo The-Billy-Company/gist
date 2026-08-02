@@ -45,7 +45,7 @@ client declines any peer it does not `agree` with, exactly as it declines a wire
 version it does not speak.
 
 Declining alone would strand the warm tier: the daemon's idle TTL wants ten
-*continuous* minutes of quiet, which a tree with ten coworker agents never
+_continuous_ minutes of quiet, which a tree with ten coworker agents never
 gives it, so one `zig build` would mean cold queries for the rest of the
 day. On the way out to cold, a client that is **strictly newer** — a higher wire
 version, or a later build stamp — sends `shutdown`. The order is one-directional
@@ -54,7 +54,7 @@ new one taking turns killing each other's daemons all afternoon. This way the
 skew converges after a single cold query, and the next eligible one auto-spawns
 from the binary that won.
 
-`residency(gpa, io, socket_path)` is the same judgement asked as a question
+`residency(gpa, io, socket_path)` is the same judgment asked as a question
 rather than acted on: `none` / `ours` / `foreign`, no spawn and no retire. It
 is what `gist status` prints, so a skew is legible before it costs an afternoon.
 
@@ -69,6 +69,6 @@ silence — the verb runs as if this module did not exist.
 The keep is the one handshake that does **not** judge the build, and the reason
 is structural: its callers are `relate` and `irregex`, two binaries dialing
 gist's daemon, so a stamp mismatch there is the normal state rather than a skew.
-It stays safe without one because a kept answer is bytes the *client* rendered
+It stays safe without one because a kept answer is bytes the _client_ rendered
 and offered, held against a corpus epoch — the daemon never computes it, so a
 daemon of another vintage cannot put its own engine's output in the reply.

@@ -1,0 +1,21 @@
+# Link checks should be cheap enough to repeat, so successful responses live for
+# a day. The cache changes latency, never the answer for a new URL.
+cache = true
+max_cache_age = "1d"
+
+# Package caches contain upstream READMEs with links relative to a fuller source
+# archive. They are fetched build inputs, not this repository's documentation.
+exclude_path = [ "zig-pkg" ]
+
+exclude = [
+  # These are minted evidence. Their READMEs describe where a successful run
+  # writes them; a clean checkout correctly has neither file yet.
+  'bench/certificate/artifact/CERTIFICATE\.md$',
+  'bench/certificate/ledger/LEDGER\.md$',
+
+  # The DOI resolver works, then ACM and MDPI reject non-browser clients with
+  # 403. Keep the citations exact instead of accepting every forbidden URL.
+  '^https://doi\.org/10\.1145/1571941\.1572114$',
+  '^https://doi\.org/10\.1145/363347\.363387$',
+  '^https://doi\.org/10\.3390/a14050133$',
+]

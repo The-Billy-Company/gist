@@ -112,7 +112,7 @@ two byte offsets to filter 64-byte blocks on, and that choice collapsed to the
 adjacent pair `(0,1)` for any needle whose bytes all tied on corpus rarity (most
 lowercase identifiers): 18.1 GB/s where 35.5 GB/s was achievable on code, and a
 shipped `stepSec` running 41% slower than `pgxpool` despite ~19x less true work.
-Every literal probe was labelled `rare` or `common`, so the class was represented
+Every literal probe was labeled `rare` or `common`, so the class was represented
 by its luckiest needle (`pg` is a rare digraph) and the degenerate needles that
 were already being timed had their slowness charged to true-match volume. The
 probe set therefore carries a **standing requirement** to span the needle space

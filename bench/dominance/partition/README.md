@@ -14,7 +14,7 @@ per prose type, hand-assembled, every time.
 
 ## The rival is derived, never written down
 
-```
+```text
 union  =  (rows gist's docs genus is made of)  ∩  (rows rg's registry has)
 ```
 

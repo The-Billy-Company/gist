@@ -54,6 +54,9 @@ jobs:
   native:
     name: zig build test (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
+    env:
+      MATRIX_ARCH: ${{ matrix.arch }}
+      ZIG_ARCH: ${{ matrix.zig_arch }}
     # `-Dtest-shards` defaults to 2x the core count, and a standard Windows
     # runner has 4 cores where the dev boxes have 10+. The daemon block on top
     # of that polls for a real process to come up. Budget for both rather than
@@ -77,13 +80,15 @@ jobs:
       run:
         working-directory: gist
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: gist
-      - uses: actions/checkout@v4
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: The-Billy-Company/irregex
           path: irregex
+          persist-credentials: false
 
       # Zig comes from the official download index and is sha256-verified
       # against it, rather than pulled through a setup action: this is twenty
@@ -98,12 +103,12 @@ jobs:
       - name: Provision Zig
         shell: pwsh
         run: |
-          $ver = '${{ env.ZIG_VERSION }}'
+          $ver = '$env:ZIG_VERSION'
           $floor = Select-String -Path build.zig.zon -Pattern '\.minimum_zig_version = "([^"]+)"'
           if (-not $floor) { throw 'no minimum_zig_version in build.zig.zon' }
           $declared = $floor.Matches[0].Groups[1].Value
           if ($declared -ne $ver) { throw "workflow pins zig $ver, build.zig.zon declares $declared" }
-          $target = '${{ matrix.zig_arch }}-windows'
+          $target = "$env:ZIG_ARCH-windows"
 
           $index = Invoke-RestMethod -Uri 'https://ziglang.org/download/index.json'
           $release = $index.$ver
@@ -202,7 +207,7 @@ jobs:
           $parsed = $status | ConvertFrom-Json
           if ($parsed.schema_version -ne 1) { throw "status --json schema_version was '$($parsed.schema_version)'" }
           if (-not $parsed.state) { throw 'status --json carried no state' }
-          Write-Host "gist ok on ${{ matrix.arch }}: state=$($parsed.state) roots=$($parsed.roots -join ',')"
+          Write-Host "gist ok on ${env:MATRIX_ARCH}: state=$($parsed.state) roots=$($parsed.roots -join ',')"
           exit 0
 
       # The Win32-only behaviors, on the kernel that actually has them. Every
@@ -279,7 +284,7 @@ jobs:
             if (-not $conf.preferences) { throw 'no preferences found under %LOCALAPPDATA%' }
             if ($conf.preferences.in_force) { throw 'preferences applied to a piped run' }
           } finally { $env:LOCALAPPDATA = $prev }
-          Write-Host 'Win32 contract holds on ${{ matrix.arch }}'
+          Write-Host "Win32 contract holds on ${env:MATRIX_ARCH}"
 
       # The resident tier and its freshness watcher, end to end on the platform
       # whose transport is entirely different code. Cross-compilation proves the
@@ -373,7 +378,7 @@ jobs:
               if (-not $daemon.HasExited) { Stop-Process -Id $daemon.Id -Force -ErrorAction SilentlyContinue }
             }
           } finally { Pop-Location; Remove-Item Env:\GIST_DIR -ErrorAction SilentlyContinue }
-          Write-Host 'resident tier + watcher hold on ${{ matrix.arch }}'
+          Write-Host "resident tier + watcher hold on ${env:MATRIX_ARCH}"
 
       # The install ritual itself, because a binary nobody can run is not
       # shipped. The POSIX side is bash and there is no make here, so Windows
@@ -440,7 +445,7 @@ jobs:
           if ($count -ne 1) { throw "re-running install.ps1 left $count PATH entries for $prefix" }
           $sourced = (Select-String -LiteralPath $PROFILE -SimpleMatch $completion).Count
           if ($sourced -ne 1) { throw "re-running install.ps1 left $sourced profile lines" }
-          Write-Host "install.ps1 holds on ${{ matrix.arch }} (gist at $resolved)"
+          Write-Host "install.ps1 holds on ${env:MATRIX_ARCH} (gist at $resolved)"
 
   # One job collapsing both legs into a single verdict, kept even though the
   # monorepo's reason for it is gone. The reason that survives is a plain
@@ -457,6 +462,7 @@ jobs:
   # gates the legs, so a leg that did not run is a Windows lane that was not
   # proven, and it must not read as green.
   verdict:
+    name: verdict
     needs: [native]
     if: always()
     runs-on: ubuntu-latest

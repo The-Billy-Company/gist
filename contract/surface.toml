@@ -151,16 +151,20 @@ ffi = { status = "operational-accelerator", detail = "one coherent open/search/c
 #   an inotify accelerator; the portable metadata-reconcile barrier is always
 #   there.
 [session]
-socket_env = "GIST_SESSION_SOCK"                 # overrides the per-repo default below
+socket_env = "GIST_SESSION_SOCK" # overrides the per-repo default below
 default_socket = ".gist/gistd.sock"
-protocol_version = 9                             # the length-prefixed frame protocol
-generations = [ "daemon", "session", "index" ]   # boot id · connection id · published pair.gen
-build_identity = "image"                         # READY's u64 build stamp; a skewed peer runs cold
-residency = [ "none", "ours", "foreign" ]        # what `gist status` reports about the peer at the rendezvous
-capabilities = [ "cap_fd_transport" ]            # HELLO-negotiated, additive
-eligible_modes = [ "files", "count", "lines" ]   # -l · corpus-wide -c · the bare line search
-freshness = "fail-closed-reconcile"              # resident bytes only behind a proven barrier
-watchers = [ "inotify", "reconcile" ]            # linux accelerator · portable barrier
+protocol_version = 9 # the length-prefixed frame protocol
+generations = [ "daemon", "session", "index" ] # boot id · connection id · published pair.gen
+build_identity = "image" # READY's u64 build stamp; a skewed peer runs cold
+residency = [
+  "none",
+  "ours",
+  "foreign",
+] # what `gist status` reports about the peer at the rendezvous
+capabilities = [ "cap_fd_transport" ] # HELLO-negotiated, additive
+eligible_modes = [ "files", "count", "lines" ] # -l · corpus-wide -c · the bare line search
+freshness = "fail-closed-reconcile" # resident bytes only behind a proven barrier
+watchers = [ "inotify", "reconcile" ] # linux accelerator · portable barrier
 
 
 # ═══ 5 · embedding ═══════════════════════════════════════════════════════════

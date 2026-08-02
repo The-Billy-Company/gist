@@ -10,7 +10,6 @@ them from here would assert paths this checkout does not contain. The native
 Windows CI lane is not wired in either package yet.
 -->
 
-
 # `bench/targets` — the target matrix, executed
 
 > "You are not going to displace ripgrep — it's **more portable**."
@@ -180,7 +179,7 @@ the Windows difference in exactly one place:
 | a whole file as bytes                         | `mmap(PRIVATE)`    | `NtCreateSection` + `NtMapViewOfSection`, section handle dropped — demand-paged, and the view outlives both it and the file handle. Naming the size makes this the safer arm: a file that shrank mid-race fails to map instead of faulting on the vanished tail |
 | every entry in a directory, with its clocks   | `getattrlistbulk` / `getdents64` | `NtQueryDirectoryFile` — one record carries the name, the attributes, and both change clocks, so there is no cheaper names-only call to drop to                                                                                    |
 | what kind of thing is this handle             | `stat` mode bits   | `NtQueryInformationFile` attributes + `GetFileType` device class                                                                                                                                                                           |
-| which volume is this on (`--one-file-system`) | `st_dev`, already in the stat | `NtQueryInformationFile(.Id)` — its own entry point (`inode.devicePath`), because it is a *different* query here and folding it into the stat would tax every entry to serve a once-per-directory flag. Not `FileFsVolumeInformation`, which Wine answers `NOT_IMPLEMENTED` |
+| which volume is this on (`--one-file-system`) | `st_dev`, already in the stat | `NtQueryInformationFile(.Id)` — its own entry point (`inode.devicePath`), because it is a _different_ query here and folding it into the stat would tax every entry to serve a once-per-directory flag. Not `FileFsVolumeInformation`, which Wine answers `NOT_IMPLEMENTED` |
 | a path the walker just handed back            | already `/`-joined — `paths.slashed` is comptime the identity, so the seam costs nothing here | `\`-joined, so it is normalized once at each walker seam: the serial walk takes a copy (the walker overwrites the bytes it lends), the haystack rewrites the join it already owns. The ignore protocol, depth counting, and the render all speak `/`      |
 | the canonical path                            | `realpath(3)`      | `GetFinalPathNameByHandle` (symlinks already followed), `GetFullPathName` if the open is refused                                                                                                                                           |
 | the argument list                             | a pre-split `argv` | one command-line string that must be **parsed**, so the iterator needs an allocator                                                                                                                                                        |
@@ -198,7 +197,7 @@ Two things degrade rather than block, which is why the port fits in one pass:
 - **One of the two pager hints declines.** `WILLNEED` ports exactly onto
   `PrefetchVirtualMemory` — same instruction, batch the fault-in now — and that is
   the hint the measured win lives in. `SEQUENTIAL` has no view-level spelling on
-  NT, which says "expect a forward streaming read" as a flag on the *open*, before
+  NT, which says "expect a forward streaming read" as a flag on the _open_, before
   this seam ever sees a handle; it declines rather than being faked, because
   prefetching the whole range to imitate it would reintroduce the eager read the
   section mapping exists to delete.

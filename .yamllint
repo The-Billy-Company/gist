@@ -1,0 +1,38 @@
+# GitHub Actions is the whole CI plane here. Keep correctness hard, while long
+# `run:` lines and compact matrices stay readable instead of becoming churn.
+---
+extends: default
+
+ignore: |
+  **/.venv/**
+  **/.zig-cache/**
+  **/zig-out/**
+  **/zig-pkg/**
+
+rules:
+  line-length:
+    max: 200
+    level: warning
+    allow-non-breakable-words: true
+  document-start: disable
+  truthy:
+    allowed-values: ["true", "false", "on", "off", "yes", "no"]
+    check-keys: false
+  comments:
+    require-starting-space: true
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  braces:
+    max-spaces-inside: 1
+  brackets:
+    max-spaces-inside: 1
+  indentation:
+    spaces: consistent
+    indent-sequences: consistent
+  key-duplicates: enable
+  trailing-spaces: enable
+  new-lines: enable
+  empty-lines:
+    max: 2
+    max-start: 0
+    max-end: 1

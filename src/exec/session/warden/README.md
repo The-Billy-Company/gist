@@ -189,14 +189,14 @@ opposite of the intuitive choice:
 A daemon that loads says what the load cost, because the crest is the number a
 ration has to accommodate and it is invisible otherwise:
 
-```
+```text
 gist serve: warm on .gist/gistd.sock (0 roots, 8 workers,
             held 583 MB of a 4096 MB ration, load crest 2793 MB)
 ```
 
 A daemon that does not fit says so instead, and leaves the note:
 
-```
+```text
 gist serve: mirror does not fit the 1024 MB ration (held 927 MB)
             — standing down, queries answer cold
 ```

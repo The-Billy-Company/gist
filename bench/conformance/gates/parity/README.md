@@ -15,6 +15,7 @@ rest are pure gist-side oracles needing no field.
 | `patterns_corpus_parity.sh` | **multi-pattern set** — `relate patterns -e …` covers the exact file set `gist -l` answers over, keeping the dragnet/trawl a true drop-in                                                                                                                           |
 | `partition_parity.sh`       | **the genus partition over a real tree** — `docs ∪ code ∪ data` is the unfiltered answer and the pairs are disjoint; each `--no-X` is its positive's exact complement; `-t`/`-T` agree with the long flags; index and daemon change speed only; no genus un-hides   |
 | `phantom_walk_parity.sh`    | **the `tree.map` snapshot vs itself** — the phantom-served run ≡ the same query with `GIST_NO_PHANTOM=1` (every directory listed live), across both the served and the cost-declined branch, with content-edit and membership-change freshness as the adverse cases |
+| `type_union_parity.sh`      | **`-t` is a union** — every type named on the line reaches the answer, built-in or `--type-add`, in any order, byte-identical to `rg`; `-T <custom>` subtracts exactly its positive, and a custom `-t` still respects `.gitignore`                                  |
 | `scan_regress.sh`           | **no-prefilter fallback** — the live-tree full-read fallback ≡ `rg (?-u)` (exits 1 on FN/FP) plus a min-of-N speed floor                                                                                                                                            |
 
 `partition_parity.sh` has no `rg` column on purpose: ripgrep cannot express a
@@ -37,6 +38,15 @@ GIST_CORPUS_ROOT="$PWD/.local/gist-corpora/torture" GIST_PARITY_SLATE=torture \
   bench/conformance/gates/parity/patterns_corpus_parity.sh
 ```
 
+`type_union_parity.sh` synthesizes its corpus for the opposite reason
+`patterns_corpus_parity.sh` constrains one: its subject is a flag's algebra, not
+a population, and it needs go, py, rust, ts and tsx in one tree to ask the
+question at all. gist's own checkout is pure Zig, so reading whatever tree it
+runs in would make the interesting cases match nothing and pass as vacuously
+equal — which is exactly how the bug it guards survived. The mix is the whole
+point: built-in types union with built-in types correctly, and a custom type
+alone matches `rg` exactly, so only a line holding both diverged.
+
 `phantom_walk_parity.sh` is the differential twin of `index_elision_parity.sh`
 with the directory-membership snapshot as the subject instead of the trigram
 index, and it guards a claim that is easy to lose: the snapshot may only change
@@ -54,5 +64,6 @@ bench/conformance/gates/parity/equality.sh 150 1
 bench/conformance/gates/parity/index_elision_parity.sh
 bench/conformance/gates/parity/partition_parity.sh
 bench/conformance/gates/parity/phantom_walk_parity.sh
+bench/conformance/gates/parity/type_union_parity.sh
 bench/conformance/gates/parity/unicode_parity.sh
 ```
