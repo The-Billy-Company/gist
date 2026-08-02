@@ -85,6 +85,22 @@ jobs:
       # the failure is one line rather than a suite's worth of scrollback.
       - run: zig build check
       - run: zig build test
+      # ripgrep is this gate's oracle, and the gate exits 1 without it rather
+      # than skipping — a parity gate that skips has stopped gating.
+      - name: install the parity oracle
+        run: |
+          command -v rg && exit 0
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install ripgrep;
+          else sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep; fi
+      # The one conformance gate that runs per-push on both hosts. It earns that
+      # by being hermetic (it synthesizes its corpus, so it cannot go vacuous or
+      # depend on what a checkout happens to contain) and by finishing in under
+      # a second on a built tree. The claim it holds is one a unit test cannot:
+      # that a flag's ALGEBRA matches ripgrep's over a real walk. It exists
+      # because a `--type-add` type selected with `-t` was silently cancelling
+      # every other `-t` on the line, which nothing in `zig build test` saw.
+      - name: -t union parity (every type on the line reaches the answer)
+        run: ./bench/conformance/gates/parity/type_union_parity.sh
 
   python:
     # 3.12 is the declared floor and is load-bearing (PEP 695 syntax reaches
@@ -118,7 +134,7 @@ jobs:
       - name: install the parity oracle
         run: command -v rg || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep; }
       # The product's own libraries, and the substrate's from ITS checkout.
-      # `tests/test_packaging.py` stages `libgist` and `libirregex` side by side
+      # `tests/test_packaging.py` stages `libgist` and `libirgx` side by side
       # and opens the product in a clean child process — the gate on the
       # loader-relative rpath — and it looks for the substrate under the sibling
       # checkout's `zig-out`, not the copy this build installs into ours. So
@@ -129,8 +145,22 @@ jobs:
       - name: zig build (the sibling substrate)
         run: zig build
         working-directory: irregex
-      - run: uv run --python ${{ matrix.python }} pytest -q
+      # `-rs` and the grep, because every skip in this suite is conditioned on a
+      # binary or library resolving, and a loader miss returns nothing rather than
+      # erroring. That makes a broken build indistinguishable from a passing run:
+      # the tier's tests simply stop existing and the job stays green. Both zig
+      # builds and the oracle above are steps precisely so nothing here has a
+      # reason to skip — so if something does, the environment is wrong, not
+      # optional.
+      - name: pytest, and prove nothing skipped itself
         working-directory: gist/bindings/python
+        run: |
+          set -o pipefail
+          uv run --python ${{ matrix.python }} pytest -q -rs 2>&1 | tee "$RUNNER_TEMP/pytest.log"
+          if grep -qE '^SKIPPED|[0-9]+ skipped' "$RUNNER_TEMP/pytest.log"; then
+            echo "::error::a test skipped itself — a library or binary did not resolve"
+            exit 1
+          fi
 
   go:
     # A Zig step, unlike the substrate's Go job: that module carries a prebuilt
@@ -162,10 +192,13 @@ jobs:
         working-directory: gist
       - run: go vet ./...
         working-directory: gist/bindings/go
-      # The `index` suite additionally reaches for a `relate` binary, which
-      # ships from its own checkout and is not one this package can produce.
-      # That arm takes its documented skip; the search arms, which are what this
-      # module exists for, do not.
+      # Exactly one test here still reaches for a `relate` binary, which ships
+      # from its own checkout and is not one this package can produce: the atlas
+      # artifacts it reads are relate's to write, and no other producer
+      # substitutes. Its reader half was split off so the assertion that a fresh
+      # artifact home reports nothing ready — entirely gist's own code — runs
+      # here rather than vanishing with it. Every other missing-binary arm is now
+      # fatal, so this is the only skip the job can legitimately print.
       - run: go test ./...
         working-directory: gist/bindings/go
 
@@ -351,6 +384,21 @@ jobs:
               print(f"  ok  {path}")
           print(f"{len(modules)} modules import cleanly")
           PY
+
+  version:
+    # One number lives in `build.zig.zon`; the publishing manifests that cannot
+    # import it — Cargo and PyPI — carry a marked copy the release bot rewrites.
+    # This asks whether those copies still agree, and whether the bot has been
+    # told about every one of them. A mirror the config forgot is the
+    # interesting failure: nothing breaks until a release ships a package
+    # claiming last version's number.
+    #
+    # Stdlib-only, no Zig and no build — it reads lines.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run --no-project --python 3.12 python tools/version_parity.py
 
   changelog:
     # Neither repository had anything checking its news fragments, and the
