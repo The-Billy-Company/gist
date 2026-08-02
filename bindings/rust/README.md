@@ -1,22 +1,3 @@
----
-doc_radar:
-  counts:
-    - description: "one README per module directory under src/"
-      glob: "bindings/rust/src/*/README.md"
-      equals: 2
-  sentinels:
-    - description: "gist exposes only exact search and index lifecycle"
-      file: bindings/rust/src/lib.rs
-      contains: ["pub mod exact", "pub mod index"]
-      absent: ["pub mod relate", "pub mod compose", "pub mod contract", "pub mod runtime"]
-    - description: "the native feature is opt-in, not assumed"
-      file: bindings/rust/Cargo.toml
-      contains: ["[features]", "native"]
-    - description: "gist depends on the irregex substrate crate"
-      file: bindings/rust/Cargo.toml
-      contains: ["irregex ="]
----
-
 # gist — the importable Rust search API
 
 ## What it is

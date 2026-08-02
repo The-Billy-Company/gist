@@ -1,32 +1,3 @@
----
-doc_radar:
-  counts:
-    - description: "five flat gist verbs: codex · config · index · schema · status"
-      glob: src/surface/face/gist/verbs/*.zig
-      unit: files
-      equals: 5
-  sentinels:
-    - description: "index verb still generation-publishes index + paths + freshness anchor"
-      file: src/surface/face/gist/verbs/index.zig
-      contains:
-        - "persist.persistIndexAndPaths"
-        - "fresh.writeAnchor"
-        - "Index.build"
-    - description: "codex verb group drives the shared shelf plane rather than owning it"
-      file: src/surface/face/gist/verbs/codex.zig
-      contains:
-        - "shelf_mod.persist"
-        - "shelf_mod.open"
-        - "shelf_mod.staleCount"
-    - description: "the shelf artifact's whole lifecycle lives below every face, in one writer"
-      file: src/corpus/index/shelf/shelf.zig
-      contains:
-        - "pub fn shelfFile"
-        - "pub fn persist"
-        - "pub fn open"
-        - "pub fn staleCount"
----
-
 # `surface/face/gist/verbs/` — gist's five flat verbs
 
 Lifecycle and introspection verbs for the gist face, consolidated flat after

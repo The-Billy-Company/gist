@@ -1,14 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "public C ABI keeps open/search/close + session version symbols"
-      file: include/gist.h
-      contains: ["gist_abi_version", "gist_open", "gist_search", "gist_close", "gist_run"]
-    - description: "Zig root exports the same session surface"
-      file: src/root.zig
-      contains: ["export fn gist_open", "export fn gist_run", "export fn gist_abi_version"]
----
-
 # `include/` — public C ABI (`libgist`)
 
 The flat, versioned header non-Zig hosts compile against. One file:

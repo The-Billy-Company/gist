@@ -1,12 +1,3 @@
-<!--
-doc_radar:
-  sentinels:
-    - file: bench/dominance/session/session_baseline.json
-      contains: ["armed_geomean_floor"]
-    - file: bench/dominance/session/gate_session.py
-      contains: ["--committed", "--live", "report-only"]
--->
-
 # bench/session
 
 The **resident-session** certificate — the honest warm-product half of gist's

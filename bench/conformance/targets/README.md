@@ -1,20 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "Layer H's markers and title are this harness's alone"
-      file: bench/certificate/report/portable.py
-      contains: ["<!-- PORTABLE-LAYER-START -->", "<!-- PORTABLE-LAYER-END -->", "## Layer H — portability (target matrix, executed)"]
-    - description: "the conformance slate defeats gist's output cap, proves the vendored PCRE2 per target, and caps the translation-layer lane at its own rung"
-      file: bench/conformance/targets/matrix.py
-      contains: ["--uncap", "PCRE2_PROBE", "TIERS", "conforms-wine", "LANE_CEILING", "WINE_DOCKERFILE"]
-    - description: "the Wine ceiling is read by the scorer, not just declared"
-      file: bench/conformance/targets/portable.py
-      contains: ["lane_ceiling(t[\"lane\"])"]
-    - description: "a sweep is hermetic against the ~10 coworker agents editing this tree"
-      file: bench/conformance/targets/crossbuild.py
-      contains: ["def snapshot", "def frozen", "def control"]
----
-
 <!--
 The Windows-descent invariants this matrix exercises are the *engine's*, and
 they are asserted where they live: `portal.zig` (the comptime fork seam and the

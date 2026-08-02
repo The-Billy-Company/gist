@@ -1,32 +1,3 @@
----
-doc_radar:
-  occurrences:
-    - {file: bench/conformance/rgsuite/results.json, pattern: '"bucket": "PASS"', equals: 411}
-    - {file: bench/conformance/rgsuite/results.json, pattern: '"bucket": "FAIL"', equals: 0}
-  sentinels:
-    - file: ../irregex/src/exec/cold/engine/serial.zig
-      contains: ["used purely to ELIDE reads", "never to change the file set"]
-    - file: ../irregex/src/kernel/regex/pcre2/literal.zig
-      contains: ["pub fn required"]
-    - file: ../irregex/src/kernel/rank/signals.zig
-      contains: ["pub fn declarationConfidence", "pub fn shapeFingerprint", "pub fn isGenerated"]
-    - file: ../irregex/src/kernel/math/crest.zig
-      contains: ["pub const Vector", "pub fn crest"]
-    - file: contract/surface.toml
-      contains:
-        - 'subprocess = { status = "authoritative"'
-        - 'uds = { status = "operational-accelerator"'
-        - 'ffi = { status = "operational-accelerator"'
-    - description: "every measured number this page quotes is still the one the certificate carries"
-      file: bench/certificate/artifact/CERTIFICATE.md
-      contains:
-        - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
-        - "7.5× geomean end-to-end speedup"
-    - description: "the warm claim is sourced from the armed resident-session certificate, never the cold race"
-      file: bench/dominance/session/session_meta.json
-      contains: ['"armed": true', '"geomean_speedup": 565.6']
----
-
 # Gist — exact code search built for agents
 
 **Status:** shipped product + measured evidence. CLI face:

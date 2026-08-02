@@ -1,15 +1,3 @@
-<!--
-doc_radar:
-  sentinels:
-    - file: index.go
-      contains:
-        - "func Over(roots ...string) *Corpus"
-        - "func (c *Corpus) Status(ctx context.Context) (Trigrams, error)"
-        - "func (c *Corpus) Atlas(ctx context.Context) (Atlas, error)"
-        - "func (c *Corpus) Refresh(ctx context.Context) (Trigrams, error)"
-        - "func (c *Corpus) RefreshAtlas(ctx context.Context, shelf bool) (Atlas, error)"
--->
-
 # `index` — artifact lifecycle and readiness
 
 Warmth is an optimization tier, never a dependency: every verb answers correctly

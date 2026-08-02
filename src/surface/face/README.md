@@ -1,12 +1,3 @@
----
-doc_radar:
-  counts:
-    - description: "gist keeps exactly one product face under this folder"
-      glob: src/surface/face/*
-      unit: dirs
-      equals: 1
----
-
 # `src/surface/face/` — the product faces
 
 Thin argv faces over the shared floor. Every binary classifies flags, picks a

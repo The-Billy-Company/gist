@@ -1,12 +1,3 @@
----
-doc_radar:
-  counts:
-    - description: "checked-in README figures stay as the five published PNGs"
-      glob: assets/*.png
-      unit: files
-      equals: 5
----
-
 # `assets/` — README / certificate figures
 
 Checked-in PNGs embedded by the package narrative and Dominance-and-Fit

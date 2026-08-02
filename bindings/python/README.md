@@ -1,17 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - file: ../../contract/surface.toml
-      contains: ["[package]", "[transports]", "[tool_boundary]"]
-      description: Gist's own surface contract still declares package names, transports, and the tool boundary.
-    - file: ../../../irregex/contract/engine.toml
-      contains: ["engine =", "multiline =", "unicode ="]
-      description: Matcher controls remain engine-contract sections authored by irregex.
-    - file: ../../../irregex/contract/analytic.toml
-      contains: ["[row_schemas]", "[analytic.verbs]"]
-      description: The analytic row plane is substrate and lives with irregex, not with this product.
----
-
 # gist — the importable search API
 
 Exact search over a tree. Kinship lives in the `relate` package; composed verbs

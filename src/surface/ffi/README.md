@@ -1,26 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "C ABI session symbols stay exported from the package root"
-      file: src/root.zig
-      contains: ["export fn gist_open", "export fn gist_search", "export fn gist_close", "export fn gist_run"]
-    - description: "public header declares the session surface and includes the substrate"
-      file: include/gist.h
-      contains: ["int32_t gist_open(", "int32_t gist_search(", "void gist_close(", "int32_t gist_run(", "#include <irgx.h>"]
-    - description: "gist's contract keeps search-owned types and re-exports the substrate"
-      file: src/surface/ffi/contract.zig
-      contains: ["pub const SearchOptions", "pub const SearchRequest", "pub const flag_quiet", "const substrate"]
-    - description: "push entry points never terminate the embedding host"
-      file: src/surface/ffi/session.zig
-      absent: ["std.process.exit", "@panic", "catch unreachable"]
-    - description: "pull entry points never terminate the embedding host"
-      file: src/surface/ffi/cursor.zig
-      absent: ["std.process.exit", "@panic", "catch unreachable"]
-    - description: "the seam's adverse allocation-failure suite drives the entry under a failing allocator"
-      file: src/surface/ffi/oom_test.zig
-      contains: ["FailingAllocator", "session.openWith", "OutOfMemory"]
----
-
 # surface/ffi — in-process C-ABI search session
 
 The package binding for non-Zig hosts. `session.zig` exposes

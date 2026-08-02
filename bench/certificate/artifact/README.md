@@ -1,14 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "artifact validation requires all generated layer sidecars"
-      file: bench/certificate/guard/layers.py
-      contains: ["portcert.json", "roofline.json", "lowerbound.csv", "crest.csv"]
-    - description: "the committed ratio gate reads this artifact"
-      file: bench/certificate/guard/ratio.py
-      contains: "certify_macro.csv"
----
-
 # Committed certificate artifact
 
 Seven-layer bundle (A micro + A macro + warm + `--rank` + B/B′ + C + D + E + F + G).

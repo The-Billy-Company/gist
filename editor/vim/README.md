@@ -1,30 +1,3 @@
----
-doc_radar:
-  counts:
-    - description: "the plugin's autoload modules — one per concern (job, sink, args, hint, kin, health)"
-      glob: editor/vim/autoload/gist/*.vim
-      unit: files
-      equals: 6
-  occurrences:
-    - description: "every action is a <Plug> mapping, so every key is re-bindable"
-      file: editor/vim/plugin/gist.vim
-      pattern: 'nnoremap <silent> <Plug>\(gist-|xnoremap <silent> <Plug>\(gist-'
-      min: 8
-  sentinels:
-    - description: "the installer links the plugin into the pack/*/start contract of an editor that already exists"
-      file: editor/install.sh
-      contains: ["pack/gist/start", "GIST_VIM_INSTALL", "command -v"]
-    - description: "the job layer hands every runtime a null stdin — gist inherits rg's rule that a readable non-tty stdin is the corpus, so an open pipe would hang a pathless search"
-      file: editor/vim/autoload/gist/job.vim
-      contains: ["'stdin':     'null'", "'in_io':     'null'"]
-    - description: "help is a real Vim help file, reachable as :help gist"
-      file: editor/vim/doc/gist.txt
-      contains: "*gist.txt*"
-    - description: "the Lua leg is linted as Neovim rather than skipped — the repo's root Lua runtime is the Redis sandbox, where `vim` does not exist"
-      file: editor/vim/lua/selene.toml
-      contains: 'std = "lua51+nvim"'
----
-
 # gist.vim
 
 The Vim and Neovim end of [`gist`](../../src/surface/face/gist/README.md).

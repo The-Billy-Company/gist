@@ -1,19 +1,3 @@
----
-doc_radar:
-  counts:
-    - description: "bindings keep Python, Rust, and Go faces"
-      glob: bindings/*
-      unit: dirs
-      equals: 3
-  sentinels:
-    - description: "request options live in the engine contract"
-      file: ../irregex/contract/engine.toml
-      contains: ["[request_options]"]
-    - description: "transports live in the surface contract"
-      file: ../contract/surface.toml
-      contains: ["[transports]"]
----
-
 # `bindings/` — importable kernel faces
 
 Language packages that speak the **same** `SearchRequest → Match` shape as

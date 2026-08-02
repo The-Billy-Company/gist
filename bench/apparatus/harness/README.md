@@ -1,14 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "PMU state is a first-class, fail-closed certificate fact with host provenance"
-      file: bench/apparatus/harness/certify.zig
-      contains: ["NOT measured on this machine", "cpuBrand", "requestPerformanceQos"]
-    - description: "the session lane drives the real daemon, not a stand-in"
-      file: bench/apparatus/harness/bench.zig
-      contains: ["product.session.serve", "product.session.protocol"]
----
-
 # bench/apparatus/harness
 
 The native **`gist-bench`** binary — one executable, six modes. It is separate

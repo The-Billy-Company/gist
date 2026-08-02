@@ -1,28 +1,3 @@
----
-doc_radar:
-  occurrences:
-    - description: "the shared certificate registry has twelve active query classes"
-      file: bench/apparatus/harness/probes.zig
-      pattern: '^    \.\{ \.class = '
-      equals: 12
-  sentinels:
-    - description: "the full mint automatically splices the Layers B through F pass"
-      file: bench/certificate/mint/mint.sh
-      contains: 'CERT_OUT="${OUT}" bash "${HERE}/splice.sh"'
-    - description: "the full mint wires the --rank and relate lanes into the certificate"
-      file: bench/certificate/mint/mint.sh
-      contains: ['bash "${HERE}/rank.sh"', 'bash "${HERE}/relate.sh"']
-    - description: "the layers pass mints the codex self-index proof (Layer F)"
-      file: bench/certificate/mint/splice.sh
-      contains: 'report/codex.py'
-    - description: "the release gate requires a certificate on both the Mac and the Linux machine"
-      file: bench/certificate/guard/release.py
-      contains: ['"darwin": "Mac"', '"linux": "Linux"']
-    - description: "Town Crier (package changelog) gates the irregex release on the cross-machine certificate"
-      file: towncrier.toml
-      contains: "guard/release.py"
----
-
 # bench/certificate
 
 The **published claim** (was `certify/`). The microscopic half of the Layer-A

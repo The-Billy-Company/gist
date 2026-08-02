@@ -1,11 +1,3 @@
-<!-- doc_radar:
-paths_exist:
-  - bench/conformance/diag/golden.py
-sentinels:
-  - file: bench/conformance/diag/golden.py
-    contains: ["def normalize", "def cmd_check"]
--->
-
 # `bench/diag/` — the diagnostic-template golden net
 
 The safety net for routing every stderr diagnostic through

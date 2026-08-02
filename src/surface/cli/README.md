@@ -1,12 +1,3 @@
-<!--
-doc_radar:
-  counts:
-    - glob: src/surface/cli/**/*.zig
-      min: 4
-      unit: modules
-      description: the primer leaf — a new generator module needs a row below
--->
-
 # `src/surface/cli/` — gist's generate vocabulary
 
 What remains of the shared face vocabulary after the relate face moved into

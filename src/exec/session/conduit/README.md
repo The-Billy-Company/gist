@@ -1,30 +1,3 @@
-<!--
-doc_radar:
-  paths_exist:
-    - src/exec/session/conduit/protocol/protocol.zig
-    - src/exec/session/conduit/wire.zig
-    - src/exec/session/conduit/shm.zig
-    - src/exec/session/conduit/spawn.zig
-    - src/exec/session/conduit/image.zig
-    - src/exec/session/conduit/vigil.zig
-  sentinels:
-    - file: src/exec/session/conduit/vigil.zig
-      contains: ["IOCTL_AFD_POLL", "pub fn wait", "pub const Bell", "pub const Pair"]
-      description: The readiness seam — one wait over listener + idle clients + worker bell, and the socket pair the bell needs because AFD cannot watch a pipe
-    - file: src/exec/session/conduit/protocol/protocol.zig
-      contains: ["protocol_version: u8 = 9", "cap_fd_transport", "caps_supported", "image: u64"]
-      description: The negotiated contract head the entry file owns — version, the additive HELLO capability byte, and the READY build stamp
-    - file: src/exec/session/conduit/image.zig
-      contains: ["pub fn stamp", "pub fn agrees", "pub fn replaced", "pub fn hosts", "pub const unknown"]
-      description: The build-identity surface — equality decides warm-or-cold, a rewritten executable retires its own daemon, and the stamp order is only the tiebreak for a daemon that cannot observe that
-    - file: src/exec/session/conduit/protocol/opcodes.zig
-      contains: ["chunk = 11", "chunk_fd = 12", "recall = 17", "retain = 19"]
-      description: The opcode spine is one enum in one file, so an opcode byte is minted exactly once
-    - file: src/exec/session/conduit/protocol/query.zig
-      contains: ["known_flags", "flag_word", "flag_invert", "flag_smart_case", "flag_quiet", "flag_max_count_present"]
-      description: The query flags byte is fully assigned and lives with the codec that reads it
--->
-
 # `conduit/` — how a request reaches the daemon and an answer gets back
 
 The transport plane. Nothing here knows what a query _means_; it moves bytes and

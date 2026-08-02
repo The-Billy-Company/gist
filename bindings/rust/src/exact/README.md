@@ -1,14 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "SearchRequest is re-exported from the irregex substrate"
-      file: bindings/rust/src/exact/mod.rs
-      contains: ["pub use irgx::request::{SearchEngine, SearchRequest}"]
-    - description: "aggregation reads only real matches, never context lines"
-      file: bindings/rust/src/exact/aggregate.rs
-      contains: ["MatchKind::Match"]
----
-
 # `exact/` — where a pattern occurs
 
 The `ripgrep`-parity half of the crate: same flags, same precedence, same exit

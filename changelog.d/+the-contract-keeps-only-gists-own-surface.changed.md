@@ -17,4 +17,4 @@ the mirrors cite them where they live.
 
 The C header's account of what a row means pointed at `contract/surface.toml`,
 which no longer declares it; it names `irregex/contract/analytic.toml` now, as
-do the binding READMEs and the Python package's Doc Radar sentinels.
+do the binding READMEs.

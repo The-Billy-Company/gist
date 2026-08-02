@@ -1,17 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "the installer mints each artifact from the binary and links it where the shell already looks — never a checked-in copy to drift"
-      file: shell/install.sh
-      contains: ["--generate", "GIST_SHELL_INSTALL", "command -v", "ln -sfn"]
-    - description: "every shell the primer renders for is placed by name"
-      file: shell/install.sh
-      contains: ["complete-zsh", "complete-bash", "complete-fish", "complete-powershell", "man/man1/gist.1"]
-    - description: "zig build runs this after linking the binaries"
-      file: build.zig
-      contains: "shell/install.sh"
----
-
 # `shell/` — the manual and the completions
 
 The shell end of [`gist`](../src/surface/face/gist/README.md), the way

@@ -1,17 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "warm client stays fail-open with an I/O deadline"
-      file: src/exec/session/daemon/client/client.zig
-      contains: ["pub fn attempt", "client_io_timeout_ms", ".cold", ".served"]
-    - description: "autoserve remains opt-out, not opt-in"
-      file: src/exec/session/daemon/client/spawn.zig
-      contains: ["maybeSpawn", "GIST_NO_AUTOSERVE"]
-    - description: "a superseded daemon is declined, retired one-directionally, and reportable"
-      file: src/exec/session/daemon/client/client.zig
-      contains: ["image.agrees", "fn retireIfSuperseded", "pub fn residency"]
----
-
 # exec/session/daemon/client — warm dial + cold fallback
 
 The fail-open bridge from the bare `gist <pattern>` front door to the resident

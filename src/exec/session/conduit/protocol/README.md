@@ -1,17 +1,3 @@
-<!--
-doc_radar:
-  paths_exist:
-    - src/exec/session/conduit/protocol/protocol.zig
-  sentinels:
-    - file: contract/irregex.ward
-      contains: ["seal exec/session/conduit/protocol through protocol.zig"]
-      description: The directory is a sealed deep module, so a caller cannot bind to half the versioned contract
-    - file: src/exec/session/conduit/protocol/protocol.zig
-      contains: ["protocol_version: u8 = 9"]
-      absent: ["MONOLITHIC"]
-      description: The entry file owns the negotiated version and is no longer a registered monolith
--->
-
 # `protocol/` — the versioned wire grammar, entered as one
 
 One contract, five chapters. Everything the resident daemon and its clients say

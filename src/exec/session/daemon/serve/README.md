@@ -1,26 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "daemon socket path stays contract-pinned"
-      file: contract/surface.toml
-      contains: ["GIST_SESSION_SOCK", "gistd.sock"]
-    - description: "serve.zig stays the lifecycle face, not the machinery"
-      file: src/exec/session/daemon/serve/serve.zig
-      contains: ["pub fn run", "pub fn socketPath"]
-    - description: "the accept loop stays one readiness wait with in-flight work off the set, and asks the platform through the vigil seam rather than naming a syscall"
-      file: src/exec/session/daemon/serve/loop.zig
-      contains: ["vigil.Vigil.open", "vigil.max_watched", "drainCompletions"]
-    - description: "an unservable request is declined, never answered wrong"
-      file: src/exec/session/daemon/serve/answer.zig
-      contains: ["decline", "servesScope"]
-    - description: "idle release stays two-stage: watch set before session"
-      file: src/exec/session/daemon/serve/idle.zig
-      contains: ["pub const ttl_ms", "pub const shed_ms", "pub fn nextStep"]
-    - description: "the keep is routed inline and gated on an epoch the watcher can vouch for"
-      file: src/exec/session/daemon/serve/route.zig
-      contains: ["handleRecall", "handleRetain", "epochNow"]
----
-
 # exec/session/daemon/serve — `gist serve`
 
 Keeps one `ResidentSession` (`irregex/src/exec/session/warm/resident.zig`) warm behind a

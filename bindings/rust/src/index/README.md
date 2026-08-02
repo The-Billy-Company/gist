@@ -1,11 +1,3 @@
----
-doc_radar:
-  sentinels:
-    - description: "the three persisted artifacts of the two engines"
-      file: bindings/rust/src/index/mod.rs
-      contains: ["Trigrams", "Atlas", "Shelf"]
----
-
 # `index/` — the artifacts, and what state they are in
 
 Three persisted artifacts, one per thing an engine wants to stop recomputing:

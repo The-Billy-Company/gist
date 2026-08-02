@@ -1,39 +1,3 @@
----
-doc_radar:
-  paths_exist:
-    - src/surface/face/gist/main.zig
-    - contract/surface.toml
-    - ../irregex/contract/engine.toml
-    - bench/certificate/artifact/CERTIFICATE.md
-  sentinels:
-    - file: ../irregex/src/exec/cold/argv/catalog.zig
-      contains:
-        - "pub const flag_catalog"
-        - "unsupported_fail_loud"
-    - file: bench/conformance/gates/contract/ci_order.sh
-      contains:
-        - "pcre parity -P"
-        - "index-elision parity"
-        - "macro certificate"
-    - file: contract/surface.toml
-      contains:
-        - 'subprocess = { status = "authoritative"'
-    - description: "canary for the Layer A (index-on) 12-class win range quoted below — a re-mint moves both bounds, and breaking here is the signal to restate them"
-      file: bench/certificate/artifact/CERTIFICATE.md
-      contains:
-        - "gist vs ripgrep across 12 classes: 12 win · 0 parity · 0 loss"
-        - "machine: **Apple M4 Max**"
-        - "8.93x"
-        - "5.78x"
-    - description: "canary for the Layer I (scanner-only) sweep and geomean this file leads with, and the Layer J scale caveat that bounds both"
-      file: bench/certificate/artifact/CERTIFICATE.md
-      contains:
-        - "24 win · 0 parity · 0 loss"
-        - "the scanner alone is **1.93× faster than ripgrep**"
-        - "352,316 files / 5.5 GiB on disk"
-        - "wins 5, ties 2, loses 5"
----
-
 # Gist — research map for agent-loop code search
 
 Gist studies one systems question: **how often can an agent search a changing

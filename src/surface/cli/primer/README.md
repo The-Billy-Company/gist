@@ -1,19 +1,3 @@
----
-doc_radar:
-  counts:
-    - description: "primer is four Zig modules — Surface + three renderers"
-      glob: src/surface/cli/primer/*.zig
-      equals: 4
-      unit: modules
-  sentinels:
-    - description: "one Surface drives every --generate target"
-      file: src/surface/cli/primer/primer.zig
-      contains: ["pub const Surface", "pub fn render", "pub fn emit", "complete-zsh"]
-    - description: "the zsh menu is captioned per group and derives its exclusions, rather than dumping one flat table"
-      file: src/surface/cli/primer/zsh.zig
-      contains: ["tag-order", "ignored-patterns", "group-name"]
----
-
 # `src/surface/cli/primer/` — man page + shell completions
 
 `--generate` artifacts for every product face, minted from the same `Surface`

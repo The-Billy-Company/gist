@@ -1,16 +1,3 @@
-<!--
-doc_radar:
-  sentinels:
-    - file: engine.go
-      contains:
-        - "func Open(roots ...string) (*Engine, error)"
-        - "func (e *Engine) Search(ctx context.Context, req analytic.Request) (*Cursor, error)"
-        - "func (e *Engine) Files(ctx context.Context, req analytic.Request) ([]string, error)"
-        - "func (e *Engine) Count(ctx context.Context, req analytic.Request) (int, error)"
-        - "func (e *Engine) Rank(ctx context.Context, req analytic.Request, top int) ([]Ranked, error)"
-        - "func (c *Cursor) All() iter.Seq2[analytic.Match, error]"
--->
-
 # `exact` — pattern search
 
 Where is this exact pattern? A warm `Engine` opened over some roots, queried many

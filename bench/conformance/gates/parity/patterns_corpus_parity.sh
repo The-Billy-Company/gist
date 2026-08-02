@@ -137,8 +137,7 @@ SLATE_MONOREPO=(
 # The hermetic slate: the same six roles over the committed `vendor/` and `src/`
 # subtrees `bench/apparatus/corpora/torture.py` plants. That generator and these
 # rows are one coupled pair — the tokens are named in both, and nothing
-# machine-enforces it beyond the corpora README's doc-radar sentinel, so a
-# rename there must land here in the same commit.
+# machine-enforces it, so a rename there must land here in the same commit.
 SLATE_TORTURE=(
   # Dominated by vendor/ (every vendored file names it) with a handful of
   # callers in src/ — the same silhouette the monorepo's regression case had.

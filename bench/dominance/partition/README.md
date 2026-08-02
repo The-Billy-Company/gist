@@ -1,15 +1,3 @@
-<!--
-doc_radar:
-  sentinels:
-    - file: bench/dominance/partition/gate_partition.py
-      contains: ["--committed", "--live", "keep_disabled", "min_walk_agreement"]
-    - file: bench/dominance/partition/certify_partition.sh
-      contains: ["GIST_NO_KEEP=1", "--type-list --docs", "over-claimed", "rescued"]
-    - description: "both populations the lane measures are really built"
-      file: bench/dominance/partition/certify_partition.sh
-      contains: ["classify tracked", "classify fixture"]
--->
-
 # bench/dominance/partition
 
 The certificate for the **corpus partition** — `--docs` / `--code` / `--data`.

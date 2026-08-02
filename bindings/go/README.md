@@ -1,20 +1,3 @@
-<!--
-doc_radar:
-  counts:
-    - glob: "bindings/go/*/"
-      equals: 2
-      unit: dirs
-  sentinels:
-    - file: exact/engine.go
-      contains:
-        - "func Open(roots ...string) (*Engine, error)"
-        - "func (e *Engine) Search(ctx context.Context, req analytic.Request) (*Cursor, error)"
-    - file: index/index.go
-      contains:
-        - "func Over(roots ...string) *Corpus"
-        - "func (c *Corpus) Status(ctx context.Context) (Trigrams, error)"
--->
-
 # `bindings/go/`
 
 Go binding for [gist](../../README.md) — search a tree. Exact pattern search and

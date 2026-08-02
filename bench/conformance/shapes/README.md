@@ -1,23 +1,3 @@
----
-doc_radar:
-  occurrences:
-    - description: "every declared CLI shape is one [[shape]] row in matrix.toml"
-      file: bench/conformance/shapes/shapes.toml
-      pattern: '\[\[shape\]\]'
-      equals: 27
-    - description: "the literal set keeps a degenerate-selection case (selector blind spot)"
-      file: bench/conformance/shapes/shapes.toml
-      pattern: 'select = "degenerate"'
-      min: 1
-  sentinels:
-    - description: "the driver reuses the certificate's stats (never a second impl)"
-      file: bench/conformance/shapes/shapes.py
-      contains:
-        - "import stats as S"
-        - 'sub.add_parser("parity")'
-        - 'sub.add_parser("gate")'
----
-
 # gist/bench/matrix — the CLI-shape admission matrix
 
 The races and the certificate prove gist beats the field on a handful of

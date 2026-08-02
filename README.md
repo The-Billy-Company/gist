@@ -163,9 +163,6 @@ build recipe and not prose: a specific spelling outranks a bare extension, and
 the shadow set that needs is derived from the type table rather than listed.
 
 <!-- The three paths above are illustrative shapes of the rule, not files here. -->
-<!-- doc-xref-ignore: docs/notes.md -->
-<!-- doc-xref-ignore: docs/CONVENTIONS -->
-<!-- doc-xref-ignore: docs/conf.py -->
 
 A genus **narrows** what the walk produced and never un-hides. Unlike `-t` and
 `-g` it will not pull a dotfile or a gitignored leaf back in — `code` is the

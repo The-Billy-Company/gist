@@ -1,30 +1,3 @@
-<!--
-doc_radar:
-  paths_exist:
-    - src/exec/session/warden/warden.zig
-    - src/exec/session/warden/ration.zig
-    - src/exec/session/warden/standdown.zig
-  sentinels:
-    - file: src/exec/session/warden/warden.zig
-      description: the ration is charged wholesale into per-thread lanes, swept back before any refusal, with relief tried before a refusal
-      contains: ["pub fn attend", "fn charge", "fn beg", "fn sweep", "fn refill", "const Lane", "align(std.atomic.cache_line)"]
-    - file: src/exec/session/warden/ration.zig
-      description: a machine share AND a work-shaped ceiling, both fail-closed to zero
-      contains: ["commons_fraction", "resident_ceiling", "arming_floor", "GIST_MEMORY_MB"]
-    - file: src/exec/session/warden/standdown.zig
-      description: the brake records the budget it refused so it cannot latch
-      contains: ["ration_bytes=", "pub fn standing", "pub fn lift"]
-    - file: src/exec/session/daemon/serve/serve.zig
-      description: the daemon allocates through the meter, not through its raw gpa
-      contains: ["Warden.init", "warden.attend", "standdown.mark"]
-    - file: src/exec/session/answer/keep.zig
-      description: the keep can be surrendered under pressure without deadlocking
-      contains: ["pub fn surrender", "tryLock"]
-    - file: bench/rungs/warden/bench.zig
-      description: the cost of the bound is gated, decomposed against a no-op wrapper, not merely reported
-      contains: ["budget_parallel_ns", "budget_serial_ns", "const Passthru", "WardenOverheadRegressed"]
--->
-
 # `warden/` — what a resident daemon may hold, and what happens when it wants more
 
 A `gist serve` daemon is a background process nobody remembers starting. This

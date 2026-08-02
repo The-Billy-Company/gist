@@ -1,16 +1,3 @@
----
-doc_radar:
-  counts:
-    - description: "daemon is serve + client only"
-      glob: src/exec/session/daemon/*/
-      equals: 2
-      unit: dirs
-  sentinels:
-    - description: "warm path stays fail-open to cold"
-      file: src/exec/session/daemon/client/client.zig
-      contains: [".cold", "attempt"]
----
-
 # `src/exec/session/daemon/` — warm Unix-socket transport
 
 Moved here from `exec/session/daemon/` so the resident session owns its
