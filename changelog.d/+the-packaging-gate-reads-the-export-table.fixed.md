@@ -15,11 +15,20 @@ Linux CI, where it had been failing.
 It reads `nm` now, which answers the actual question. Deliberately not `dlsym`: a
 handle resolves its dependencies too, so asking a loaded libgist for
 `irgx_engine_open` succeeds by finding libirgx's copy - the very thing under test.
-Three gates replace the one: libgist exports none of the substrate's names and
-records needing the library that does, it carries a loader-relative search path
-(the property that makes the shipped shape loadable, previously indistinguishable
-from a build-cache path that happened to resolve), and the same probe run over
-libirgx proves it can see an engine vocabulary when one is really there.
+Three gates replace the one: libgist exports none of the substrate's names, it
+carries a loader-relative search path (the property that makes the shipped shape
+loadable, previously indistinguishable from a build-cache path that happened to
+resolve), and the same probe run over libirgx proves it can see an engine
+vocabulary when one is really there.
+
+What is deliberately not asserted is that libgist records libirgx as a needed
+dependency. That record is the linker's decision rather than this repository's:
+ELF drops an `--as-needed` library that no undefined symbol needs, so a product
+whose statically linked Zig already satisfies everything records nothing, while
+Mach-O keeps the entry regardless. The sibling products disagree on exactly that
+line today from identical link calls, which is the proof it was never a contract.
+Absent redefinition is what makes the vocabulary single; the dependency table only
+ever explained it, and it is reported in the failure message for that reason.
 
 Nothing in the build changed - the boundary was already sound. Each product
 statically links the engine's Zig code, because that is what linking a Zig module
