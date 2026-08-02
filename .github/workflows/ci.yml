@@ -99,6 +99,13 @@ jobs:
       # that a flag's ALGEBRA matches ripgrep's over a real walk. It exists
       # because a `--type-add` type selected with `-t` was silently cancelling
       # every other `-t` on the line, which nothing in `zig build test` saw.
+      # The gate below shells `zig build -Doptimize=ReleaseFast` in this package,
+      # and that install step copies `../irregex/zig-out/lib/libirgx.a`. `check`
+      # and `test` above never install, which is why this is the first step in
+      # the job that needs the sibling on disk rather than merely resolvable.
+      - name: zig build (the sibling substrate)
+        run: zig build -Doptimize=ReleaseFast
+        working-directory: irregex
       - name: -t union parity (every type on the line reaches the answer)
         run: ./bench/conformance/gates/parity/type_union_parity.sh
 
@@ -139,12 +146,17 @@ jobs:
       # loader-relative rpath — and it looks for the substrate under the sibling
       # checkout's `zig-out`, not the copy this build installs into ours. So
       # both builds are required for that assertion to run at all.
-      - name: zig build (this package)
-        run: zig build
-        working-directory: gist
+      # The sibling FIRST, and the order is load-bearing rather than tidy: this
+      # package's install step copies `../irregex/zig-out/lib/libirgx.a` into its
+      # own prefix, so building gist against an unbuilt sibling fails on that
+      # copy. It was written the other way round and could only ever have worked
+      # on a machine where someone had already built irregex by hand.
       - name: zig build (the sibling substrate)
         run: zig build
         working-directory: irregex
+      - name: zig build (this package)
+        run: zig build
+        working-directory: gist
       # `-rs` and the grep, because every skip in this suite is conditioned on a
       # binary or library resolving, and a loader miss returns nothing rather than
       # erroring. That makes a broken build indistinguishable from a passing run:
@@ -187,18 +199,26 @@ jobs:
           # Workspace-relative on purpose: this input is read by the action, not
           # by a shell, so it does not follow a step's working directory.
           go-version-file: gist/bindings/go/go.mod
+      # The sibling first — gist's install step copies its `libirgx.a`. See the
+      # python job for why the order is load-bearing.
+      - name: zig build (the sibling substrate)
+        run: zig build
+        working-directory: irregex
       - name: zig build
         run: zig build
         working-directory: gist
       - run: go vet ./...
         working-directory: gist/bindings/go
-      # Exactly one test here still reaches for a `relate` binary, which ships
-      # from its own checkout and is not one this package can produce: the atlas
-      # artifacts it reads are relate's to write, and no other producer
-      # substitutes. Its reader half was split off so the assertion that a fresh
-      # artifact home reports nothing ready — entirely gist's own code — runs
-      # here rather than vanishing with it. Every other missing-binary arm is now
-      # fatal, so this is the only skip the job can legitimately print.
+      # Exactly one test here skips, and it is the only skip this job can
+      # legitimately print: `TestAtlasReportsEveryArtifact` reads
+      # `relate status --json`, so relate is not merely the producer of the
+      # artifacts under test but of the readiness document itself. relate is
+      # internal and cannot be checked out here. Every other missing-binary arm
+      # in this module is fatal, because they all resolve `gist` — which this job
+      # builds two steps up, so a miss there is a broken environment rather than
+      # an absent capability. The skipped assertion is not merely conceded: it
+      # runs for real in relate's CI, which builds both and drives this suite
+      # with `RELATE_BIN` set.
       - run: go test ./...
         working-directory: gist/bindings/go
 
@@ -221,6 +241,11 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - name: install the parity oracle
         run: command -v rg || { sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep; }
+      # The sibling first — gist's install step copies its `libirgx.a`. See the
+      # python job for why the order is load-bearing.
+      - name: zig build (the sibling substrate)
+        run: zig build
+        working-directory: irregex
       - name: zig build
         run: zig build
         working-directory: gist

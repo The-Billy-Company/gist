@@ -80,16 +80,31 @@ func TestRefreshBuildsAndReportsTheIndex(t *testing.T) {
 	}
 }
 
-// TestAtlasReportsNothingReadyWhenNothingIsBuilt is the half of the artifact
-// contract that needs no producer: reading a fresh artifact home must report
-// every artifact absent rather than defaulting one to ready.
+// TestAtlasReportsEveryArtifact pins that all three compression artifacts are
+// reported separately: quote needs the shelf specifically, so "the atlas is ready"
+// must not stand in for "the shelf is ready". The unbuilt read is the first half —
+// a fresh artifact home must report every artifact absent rather than defaulting
+// one to ready — and the built read is the second.
 //
-// Split out from the build half below because that half needs the relate binary,
-// which this package cannot produce and public CI cannot clone. Left fused, the
-// whole assertion skipped wherever relate was missing — so the reader half, which
-// is entirely gist's own code and runs anywhere, was never exercised on CI at all.
-func TestAtlasReportsNothingReadyWhenNothingIsBuilt(t *testing.T) {
-	empty, err := fixture(t).Atlas(t.Context())
+// The one skip left in this package, and the only one that survives scrutiny.
+// Every other missing-binary arm here became fatal, because this module answers
+// by running `gist` and a missing one is a broken environment. This is different
+// in kind: [Corpus.Atlas] reads `relate status --json`, so relate is not merely
+// the producer of the artifacts — it is the producer of the *readiness document*
+// under test. Neither half runs without it.
+//
+// It is also not relocatable the way irregex's ladder tests were. Those needed
+// only *a* producer, so they moved to the public one. Moving this would mean
+// relate's Go module requiring gist's, inverting the dependency edge permanently
+// in go.mod to serve a test. So it stays where the API lives and skips where the
+// binary cannot exist — and relate's CI, which can build both, runs this suite
+// against a real binary so the assertion is genuinely exercised somewhere.
+func TestAtlasReportsEveryArtifact(t *testing.T) {
+	c := fixture(t)
+	if _, err := runtime.Binary(runtime.ToolRelate); err != nil {
+		t.Skipf("no relate binary, and relate both writes these artifacts and reports their readiness: %v", err)
+	}
+	empty, err := c.Atlas(t.Context())
 	if err != nil {
 		t.Fatalf("atlas: %v", err)
 	}
@@ -97,22 +112,6 @@ func TestAtlasReportsNothingReadyWhenNothingIsBuilt(t *testing.T) {
 		if a.Ready() {
 			t.Errorf("%s reported ready in a fresh artifact home: %+v", name, a)
 		}
-	}
-}
-
-// TestAtlasReportsEveryArtifact pins that all three compression artifacts are
-// reported separately: quote needs the shelf specifically, so "the atlas is ready"
-// must not stand in for "the shelf is ready".
-//
-// The one test here that genuinely cannot run without relate: the artifacts it
-// reads are relate's to write, and no other producer substitutes for it. Unlike
-// irregex's ladder tests — which only needed *a* producer and so moved to gist —
-// this is a real cross-package integration, so it skips rather than relocating
-// into a repository that does not own the API under test.
-func TestAtlasReportsEveryArtifact(t *testing.T) {
-	c := fixture(t)
-	if _, err := runtime.Binary(runtime.ToolRelate); err != nil {
-		t.Skipf("no relate binary, and only relate writes the atlas this reads: %v", err)
 	}
 	built, err := c.RefreshAtlas(t.Context(), false)
 	if err != nil {
