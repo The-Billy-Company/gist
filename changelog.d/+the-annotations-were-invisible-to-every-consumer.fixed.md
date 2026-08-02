@@ -1,0 +1,3 @@
+Every function in this package is annotated, public and private alike, and every consumer's type checker has been ignoring all of it. PEP 561 says annotations inside an installed package are invisible unless the package ships a `py.typed` marker, and this one never did. The work was done and then hidden: `mypy` run against code importing this package got `Any` for the whole API and reported nothing wrong.
+
+The marker is there now, and hatchling ships it because it sits inside the package directory. There is a test for it too, because the failure mode is silent in both directions - nothing here breaks when it goes missing, and nobody downstream is told.
