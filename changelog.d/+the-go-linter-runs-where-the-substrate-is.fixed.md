@@ -1,0 +1,3 @@
+The Go binding's linter moved into the job that has the substrate checked out.
+
+It was living in `discipline`, which opens by saying it needs neither `../irregex` nor a gist binary - and means it, because a contributor who mistyped a heading should learn that in seconds rather than after a matrix compiles. But golangci-lint typechecks, and this module's `go.mod` replaces the substrate with `../../../irregex/bindings/go`, so from a lone checkout it failed on a missing replacement directory rather than on any Go it was asked to judge. The `go` job already clones both repositories and sets up the toolchain, so the lint costs nothing extra there and now reads real code.
