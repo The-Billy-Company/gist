@@ -314,9 +314,12 @@ jobs:
     # needs ../irregex or a gist binary; cloning and compiling the ecosystem
     # would spend minutes without making the verdict any stronger.
     #
-    # Python-distributed tools run through uv's isolated no-project environment.
-    # Hosted tool actions and the cache use verified SHA pins; ShellCheck comes
-    # with the runner. Dependabot watches every pin each Monday.
+    # Python-distributed tools run through uv's isolated no-project environment,
+    # ShellCheck included: it used to come with the runner, and an image carrying
+    # an older build reported SC2317 against a `trap`-invoked cleanup that newer
+    # ShellCheck understands. An unpinned linter turns an image bump into a
+    # verdict, so it is pinned like every other tool here. Hosted tool actions and
+    # the cache use verified SHA pins. Dependabot watches every pin each Monday.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -353,7 +356,7 @@ jobs:
           uv run --no-project --with ruff==0.16.1 ruff check .
           uv run --no-project --with ruff==0.16.1 ruff format --check .
       - name: Shell correctness
-        run: git ls-files '*.sh' | xargs shellcheck
+        run: git ls-files -z '*.sh' | xargs -0 uv run --no-project --with shellcheck-py==0.11.0.1 shellcheck
       # Run this last so the workflow audits the exact file CI just interpreted,
       # including every action and permission introduced by this job itself.
       - name: GitHub Actions security
