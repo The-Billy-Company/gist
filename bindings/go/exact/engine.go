@@ -16,6 +16,7 @@ package exact
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"iter"
 	"slices"
 	"strconv"
@@ -144,7 +145,7 @@ type Ranked struct {
 // files demoted. This is gist's one shape with no ripgrep equivalent; top <= 0
 // takes the engine's default. Ranking reads the persisted index, so with none
 // there is nothing to rank and the answer is empty.
-func (e *Engine) Rank(ctx context.Context, req analytic.Request, top int) ([]Ranked, error) {
+func (e *Engine) Rank(ctx context.Context, req analytic.Request, top int) (out []Ranked, err error) {
 	rows, err := runtime.Run(ctx, runtime.Query{
 		Op:     analytic.OpRank,
 		Params: analytic.Rank{Pattern: req.Pattern, Top: top, Fixed: req.Fixed, IgnoreCase: req.IgnoreCase},
@@ -154,8 +155,7 @@ func (e *Engine) Rank(ctx context.Context, req analytic.Request, top int) ([]Ran
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Ranked
+	defer func() { err = errors.Join(err, rows.Close()) }()
 	for row, err := range rows.All() {
 		if err != nil {
 			return out, err
