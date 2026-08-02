@@ -9,12 +9,22 @@
 
 [package]
 name = "gist"
-version = "1.0.0"                                                                                                  # x-release-please-version
+version = "1.0.0"                                                                                                                                # x-release-please-version
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
 publish = false
-description = "Importable, rg-parity search API over the GIST code-search kernel (subprocess transport by default)."
+description = "Indexed code search for Rust - ripgrep-parity regex search over a persisted trigram index, with ranked definition-first results."
+readme = "README.md"
+homepage = "https://github.com/The-Billy-Company/gist"
+repository = "https://github.com/The-Billy-Company/gist"
+documentation = "https://github.com/The-Billy-Company/gist/blob/main/bindings/rust/README.md"
+authors = [ "The Billy Company" ]
+# Five slots, and the crate name spends none of them: "gist" tells a searcher
+# nothing about code search. So these are the job (code-search, grep, search)
+# and the tool somebody is already holding when they come looking (ripgrep).
+keywords = [ "code-search", "grep", "ripgrep", "regex", "search" ]
+categories = [ "text-processing", "development-tools", "api-bindings", "algorithms" ]
 
 [lib]
 name = "gist"
