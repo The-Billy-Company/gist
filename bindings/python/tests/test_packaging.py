@@ -39,6 +39,23 @@ def _checkout(name: str) -> Path | None:
     return None
 
 
+def _recorded_dependencies(library: Path) -> str:
+    """The libraries `library` records that it needs, as the platform states them.
+
+    A load-time verdict alone cannot distinguish "imports the substrate" from
+    "absorbed a copy of it", which is the whole question here — so a failure
+    quotes the dependency table instead of leaving the reader to go find it.
+    """
+    probe = ["otool", "-L"] if sys.platform == "darwin" else ["objdump", "-p"]
+    try:
+        out = subprocess.run([*probe, str(library)], capture_output=True, text=True, check=False)
+    except OSError as exc:  # the probe itself is absent — say so rather than vanish
+        return f"<{probe[0]} unavailable: {exc}>"
+    keep = ("NEEDED", "RUNPATH", "RPATH") if sys.platform != "darwin" else (".dylib",)
+    lines = [ln.strip() for ln in out.stdout.splitlines() if any(k in ln for k in keep)]
+    return "\n".join(lines) or f"<no dependency records; {probe[0]} said: {out.stderr.strip()}>"
+
+
 def _library(checkout: str, stem: str) -> Path | None:
     """The built dylib. The checkout and the library are named separately: the
     engine's repository is `irregex` while its artifact is `libirgx`."""
@@ -78,16 +95,23 @@ def installed(tmp_path: Path) -> Path:
 
 def test_a_consumer_can_open_it_from_an_unrelated_directory(installed: Path, tmp_path: Path):
     """The regression: with a build-tree-only rpath this fails to resolve the substrate."""
-    done = _open_in_a_child(installed / f"lib{PRODUCT}{SUFFIX}", tmp_path)
-    assert done.returncode == 0, f"a staged lib{PRODUCT} would not load:\n{done.stderr}"
+    product = installed / f"lib{PRODUCT}{SUFFIX}"
+    done = _open_in_a_child(product, tmp_path)
+    assert done.returncode == 0, (
+        f"a staged lib{PRODUCT} would not load:\n{done.stderr}"
+        f"What it records that it needs:\n{_recorded_dependencies(product)}"
+    )
 
 
 def test_it_still_imports_the_substrate_rather_than_carrying_one(installed: Path, tmp_path: Path):
     """The other half. If the product quietly compiled its own copy of the engine it
     would load happily with no substrate beside it — and then hand back handles no
     other library can interpret."""
+    product = installed / f"lib{PRODUCT}{SUFFIX}"
+    records = _recorded_dependencies(product)
     (installed / f"lib{SUBSTRATE}{SUFFIX}").unlink()
-    done = _open_in_a_child(installed / f"lib{PRODUCT}{SUFFIX}", tmp_path)
+    done = _open_in_a_child(product, tmp_path)
     assert done.returncode != 0, (
-        f"lib{PRODUCT} loaded with no substrate present — it is not importing the shared engine"
+        f"lib{PRODUCT} loaded with no substrate present — it is not importing the shared "
+        f"engine. What it records that it needs:\n{records}"
     )

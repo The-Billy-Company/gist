@@ -169,4 +169,6 @@ def test_rootless_engine_matches_cold_rootless(corpus, monkeypatch) -> None:
     monkeypatch.chdir(corpus)
     with gist.Engine() as eng:  # no roots -> the rootless CWD walk
         warm = list(eng.search("TODO"))
-    assert warm == engine.run(SearchRequest(pattern="TODO"), cwd=None)
+    # Rootless on both sides, so no `paths` — but the same pinned order as `_cold`.
+    rootless = SearchRequest(pattern="TODO", extra_flags=("--sort", "path"))
+    assert warm == engine.run(rootless, cwd=None)
