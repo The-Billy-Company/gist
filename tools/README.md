@@ -6,6 +6,21 @@ them with `python3 tools/<name>.py`.
 | Script | What it does |
 |---|---|
 | `sync_contract.py` | Verifies the foreign contracts are reachable as sibling checkouts (`../irregex`, `../relate`). |
+| `version_parity.py` | Proves every mirror of this package's version still equals `build.zig.zon`, and that the release bot was told about each one. |
+
+## One version, and where the copies are
+
+`build.zig.zon`'s `.version` is the single authority. `src/root.zig` reads it
+through a build option, Rust reads `CARGO_PKG_VERSION`, and Python reads its
+installed distribution metadata — none of them restate it. What is left is the
+publishing manifests that cannot import anything, and each carries an
+`x-release-please-version` marker that `release-please-config.json` lists and
+the release bot rewrites in one commit.
+
+`version_parity.py` is what keeps that honest: it discovers marked lines rather
+than holding a list, so it fails on a mirror that drifted **and** on a mirror
+the release config never learned about. It runs in CI (the `version` job) and
+takes `--json`.
 
 ## Four contracts, one of them ours
 

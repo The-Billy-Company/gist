@@ -285,7 +285,7 @@ fn lifecycleAnswer(args: []const []const u8) !bool {
         }
         if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
             var line: [64]u8 = undefined;
-            gist.corpus.emitStdout(try std.fmt.bufPrint(&line, "gist {s}\n", .{gist.version_string}));
+            gist.corpus.emitStdout(try std.fmt.bufPrint(&line, "gist {s}\n", .{chassis.version_string}));
             return true;
         }
         // rg's phrasing, gist's build: the vendored PCRE2 is always present and
@@ -296,7 +296,7 @@ fn lifecycleAnswer(args: []const []const u8) !bool {
         }
         if (std.mem.eql(u8, arg, "--generate") or std.mem.startsWith(u8, arg, "--generate=")) {
             const inl = if (arg.len > "--generate".len) arg["--generate=".len..] else null;
-            primer.emit(gist.version_string, inl orelse nextAfter(args, arg));
+            primer.emit(chassis.version_string, inl orelse nextAfter(args, arg));
             return true;
         }
     }
@@ -345,11 +345,11 @@ fn run(init: std.process.Init) !void {
     if (std.mem.eql(u8, mode, "--version") or std.mem.eql(u8, mode, "-V")) {
         var line: [64]u8 = undefined;
         return gist.corpus.emitStdout(
-            try std.fmt.bufPrint(&line, "gist {s}\n", .{gist.version_string}),
+            try std.fmt.bufPrint(&line, "gist {s}\n", .{chassis.version_string}),
         );
     }
     if (std.mem.eql(u8, mode, "--schema")) {
-        schema.emit(gist.version_string);
+        schema.emit(chassis.version_string);
         return;
     }
     // `--generate <target>` — the same surface `--schema` describes to a
@@ -363,7 +363,7 @@ fn run(init: std.process.Init) !void {
             gist.assay.diag("gist: unknown flag {s}\n", .{mode});
             std.process.exit(2);
         };
-        primer.emit(gist.version_string, inl orelse it.next());
+        primer.emit(chassis.version_string, inl orelse it.next());
         return;
     }
 

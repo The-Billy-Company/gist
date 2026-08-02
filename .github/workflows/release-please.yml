@@ -1,0 +1,56 @@
+# Open (and keep updating) a release PR from the conventional commits on main.
+#
+# The PR bumps `build.zig.zon` and every packaging manifest that mirrors it —
+# the list lives in release-please-config.json, and each target line carries an
+# `x-release-please-version` marker. Merging it tags `vX.Y.Z` and cuts a GitHub
+# Release. Nothing here publishes: `release.yml` does that, triggered by the tag.
+#
+# ── Two things worth knowing before the first release
+#
+# 1. The changelog is NOT written by this workflow. towncrier owns CHANGELOG.md
+#    and the fragments under changelog.d/ are the notes people actually read, so
+#    the config sets `skip-changelog`. Before merging the release PR, run
+#    `towncrier build --version <the version the PR bumps to>` and push that
+#    onto the PR branch, so the tag and the notes land together.
+#
+# 2. A tag pushed with the default GITHUB_TOKEN does not start another workflow
+#    — GitHub's guard against recursive CI. With only GITHUB_TOKEN the release
+#    PR still works, but `release.yml` will not fire on the tag and the wheels
+#    have to be published by hand (`workflow_dispatch`). Set a repository secret
+#    RELEASE_PLEASE_TOKEN (a fine-grained PAT with contents + pull-requests
+#    write) and the hand-off happens on its own.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel: a half-applied release PR is worse than a slow one.
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: release PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Write to push the release branch and its version bumps; pull-requests to
+      # open and label the PR; issues to comment on the ones a release closes.
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      # release-please reads the commit history through the GitHub API, so there
+      # is nothing to check out and nothing to build.
+      - uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          target-branch: main
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}

@@ -18,6 +18,14 @@ const api = engine.api;
 const ngram = engine.ngram;
 const portal = engine.portal;
 
+/// This package's semver, read from `build.zig.zon`'s `.version` — the single
+/// place it is written. `build.zig` lifts it in as a build option, so
+/// `gist --version`, the `--schema` manifest, and the generated man page all
+/// answer with this binary's own number rather than the engine's. They are not
+/// the same axis: the engine underneath versions on its own schedule, and
+/// `engine.version_string` is still how you ask what it is.
+pub const version_string: [:0]const u8 = @import("build_options").version;
+
 // ── the CLI vocabulary that stays with this product ──
 pub const cli = struct {
     /// `--generate`: the Surface vocabulary rendered as the man page and the

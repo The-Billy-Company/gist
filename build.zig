@@ -30,6 +30,23 @@ pub fn build(b: *std.Build) void {
         .{ .name = "irregex", .module = irgx_dep.module("irregex") },
     };
 
+    // ── the one place this package's semver lives ──
+    // `build.zig.zon`'s `.version` is the single authority; `src/root.zig`
+    // reads it through this option instead of restating it, and every remaining
+    // copy is a packaging manifest that cannot import anything (Cargo, PyPI).
+    // Those carry an `x-release-please-version` marker and are moved by the
+    // release bot; `tools/version_parity.py` fails if one of them lags.
+    //
+    // The package name rides along so this generated file differs from the one
+    // `irregex` generates. Zig content-addresses it, and two packages whose only
+    // option was an identical version string produced the SAME file — which it
+    // then refuses as the root of two modules the moment this package links the
+    // engine. Naming the package keeps them distinct and reads better anyway.
+    const zon = @import("build.zig.zon");
+    const version = b.addOptions();
+    version.addOption([:0]const u8, "version", zon.version);
+    version.addOption([:0]const u8, "package", @tagName(zon.name));
+
     // ── the chassis module (`@import("gist")` — what `relate` and `blast` ride) ──
     const chassis = b.addModule("gist", .{
         .root_source_file = b.path("src/root.zig"),
@@ -38,6 +55,7 @@ pub fn build(b: *std.Build) void {
         .pic = true,
         .imports = &deps,
     });
+    chassis.addOptions("build_options", version);
 
     // ── the product binary ──
     // The CLI is the product surface — the on-PATH binary whose entire reason
@@ -54,13 +72,17 @@ pub fn build(b: *std.Build) void {
         "optimize mode for the installed CLIs (default ReleaseFast — the product surface's whole point is speed)",
     ) orelse .ReleaseFast;
     const cli_deps = if (cli_optimize == optimize) deps else engines(b, target, cli_optimize);
-    const cli_chassis = if (cli_optimize == optimize) chassis else b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = cli_optimize,
-        .pic = true,
-        .imports = &cli_deps,
-    });
+    const cli_chassis = if (cli_optimize == optimize) chassis else blk: {
+        const twin = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = cli_optimize,
+            .pic = true,
+            .imports = &cli_deps,
+        });
+        twin.addOptions("build_options", version);
+        break :blk twin;
+    };
     // A face main is a thin exe root: real driver code is analyzed inside
     // the chassis module (whose root is src/root.zig, so relative imports
     // resolve) and reached as `@import("gist").faces.*`.
@@ -101,6 +123,7 @@ pub fn build(b: *std.Build) void {
         .pic = true,
         .imports = &deps,
     });
+    abi.addOptions("build_options", version);
     abi.linkLibrary(irgx_lib);
     // A shipped dylib has to find its substrate beside itself. `linkLibrary`
     // records only this build tree's own output dir — a RELATIVE
@@ -136,6 +159,7 @@ pub fn build(b: *std.Build) void {
             .pic = true,
             .imports = &deps,
         });
+        obj_mod.addOptions("build_options", version);
         const obj = b.addObject(.{ .name = "gist", .root_module = obj_mod });
         const repack = b.addSystemCommand(&.{ "libtool", "-static", "-o" });
         const aligned_a = repack.addOutputFileArg("libgist.a");
@@ -250,13 +274,17 @@ pub fn build(b: *std.Build) void {
         "test-optimize",
         "optimize mode for the unit-test binary (default ReleaseSafe)",
     ) orelse .ReleaseSafe;
-    const test_module = if (test_optimize == optimize) chassis else b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = test_optimize,
-        .pic = true,
-        .imports = &engines(b, target, test_optimize),
-    });
+    const test_module = if (test_optimize == optimize) chassis else blk: {
+        const twin = b.createModule(.{
+            .root_source_file = b.path("src/root.zig"),
+            .target = target,
+            .optimize = test_optimize,
+            .pic = true,
+            .imports = &engines(b, target, test_optimize),
+        });
+        twin.addOptions("build_options", version);
+        break :blk twin;
+    };
 
     const shards = b.option(
         usize,
