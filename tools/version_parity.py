@@ -55,7 +55,13 @@ SKIP = {
     ".pytest_cache",
     ".ruff_cache",
     "testdata",
+    # Release notes, before and after the fold. Their whole subject is versions
+    # and the machinery that moves them, so an entry can name this marker and a
+    # number in one sentence and read as a mirror to any line-level heuristic.
+    # They are also the one place the bot must never rewrite: a past release's
+    # number is history, not a copy of the current one.
     "changelog.d",
+    "CHANGELOG.md",
 }
 # Text files only, and only the kinds a manifest is written in.
 SUFFIXES = {".zon", ".toml", ".py", ".rs", ".go", ".zig", ".h", ".json", ".md", ".yml", ".yaml"}

@@ -7,6 +7,1118 @@ All notable changes to `gist` (the product chassis; ships the `gist` and
 
 <!-- towncrier release notes start -->
 
+## [1.0.0] - 2026-08-02
+
+### Added
+
+- A resident daemon now has a memory ration it cannot exceed, instead of an
+  appetite bounded only by the corpus it happened to be pointed at. Measured on one
+  laptop before this: a `gist serve` 36 seconds old holding 1904 MB, several of them
+  resident at once across worktrees, and the machine out of memory.
+
+  The new `exec/session/warden/` is three small pieces. `ration.zig` decides how
+  many bytes this machine will lend — the smaller of a quarter of physical RAM and a
+  work-shaped ceiling, floored so a machine too small to lend a useful share arms
+  nothing at all rather than half a mirror (`GIST_MEMORY_MB` overrides). `warden.zig`
+  makes that binding by being the allocator the daemon builds everything through, so
+  the ceiling is a property of the process rather than a habit of its callers: one
+  atomic test-and-add per allocation, which is what keeps eight concurrent workers
+  from crossing it together and then each discovering it. Meeting it is the ordinary
+  warm→cold declinature — the cold walk answers every query correctly — and the
+  answer keep is surrendered first, since rendered answers are recomputable by
+  construction (`Keep.surrender` tries its lock rather than taking it, because the
+  hand runs inside a failing allocation on a thread that may already hold it).
+
+  `standdown.zig` is why a ceiling was safe to impose at all. Bound the daemon and
+  nothing else and an unfittable tree gets a spawn storm — meet the ceiling mid-load,
+  exit, and let the next query fork a replacement that dies the same way, forever.
+  A daemon that stands down leaves a note beside its socket, and the note records
+  *which ration* it was refused under, so a raised `GIST_MEMORY_MB` takes effect on
+  the next query instead of waiting out the expiry: the note blocks the spawn and
+  only a spawn can lift it, so a refusal that covered every later attempt would have
+  stranded the warm tier with nothing to say it had already been fixed.
+
+  A bound that costs throughput is not worth having, so the overhead is measured by
+  a gated bench (`zig build warden`) that fails rather than reports, against the
+  allocator the daemon actually gets (`smp_allocator`) and decomposed against a
+  wrapper that forwards and accounts nothing. That decomposition is what mattered:
+  interposing an allocator costs 0.1-0.6 ns/op, so the whole cost was accounting —
+  and charging one shared counter per allocation cost **217 ns/op with 8 workers
+  against 0.5 ns bare**, a guard 350x the work it guarded, because `smp_allocator`
+  scales by giving each CPU its own shard and a global counter reintroduces exactly
+  the contention it exists to avoid.
+
+  Fixed by charging wholesale and spending retail: `charge` claims 256 KiB at a
+  time into a per-thread lane (one counter per cache line, carrying its own copy of
+  the backing allocator so the fast path touches a single line), and allocations
+  spend from the lane. Shared state is touched about once per 256 KiB instead of
+  once per allocation, which puts the 8-thread cost at 0.4-0.9 ns/op over the
+  no-op wrapper - inside machine noise, a 230x improvement. The ceiling stays
+  absolute because the shared counter tracks *reserved* bytes: live usage is always
+  `held` minus unspent lane credit, so it can never exceed the ration, and `sweep`
+  reclaims every lane before anything is refused so the strictness never becomes a
+  false refusal. Lanes are process-lifetime slots borrowed by index, so a dead
+  thread strands nothing - its credit stays reclaimable, and Zig has no
+  thread-exit hook to rely on. Two tests pin it: a lane may not hoard what the
+  ceiling needs (it fails if `sweep` is deleted), and eight workers with room for
+  many batches still never cross the ration.
+
+  What remains is a floor - a hard ceiling must claim on alloc and release on
+  free, and two uncontended atomics cost ~2.2-3.6 ns - so the serial column is
+  marginally worse than the shared-counter version in exchange for the 230x
+  parallel win. End-to-end nothing was ever detectable anyway: mirror load plus
+  index build 1650 ms metered against 1675 ms bare, warm queries 3.6 ms against
+  3.7 ms, both inside run-to-run spread with the winner flipping between rounds.
+  Two layout facts came out of the same measurements, both against intuition:
+  `held` and `crest` deliberately *share* a cache line (splitting them cost 1.3
+  ns/op, since a charge writes one and reads the other), while the diagnostics are
+  pushed off it; and `charge` reads the crest before updating it, because an
+  unconditional second read-modify-write on the hot line cost 293 ns/op where the
+  conditional costs 117, and a high-water mark that only rises is safe to skip.
+
+  The meter earned its keep immediately by pricing a spike nobody could see. On this
+  repo the daemon settles at 583 MB but *crests at 2793 MB* while building its warm
+  trigram index, because that build is out-of-place — ~138 M postings at 8 bytes
+  each in per-shard buffers, counting-sorted into a second buffer the same size.
+  Shrinking each shard's unused tail before the output is claimed took the crest
+  from 3464 MB to 2793 MB with the settled set unchanged and postings byte-identical
+  (capacity only). The remaining 2× is inherent to the out-of-place sort, and it —
+  not the steady state — is what currently sizes the ceiling.
+- A verification lane nearly certified a tree as immune to an environment variable
+  on the strength of a run that never executed. The trap belongs in both packages
+  that can hit it, so it is now in the README under "Build and test" here as well
+  as in irregex, which owns `brigade.zig` and carries the longer version.
+
+  `zig build test` caches the test run and the environment is part of the cache key.
+  `-Dtest-filter` reaches the harness as `BRIGADE_FILTER`, an environment variable
+  set on the run step, and Zig hashes a run step's environment along with its argv.
+  So a new environment always executes and any environment you have already used
+  replays from cache - step skipped, nothing run, exit 0 in about a third of a
+  second here. Note the direction, because I had it backwards at first: the problem
+  is not that environment variables are missing from the cache key, it is that they
+  are in it, so every distinct environment earns a durable entry that is replayed
+  on the second visit.
+
+  That is exactly the shape of an immunity probe - set the variable, run; unset it,
+  run again to confirm - where the confirming leg revisits a seen environment and is
+  therefore green by construction. The tell is neither the exit code nor the test
+  count: a cached run still prints `1/1 tests passed` under `--summary all`, and the
+  only distinguishing token is `cached` against `success <n>ms`.
+
+  The README's answer is to drive the compiled test binary directly, which has no
+  build-cache layer and executes every time, with `BRIGADE_TIMES=1` as the evidence
+  it did.
+
+  Measured here, not transcribed: A, B, A', B' over one probe variable gives
+  `success 3ms`, `success 3ms`, `cached`, `cached` - four exit-0 runs all claiming
+  1/1 passed, two of which ran nothing.
+- Added **`gist --generate`**, which mints `gist(1)` and bash · zsh · fish · PowerShell completions from the same `flag_catalog` the argv parser dispatches on. `zig build` now places them where each installed shell already looks, so `man gist` answers and `gist -<TAB>` completes with no configuration; `GIST_SHELL_INSTALL=0` declines, and a shell that isn't installed is never touched.
+
+  The point is not that ripgrep lacks these — its zsh completion is the best hand-written one in the field. The point is that it _is_ hand-written, and carries a comment asking you to re-run a CI script "to ensure that the options supported by this function stay in synch with the `rg` binary". A drift gate is an admission that there is drift to gate. Minting from the parse table removes the category, and buys three things with the effort that would have gone into keeping it in sync.
+
+  **A tab costs no process.** `_rg_types` answers `-t<TAB>` by forking `rg --type-list` and re-parsing it, per keystroke; gist's menu is an array written into the file at generation time. Measured here with both functions' candidate sinks stubbed identically, so only the gather is timed: **5.0 ms → 0.065 ms, ~77×** (an earlier run on a busier machine put rg at 6–9 ms; gist's side barely moves, because there is nothing in it to slow down). gist's 239 candidates each arrive with their globs attached, where rg discards them by default and shows 224 bare names. The same holds for engines, sort keys, color postures and hyperlink aliases, and the bash side filters its baked menus with a pure-shell loop rather than a `compgen -W` subshell, so the claim is literal in all four shells.
+
+  **The menu is grouped.** `rg -<TAB>` is one alphabetical wall of flags. `gist -<TAB>` arrives as captioned sections — _Corpus — which bytes are searched_, _Semantics — what counts as a match_, _Presentation_, _Execution_ — and the man page is organized the same way, because both read the `Reach` the parser already records to decide what a persisted setting may do. A flag lands in the right section by being classified at all, and the manual answers the question a reader actually arrives with instead of what comes after `--max-filesize`.
+
+  **Mutual exclusion is derived.** `-i`/`-s`/`-S` rule each other out in the menu because they resolve to one case mode in the parser, and `--context-separator` fights `--no-context-separator` because they assign one string — a pairing no hand-kept exclusion list thinks to make. Three exhaustive `switch`es over the action union decide what each flag takes, displaces, and where it belongs, so a new action is a compile error until someone answers all three.
+
+  **The menu tells the truth about the grammar.** Three defects that only a real keystroke finds, each fixed at the generator: a verb is offered at `argv[1]` and nowhere else, because `gist -w index` searches for "index" and a menu that captions it "build and persist the index" is lying (fish's usual `__fish_use_subcommand` is the _git_ rule — it skips leading flags — so naming it would have been the bug); a glued short value is split before the flag-list fallback, so `-t<TAB>` menus the type registry where ripgrep's generated bash dead-ends; and the zsh value tags are named ahead of the option groups, because zsh offers the first tag-order entry that yields anything and the caller half-way through `-t` wants a type, not the flag wall they have already left.
+
+  the shell-completion suite under `shell/` is the other half of the proof: bash, zsh, fish, PowerShell and mandoc each parse their own artifact, every flag is shown to be filed in exactly one captioned group, the three grammar rules above are asserted against the generated bytes, and no generated file may run a program at tab time. The man page is pure ASCII roff, folded where mandoc measures it, and mandoc-clean with no exceptions: it carries a real date, and `SOURCE_DATE_EPOCH` pins it, so a packager or a drift gate gets identical bytes while a human minting their own page gets the day they minted it.
+- Added `irgx_last_fault(irgx_fault *out)` — the C seam's per-incident detail pull, plus the one `Fault → Status` translation behind it. A status code is one of six values, so it can name a _kind_ of failure but never the incident; and because the in-process session deliberately scopes assay's diagnostic sink `.dark`, an embedding host previously had no way at all to learn _which_ fault, about _which_ file, at _which_ byte. This is a pull, not a second sink: `sqlite3_errmsg` / `git_error_last` semantics — per thread, last fault wins, `path` borrows thread-local storage until that thread's next call, and reading does not consume. `irgx_fault` is `struct_size`-checked and append-only like `SearchRequest`, so a newer field is a forward-compatible extension rather than a silent reinterpret; the symbol is purely additive, so `gist_abi_version` stays `2`. The translation itself now lives once, beside `Status` in `surface/ffi/contract.zig`, read off `contract/search_api.toml`'s `disposition` column rather than chosen at each call site: a new `Disposition` enum makes the contract's three channels executable, `Status.disposition()` proves `stale` is a declinature (negative, but not an error), and `Status.ofFault` switches exhaustively over all nineteen `fault.Fault` members so a new taxonomy member is a compile error instead of a fault silently reported as a clean run. Every entry point that starts work now opens the fault window first, so a host asking after a **successful** call is handed nothing rather than an earlier failure, while the four destructors and both readers leave the slot alone so a cleanup path can still report it.
+- Added a **resident answer keep** to the `gist serve` daemon, so a verb whose answer is a pure function of the corpus is not recomputed while the corpus has not moved. Every other acceleration in this kernel makes one query cheaper; some questions have no cheaper form — `relate echoes --shape distinct` is a claim about every pair of files, and there is no index over "every pair" — so the only remaining elision is a sweep already done over the same bytes. Measured on this tree: `relate echoes --unit function --shape distinct` 27.5 s → 4.9 ms (5567×), `relate echoes --shape distinct` 8.1 s → 6.2 ms (1315×), `relate echoes --unit function --shape families` 3.4 s → 5.7 ms (590×), `irregex blast Corpus` 2.3 s → 4.8 ms (471×), `relate echoes --as shapes --shape families --unit function` 1.8 s → 4.7 ms (381×), each byte-identical to its cold answer.
+
+  The keep is shaped so it cannot become a second source of truth. **The daemon never computes**: a client computes cold and offers its rendered stdout back stamped with the corpus change epoch it read _before_ it started, and the daemon retains those bytes only if the epoch has not advanced since — a store that cannot recompute cannot recompute differently. The key is the literal question rather than a hash (tool, verb, argv, canonical cwd, every scoping environment knob, and the running binary's own size + mtime, so a rebuilt verb is never served its previous build's answer). Output is teed, not buffered, so an early exit or a closed pipe costs a keep entry and never a byte of the answer. Every failure mode — no daemon, stale protocol, a watcher that cannot vouch for an epoch, an oversized answer — is silence, and the verb behaves exactly as it did before. `GIST_NO_KEEP=1` opts out; a TTY is out of the envelope entirely.
+
+  Two supporting fixes. The freshness annals' `doubt` flag now poisons only _which_ files changed, not _whether_ the corpus moved: an unmappable event advances the epoch instead of making it unanswerable, so one unresolvable path no longer silently disables the keep for the rest of the daemon's life. And a recalled answer says so — stdout stays byte-identical, but stderr closes with a `recalled · epoch N · N B` line in place of the verb's own summary, because that summary's file counts and milliseconds describe work the run did not do.
+- Added ripgrep's two **message switches** — `--no-messages` and `--no-ignore-messages` (with `--messages`/`--ignore-messages` to undo them left-to-right) — closing the last lane of gist's stderr that had no switch at all. `--no-messages` quiets the per-file line for a path that would not open, descend, or preprocess, the `-L` symlink-loop report, and the "no files were searched" verdict; `--no-ignore-messages` quiets the narrower lane for an ignore source that would not open, and `--no-messages` subsumes it exactly as it does in rg.
+
+  **Suppression is cosmetic by construction.** Flagging the run and reporting it were already separate statements at every producer, so a quieted walk error still exits 2 and a quieted ignore message still exits 0 — measured against live rg for all three producers. That split is the half of this feature a careless implementation breaks, so it is what the new differential asserts: rg's own mined `--no-messages` cases score on the exit code alone, which a gist that merely _rejected_ the flag also satisfied (both exit 2). `bench/rgsuite/flags.py` now proves the real property — stderr goes empty while stdout and the exit class do not move — across four flag postures × three producers × both engines.
+
+  The gate itself is `assay.Chatter`, the exact inverse of the existing `GIST_TRACE` lens: a lens is dark until it is named, a chatter class speaks until it is muffled. Both live behind one thread-local sink, so the C-ABI never-write contract and the daemon's per-request capture keep holding without a second mechanism. The nesting between the two switches is resolved once in `assay.muffle` rather than re-derived per call site.
+
+  Fixed alongside it: a named `--ignore-file` that will not open was previously **silent**, so rules the user explicitly asked for could go unenforced with a clean exit and no way to notice. It now reports with rg's errno phrasing (`gist: nope.ignore: No such file or directory (os error 2)`) and, as in rg, still does not error the run — an unenforced ignore source is advisory, unlike an unreadable directory.
+- Apache-2.0, matching the rest of the ecosystem: the same permissive freedoms as MIT plus an explicit patent grant, a NOTICE obligation, and a stated-changes requirement. NOTICE records that nothing third-party is bundled here — the dominance certificate measures ripgrep, csearch, and zoekt by invoking binaries the operator installed, so no competitor's bytes ship in the package — and that the rg-parity conventions this chassis is a drop-in for are implemented from published behavior, credited in the module headers and `research/gist/PRIOR_ART.md`.
+- Every one of these repositories has shipped a `deny.toml` since the crate existed, and not one of them ever ran it. Four checks were written down and none enforced: a RustSec advisory against anything in the graph, the banned crates that would mean a regex binding grew a TLS stack or an async runtime, the license allowlist, and which registries a crate may come from. A policy nobody runs is a policy nobody has.
+
+  So `cargo deny check` is a step in the `rust` job now, on a prebuilt binary rather than the Docker action - that action takes a repo-root-relative manifest path and the checkout layout differs in every repo here, so a plain step inheriting the working directory is both shorter and harder to get wrong.
+
+  It passed first try in all four, which is the good version of this news and also exactly why it needed wiring: nothing was wrong, so nothing would have said when something became wrong. One thing needed saying out loud. The allowlist is a policy - the licenses this project accepts - not a snapshot of today's graph, so most entries go unmatched and cargo-deny warns once each. Shrinking the list to silence that would invert the point, because the next permissively-licensed crate would fail and get fixed by widening the list again, one entry at a time, with nobody deciding anything. `unused-allowed-license = "allow"` says that instead.
+
+  While in there: the toolchain pin asked for `rust-src`, which nothing in this repository uses. Every contributor and every CI run was downloading the standard library's source to satisfy a component no build reads. It is gone, and the pin now carries the same comment its three siblings do.
+- Every published Dominance-and-Fit Certificate now appends a row to a mint ledger (bench/certify/LEDGER.md) recording its corpus, the layers it actually carried, its verdict tally, and its cold/crest geomeans — so a re-mint that silently drops a layer is caught at the mint instead of surfacing later as a stale documentation pin. Verify with 'python3 bench/certificate/ledger/ledger.py verify'.
+- Layer I of the certificate now measures gist as a pure scanner — `--no-index`, no crest sidecar, no resident daemon — against ripgrep, because the interesting claim was never that an index is fast. `bench/races/scanner_headtohead.sh` races the same 12 query classes Layer A certifies (plus a `-c` lane, where no short-circuit is available and every candidate must be scanned whole) with INTERLEAVED round-robin sampling rather than block-per-tool, so a load excursion on a machine ~10 agents share cannot be mistaken for a tool difference; every cell is equivalence-checked against rg's exact result set before it is timed, because a timing number for a wrong answer is worse than no number. `bench/certify/certify_scanner_report.py` splices the verdicts under the certificate's own fail-closed statistic (lower median AND Mann-Whitney p < 0.05) and refuses to splice if any class loses or if measured rg-conformance drops below its committed floor. Measured: 24 of 24 cells are outright wins with the index switched off — no parity cells and no losses — at a 1.93x geomean, with the index then adding a further 3.1x on top. Conformance is measured against a denominator ripgrep owns rather than one we chose: 186 flags read from rg's own generated completions and man page (176 byte-identical, 10 declared boundaries each re-verified this run, 0 divergent, 0 unprobed) plus 411/411 of its mined `tests/` corpus. The "scanner by design" claim is therefore not a claim about design at all, and it does not survive measurement.
+- Nothing was checking the news fragments, and the way that fails is nastier than
+  it sounds. `towncrier build --draft` does not complain about a filename it cannot
+  parse; it just does not treat it as a fragment. So a file typed `.fixd.md`
+  instead of `.fixed.md` renders nothing, exits 0, and stays invisible until
+  somebody notices the entry missing from a release - by which point the fragment
+  is buried among the sixty others in the directory.
+
+  I checked whether `--draft` on its own was the right gate before writing one, and
+  it is not. Against the real fragment set it is completely blind: a typo'd type, a
+  file with no type at all, a wrong-cased `.Fixed.md`, and an empty type all give
+  exit 0 with stdout byte-identical to a clean run and nothing on stderr. Adding
+  `--draft` alone would have been a green tick over exactly the defect it was
+  supposed to catch, which is worse than no job because it reads as coverage.
+
+  The strictness has to come from `ignore` in `towncrier.toml`. Setting that key -
+  even to an empty list - flips towncrier from skipping unparseable filenames to
+  failing on them, with a message naming the file and telling you to whitelist it
+  if it was deliberate. That is the right place for it: the fragment grammar stays
+  in towncrier's hands instead of being re-spelled in a filename parser here, the
+  same reason the formatter's file set comes from `git ls-files` rather than a path
+  list. It also means a contributor running `towncrier build --draft` locally now
+  gets the identical error CI does, which is the part a CI-only check would have
+  missed.
+
+  `towncrier check` is deliberately not what this runs - that verb asks whether a
+  branch added a fragment, which is a contribution policy and a different argument.
+  This job only asks whether the fragments that exist are well-formed.
+
+  There is also a guard against the job passing over nothing, in the same spirit as
+  the formatter's "found no .zig files": a misconfigured `directory` renders "No
+  significant changes." and exits 0, so the job fails if fragments are sitting on
+  disk while towncrier reports none. It is conditioned on fragments actually
+  existing, so the honest empty draft right after a release still passes.
+
+  Proven the whole way round: green on the real tree, exit 1 naming the file when I
+  drop a `.fixd.md` into a faithful copy, green again once it is removed, and exit 1
+  on the vacuous-green case when the fragment directory is pointed somewhere empty.
+- The Python and Rust bindings now tell the engine's two exit-2 classes apart,
+  because they ask for opposite responses. `UnsupportedPatternError` /
+  `Error::UnsupportedPattern` still means *this pattern is outside the linear
+  engine, retry on `pcre2`/`auto`* — real advice. The new `BadPatternError` /
+  `Error::BadPattern` means *no grammar here accepts this at all*: the message
+  names the defect and points at the offending byte, and no `engine=` choice lifts
+  it.
+
+  Both used to arrive as the unsupported class, so a caller retrying on PCRE2 for
+  `[abc` retried into a second failure. The new class is a sibling rather than a
+  subclass, precisely so that `except UnsupportedPatternError` no longer catches
+  it — a retry loop written against that class would otherwise keep retrying
+  something nothing can compile.
+
+  The classification reads a phrase the engine prints only after asking PCRE2 and
+  being refused too, so it reports a probe's verdict rather than guessing at one.
+  Malformed is tested first, because PCRE2's own message can contain "not
+  supported" and the diagnostic echoes the user's pattern, which can contain any
+  marker word at all.
+- The Python binding now imports all three faces, and stops pretending a program wants what a terminal wants. Previously the package covered gist alone: every kinship, retrieval, and composed verb was reachable only by shelling out and re-parsing text, which is exactly the reflex the unified importable API removed for exact search. The new surface is thirteen verbs across four modules — `kinship` (`similar`/`dups`/`clusters`/`echoes`, plus the function-granularity `concepts`/`fragments`), `retrieval` (`recall`/`pack`/`quote`), `radius` (`blast`), and `compose` (`context`/`family`/`provenance`) — over shared infrastructure lifted into `corpus` (scope lowering, the NDJSON+diagnostic verb runner, `Region`, the `Kin` result), with the multi-pattern sweep (`patterns`/`pattern_counts`) relocated into its own `sweep` module. It deliberately **diverges from the CLI wherever a caller's needs differ**, because the CLI's answer is a rendering and a program needs the model behind it. Calibration was the sharpest loss: the kernel grades every distance against per-channel bands, then prints that verdict to _stderr_, so a subprocess caller received a bare `0.78` — a number that looks like a result and frequently means "both files are Python". `grade.py` mirrors `src/surface/cli/grade.zig` as `StrEnum`s that know their own polarity (a gap channel improves as it rises, a distance channel as it falls — the inversion a hand-rolled threshold gets wrong), every row carries `grade`, `min_grade=` withholds background engine-side, and `Kin.at_least()` re-filters without a second process. `tests/test_grade_parity.py` reads the Zig source as its oracle and asserts every tag, alias, cut point, band edge, NaN case, and the `meets` floor, so the mirror cannot drift silently. The same principle drove the rest: `Kin` carries the scored population, warmth, and elapsed time the CLI leaves on stderr (nearest-of-three and nearest-of-twenty-thousand are different claims); `Region.read()` returns the source a program has to be handed rather than the coordinates a human goes and looks at; `Blast.paths`/`.exact_paths` expose the edit set the six printed sections are evidence for; `FamilyReport` keeps families and unaffiliated implementations as separate collections instead of one stream to re-sort; `Packed` reports coverage and foreign chunks beside its picks; results are complete rather than trimmed to a context budget; and `atlas_status()`/`atlas_index()` let a long-running process decide warmth once, with `can_quote` preflighting the one artifact `quote`/`provenance` genuinely require instead of catching its absence. Scope refusal moved into Python too — `context`/`family` raise on an unscoped call rather than surfacing an opaque exit 2 from the child. No analysis was reimplemented: grades come off the row when the engine emitted one, and Zig stays the sole case, class, and calibration authority. Verified by 51 tests across grade parity, kinship, retrieval, composed verbs, and atlas lifecycle — 46 of them new — each exercising a real built binary over a planted corpus rather than a mocked stream.
+- The certificate machinery decides whether a published dominance claim is
+  well-formed - the mint ledger, the cross-machine release gate, the report
+  post-processors - and nothing was running its tests. 55 tests across four suites,
+  all passing, none of them in CI. A break in that subsystem would not have
+  surfaced until someone tried to mint, which is the worst possible moment to start
+  debugging it.
+
+  So there is a `certificate` job. It runs on a bare checkout with no Zig and no
+  sibling, and that is worth saying because it is the sort of thing later "fixed"
+  into something slower: none of these suites build or drive a gist binary. They
+  are hermetic by construction - every certificate, bundle and residual record is
+  synthesized into a tmpdir - and their own docstrings say so.
+
+  That also means the job does not want the minted artifacts, which matters right
+  now. The published bundles under `bench/certificate/artifact/` were purged and
+  gitignored because they had been minted over a corpus that is not public. The
+  machinery survived that intact and the tests never touched those artifacts, so
+  this job is the standing proof of the separation rather than something that
+  quietly needs them back.
+
+  Two steps, because they catch different things. The suites are enumerated from a
+  glob rather than listed, for the same reason the formatter's file set is. Then
+  every module gets imported, which earns its place: `test_release` already reaches
+  `release` → `artifacts` → `layers` transitively, but nothing reaches `ratio.py`
+  or the nine report post-processors, so a bad import in one of those was
+  invisible. I proved both halves by injecting defects - breaking the ledger's
+  column-alignment contract (`c.ljust(w)` → `c`) fails the suite step with
+  `FAILED (failures=1)`, and appending a bad import to `ratio.py` or
+  `report/portable.py` sails past the suites at exit 0 and is caught only by the
+  import step. Both revert clean.
+
+  One caveat for whoever reads a future red X: `report/test_scanner_residual.py`
+  puts `bench/conformance/rgsuite/` on `sys.path` and drives `fuzz._klass`, to prove
+  every residual class the harness can emit has prose in the reporter. The coupling
+  is the test's entire point, since that vocabulary has two owners and drift
+  between them is otherwise silent, but it does mean a change to the fuzz harness
+  can fail this job. Reconcile the two; do not drop the suite from the glob.
+- The conformance slate now lives here, where the binary it oracles is built.
+  `bench/conformance/` — the `rg` parity gates, the behavioral-contract gates, the
+  mined ripgrep drop-in replay, the stderr goldens, the CLI-shape admission
+  matrix, and the cross-compile target matrix — arrived from the engine package
+  along with the corpus fetcher that was its only consumer, now at
+  `bench/apparatus/corpora/`.
+
+  The split left it behind, and the seams said so before anyone noticed: the
+  contract gates already sourced `gist/bench/dominance/races/field.sh`, the target
+  matrix already pinned `bench/certificate/report/portable.py`, the shapes README
+  already called itself `gist/bench/matrix`, and half of this repo's own prose
+  already cited `bench/conformance/…` as a local path. Four parity gates were
+  resolving the `gist` binary out of the engine's `zig-out`, where it is never
+  built, so they had been failing to find their subject rather than failing to
+  prove anything about it.
+
+  From here the resolution is what it reads like — `PRODUCT` is this checkout —
+  and `rgsuite/stress.py`, which finds the binary by walking up three parents, is
+  correct without being touched. `patterns_corpus_parity.sh` now builds the
+  sibling `relate` from its own package instead of expecting one `zig-out` to hold
+  both binaries.
+
+  Re-run from `bench/conformance/rgsuite`: 411 of 411 supported cases byte-identical
+  to ripgrep 15.2.0, on both the parallel and the serial engine.
+- The public tree now judges the parts a compiler cannot: prose, spelling,
+  manifests, shell, editor shape, and binding lint all fail in CI when they drift.
+  GitHub Actions joins the same contract; every action is pinned to verified bytes
+  instead of trusted through a movable tag.
+- The repository had a license, a NOTICE, and eight workflow jobs across two
+  lanes, and nothing that told an outsider how to participate in any of it. The
+  single most load-bearing fact about building this package - that it cannot
+  build from its own clone, because `build.zig.zon` and all three bindings
+  path-depend on a sibling `../irregex` checkout - was written down only in a
+  comment at the top of a CI file.
+
+  Six files now say it out loud.
+
+  **`CONTRIBUTING.md`** is the practical half: the sibling-checkout layout and
+  why CI is shaped around it, the pinned toolchains, the test loop that matters
+  (`-Dtest-filter`, `-Dtest-shards=1`, `BRIGADE_TIMES=1`, since the long-pole
+  differential fuzz dominates an unfiltered run), the four suites that are not
+  `zig build test` - the `-t` union parity gate, `shell/check.sh`, the plugin's
+  headless suite in both editors, and each binding - and what each CI job holds.
+  It also states parity as the product constraint it is: same flags, same file
+  set, same exit codes, divergence welcome only as a documented improvement, a
+  gate that skips has stopped gating, and `--no-index` is the oracle the
+  accelerated path answers to.
+
+  **`SECURITY.md`** draws the line this project actually has, which is not the
+  usual one. The corpus is the attacker: hostile file names, a committed
+  `.irregex.toml` whose reach is ceilinged at corpus and must never change what
+  matches, a planted index, terminal escape sequences on their way to a real
+  terminal, and the daemon's same-user socket. An accelerator that changes an
+  answer is a security bug here, because "the tree tells the truth" is the promise
+  the whole design rests on. PCRE2 going exponential behind `-P` is the documented
+  trade you opt into, and a big tree taking longer than a small one is arithmetic.
+
+  **`CODE_OF_CONDUCT.md`** is Contributor Covenant 3.0 with the reporting and
+  enforcement sections filled in rather than left as the template's bracketed
+  notes. Its "failing to credit sources" clause is not decoration in a project
+  that benchmarks against ripgrep, csearch, and zoekt on every release: describing
+  a competitor accurately, and crediting an idea we took, is part of the work.
+
+  **`.editorconfig`** carries no second opinion - every value is the one the
+  formatter that gates the file already emits, so an editor save and `zig fmt
+  --check` cannot disagree. Vim's help file is exempt, because its tag columns are
+  load-bearing and an editor that trims them breaks `:help gist`.
+
+  **`.gitattributes`** normalizes line endings (the parity suite compares bytes
+  against ripgrep's, so a CRLF checkout would fail the comparison for a reason
+  that has nothing to do with either tool), marks the figures binary, collapses
+  Vim's generated help index, and binds git's hunk-header drivers. It deliberately
+  does not use `export-ignore`: that would change the bytes of the tarball GitHub
+  generates for a tag, which is exactly what a downstream `zig fetch` pin is a
+  hash of.
+
+  **`.mailmap`** collapses seven author spellings into the three people who wrote
+  them.
+
+  Alongside them, `.github/` gains a CODEOWNERS routing table, a Dependabot
+  configuration whose omissions are the interesting part (the bindings resolve the
+  engine through a sibling path Dependabot's sandbox cannot see, so a `cargo` or
+  `uv` entry here would produce a recurring resolution error against a manifest
+  that is correct - leaving the one thing nothing else watches, the actions
+  themselves), a pull-request template with parity as its own section, and three
+  issue forms. The first is the one this project needs most: a parity-gap report
+  that asks for both command lines, both outputs, and the single most diagnostic
+  question available - whether `--no-index` changes the answer.
+- This repo had no CI at all after the split, which meant the only thing standing
+  between a bad commit and `main` was whoever happened to run `zig build test`
+  locally. It has two workflows now. `ci.yml` is four jobs for the four faces -
+  the engine on Linux and macOS, the Python binding across 3.12/3.13/3.14, Go,
+  and Rust - deliberately not one job, because a Zig engine regression and a
+  clippy nit are different news and a single red X reports them as the same thing.
+  `windows.yml` is the native Windows lane, on x64 and on windows-11-arm, ported
+  over from the monorepo it was written in: the suite, a ReleaseFast build, the
+  index-elision parity gate, a CLI smoke over the rg exit-code contract, the
+  Win32 block (path separators, ignore rules spelled with `/`, `--max-depth`,
+  `--one-file-system`, console color, preferences under `%LOCALAPPDATA%`), the
+  resident tier and its watcher, and `install.ps1` proven by running it. Cross
+  compilation says the Win32 arm compiles; only a Windows kernel can say whether
+  `NtCreateFile` really descends an NTFS tree.
+
+  The interesting part was the sibling. `build.zig.zon` resolves `irregex` as
+  `../irregex`, and so do all three bindings independently - the Go `replace`, the
+  uv source, the Rust path dep - so a bare clone of this repo builds nothing.
+  `actions/checkout` refuses a `path:` that leaves the workspace, so the obvious
+  `path: ../irregex` is not on the table. Both repositories are checked out into
+  subdirectories of the workspace instead, which makes them siblings of each
+  other, and every one of those relative paths then resolves exactly as written.
+  Nothing in the package is patched for CI; what builds in CI is the layout a
+  contributor actually clones.
+
+  Two assumptions from the substrate's CI turned out to be false here and are
+  worth naming, because copying them would have produced a green lane that proved
+  nothing. Its Go and Rust jobs install no Zig, on the correct reasoning that
+  those modules link a vendored archive and `go get` needs no toolchain - but
+  gist's bindings are subprocess transports over the certified binary, so all
+  three suites need a real `zig build` first, and the Go suite fails rather than
+  skips without one. And the Python packaging gate stages `libgist` beside
+  `libirgx` from the *sibling's* `zig-out`, so that checkout gets built too or
+  the assertion silently takes its skip branch. ripgrep is installed on the Linux
+  jobs for the same reason: it is the oracle the parity tests compare against, and
+  without it on PATH they skip, which is a parity gate that has stopped gating.
+
+  Dropped on the way over: the monorepo's `paths:` filter and the scope job that
+  replaced it, both of which existed only because a required status has to be
+  resolvable on a PR that touches none of the kernel. Here the repository is the
+  package, so there is no out-of-scope PR and nothing for the filter to say. The
+  job that collapses the matrix into one verdict stayed, because its reason is a
+  GitHub fact rather than a monorepo one - a matrix job reports one status per leg
+  and never one under its own id - but `skipped` is no longer a pass in it, since
+  nothing gates the legs anymore and a leg that did not run is a lane that was not
+  proven.
+
+  One extraction bug fell out of writing the install step: `install.ps1` still
+  expected to place `gist.exe`, `relate.exe` and `irregex.exe` out of this
+  package's `zig-out`, and this package builds exactly one of those now, so the
+  installer threw before placing anything. It installs `gist`, and its "install
+  Zig" hint no longer points at a `.mise.toml` that did not come across the split.
+- Zig is the language this package is written in and it was the only one here whose
+  formatter nothing checked. Rust already got `cargo fmt --check` and `cargo clippy
+  -D warnings` on every push in the `rust` job; `zig fmt` was on the honor system.
+  irregex, relate and blast each grew a `fmt` job for this already, so gist was the
+  last one running without.
+
+  The drift this catches is not the kind you spot in a diff. `zig fmt` pads a
+  column-aligned multiline array literal into a grid, so a rename that shortens the
+  widest cell leaves every row beneath it one space too wide, in files nobody
+  edited. That deserves a red X that says "formatting" rather than one buried at
+  the bottom of a build log, which is why it is its own job: folding it into
+  `engine` would run it once per host for a verdict that cannot vary by host.
+
+  The file set comes out of git rather than being written down, and this package is
+  a good argument for why. The obvious hand-written list is `src/ bench/` - which
+  would silently skip `build.zig` sitting at the repository root, and `tools/`
+  looks like it would hold Zig and holds only Python, so a list naming it would
+  check a directory with nothing in it while missing a real file. `git ls-files -co
+  --exclude-standard '*.zig'` is every Zig file the repository owns; what it leaves
+  out is exactly the ignored trees (`zig-out/`, `.zig-cache/`, and the fetched
+  `zig-pkg/`, which parks a whole `build.zig` of its own), and those are named in
+  `.gitignore` where someone can review them.
+
+  It needs no sibling checkout, unlike every build job in this file, because it
+  reads files instead of configuring a build - so it is also the cheapest job here.
+
+  I watched it fail before believing it: 50 files check clean today, a deliberately
+  mis-padded grid literal dropped at the repository root takes it to exit 1 with
+  the offending file named, and deleting that file puts it back to 50 clean. The
+  enumeration picking up a brand-new root-level file is the same thing the
+  hand-written list would have missed.
+- `.mise.toml` and a committed `mise.lock` turn the Setup table in `CONTRIBUTING.md` into `mise install`. Zig, Rust, Go, Python, and uv are pinned at the versions CI already uses, with checksums recorded for all four release platforms. The pins are mirrors of `build.zig.zon`, `bindings/rust/rust-toolchain.toml`, `bindings/go/go.mod`, and the `--python` CI hands uv - never the authority, so a bump has to touch both files or nothing resolves the way it reads.
+
+  The discipline gate's binaries are pinned the same way, and for the same reason a red X should mean the same thing in both places: markdownlint-cli2, typos, shellcheck, and golangci-lint, each at the version its CI step already resolves. Two of those come from the versions their actions bundle, which is why the markdownlint action moved up to v24.1.0 in the same pass - it had been running markdownlint-cli2 0.22.1, one minor behind the 0.23.1 pinned here.
+
+  The other half of the gate is deliberately not here. Ruff, yamllint, taplo, editorconfig-checker, towncrier, and zizmor arrive through `uv run --no-project --with <pkg>==<version>`, which is a version authority already - written in the workflow, repeated verbatim in `CONTRIBUTING.md`, and needing no install step at all. A second pin for those could only ever disagree with the first.
+
+  ripgrep is pinned alongside them, which needs a word since the CI step that installs it argues the opposite. That step is right: the parity corpus is a handful of files and three patterns, so the comparison does not turn on which rg release a runner carries, and this pin makes no claim that it does. It is here for presence, not version. The conformance gate exits 1 without an oracle rather than skipping - deliberately, because a parity gate that skips has stopped gating - and the failure that produces on a laptop missing `rg` is a gate failure that says nothing about the code. One `mise install` and the oracle is there.
+- `bench/conformance/gates/parity/type_union_parity.sh` - a permanent guard that
+  every `-t` named on the line reaches the answer, with ripgrep as the oracle.
+
+  It exists because a real bug got through: a `--type-add` name selected with
+  `-t` was routed into the `-g` include set, which ANDs against the built-in
+  types rather than joining them, so one custom type silently voided every other
+  type on the line (fixed in irregex, `Builder.addType`). Each half was
+  individually correct - built-ins union with built-ins, a custom type alone
+  matches rg exactly - so only the mix diverged, and no existing case asked for
+  the mix.
+
+  The gate checks per case that gist's file set is byte-identical to rg's; that
+  the mixed answer contains each part it was built from and is strictly larger
+  than both; that `-T <custom>` subtracts exactly what `-t <custom>` selected;
+  and that a custom `-t` still respects `.gitignore`, since only `-g` may
+  un-ignore.
+
+  It synthesizes its own corpus (go, py, rust, ts, tsx, plus a gitignored file)
+  instead of reading whatever tree it runs in. gist's own checkout is pure Zig,
+  so the interesting cases would have matched nothing and passed as vacuously
+  equal; the non-vacuity floors now have something to stand on, and the run is
+  the same run on every machine.
+- `gist-bench` lives here now, and can be built again. The harness spent the split
+  in the engine package, where it could not compile at all: its `session` mode
+  spawns a real `gist serve` daemon on a thread and speaks the real socket frame
+  grammar to it, and `gist` depends on `irregex` rather than the reverse, so the
+  imports it needed pointed the wrong way down the dependency edge. Everything
+  that drives it — `certificate/`, `dominance/`, `certify_session.sh`, the warm
+  and scanner races — is already here, and now so is the binary.
+
+  `bench.zig`, `certify.zig`, `flagbench.zig`, and `sessionprof.zig` moved into
+  `bench/apparatus/harness/`. The three instruments they read did not: `probes`,
+  `pmu`, and `stats` stay with the engine and arrive as Zig modules through the
+  `irregex` dependency, because that package's own rungs and bounds read them too.
+  One registry and one significance test across both repos is what keeps a class
+  name meaning the same thing in a race here and a rung there.
+
+  The warm race was the visible casualty and is the clearest proof it is fixed.
+  `dominance/races/warm.sh` had been failing outright on a missing `zig build
+  bench` step; it now completes and wins 20 of 20 queries against every tool in
+  the field, at a 1012x geomean over ripgrep on the resident path.
+
+  New and restored steps: `zig build lab` installs `gist-bench` and `warden`;
+  `bench`, `verify`, `certify`, `flagbench`, `sessionprof`, and `warden` each run
+  their lane. `session` is new as a step — the daemon lane was previously
+  reachable only by argv, despite being the one number a long-lived client
+  actually sees. `cli` is back for running the built binary straight out of the
+  build graph. The monorepo's `gist` step is gone rather than ported: it existed
+  to install the CLI without the lab, which is what a bare `zig build` already
+  does here.
+- `gist` is its own package: the product chassis (both binary faces, the
+  resident daemon, the session C ABI + bindings, the editor plugin, generated
+  man page + completions, and the dominance certificate) extracted from
+  a private monorepo kernel package at ce430bbaab, over the `irregex` and
+  `relate` libraries as sibling checkouts. CLI binaries build ReleaseFast by
+  default via `-Dcli-optimize`.
+- `install.ps1` is the Windows half of `zig build`. A Windows user could
+  build the three binaries and had to place them, put them on PATH, and find the
+  completions themselves — the one-shot setup existed only as a Makefile target
+  shelling POSIX tools. The script installs all three executables, persists the
+  prefix to the user PATH without duplicating an entry it already added, generates
+  the PowerShell completion from the same flag table argv is parsed with and
+  sources it from `$PROFILE`, links the editor plugin (symlink first, copy when
+  Developer Mode is off), and indexes the tree it was run in. Two Windows
+  specifics get handled rather than papered over: a running `gist.exe` cannot be
+  overwritten, so a locked target is renamed aside and cleaned up on the next run,
+  and the PATH edit uses the registry-backed user environment so it survives the
+  session that made it. Re-running is a no-op, which the native CI lane asserts by
+  running it twice and counting PATH entries and profile lines.
+- `ruff check` ran here and `ruff format --check` did not, which is half a gate: the lint rules were enforced and the formatting they assume was not. Thirty-four files had drifted out. They are formatted now and the check runs in CI beside the lint, so the two stay in step.
+
+  The reformat is mechanical. I parsed all 72 files before and after and the syntax trees are identical, so nothing here changed behavior.
+- gist ships an **editor face**: a Vim and Neovim plugin (`editor/vim/`) that
+  `zig build` links into `pack/*/start/` for whichever editors are
+  already on the machine. Nothing is added to a vimrc, `:help gist` is minted at
+  install time, and a checkout that moves updates the plugin with it.
+
+  The usual ripgrep integration is one line — `set grepprg=rg\ --vimgrep` — and
+  inherits four consequences the plugin does not. Searches run in a job and
+  stream into the quickfix list as they arrive, so a large tree does not freeze
+  the editor and `:GistStop` can cancel. Arguments are handed over as argv, so
+  `:Gist foo|bar` and `:Gist 'a b'` reach the regex engine as typed instead of
+  through the user's `'shell'`. Each output shape is parsed for what it is,
+  which retires the catch-all `%f` in `'grepformat'` that turns a stray stderr
+  line into a quickfix entry pointing at a file that never existed. And a miss
+  keeps gist's coaching out of the list while turning the runnable part of it
+  into a numbered offer, so `try -i` becomes `:GistRetry 1`.
+
+  The three faces stay themselves: `:GistRank` is the definition-first view,
+  `:GistSimilar` is `relate similar` on the current buffer, and `:GistBlast`
+  puts a symbol's live blast radius in the quickfix list so `:cnext` walks a
+  change's consequences the way it walks matches. A selection or motion that
+  crosses line breaks is searched with `-U` as one string, which a
+  line-at-a-time grep cannot express at all. Completion asks the installed
+  binary — `--schema` for flags, `--type-list` for `-t` names — so `<Tab>` can
+  never drift from the gist that is actually there.
+
+  Two runtime facts the plugin settles rather than exposes. Neovim's default
+  job stdin is an open pipe, and gist inherits ripgrep's rule that a readable
+  non-tty stdin _is_ the corpus, so a pathless search would have waited forever
+  on input no one was going to write; every runtime now hands the child a null
+  device. And `'grepprg'` is claimed only while it still holds a value the
+  editor chose for itself — Vim's built-in grep or the ripgrep line Neovim
+  writes when rg is on `$PATH` — because a `'grepprg'` in a vimrc is a decision,
+  not a gap to fill.
+
+  `zig build test` (plus the editor suite under `editor/vim/`) runs the suite in both editors against a temp corpus with
+  its own `$GIST_DIR`; both must pass, since the two runtimes disagree about
+  jobs, quickfix, and completion often enough that one proves nothing about the
+  other.
+
+### Changed
+
+- A certificate's recorded git_commit is now provenance only. The release and reproducibility gates no longer resolve it, compare it to HEAD, or require it at all: a mint rewrites the tracked bundle, so the tree is necessarily dirty by the time a certificate exists and every caller already ran the check disabled. Bundles are judged purely on their bytes, so a mint from a dirty tree or an exported tarball verifies like any other.
+- Adopted the substrate's shortened caller-facing spelling. The engine library's C
+  ABI prefix is `irgx_` rather than `irregex_`, its installed header is `irgx.h`,
+  its Python package imports as `irgx`, and its Rust lib is `irgx`. Every seam
+  this repository reaches through it moved with it: the cgo preamble and cursor in
+  the Go binding, the `extern "C"` block and `use` paths in the Rust binding, the
+  cffi cursor in the Python binding, `include/gist.h`, and the FFI prose in
+  `src/`. The project, the repository, the PyPI and crates.io identities, and the
+  `@import("irregex")` Zig alias are all unchanged - what shortened is the
+  identifier a caller types, not what the thing is called. gist's own `gist_*`
+  symbols were never in scope.
+- Closing the roofline Layer C gap traced the corpus scan's 35%-of-DRAM ceiling to document fragmentation, not the kernel: the default fused parallel loader leaves ~20k file bodies scattered across per-worker arenas and then path-sorts them, so `for (docs) |d| contains(d, …)` jumps to an unrelated address at every one of them and the hardware prefetcher restarts cold — the certificate's own ladder showed a contiguous 512 MiB buffer streaming at 52.8 GB/s while the same bytes as scattered corpus documents reached only 28.7. `corpus.load` now runs one final `compact` pass that relocates every body into a single contiguous, scan-order blob (paths copied alongside so the scattered source arenas and worker shards free — steady-state retention is one tight blob), letting the prefetcher, which streams linearly and never stops at a slice boundary, warm the next document's head while the current tail is still in flight. Each slice stays scanned within its own bounds, so no separator is needed and no cross-document match can appear; content, paths, iteration order, and doc ids are byte-identical, so `loadpar`'s membership parity test doubles as the compaction proof. `GIST_NO_COMPACT` keeps the scattered layout as an A/B toggle and parity escape hatch (mirroring `GIST_NO_PARALLEL_LOAD`), and the pass is fail-open — an allocation failure leaves the corpus in its original layout. Roofline A/B on M4 (same binary, compaction on vs off, DRAM ceiling ~80 GB/s both): pure-streaming full-scan 28 → 61 GB/s (36% → 76% of the ceiling, ~2.15×); end-to-end full-pipeline `})` p50 1.29 ms → 0.75 ms (~1.7×) with far tighter tails. Byte-parity proven by `zig build test` and the rg equality oracle (`bench/gates/equality.sh`: 140 literals + 70 regexes, 0 FN / 0 FP over the compacted corpus).
+- Lifting the `relate patterns` parity gate's two scopes into knobs left it half configurable, because seven of its cases still carried hardcoded needles and two of those were tool names from the private monorepo. So a tree could declare both roots correctly and still not run the gate; pointed at the sibling `irregex` checkout with stock knobs, `build_graph` found nothing at all and the run went red on a *pattern* fact while the scope facts were fine. The slate is declared now too - `GIST_PARITY_SLATE`, rows of `<label> <pattern> [<scope>]` in the same shape every `PROBES` array under `bench/` already uses, either naming one of the two slates in the file or supplying its own. What each case is *for* moved with it, because the spread is the coverage argument and not decoration: a literal the pruned tree dominates (the one that was silently reporting 145 files of 616), a second resident of that tree in a different shape so the first isn't one token's luck, ordinary first-party literals outside it to catch a fix that over-corrects the other way, a 3-character pattern that is exactly one trigram, and one case scoped to each side of the skip decision. A replacement slate that drops a role stops proving what the gate's name claims, so the roles are written down at the knob.
+
+  The bigger problem was that this gate could not go green anywhere except pointed at a tree nobody outside the company can clone. Fail-closed is honest, but a permanently-red gate is not a signal. It needs exactly one thing a package cannot manufacture for itself: a directory whose basename `haystack.isSkipDir` prunes out of the corpus loader while the rg-parity walk still enters it - committed, not gitignored, not named in the charter `skip`. `bench/apparatus/corpora/torture.py` already generates a tree deterministically with no network, so it grows a `vendor/` (16 vendored C lanes plus 6 Go files, nothing ignoring them) and a `src/` that calls into it. I checked the asymmetry is real rather than assuming it: the corpus loader indexes 3037 files there and the walk sees 3061, and adding three more files under `vendor/` moves the walk and leaves `amended 0 docs` behind. `node_modules` would have pruned identically and proved nothing, since it is gitignored nearly everywhere and then both sides drop it together. The gate now runs green on that corpus - 32 files for the pruned literal with 24 vendored, 25/17 for the underscored one, 9 and 10 for the first-party pair with zero under `vendor/`, 24 and 9 for the two scoped cases - and it still fails loudly on everything it should: the monorepo slate against that corpus reports six vacuous cases, a slate that never reaches the pruned tree trips the non-vacuity check, an empty slate is refused, and a malformed row is a FAIL rather than a skip. The 168-case differential sweep still passes on the extended fixture, both engines.
+
+  Two smaller things. `pruned_hits` ended `sed | grep -F -c`, and `grep -c` prints its count and then exits 1 when that count is zero; under `pipefail` that was the function's status, so it returned rc=1 on the perfectly legitimate answer "no hits under the pruned tree". Harmless today only because the script has no `set -e` - adding one later would have turned every such case into a run-killer, which is a hard thing to notice because it fires exactly when the corpus is wrong. The status is discarded deliberately now and the count is untouched. And `fetch.sh` only checked that a torture corpus *existed*, which made a tree generated before these subtrees indistinguishable from a current one; the ready-marker carries a build id now, so a stale corpus regenerates instead of claiming to be ready and then failing the gate it was supposed to satisfy.
+
+  The header sentence about a package measuring itself said the two root-scoped cases resolve to nothing. That was already understating it and is more wrong now that the patterns are declared: with no pruned subtree *and* a slate describing another tree, most cases come up empty and the non-vacuity check fails as well, each on its own line. It says that. The gate also prints whether the corpus actually carries an index, because the headline claim is "armed AND stripped" and against an unindexed tree both legs are stripped - it never builds one itself, since it must not write into a tree it was merely handed, but a half-vacuous run should not read like a full one.
+- Restructured the crate into five layers — floor (`portal` · `assay` · `fault` · wire-floor `corpus/index/frame/`), `kernel/` (ten pure-compute tiers with a dedicated **math floor** and a first-class **regex package** sealed through `regex.zig`), `corpus/` (scope · read · tree · fresh · index), `exec/` (cold · retrieval · session, promoted out of `surface/`), and `surface/` (cli · api · ffi · faces). The warm daemon moved into `exec/session/daemon/`; gist lifecycle verbs consolidated flat under `face/gist/verbs/`; FM-index math lives in `kernel/codex/` with the persisted shelf under `corpus/index/shelf/`. Import topology is the ward contract (`contract/irregex.ward`); this is the prose half.
+- The FFI transport, the contract mirror and the parity gates over both now live
+  here rather than in the substrate, across all three bindings.
+
+  Python gains `gist._native` and `gist._daemon`, moved from `irgx.runtime`, and
+  they carry the `gist_*` cdef with them; `irgx.runtime.loader` grew a face
+  registry so a product registers its declarations, its library stem and its ABI
+  expectation, and the substrate composes one cffi type universe from what
+  registered. `gist._contract` holds the published `dist` / `import` names and the
+  tool-boundary aliases and routing keys, which `irgx.contract.abi` used to carry.
+  Rust gains `gist::contract` with the same four constants. Both are gated here
+  against this repository's own `contract/surface.toml` and `include/gist.h`.
+
+  Two tests arrived with their subjects. `tests/test_span_parity.py` holds
+  `gist --json` and the engine's own iterator to the same submatch spans, the claim
+  `irgx.h` names this tool the authority for; it is a statement about two tiers and
+  the far one is this repository's binary. `exact/ladder_test.go` drives the shared
+  cold tier through `rank` and asserts an answer can say how much work it did and
+  which tier did it.
+
+  None of it was unused where it was. It moved because a substrate whose tests need
+  its consumers checked out is a substrate its consumers cannot be released
+  without, and because a mirror should be checked against the header that owns it.
+- The Go and Python bindings stopped carrying the private monorepo's names. The Go module declared itself by its path inside that monorepo — a path that resolves for exactly one checkout on earth and cannot be `go get`-ed by anyone else — and its root package was `irregex`, which forced every importer to spell an explicit `irregex "…/bindings/go"` alias because the trailing path element is `go`. It is now `github.com/The-Billy-Company/gist/bindings/go` with root package `gist`, so a plain import binds the right identifier and the aliases are gone. The Python side published as distribution `billy-irregex` importing as `irregex`, which was worse than untidy: the kernel repo holds a separate package that genuinely owns the `irregex` import name, and two installed distributions cannot both provide one top-level module. It is now distribution `gist-search`, import `gist`.
+
+  Neither name was invented for this change — the Rust crate has been `gist` all along and `contract/search_api.toml` already declared `package_import = "gist"`, so what actually happened is that two of the three faces drifted off a name the contract had been asserting the whole time, behind a parity test that was silently skipping. Four meanings of the token `irregex` were deliberately left alone, because only one of them was ever this package: the engine and the prose about it, the native artifacts (`libirregex.*` and the substrate header and C symbols it exports) whose filenames the FFI loader opens by name, the contract's own `[irregex.*]` sections, and the `irregex` binary itself.
+- The Python binding answers every analytic verb in-process through the analytic row plane, with one schema-driven decoder in place of seventeen hand-written NDJSON readers, and reshapes into the six packages the Rust and Go bindings share.
+
+  **Seventeen parsers were one parser written seventeen times.** Every kinship, retrieval, and composed verb reached the engine by spawning `relate`/`irregex`, then re-parsing `--json` with a per-verb reader that knew its own key names — `shell.as_float(row, "gain", 0.0)` sixty-odd times over — and the ranked view was recovered by regex-scraping human stdout, the only verb with no `--json` at all. A key that got renamed in Zig produced a silently zero field in Python. There is now one decoder (`runtime/decode.py`) that walks `contract/search_api.toml`'s `[row_schemas]` positionally, so a field is located by its declared slot rather than by a string that has to survive a transport. It resolves enum ordinals through the generated table, recurses into nested row fields, and emits frozen slotted dataclasses — bound to the published row types where those predate the plane, generated from the schema where they do not. A dataclass that drifts from its schema is an `ImportError` at import, not a mis-decoded field two layers down.
+
+  **Absence stopped looking like zero.** `distance = 0.0` is the _identical_ verdict, so a row whose distance was never measured could not keep decoding as `0.0` — and on the subprocess tier, where the wire simply omits the key, it did. The presence mask is now honored on both tiers (reconstructed from which keys an object carries on the cold rung), an absent required field is a loud `RowDecodeError` rather than a guess, and an enum ordinal this binding's table does not name surfaces as `Unknown` — which refuses every `--min-grade` floor instead of being rounded to the nearest label it happens to know. A collection is the one exception, because JSON cannot say "unmeasured list": `pack` prints no `patterns` when nothing narrowed the pick, and empty is the true reading.
+
+  **The transport is a ladder, and it is invisible.** `gist_run` is the preferred rung, the CLI is the fallback, and a tier that cannot express a request — a scope the handle does not cover, a CLI-only knob the params struct has no room for, a library built before the plane existed — declines. `IRGX_STALE` is never raised; the next rung answers, identically, and only `Stats.source` says who did. The plane is _probed_, not assumed, so a stale `libirgx` costs nothing but speed. The one thing that cannot degrade is agreement about what a row _is_: the library's `irgx_schema_digest()` is checked against the generated table at load, and a mismatch fails loudly and names the drifted schemas through `irgx_schema_get`, because decoding against the wrong table produces values of the right type read out of the wrong field.
+
+  **Rows batch, and the arena stays behind.** `Rows` iterates lazily by default, `batches(n)` maps to one `irgx_rows_next_batch` per chunk, and `drain()` takes everything. Native rows borrow the cursor arena and expire at the next pull, so records are materialized before they are yielded and `Stats` is snapshotted at close — a record read after the cursor is gone is still a record. `foreign` and `omitted` ride that snapshot rather than being read off stderr by eye, so a caller can finally distinguish "your text is not in this corpus" from "no results", and `pack`'s coverage comes from the picks themselves instead of a parsed summary line.
+
+  **Nineteen flat modules became six packages.** `contract/` (mirrored constants, calibration, the generated schema table) · `runtime/` (transports, the ladder, the decoder) · `exact/` (request, cursor, aggregation, the ranked view) · `relate/` (kinship and retrieval) · `compose/` (the composed verbs) · `index/` (artifact lifecycle) — the shape the Rust and Go bindings mirror, each package documented where it lives. `irregex/__init__.py` is unchanged as the public API.
+- The Python binding declared `requires-python = ">=3.14,<3.15"`, which was the monorepo's pinned interpreter wearing the costume of a library requirement. It is now `>=3.12`, the floor the code actually has (PEP 695 syntax in `exact/aggregate.py`, and the `irregex` substrate's own floor), with no upper bound.
+
+  Both halves were wrong in a way worth naming. The lower bound locked out every 3.12 and 3.13 user for no reason the source supports — the binding imports and runs fine on 3.12, which is how the real floor was found. The upper bound was worse, because it fails in the future: `<3.15` turns the day CPython 3.15 ships into the day this package stops resolving, for a cap nothing ever asked for. An application may pin one interpreter; a published library has no business refusing the next one.
+- The Python distribution is `gist-search`; the import is still `gist`. `gist` on
+  PyPI belongs to an unrelated author, so the name was never available to publish
+  under - and, worse, a plain `pip install gist` fetches that stranger's package
+  into a tree that then imports `gist` and gets whatever it contains. Splitting
+  the two names closes that: `pip install gist-search`, `import gist`, which is
+  the same shape bs4, PIL, and cv2 already ship. Only `[project].name` moved; the
+  package directory, the wheel's `packages` entry, and every `import gist` in the
+  tree are untouched, so nothing a caller writes changes. The release workflow was
+  already publishing under `gist-search`, and `contract/surface.toml` now declares
+  the split it was silently contradicting.
+- The README stops re-deriving the engine and says what powers it. Engine lineage,
+  the trigram/crest construction, the rank fusion, and the genus classifier now
+  link into `irregex` where they live, so this page is about the tool built on the
+  engine: argv, the daemon, distribution, and the parity contract. Also repairs
+  two links that named files this tree does not have.
+- The README takes the house shape the sibling packages already use. Both tables
+  became lists, the headings became Title Case labels rather than arguments with
+  glosses, long paragraphs split to one idea each, and the page gained a contents
+  list, a section routing bugs and vulnerabilities, and a section telling a reader
+  in the wrong repository where to go instead. Every claim, number, and flag
+  survives the move, and the prose now speaks for the company rather than one
+  author.
+- The `relate patterns` corpus parity gate stopped naming the private monorepo `gist` was extracted from. Everywhere else that tree got quoted it was quoted in prose, so sanitizing the text was the whole fix; here the strings were live functional inputs — `scripts/vendor` was a scoped case's root *and* the needle of the `grep -c` that decides whether a run proved anything at all, and a second nested directory was the other scoping root — so substituting the text would have left an executable gate measuring directories that do not exist, cheerfully reporting five cases ok and two vacuous. Excluding the one file from the rewrite would just have shipped the paths instead.
+
+  The gate is told those two paths now rather than assuming them: `GIST_PARITY_PRUNED_ROOT` (default `vendor`) and `GIST_PARITY_SCOPE_ROOT` (default `src`), overridable the way `GIST_CORPUS_ROOT` already was. `vendor` is the honest default because the property the gate needs is not "a vendored tree" but "a directory `haystack.isSkipDir` prunes out of the corpus loader that the rg-parity walk still enters" — that asymmetry is the only place the two populations can disagree, so it is the whole instrument. Of the generic basenames in the comptime skip set, `vendor` is the one most likely to hold committed third-party source a walk really sees: Go module vendoring, Composer, Bundler and `cargo vendor` all put code there and it is normally checked in. `node_modules` prunes identically and is the obvious alternative, and it is the wrong one — it is nearly always gitignored, which takes it out of the rg-parity walk too, and then both sides agree for the wrong reason and the gate goes green having proved nothing. Naming a directory in the tree's charter `skip` or in `GIST_SKIP` is the same trap and worse, since cold search honors those deliberately. All of that is written down at the knob, because it is the one thing someone configuring this can get wrong.
+
+  One thing had to get stricter rather than just move. The vacuity count was `grep -c 'scripts/vendor'`, and a bare substring is close enough while the literal is two components; it stops being close enough once the value can be a single generic word, because `vendor.zig` and `bench/myvendor/x` would then count as hits under a pruned tree and satisfy the check without one. Making the check configurable would have quietly turned the gate's entire point into something that passes vacuously, so each path now gets a leading `/` before a single fixed-string match and what gets tested is a whole path component. On the tree the old literal described, both spellings count 470 of 625 — byte-identical; against a corpus built to have a `myvendor/` and a `vendor.go` and no real `vendor/`, the gate still fails as vacuous, which is the point. The failure message picked up the corpus property that is missing and the invocation that supplies it, and a package measuring itself still fails as vacuous by design, because it has no pruned subtree to measure.
+- The `relate` CLI left this package.
+
+  Its face (`src/surface/face/relate/`) and the four CLI modules only that
+  face needed (`flags` · `grade` · `manifest` · `reprise`) moved into the
+  `relate` package, which can now ship its own binary. The FM-index shelf
+  had already broken the cycle that forced the face to live here; with the
+  face gone, `gist` no longer depends on `relate` at all. What stays is the
+  `gist` binary, the resident daemon, the answer keep's transport, the
+  session C ABI, and the `--generate` primer. `relate` imports this chassis
+  for the daemon the keep dials.
+- The `relate` and `irregex` faces gained one kinship vocabulary, a calibration that tells a finding from background, and a single verb table that four renderings derive from.
+
+  **A distance was not an answer.** `relate similar fresh.zig` returned five neighbors at 0.77–0.80 — correctly reporting "no real twins", but a ranking verb always returns rows, so the output read exactly like a hit and nothing said the whole answer sat past the 0.50 line where kinship stops meaning "related" and starts meaning "both files are Zig". The calibration existed only in prose, which the binary's caller does not have. It now lives in the engine (`surface/cli/grade.zig`): distances band `identical` ≤ 0.05 · `strong` ≤ 0.25 · `moderate` ≤ 0.50 · `weak` ≤ 0.75 · `none` above, gaps invert from the 0.15 `--min-echo` floor, the band rides every `--json` row, `--min-grade G` withholds anything weaker (empty beats noise), and an answer made entirely of background explains itself on stderr in gist's own hint grammar — naming the band and the channel that would have found something. A trimmed but genuine answer accounts for what it withheld without recanting the finding, and `GIST_HINTS=0` mutes the channel for byte-counting captures. gist's no-match hints and relate's verdicts now speak one grammar (`surface/cli/guide.zig`) rather than two hand-kept copies of the `tool: try …` shape.
+
+  **One channel vocabulary.** `--lens` used to name two mutually incompatible enums — `similar --lens echo` and `concepts --lens fused` both failed for no principled reason. There is now a single `Channel`, named for what each channel _finds_ rather than the metric behind it: `copies` (LZJD over raw bytes), `twins` (the bytes−structure gap — the `echoes` signal), `shapes` (normalized-structure silhouette), `any` (the closer of either), spelled `--as` with the metric names kept as `--lens` aliases so nobody who learned the old spelling is stranded. Polarity is explicit rather than remembered (`copies`/`shapes`/`any` score a distance, `twins` scores a gap), and each channel's definition in terms of the two metrics exists in exactly one function, where before every verb re-derived the `min`/subtraction inline.
+
+  **An empty answer now says so in `$?`.** The kinship verbs exited 0 whether they found kin or not, so `relate similar X && …` was a lie a shell could not detect — and the contract had declared exit 1 for "ran cleanly, found nothing" all along. Emitting no row now exits 1 across `similar`/`dups`/`clusters`/`echoes`, the same code `gist` returns for a pattern that matches no line, whether the corpus held no kin or `--min-grade` withheld every candidate. The trace diagnostic still prints first: how long a query took is a fact about the run, not about whether it found anything. `clusters` also gained the verdict and `--min-grade` the other three had, graded by a family's _loosest_ verified edge so the grade describes the whole family rather than its tightest pair.
+
+  **The verb surface is declared once.** `relate`'s surface was written down five times — the module doc comment, the `usage()` text, the `--schema` JSON, the `dispatch` tuple, and the unknown-verb line — with nothing tying them together, so they drifted: the shipped manifest still advertised `similar --lens bytes|structure|fused` after the flag changed, and both faces claimed version 0.1.0 against an engine at 0.2.0. Each face now declares a `Face` in its own `repertoire.zig` — every verb row carrying its usage form, its human blurb, its machine summary, its typed flags, and the handler that runs it — and `surface/cli/manifest.zig` renders the help, the JSON manifest (including the envelope both faces were copying verbatim), the dispatch, and the verb list from that one table. A verb cannot be listed without being runnable or runnable without being listed, and the two hand-written `schema.zig` documents are gone. Fittingly, `relate echoes` is what found those two manifests in the first place: structure distance 0.038 while 0.66 apart in bytes — the same document written twice in different words, which is exactly the DRY signal byte kinship structurally cannot see.
+
+  **Then it found the fix's own echo.** Collapsing the four hand-kept lists left both faces' `main` byte-identical apart from the name it passed itself, and `echoes` scored the pair at structure distance 0.000 — the strongest echo in the corpus, in code minutes old. Every irregex-family binary is the same program with a different verb table, so the process moved into the table too: `manifest.drive` owns the diagnostic install, argv, the three introspection conventions, the output budget, the dispatch, and the exit contract, and a `main.zig` is now a doc comment and a single call naming its repertoire (189 → 29 lines for relate, 147 → 33 for irregex). An agent that learns `--help`/`--version`/`--schema` on one face has learned all of them, because there is one implementation left to learn.
+- The artifact home moved from `.local/gist-verify/` to `.gist/`. The old path was two inherited conventions stacked on each other: `.local` was the private monorepo's machine-local scratch drawer, and `gist-verify` was the name of one directory inside it that happened to be where the index landed. Neither means anything in a repo you clone yourself, and together they read like a temp dir you could delete. `.gist` says what it is the way `.git`, `.ruff_cache`, and `.mypy_cache` do, and it reads correctly next to the `GIST_DIR` override that was always the real knob.
+
+  This orphans whatever index you already have — nothing migrates it, and a stale `.local/gist-verify/` just sits there until you delete it. Rebuilding is `gist index`, about three seconds on a large tree, and every verb answers correctly from a live scan in the meantime. If you'd rather not move, `GIST_DIR=.local/gist-verify` pins the old location and nothing else changes.
+- The corpus parity gate now refuses a tree with no index instead of reporting a half-vacuous run as a pass. Its headline claim is that `relate patterns` answers over the same file set as N sequential `gist -l` runs *with the index armed and with it stripped*, and those are two different legs: the armed leg proves the index accelerates the read without deciding the population, the stripped leg proves the walk alone decides it. Against a corpus carrying no index both legs run stripped, so the armed half went unproven while the gate still printed `PROVEN` and exited 0. The banner had quietly weakened itself to "armed or stripped" to stay technically true, which is the tell: a gate whose proof text disagrees with its own headline is reporting something weaker than it claims. It now fails closed with the remedy (`gist index` inside the corpus) and the reason, and the banner says "armed AND stripped" because that is now guaranteed. It still never BUILDS an index; writing into a tree it was merely handed is a different and worse failure than declining to judge one. Proven red-then-green against a freshly generated unindexed torture tree (exit 1, no cases run) and the indexed one (exit 0, 7/7 with 4 cases resolving under the pruned `vendor/` subtree), with the three pre-existing refusals unchanged: a wrong slate still yields 6 vacuous failures, an empty slate is still refused before anything runs, and a malformed row is still a loud failure rather than a skip.
+- The differential-fuzz residual floor drops from 13 divergences to 9, and one
+  whole class disappears from it.
+
+  Seed 20260727 at 6000 iterations, against ripgrep 15.2.0. `line-count+exit` goes
+  to zero (the `--files-without-match` exit code), and `line-count` falls 5 -> 2
+  (the `--crlf` dot eating a carriage return, the `-w` arm that was never retried,
+  and the binary file this mode listed twice over). `line-content` (4),
+  `timeout-rg` (2), and `trailing-bytes` (1) are unchanged, and each is a case I
+  have not fixed rather than a number I have moved: the two timeouts are the oracle
+  giving up on a pathological pattern over the `giant` corpus and were never
+  ratcheted, and the rest are reported in the fix's own fragments in irregex.
+
+  Every fix is in irregex; this file only moves the floor those fixes lowered, and
+  it was republished by the command the contract in the baseline names rather than
+  hand-edited.
+- The distribution is called `gist-search` because the bare name was taken, which
+  means the name does no discovery work at all - nobody types "gist" looking for a
+  code searcher. Until now the metadata did not make up for it. The Python package
+  shipped a one-line summary, no keywords, no classifiers, no README, and no
+  links, so its PyPI page was going to be a blank card with "Importable Python API
+  for gist exact search." on it.
+
+  It now carries the words the job actually gets searched under: code search,
+  grep, ripgrep, find in files, trigram index. The summary leads with what it does
+  rather than with the word "importable", the README opens on indexed code search
+  with ripgrep semantics instead of on package boundaries, and `rank` gets named
+  early because it is the one verb with no grep equivalent. The crate got the same
+  treatment inside its five-keyword budget, plus `readme`, `homepage`,
+  `repository`, and `documentation`.
+
+  The rest of the Python README is unchanged apart from an install section and
+  links to the three sibling packages.
+- The docs, examples, and test fixtures stopped naming the private monorepo `gist` was extracted from. Every `gist WalletService services/backend/api` was demonstrating path-scoped search over a tree nobody outside that company can look at, so the shape of the example survived and the names didn't: `SessionStore` exercises the same ranking signals as a CamelCase type, and `src/server/api` scopes a path the same way. Same for the fixture paths in the Go, Rust, and Python binding examples, the `:Gist` example in the Vim help, the daemon protocol and serve tests, and the `gist SessionStore` line the man page carries — that last one is baked in by `generate.zig`, so the generator is what changed and the page mints correct the next time you build it.
+
+  `CHANGELOG.md` lost its `ADR-NNN` citations too. An architecture-decision-record number is a pointer into a document set that did not come with the code, so each one either got replaced by the substance of what was decided or dropped as a parenthetical that was carrying nothing. Prose that described measurements taken against that monorepo still says so, just as "a large polyglot monorepo" rather than by name; the numbers are real and I'm not going to restate them as if they came from somewhere else. Two things were deliberately left alone: the copyright line, which names the actual holder, and everything under `bench/`, where `WalletService` is not an example but a high-match race pattern chosen against a specific corpus — renaming it there would quietly turn every measurement built on it into a zero-match run.
+
+  The hand-cloned upstream checkout the differential tests read moved out of a hidden dotfile bucket into `upstream/` on the same reasoning, and both it and `.gist/` are now gitignored by name.
+- The engine this product links is spelled `irgx` on the linker line too. You already included `irgx.h` and called `irgx_rows_next`, but the `-l` flag and the status constant you compared `gist_search_cursor` against were both still the long spelling - one API that could not decide what it was called. Both caught up.
+
+  A C host now links `-lgist -lirgx`, and a staged prefix holds `libgist` + `libirgx` in one lib directory - which is also what `libgist`'s loader-relative rpath resolves, so the packaging gate that opens the product from an unrelated directory is asserting the new filename. The substrate vocabulary `gist.h` speaks by including the engine's header is `IRGX_*`: `IRGX_OK`, `IRGX_MATCH`, `IRGX_STALE`, `IRGX_INVALID`, `IRGX_OOM`. The Go cgo tier is `-tags irgx_ffi`, closing a split where `relate` and `blast` had moved and this repo had not, so there was no single tag that built the in-process rung across all four checkouts. Rust's `native` feature links `dylib=irgx`, the Python binding pins `IRGX_LIB` at the `libirgx` sitting beside the `libgist` it is about to map, and the contract-override knobs are `IRGX_CONTRACT` / `IRGX_<NAME>_CONTRACT` - chased as strings rather than identifiers, because a missed status code is a compile error while a missed knob is silent.
+
+  None of this touches what gist itself is called. `libgist`, `include/gist.h`, the `gist_*` symbols, the `GIST_*` environment namespace, and the `gist-search` distribution are unchanged; only the engine underneath answers to a shorter name.
+
+  Rebuild clean. A renamed library file fails at *load* time rather than compile time, so a warm `zig-out` will happily hide a miss, and the engine header an older build installed under its long name is now a file nothing writes.
+- The macOS watch set is now budgeted against the ceiling the kernel actually enforces, and an idle daemon gives the set back long before it gives up its session. Both fix the same oversight: one descriptor per watched vnode makes the file table a **commons**, and the old budget priced it as if this process were alone on the machine. `watchBudget` derived its cap from `RLIMIT_NOFILE`, which on Darwin is not the enforced limit — measured here, a soft limit of 1,048,575 against a `kern.maxfilesperproc` of 245,760 over-states the room by 4.3×, and a stock macOS box ships 24,576, _under_ the ~26k watches this repo alone admits. The design already failed closed, but not PREDICTIVELY: it would accept a set it could not register and meet `EMFILE` partway through instead of declining up front. The budget now clamps by `kern.maxfilesperproc` and by a bounded share of the live system table (`kern.maxfiles / 8`, never more than the free headroom above a 4,096-entry reserve, priced against `kern.num_files` at arm time) — so the fifth concurrent daemon declines to arm rather than starving the `pipe(2)` of whatever starts next. On this machine that resolves to 61,440 watches, which the 26k set fits; on the stock box it resolves to 24,064 and the session stays unarmed (reconcile-always) from the start. Second, daemon accumulation: four to five `gist serve` processes across different trees held 27,057 descriptors at once, and the 10-minute idle TTL was the only thing that ever gave them back. Idle release is now **two-stage** (`daemon/serve/idle.zig`), ordered by what each resource costs the machine rather than the process: the watch set — the commons — is shed at 2 minutes of continuous idleness, while the resident corpus + index, which are only this process's own RAM, still live to the unchanged 10-minute TTL. Shedding cannot cost correctness by construction, because the watcher is a pure accelerator (macOS kqueue freshness barrier): a shed session withdraws the exactness promise, clears clean, and reconciles every query against the live filesystem, which is exactly the pre-ADR behavior. Re-arming is deferred rather than done in front of the client that woke the daemon — registration walks the tree and opens ~26k descriptors (~300 ms), so it waits for the returning burst to go quiet (2 s) and every query meanwhile answers on the ~50 ms baseline; the re-arm then forces one full pass and re-seeds the annals, so a `changed` consult never answers for the window nothing was covering. Measured on a live daemon over this repo: armed at 26,113 watch descriptors, **13** open files after the shed window with the daemon still warm, a query during that window still answered warm and still finding a file created _after_ the shed, and the set back to 26,114 six seconds later. Proven by `zig build test` — budget arithmetic including the clamp edges and the zero-watch (unarmed) floor, the idle policy as a pure two-input function with its overdue/clock-jump edges, `Seqlock` disarm/re-arm, and an end-to-end kqueue case that sheds a real watcher against a real tree, mutates files through the gap, and grades the re-armed answers against an independent on-disk oracle.
+- The packaging gate now quotes the product library's own dependency table when it
+  fails. A load-time verdict cannot distinguish "imports the shared engine" from
+  "absorbed a private copy of it", which is the only thing that gate is asking, so
+  a red run used to leave the reader to go re-derive it by hand.
+- The resident daemon (`gist serve`) is now five peer modules behind an unchanged `run`/`socketPath` surface instead of one 822-line file: `crew.zig` (the connection table + bounded worker pool), `loop.zig` (the poll multiplexer, idle staging, and the annals seed), `route.zig` (poll-thread frame triage — what one readable client costs), `answer.zig` (a query's decode → session verb → response write, plus the per-query wall-clock budget), and `serve.zig` (lifecycle only: singleton lock, session, watcher, socket, pool, teardown order). Each file is now one level of abstraction, which is what the old `MONOLITHIC` deferral was buying time for — the marker and its registry row are retired. No behavior change: the same 176 unit tests pass, including all six end-to-end daemon lifecycle cases (worker-pool non-starvation under a pinned query, budget decline, the annals consult behind the flush barrier, and fd-transport byte-parity with chunk frames).
+- The resident-session wire protocol is now a sealed `conduit/protocol/` module entered through `protocol.zig` instead of one 703-line file: `frame.zig` (the opcode spine, frame budgets, and typed fd transport), `query.zig` (the request codec with its flags byte and self-describing rank/context/pcre trailers), `result.zig` (the answer codec and zero-copy readers), `keep.zig` (the v8 recall/retain answer keep), and `annals.zig` (the watcher consult). The opcode enum is a leaf every chapter imports downward, so an opcode byte is still minted in exactly one place, and encode/decode for a given frame stay in one chapter so a trailer's writer and reader cannot drift. The public surface is unchanged — the entry file re-exports every name callers already bind to, and the ward seal makes the chapters internals — while the `MONOLITHIC` marker and its registry row are retired. `encodeRecalled` now takes named `Vouched`/`Hit` types instead of an anonymous parameter struct only the callee could spell, which a caller assembling the value before the call could not construct.
+- Thirty-seven READMEs carried a `doc_radar:` block - YAML frontmatter on most, an
+  HTML comment on the rest - declaring path, count, and sentinel assertions for a
+  freshness gate that lives in the monorepo this package was split out of. That
+  gate was never ported here, so every one of those blocks was inert. On the
+  Python binding's README it was also the first thing a PyPI reader would meet,
+  where the renderer turns a YAML preamble into a horizontal rule followed by a
+  heading made of raw YAML. They are gone, and the prose below each is untouched.
+
+  One comment in `bench/conformance/gates/parity/patterns_corpus_parity.sh` cited
+  the corpora README's sentinel as the only thing coupling that gate's torture
+  slate to the generator that plants it. The sentinel never ran, so the comment
+  now says plainly that nothing enforces the pair and a rename has to land in both
+  files at once.
+- This package no longer depends on `_buildkit`, a sibling that existed on one machine and had no remote. It borrowed one file from it — `brigade.zig`, the shard-aware test runner — which now lives in `irregex` and is reached through the dependency on `irregex` this build already declares. One fewer edge in the graph, and one fewer unpublished repository standing between a clone and a test run.
+
+  Two doc comments pointed at a `_buildkit/build.zig` helper that is no longer reachable from any of these repositories; they now describe the fan-out this build actually performs.
+- This repo now authors `contract/surface.toml` - the row schemas, ABI status
+  vocabulary, transports, session semantics, analytic and composed planes, tool
+  boundary, and published package names. All of it previously sat in the kernel's
+  `search_api.toml`, describing surfaces the kernel does not own.
+
+  The contracts we do not author stay with their authors: `analytic.toml` and
+  `engine.toml` in `irregex`, `kinship.toml` in `relate`. Every binding resolves
+  them from the author's checkout, and `tools/sync_contract.py` fails when a
+  sibling is missing or its contract is absent - so a checkout of only this repo
+  knows what it cannot gate, rather than silently gating nothing.
+
+  That matters because **the parity gates now fail closed**. Every binding mirrors
+  constants from all three contracts so an installed package needs no repo file,
+  and a per-binding parity test is the only thing keeping five copies of the same
+  numbers honest. Those tests used to skip when a contract was unreadable, which
+  was defensible for a wheel and disastrous in a checkout: after the repo split
+  the locators resolved to files that no longer existed, so the assertions stopped
+  running and nobody noticed. An unreadable contract is an error now, and it names
+  the file and the command that restores it.
+- `--files-without-match` is no longer a declared boundary in the ripgrep-parity
+  harness, because there is nothing left to declare.
+
+  The entry said rg contradicted itself: over a tree holding a walked NUL-bearing
+  file it exits 0 while printing no path, so gist's exit 1 was recorded as the
+  coherent reading of a mode whose code means "a path was listed". That reading was
+  wrong. rg's success predicate here is `match_count == 0` - "some file's search
+  found no match" - and an abandoned binary search found none. gist now answers the
+  same question (fixed in irregex), so the difference the boundary excused does not
+  occur.
+
+  That matters more than tidiness: `surface.py`'s table is imported by both the flag
+  probe lane and the differential fuzzer, so as long as the entry stood, a
+  regression back to exit 1 would have been scored `declared` in both and waved
+  through. The `silent0` residual it was the only user of is gone with it.
+
+  411/411 mined cases still pass in both the parallel and serial lanes.
+- `contract/surface.toml` is down to what gist actually authors: `[package]`,
+  `[transports]`, `[session]` and `[tool_boundary]`.
+
+  The row schemas, enums, verb table, params families and producer map that used
+  to sit here are substrate, not gist's. relate and blast return those same rows
+  through the same cursor, so declaring them in gist's contract meant two
+  libraries reading a third's file to learn their own wire shape. They are in
+  `irregex/contract/analytic.toml` now, beside the generator that lowers them into
+  every binding. `[compose]` and its verbs went to `blast/contract/compose.toml`,
+  where the library that answers them lives.
+
+  `tools/build_schema_tables.py` left with the tables. `tools/sync_contract.py`
+  now verifies four contracts rather than three, and the Python and Rust parity
+  gates resolve `analytic` from `irregex` the same way they already resolved
+  `engine` and `kinship`. Nothing is vendored; each sibling declares its own and
+  the mirrors cite them where they live.
+
+  The C header's account of what a row means pointed at `contract/surface.toml`,
+  which no longer declares it; it names `irregex/contract/analytic.toml` now, as
+  do the binding READMEs.
+- `contract/surface.toml` no longer declares `[status_codes]`,
+  `[decline_reasons]` or `[fault_domains]`. They describe what
+  `include/irgx.h` returns, so they moved to `irregex/contract/engine.toml`,
+  which this repository already resolves as a sibling — the row schemas,
+  transports and session semantics that are genuinely ours stay here.
+
+  Nothing changed about what libgist returns, and no mirror moved: the Go, Python
+  and Rust constants are unchanged and their parity tests still read the engine's
+  contract the same way they read it for `[meta]` and `[request_options]`. The
+  practical difference is upstream of us. A host that links only libirgx now
+  has a contract for the codes it receives, and there is exactly one file to edit
+  when a fault domain gains a member — where before this repo could have added one
+  that the engine emitting it had never heard of.
+- `gist --version`, the `--schema` manifest, and the generated man page now answer with **this package's** version rather than the engine's. They read `build.zig.zon` - `build.zig` lifts `.version` in as a build option and `src/root.zig` exposes it - so the number is written in one place and nothing restates it. Both packages happen to be at 1.0.0 today, so no output moves yet; what moves is that they are now free to diverge without the CLI reporting a number that belongs to something else. The engine is still there to ask: `gist rg --pcre2-version` for the vendored grammar, and the engine's own accessor for its semver.
+
+  The two publishing manifests, `Cargo.toml` and `pyproject.toml`, are the only remaining copies, since neither can import anything. Both carry an `x-release-please-version` marker that `release-please-config.json` lists, so a merged release PR moves them with the manifest in one commit, and `tools/version_parity.py` fails if one lags or if a marked line was never declared to the bot. It runs in CI as the `version` job.
+- `gist_abi_version` is the session ABI (still 2). It is no longer exported as
+  `irgx_abi_version`, which `libirgx` owns for the engine plane (1). A
+  host that version-gates both libraries reads two axes, not one overloaded
+  integer.
+- `gist_run` keeps only `rank`. Kinship, retrieval, and the multi-pattern sweep
+  moved to `librelate` (`relate_run`); the composed verbs moved to `libblast`
+  (`blast_run`). A host that wants kinship no longer links the search library
+  to get it — each producer returns the same `irgx_rows *` walked by
+  `libirgx`. Op numbers are unchanged, so a stored verb id still means the
+  same thing ecosystem-wide.
+- `libgist` is the search product's C ABI again. The artifact, header, and
+  session symbols were still named for the engine library after the ecosystem
+  split (`libirregex`, an engine-named header, and an `irregex`-prefixed
+  `open` / `search` / `analytic_run` triad). They are now `libgist`,
+  `include/gist.h`, and `gist_*`.
+  Substrate status codes, the fault pull, and the `irgx_rows_*` cursor stay
+  in `libirgx`; `gist_run` returns that cursor on purpose. The product
+  stops shipping duplicate `ffi/{rows,schema.gen}.zig` and the `Rows` walker —
+  those live in `@import("irregex").ffi`.
+- macOS resident sessions now answer from a sound causal barrier instead of re-walking the tree for every query. The old FSEvents backend could only observe, never prove: fseventsd journals asynchronously with respect to the write syscall, so `flushSync` returned an unconditional doubt and every macOS query paid the full parallel walk — after two rounds of walk optimization (~160 ms → ~50 ms) that walk _was_ the remaining cost. Both candidate barriers were probed adversarially before any code was written: an FSEvents "fence file" is **unsound** (200 of 300 iterations at zero stream latency, once with 54 of 64 earlier writes still undelivered — monotonic event IDs order the journal, not delivery relative to a completed write) and its 0.05 s coalescing floor alone costs ~48 ms, slower than the walk it would replace; a kqueue `EVFILT_VNODE` barrier is sound and ~20× cheaper (**zero** unsound iterations across 355 adverse iterations at full repo scale, drain 1.9 ms). Two probe findings shaped the design rather than confirming it: directory-granular watching reports 0 of 2000 in-place content edits (a directory does not change when a file's bytes do), forcing a composite set of directories _and_ files; and case-insensitivity — expected to kill the design — does not apply, because kqueue keys events by a DESCRIPTOR this process opened with the walk's canonical spelling, so macOS can now arm exact on the very volumes where Linux's name-keyed inotify deliberately cannot. The watch set is selected by the walk's own `Ignore` (not the raw tree) and carries the hidden per-directory ignore SOURCES that decide admission, so a `.gitignore` edit re-derives both the rules and the coverage — otherwise a newly-admitted file would be unwatched while the session still reported clean; paying one descriptor per file makes that difference 193k descriptors versus 26k here (40% of the system-wide file table for a single daemon, enough to fail a second daemon's `pipe(2)`). Everything degrades to the walk, never to stale bytes: a descriptor budget that will not fit leaves the session unarmed, a post-arm registration failure poisons the fast path, and `EV_ERROR` raises doubt. Measured A/B on this repo (20.3k-file corpus, same binary, private index + socket per arm, unarmed = the pre-ADR behavior reproduced by starving the descriptor ceiling; wall = full client spawn + UDS round trip; each daemon grading its own reconciles): quiescent warm query 59.5 ms → **5.0 ms**, one-file-changed 62.7 ms → **4.9 ms**, and 51 full reconciles over 50 queries → **0** (26 scoped, the rest clean). A change to a served root still takes the walk by design. `coreservices.zig` — the dlopen'd CoreServices/CoreFoundation binding that existed only to drive the old stream — is deleted. Proven by `zig build test`, including an end-to-end kqueue suite that boots the real watcher against a real tree and grades every answer with an independent on-disk oracle: in-place edits, post-arm file and directory births re-edited in place, cross-directory moves, case-only renames, deletions, the root-entry full-walk fallback, and an ignore-rule edit that must re-cover the newly-admitted file (that last case fails, 3 matches where 2 are live, if the refresh is removed).
+
+### Fixed
+
+- A `gist` verb could die of a stack smash purely because the artifact home's path was a certain length.
+
+  The session's rendezvous path is `<artifact home>/gistd.sock`, and anything that probes for a resident daemon hands that path to `std.Io.net.UnixAddress`. std publishes one POSIX-wide `max_len` of 108 bytes, but Darwin's `sun_path` holds **104**, and std's POSIX copy takes the length unclamped — only its Windows arm applies a `@min`. So an address of 105–108 bytes passed `init` and was then memcpy'd up to four bytes past a 104-byte `sun_path` sitting on std's own stack, into whatever neighbored the connect helper's frame.
+
+  The window is four bytes wide and exact: 104 and below fits, 109 and above `init` refuses. That is why this read as flakiness for months. Whether a run landed in it depended only on how long the artifact home happened to be, so it appeared under a test runner that names temp directories after the test — and never from a shell, where `mktemp` paths are short.
+
+  It also never crashed anywhere near the damage. The report we finally chased was a segfault inside an unrelated file read three calls later, dereferencing a pointer whose low bytes were `0x6b636f73` — `"sock"`, the tail of the very path that overflowed.
+
+  `conduit/rendezvous.zig` now owns the platform's real capacity, read off `sockaddr.un`'s own `path` field rather than assumed, and every site that turns a path into a socket address goes through it. An address the kernel cannot hold is refused, which the callers already handle as "no daemon is listening there" — true by construction, since nothing can be bound to a path the kernel will not accept.
+
+  Two gates, both mutation-proven. The unit test walks every length std would have admitted past the platform bound and pins the refusal (on Linux the two bounds coincide and that span is empty, which is the correct statement there rather than a weaker test). `bindings/python/tests/test_rendezvous.py` runs the real binary across rendezvous lengths 98–115: with the guard removed and the binary rebuilt, exactly 105, 106, 107 and 108 fail and nothing else. It builds its temp home under the shortest writable temp root on purpose — under macOS's default `TMPDIR` there is no room left to construct a 105-byte address, and the suite would have skipped the entire window while reporting itself green.
+
+  This is a bug in the Zig standard library that we are guarding around; the upstream fix is for `UnixAddress.max_len` to be per-platform, or for `addressUnixToPosix` to clamp on POSIX as it already does on Windows.
+- A certificate mint no longer loses half an hour of valid measurement when a coworker deletes a file. The corpus manifest hashes every path in the index snapshot, and a file that vanished between the snapshot and the hash raised an uncaught FileNotFoundError after the whole macroscopic race had already completed. On a clean tree that strictness is the point — a manifest row promises the exact bytes that produced the timings — so strict mode still aborts on a vanished or mid-hash-mutated file. Under CERT_ALLOW_DIRTY=1, which already declares a churning coworking tree, such a file is dropped from the manifest rather than hashed loosely and counted in machine.json as corpus_unstable_files, so the certificate states exactly which bytes it can and cannot vouch for. Still fail-closed: churn past 1% of the corpus aborts the mint outright.
+- A native failure through the Rust in-process plane read `analytic run: native
+  status -3` when the engine had already said which file and which byte.
+
+  `plane::fault` exists to enrich that: pull the thread's last fault, render the
+  name, the path and the offset into the message. It pulled it, then tested the
+  return for `IRGX_OK` - which is the pull's "this thread has nothing to
+  confess". `IRGX_MATCH` is "a fault was written". So the test was inverted:
+  every real incident took the bail-out branch and every message fell back to the
+  bare status number, while the one case that got through was the empty slot,
+  whose `name` is `""`.
+
+  Nothing caught it because the rendering was a closure inside the only function
+  that called it, unreachable without a loaded engine. It is `incident()` now,
+  taking the pull as an argument, with a fake one in the tests - and the four rows
+  that pin it fail on the inverted spelling.
+
+  While there: the offset is only appended after a path when `at_space` is
+  `AT_FILE`, so a pattern offset can no longer be printed as a position inside a
+  filename.
+- A published certificate names the incumbents it beat, so `tool-versions.txt` has to say _which_ csearch and _which_ zoekt — and it did not. Every row was a bare `sha256:` of whatever `command -v` returned, which is unreadable, is not comparable to anything upstream, and differs per platform for one release. Worse, it can name the wrong file entirely: under a version manager the resolved path is the multiplexer, not the rival (a `mise` shim is a symlink to `mise`), so shimmed tools all hash to one launcher while still reading as exact pins. Measured on this machine, `csearch`, `zoekt`, and `zig` recorded the single digest `20d3bc06…`, which is `mise` — three tools, one meaningless pin, and `guard/artifacts.py` could not tell, because a digest is a digest.
+
+  Identity is now the version the tool reports of itself **and** the digest of the executable that resolved, because either alone degrades: a digest cannot survive a shim, and a version cannot separate the two local csearch builds here that are both module `v1.2.0` under different Go toolchains. Resolution walks `PATH` for a candidate whose name survives symlink resolution — a multiplexer renames itself, a real install does not — so no version manager is special-cased. The guard now fail-closes when two tool ids share one digest, which is the only signal that separates a collapsed pin from a real one.
+
+  csearch and zoekt carry no version flag at all, so their pin is the embedded Go module version read from build metadata rather than by running them. Asking a search tool for its version is actively unsafe: `csearch version` treats `version` as the _regexp_ and prints a matching corpus line, which scraped a bogus `26.3.0` into an identity before the probe order was fixed. The field now records `github.com/google/codesearch v1.2.0`, `github.com/sourcegraph/zoekt v0.0.0-20260622122048-f80c7e09ab9d`, ripgrep `15.2.0`, ugrep `7.8.2`, ag `2.2.0`, GNU grep `3.12`, git `2.55.0`. Two-component versions are accepted as the real shape they are — GNU grep ships `3.12`, and refusing it would be the guard demanding a form reality does not have. The eight non-shimmed digests are unchanged from the published bundle, so resolution moved nothing it should not have.
+- A resident daemon can no longer answer for a build it isn't running: READY now names the daemon's executable image, a gist client on a different one runs cold, and the newer of the two retires the older.
+
+  **A well-formed answer carrying bytes that no longer exist.** A freshness fix landed, the binary was rebuilt two minutes later, and `gist` kept printing a line from a file edited hours earlier — text the file on disk had not contained since. `gist index` "fixed" it, which pointed at the on-disk index; the index was sound. What was serving the stale line was a daemon started before the fix, answering a freshly-rebuilt client from the pre-fix engine. `protocol_version` did not catch it and could not: it proves two peers FRAME alike, and a correctness fix that changes what a warm answer IS moves no byte on the wire, so it earns no bump. Every behavior-only fix this engine will ever ship has that shape.
+
+  **So READY says which build is answering** (`exec/session/conduit/image.zig`, protocol v9). The daemon stamps its executable at boot — before any later rebuild can replace the file underneath it — and reports that stamp for the rest of its life; the stamping instant and the reporting instant being hours apart is the whole point. A gist query or `gist index` consult meeting a different stamp declines to the certified cold path rather than trusting an engine it no longer shares.
+
+  **The stamp is an mtime, so it carries an order, not just an identity** — and that is what makes retirement safe. Declining alone would have traded a wrong answer for a stranded warm tier: the daemon's idle TTL wants ten _continuous_ minutes of quiet, which a tree with ~10 coworker agents querying it never gets, so one `zig build` would have turned the warm path off for the rest of the day. The newer peer now asks the older to stop on its way out, and _only_ the newer: were mere difference enough, an old shell and a new one would take turns killing each other's daemons, where ordered the exchange converges after exactly one cold query. The protocol version is the outer order and is read straight off READY's byte zero rather than through `decodeReady` — a decoder speaks only for the layout it was compiled for, while every version has always put the version in the same place, which is what lets this release's own v8 daemons be retired rather than merely declined.
+
+  **And the skew is now legible before it costs anything.** `gist status` grew a `resident` line — `none` / `ours` / `foreign` — answering the half of "am I ready to search fast" whose failure was previously silent, the same way `bound_here` answers it for artifacts built over another tree. The probe is read-only: status never spawns a daemon and never retires one, so running it twice cannot change what it reports; retiring a superseded daemon stays the query path's job, one cold answer later.
+
+  **Two peers are deliberately exempt.** The answer keep never checks the stamp, because `relate` and `irregex` dial gist's socket by design and three binaries from one build are three different files — and it is sound there, since the daemon renders no kept answer and `cli/reprise.zig` already folds the caller's own build into the key. The Python and Rust bindings don't check it either (no comparable image; they report `unknown`, which abstains) — though both were pinned two versions behind and silently cold, and are now back on the shared contract with READY's new fixed 29-byte header.
+- Every function in this package is annotated, public and private alike, and every consumer's type checker has been ignoring all of it. PEP 561 says annotations inside an installed package are invisible unless the package ships a `py.typed` marker, and this one never did. The work was done and then hidden: `mypy` run against code importing this package got `Any` for the whole API and reported nothing wrong.
+
+  The marker is there now, and hatchling ships it because it sits inside the package directory. There is a test for it too, because the failure mode is silent in both directions - nothing here breaks when it goes missing, and nobody downstream is told.
+- Every in-process parity test in the Python binding — 73 of them, the whole
+  `test_ffi_parity` and `test_cursor` surface — was skipping with
+  `libirgx/cffi unavailable`, and a suite that reports 119 passed / 73 skipped
+  reads as green. Two causes, both artifacts of the repo split.
+
+  `cffi` is deliberately not a runtime dependency: the in-process tier is an
+  accelerator and fails open to the subprocess without it, which is what keeps the
+  shipped wheel pure-Python. Inside the originating monorepo it arrived anyway,
+  transitively, from the sibling cffi kernels; a standalone checkout has no such
+  sibling, so the tier went
+  dark everywhere at once. It is now a test-only dependency, which is where it
+  always belonged — the runtime contract is unchanged.
+
+  With the tier awake, 19 of those tests failed: the cursor drove
+  `gist_engine_open` / `gist_cancel_*`, and the engine had moved down into
+  libirgx as `irgx_engine_*`. Retargeted onto the substrate's spelling; the
+  symbols resolve through libgist's own handle because libgist links libirgx by
+  rpath, so the engine a cursor reads is the one the binding opened — no second
+  implementation, which is the whole reason the engine moved.
+
+  192 passed, nothing skipped.
+- Every workflow checkout of a sibling package now carries `token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}`, matching the pattern `blast` already used. The default `GITHUB_TOKEN` is scoped to the repository running the job, so a checkout of a *private* sibling 404s on a runner no matter how correct the rest of the job is; four of this repo's jobs check out `irregex`, and `irregex` is private. The fallback is what makes this safe to land ahead of the secret: with no `ECOSYSTEM_TOKEN` configured the expression collapses to the default token and the behavior is exactly what it was, so a fork still fetches whatever is public and gets a legible 404 on whatever is not, rather than a mystery failure inside a build step. This is wiring, not a grant; the secret itself does not exist on any of the four repositories or at the organization level yet, so the private-sibling checkouts stay red until someone creates it or the sibling goes public.
+- Persisted artifacts — and the resident daemon's socket — now record the tree
+  they were built over, and every accelerator declines when that binding names a
+  different one. A `GIST_DIR` aimed at a second checkout used to serve that
+  tree's content-shard bytes as this tree's, hide a real hit behind a foreign
+  freshness anchor, walk a phantom directory that exists only over there (the
+  `No such file or directory` + `-uu` misdiagnosis), and answer warm from the
+  other tree's resident session. It now answers live and correct, `gist status`
+  names the tree the artifacts actually describe, and `gist index` re-binds.
+- Reconciled every prose number that quotes the Dominance-and-Fit Certificate with the freshly minted artifact: the package and research READMEs carried a two-mint-old corpus (20,492 files / 195.8 MiB) and win range (2.10x-7.76x, 1.97x-23.57x) where the certificate now reads 20,660 files / 204.6 MiB and 5.78x-8.93x, TESTING.md quoted a Layer C roofline placement of 29.1 GB/s / 35% where the re-mint measures 61.6 GB/s / 77%, and the certify README's system-time figures predated the race-corpus scope fix. Each quoted number is now backed by a freshness sentinel that breaks on the next re-mint, and the csearch rival floors in ratio_baseline.json were refreshed to bound the currently measured loss instead of failing against a stale one.
+- The Go binding's linter moved into the job that has the substrate checked out.
+
+  It was living in `discipline`, which opens by saying it needs neither `../irregex` nor a gist binary - and means it, because a contributor who mistyped a heading should learn that in seconds rather than after a matrix compiles. But golangci-lint typechecks, and this module's `go.mod` replaces the substrate with `../../../irregex/bindings/go`, so from a lone checkout it failed on a missing replacement directory rather than on any Go it was asked to judge. The `go` job already clones both repositories and sets up the toolchain, so the lint costs nothing extra there and now reads real code.
+- The Go index lifecycle suite gave each corpus a private artifact home, which is only half of the isolation: a resident session left over from another tree is still reachable, and this suite is about what a lifecycle verb writes to disk in *its* home, not about warm dispatch. It now stands the daemon down for the duration.
+
+  That did not account for the whole flake. The residue was an intermittent `gist status: exited -1`, which the improved child-tier diagnostic in irregex has since named a **segmentation fault** in `readGenerationFile` under `status` — a real pre-existing crash, tracked separately, not the noise it was taken for.
+
+  Module floor lowered to `go 1.24` alongside irregex.
+- The Go index suite had a test split in two on a false premise, and the half that
+  was supposed to run everywhere could not run anywhere.
+
+  The reasoning was that reading a fresh artifact home should be gist's own code,
+  so it was pulled out of the relate-dependent test to stop it skipping on public
+  CI. It is not gist's own code. `Corpus.Atlas` reads `relate status --json` -
+  relate produces the artifacts *and* the document reporting whether they are
+  ready - so the extracted half failed outright rather than passing:
+
+  ```text
+  --- FAIL: TestAtlasReportsNothingReadyWhenNothingIsBuilt
+      atlas: irregex: no gist/relate/blast binary found: RELATE_BIN is unset,
+      relate is not on PATH, and no build exists at any of: ...
+  ```
+
+  The two halves are back together, with a skip that names the real reason. What
+  changed is that the skip is no longer where the story ends: relate's CI builds
+  both sides and drives this suite with the binary present, so the assertion gist
+  cannot check is checked by the repository that can. Verified on x86_64 Linux in
+  both shapes - green with relate absent, and a genuine pass with it present.
+
+  Every other missing-binary arm in the module stays fatal. Those all resolve
+  `gist`, which CI builds, so a miss there is a broken environment rather than an
+  absent capability.
+- The Python binding's whole `test_cursor` surface — 19 tests — killed the
+  interpreter outright in a side-by-side dev tree. Not a failure, a SIGSEGV: the
+  first `Engine.search` went into `gist_search_cursor` and never came back.
+
+  The process was mapping two engines. `libgist` links `libirgx` dynamically
+  and carries a loader-relative rpath, so it binds the copy staged beside itself
+  — the one gist's own build produced. Importing `irregex` maps one eagerly too,
+  and its loader resolves the engine out of the `irregex` checkout, on the
+  deliberate rule that a package's library lives in that package's `zig-out/lib`.
+  Both rules are right on their own. Together, in a tree where both checkouts are
+  built, they name two different files: a product configures its dependency
+  itself, so the sibling's own copy is a different build of the same source. A
+  handle minted by one engine then gets read by the other's code, which is
+  undefined behavior rather than a decline — macOS binds two-level, so it never
+  even reaches the accidental first-wins rescue ELF would give.
+
+  The substrate loader can't fix this, because it has no way to know a product is
+  in the room. So gist names the copy its own library binds, before anything
+  imports `irregex`. An explicit `$IRGX_LIB` still wins — a caller who names an
+  engine meant that engine — and an installed prefix, where both libraries sit in
+  one directory, resolves to the file that loader would have picked anyway.
+
+  213 passed.
+- The competitive race now scopes gist and rg to the same logical corpus the
+  indexed rivals see. Both run under `--no-ignore-vcs` for a deterministic
+  multi-root oracle set, but that also discarded every nested `.gitignore` — so
+  they alone walked ~2,488 build artifacts the root `.gitignore` never names
+  (Elixir `_build`/`deps`/`cover` beam output, Electron `out/`). Those files are
+  pruned by `gist index`, so they never enter `paths.list` and never reach
+  csearch: the "indexed twin" was racing a strict subset of gist's corpus, and
+  every one of those files fell off both the elide oracle and the content shard
+  into a live `openat`+`read`. Re-applying them as the glob equivalent of the
+  `XDIRS` set the other no-gitignore tools already get cuts gist's `literal-rare`
+  cell 1.21x and its system time by a third, with the rg-equality oracle still
+  byte-identical across the literal, regex, PCRE, and count fields.
+- The cross-language contract parity gate stopped running when the bindings moved into this repo, and nobody could tell, because its failure mode is a skip. Each binding embeds the canonical contract's load-bearing constants so an installed package carries no dependency on a repo file, and a parity test reads `contract/search_api.toml` and asserts the mirror matches — the standard shape, and the only thing keeping four independent copies of the same numbers honest. The tests located the TOML at a fixed depth (`../../contract/` from `bindings/rust`), which was right while the bindings sat beside the kernel in the monorepo and wrong the moment they were extracted here, where the contract stayed behind with the kernel in a sibling checkout. An unreadable contract is a legitimate state — a published crate ships without one — so every assertion took the documented skip branch and the gate went silently dead. The Python locator was worse: it had been off by one directory since before the split, so that mirror was never gated at all.
+
+  The path is now found by climbing rather than counting. Each ancestor is probed twice — `contract/` for the in-repo layout and `irregex/contract/` for a sibling checkout — with `IRGX_CONTRACT` overriding both, and a genuine absence still skipping. Turning it back on caught the drift it exists to catch on the first run: the engine has been `0.3.0` since an automated release bumped `src/root.zig`, while the contract and all three binding mirrors still said `0.2.0`, and the Rust crate additionally still advertised the Python distribution as `billy-irregex` after the rename to `gist`. Both are corrected, and the contract's `engine_version` picked up the release marker its two siblings already carried so the bot moves all three together instead of leaving this one a minor behind.
+- The discipline job's shell linter is pinned now, like everything else it runs.
+
+  Every other tool in that job is a Python distribution installed at an exact version into uv's isolated environment, so the job's verdict moves when we move it and not when a tool ships a release. ShellCheck was the one exception and came with the runner image, which meant a runner carrying an older build could report a finding nobody here caused - SC2317 against a `trap`-invoked cleanup that newer ShellCheck reads correctly. Pinning `shellcheck-py` closes the gap over all thirty-six tracked scripts.
+- The freshness sweep now prunes with the **same `Ignore` engine that decides admission**, which makes `relate status` **13× faster** (4.19 s → 321 ms). The sweep's job is to name every file changed since the index anchor, and it ended with `retainAdmitted` — the ignore engine — discarding whatever the corpus would never have admitted. But the walk that fed it only pruned on directory _basenames_, so it paid full metadata cost for entire trees the very next step was guaranteed to throw away. Over this repo it stat'd **241,818 files** to describe a **21,106-file** corpus; `upstream/` alone accounted for **206,289** of them — gitignored, never admitted, never skipped, 85% of the walk spent on an answer that was already known.
+
+  The fix is to ask the question earlier rather than to add a second filter: `expandOneLevel` now loads each directory's ignore rules as it descends and drops a child subtree before it becomes a `WorkItem`. That required teaching the work queue which positional root an item descends from — `Ignore` scopes its ancestor tier per root (`scopeToRoot`), so a shared engine has to know which root it is deciding under — and `prunedDir` mirrors `Ignore.admitsPath`'s ancestor discipline so a subtree is pruned on exactly the grounds it would later have been rejected on.
+
+  Pruning a walk is the kind of change that silently loses files, so it is checked rather than argued: the sweep still reports the same changed set (1765 paths against 1764 on the pre-change tree — the drift is live coworker edits, not the filter), and `bench/gates/index_elision_parity.sh` re-proves `index == --no-index` including its freshness cases, alongside `bench/gates/freshness_fs.sh` for unreadable directories and foreign artifacts. The `sweep`, `fresh`, `bulkstat`, and `ignore` unit suites pass unchanged.
+
+  This is a walk that got cheaper, not a corpus that got smaller: the pruned subtrees were never part of the answer.
+- The in-process `count` and `files` faces dropped the context window before
+  searching, which undercounts when `-m` is also in play.
+
+  Dropping the window is normally free: a context row is not a match, so a face
+  that only wants matching lines saves itself the callbacks by asking for none.
+  The exception is an after-window under a cap. rg stops *selecting* at the cap
+  but keeps searching that match's after-context window, and a match found inside
+  it counts - so `-c -m1 -A1` over a file with two adjacent hits is 2, not 1.
+  Zeroing the window meant the second line was never looked at.
+
+  The window now survives when the request carries a cap, and the two faces read
+  `kind` to tell a match row from a context row instead of counting every row
+  that arrives. Before-context is still dropped unconditionally: a line behind a
+  match was already offered to the matcher on its own account, so it can never
+  add a match.
+
+  The C header said context and inverted selections carry zero submatches. That
+  stopped being true when the record stream started painting spans from each
+  line's own content, which is what rg does. It now says to read `kind`, never
+  the submatch count, to classify a row.
+- The packaging gate now reads libgist's export table instead of hiding a file and
+  watching what happens.
+
+  The invariant `build.zig` states is about names: libgist links libirgx so that it
+  does not restate `irgx_*`, which is what lets a host load libgist and librelate
+  together and still see one engine ABI. The gate used to check that by staging both
+  libraries, deleting the substrate, and requiring the load to fail. That is a proxy,
+  and it turns out to be a proxy for the build machine rather than for the invariant -
+  Zig records the dependency's cache directory as a runtime search path, and
+  `ZIG_LOCAL_CACHE_DIR` makes that path absolute on CI while it stays relative on a
+  dev machine. An absolute one resolves the deleted library straight back out of the
+  build cache, so the check asserted the invariant locally and nothing at all on
+  Linux CI, where it had been failing.
+
+  It reads `nm` now, which answers the actual question. Deliberately not `dlsym`: a
+  handle resolves its dependencies too, so asking a loaded libgist for
+  `irgx_engine_open` succeeds by finding libirgx's copy - the very thing under test.
+  Three gates replace the one: libgist exports none of the substrate's names, it
+  carries a loader-relative search path (the property that makes the shipped shape
+  loadable, previously indistinguishable from a build-cache path that happened to
+  resolve), and the same probe run over libirgx proves it can see an engine
+  vocabulary when one is really there.
+
+  What is deliberately not asserted is that libgist records libirgx as a needed
+  dependency. That record is the linker's decision rather than this repository's:
+  ELF drops an `--as-needed` library that no undefined symbol needs, so a product
+  whose statically linked Zig already satisfies everything records nothing, while
+  Mach-O keeps the entry regardless. The sibling products disagree on exactly that
+  line today from identical link calls, which is the proof it was never a contract.
+  Absent redefinition is what makes the vocabulary single; the dependency table only
+  ever explained it, and it is reported in the failure message for that reason.
+
+  Nothing in the build changed - the boundary was already sound. Each product
+  statically links the engine's Zig code, because that is what linking a Zig module
+  means, and the FFI layer allocates through `std.heap.c_allocator`, so a row minted
+  inside one copy and freed inside the other crosses one process-wide malloc heap.
+- The published wheel asks for `irregex>=1.0.0,<2` instead of a bare `irregex`.
+
+  Unbounded, the resolver satisfied it with `irregex==0.1.0` - the pre-rename placeholder on the index, which has no `irgx` module in it at all. So `pip install gist-search` installed two packages and then failed on line 20 of `gist/__init__.py`, importing a name the dependency it just fetched has never exported. The floor is 1.0.0 because that is where `irgx` starts existing; the ceiling is the same fact from the other side, since 1.0.0 is where the substrate froze the C ABI and the `irgx` surface and a 2.0 is by definition free to move both. This is a face over an ABI, not a consumer of a loose utility.
+
+  The release gate that reads the built wheel's `Requires-Dist` now asserts the bound as well as the name, and reads that line with `packaging` rather than string surgery. Those two are the same discovery: it was finding the name by splitting on whitespace, which works for a bare `irregex` and stops working the instant a specifier is attached, because `irregex<2,>=1.0.0` has no space in it. Adding the bound made the gate report the dependency missing. A requirement's own grammar is what the index reads, so that is what the gate reads. Four shapes are rejected as intended - a bare name, a ceiling with no floor, a `file://` direct reference, and a requirement on the wrong distribution. It was passing on a requirement that could resolve to something unusable, which is the shape of gate worth strengthening: the floor-install step downstream did catch the broken import, but only because a version old enough to prove it happens to be published. An unbounded requirement is wrong either way, and a release cannot be taken back.
+- The rgsuite's tracked `results.json` no longer churns on every re-run. Four mined cases (`ignore_git_multi_root_order`, `ignore_rgignore_multi_root_order`) walk two roots whose visit order is genuinely nondeterministic — measured over 40 runs each, gist drew the two orders 24/16 and ripgrep 26/14 — which is exactly why ripgrep's own suite asserts them with `eqnice_sorted!` rather than `eqnice!`. The scorer already honored that oracle in its verdict (`cmp=sort` sorted-line equality is a full PASS), but it recorded a `detail` of whichever side the coin landed on, so a committed artifact ~10 agents share picked up a spurious diff roughly every other run. A `cmp=sort` case now records the oracle it was judged at, unconditionally. Buckets are untouched — PASS 409 / ORDER 0 / FAIL 0 on both engines, verified byte-identical across twelve consecutive suite runs, where six of the previous six disagreed.
+- The test runner is pinned by url and hash instead of assumed to sit beside this
+  repository.
+
+  `.brigade = .{ .path = "../brigade" }` resolves on a machine that happens to have
+  the sibling checked out, and nowhere else - so a fresh clone, and CI, could not
+  build this package at all. brigade is a published package now
+  (github.com/The-Billy-Company/brigade), pinned the way the vendored engines
+  already were.
+
+  The co-developed siblings stay path deps on purpose: those change together with
+  this repository and a checkout beside it is the point. A test runner does not,
+  so this repository chooses its version deliberately.
+- The warm-tier certificate CSV is now written with a real CSV writer instead of a naive comma join. One probe pattern is the regex `\w{3,8}`, whose brace comma landed unquoted in the middle of the `pattern` field and silently shifted every column after it on that row — so any consumer parsing `certify_warm.csv` read `regex-dense-scan`'s timings out of the wrong columns. The published bundle is regenerated with the pattern correctly quoted; no measurement changed.
+- The warm-vs-cold parity tests asserted a cross-file record order neither tier
+  promises. The warm engine canonicalizes to a `pathLess` total order; the cold
+  walk emits in the filesystem's `readdir` order. On a machine where `readdir`
+  comes out sorted the two agree by accident, which is why this passed on macOS
+  and on the x86 box and failed on CI. `test_cursor` now pins the cold walk with
+  the documented `--sort path`, and the three `test_ffi_parity` sites that forgot
+  the file's own `_by_file` grouping use it. Every field of every record is still
+  compared; only the free inter-file order is no longer asserted.
+- Three READMEs and one source comment said the baked completion menu carries 239
+  file types. The registry has grown since that number was written and
+  `gist --type-list` now prints 241, so every one of them understated the menu the
+  generator actually bakes. The comparison they draw is unchanged, because the 224
+  bare names ripgrep offers and the 233 encodings gist bakes are both still exact.
+- Three binding READMEs pointed at the substrate with a relative path — `../../../irregex/bindings/rust` and friends — which only resolves when someone happens to have irregex checked out beside this clone. That was true on the machine the monorepo split ran on and false for every reader on GitHub, where the link simply 404s. They address the repository now, so the link works from a clone, from the web, and from a tarball alike. The Rust wiring example also stopped claiming irregex `0.1.0`; `Cargo.toml` has asked for `1.0.0` since the version bump.
+- Three composed-face tests in the Go binding still named the scope they search
+  with the monorepo path this package was extracted from, so in the extracted repo
+  they searched a directory that does not exist.
+
+  The blast test failed outright, which is how this was noticed. The two pack
+  tests were worse: an empty scope yields no picks, and "no picks" reads as a
+  clean answer rather than as a test that never ran. They now derive the scope
+  from the tree - the kernel is the nearest ancestor holding a `build.zig`, the
+  binding is this package's own directory - and both resolve correctly whether
+  the kernel sits at a repo root or nested inside a larger tree, which is the
+  same dual-layout rule the cold-binary probe already followed.
+
+  The containment assertion was rewritten to compare resolved paths rather than a
+  string prefix, so it stays meaningful when the scope is the repo root.
+- Two release gates were running their stdlib scripts through the project environment, so they needed a sibling checkout the release job has no reason to clone.
+
+  Both are a dozen lines of `pathlib` and `tomllib`: one reads the declared version to compare against the tag, the other reads the built wheel's `Requires-Dist` to prove the shipped dependency resolves from the index rather than from a path. Neither imports anything outside the standard library, but `uv run` without `--no-project` syncs the project first - and syncing means resolving the `[tool.uv.sources]` entry that points `irregex` at `../../../irregex/bindings/python`, which is exactly the development-only entry the second gate exists to catch. So the gate against a path reference shipping could not run without one.
+
+  The version check is guarded on a tag ref, which is why a manual dry run never reached it; it would have failed the actual release. `--no-project` on both, and the reason is written down beside them.
+- `--version` / `-V` answers on **stdout** for all three faces, as ripgrep's
+  does. It had been going to the diagnostic channel, so `gist --version` read
+  back empty from anything that captured only stdout — `$(gist --version)`, a
+  CI provenance step, an editor asking which binary it is talking to — while
+  looking perfectly fine in a terminal, where both streams land on the same
+  screen. A version that was asked for is an answer, not a diagnostic. The
+  Python and Rust bindings already read whichever stream carried it, so they
+  keep working against older binaries.
+- `-U '\Abaz'` matched `baz` in the middle of a file, and `-U '\z'` reported nothing against a file whose last line has no terminator — both because a haystack anchor was being read against a line instead of the buffer. `-U` alone does not choose ripgrep's whole-buffer searcher; the line terminator belonging to the pattern does, and `\A`/`\z` touch no terminator. rg forces the multi-line path for them anyway, twice over — `non_matching_bytes` removes `\n` for `Look::Start | End` under a standing FIXME, and `ConfiguredHIR::line_terminator` returns `None` when the HIR `contains_anchor_haystack` (ripgrep#2260) — because the line searcher would hand `\A` a fresh haystack per line and quietly demote it to `^`. `Regex.readsNewline` became `claimsNewline` and now counts that third way to claim the terminator, so the buffer anchors reach the searcher that can honor them.
+
+  The buffer's far edge came with it. An empty match at `body.len` is a phantom only behind a terminator, where it claims a line that does not exist; an unterminated tail has a real last line flush against `\z`, and rg frames it (`rg -U '\z'` answers `aaa` over `aaa` and nothing over `aaa\n`). The whole-buffer walk also no longer opens a search AT the end, matching rg's `while !slice[pos..].is_empty()` — `body.len` is a place a match may land, never a place one is looked for.
+
+  Proven by a new haystack-anchor lane in `bench/rgsuite/flags.py`: three tail shapes (terminated, unterminated, single unterminated line) crossed with seven output frames, since the model choice is invisible in the plain frame but surfaces as a match tally under `-c`, a column under `--vimgrep`, and a line set under `-v`. Two shapes are named as still short of rg rather than omitted — a nullable `\A` pattern (rg's searcher re-slices on every resume, so `\A` re-anchors and the whole file frames as one block) and an empty match on an unterminated EOF in a span frame (rg's printer discards it, then falls back to printing the block verbatim).
+- `libgist` was not loadable outside the tree that built it. Linking the substrate records the dependency's own build output directory as an rpath, and that path is a *relative* `.zig-cache/o/<hash>` — true on the machine that produced it, meaningless anywhere else — so a consumer's `dlopen("libgist.dylib")` failed with `Library not loaded: @rpath/libirgx.dylib` before a single call reached the engine. `build.zig` now adds a loader-relative rpath (`@loader_path`, `$ORIGIN` off macOS), making the shape we actually ship — every library in one lib directory — the loadable one, without naming an absolute path we do not own.
+
+  This hid behind the bindings, which load the substrate first: once `libirgx` is in the process, the loader satisfies a later `@rpath` reference from the already-loaded image by install name. Every binding worked; only an honest standalone consumer failed, which is the one case nothing tested.
+
+  So `tests/test_packaging.py` now stages both libraries into a directory and opens the product **in a child process with a clean environment**, from an unrelated working directory — a same-process check would inherit exactly the rescue that hid this. Mutation-proven: deleting the loader-relative rpath from the built dylib fails the gate. Its sibling asserts the complement, that removing the substrate still breaks the load, so the fix cannot be mistaken for a product that quietly carries its own engine.
+- `libirgx.a` was copied into the install prefix with `cp
+  ../irregex/zig-out/lib/libirgx.a`, which reads a different build than the one
+  gist is being compiled against. Under `-Dtarget=x86_64-linux-gnu` that put this
+  laptop's Mach-O archive into a Linux prefix, where the symbols still carried
+  their leading underscores and nothing could link against it - and even natively
+  it needed someone to have run `zig build` in the sibling checkout first, at
+  whatever optimize mode they happened to pick.
+
+  The reason it was a `cp` was real: the engine's archive is an install-file
+  product of the irregex package rather than a named artifact, so
+  `dep.artifact("irgx")` cannot see it. It is now published over there as a named
+  lazy path and taken from the dependency graph, so it is built to order for this
+  target.
+
+  The ELF `libgist.a` also stops registering a second build artifact named
+  `gist`. The dylib already owns that name, and a duplicate makes a dependent's
+  `dep.artifact("gist")` ambiguous enough to panic the build runner - in the
+  DEPENDENT, never here, and only on the arm macOS does not take, so it would
+  have stayed invisible on a laptop while no Zig consumer could build on Linux.
+  Both arms install the archive as a file now, the way the macOS arm already did
+  for its own alignment reasons.
+- `relate` now signs its diagnostics as `relate:` instead of `gist:`. The engine hardcoded the product name at every diagnostic site, so a bad knob passed to the `relate` binary was reported as `gist: note: ignoring GIST_HYPERLINK=…` — naming a program the user was not running and sending them to the wrong `--help`. The kernel grew a brand seam (`irregex.Brand`, read from the root module at comptime), and `relate`'s entry point now declares `.{ .name = "relate" }`. Only the name moves: the knob namespace stays `GIST_*` and the artifact directory stays shared, because this binary reads the index and atlas the `gist` binary writes. The `gist` binary keeps the default identity, so its output is byte-identical — `--help`, `--schema`, `--version`, `--generate`, and searches over a fixed tree all verified unchanged. The thirteen places that still spell `gist` outright are all inside `src/surface/face/gist/`, where naming the product is the point.
+
+
 ## [0.2.0] - 2026-07-24
 
 ### Added
