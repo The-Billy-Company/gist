@@ -31,7 +31,7 @@ native = [  ]
 # Shared substrate: contracts, row protocol, transports, typed failures.
 # Path for in-tree development; once published, `cargo add gist` pulls the
 # same version range of `irregex` from crates.io.
-irregex = { version = "0.1.0", path = "../../../irregex/bindings/rust" }
+irregex = { version = "1.0.0", path = "../../../irregex/bindings/rust" }
 # ripgrep's `--json` record stream is the wire format; serde is the idiomatic,
 # ubiquitous parser for it. No other runtime dependency — the engine is a process.
 serde = { version = "1", features = [ "derive" ] }
