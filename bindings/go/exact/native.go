@@ -1,13 +1,13 @@
-//go:build cgo && irregex_ffi
+//go:build cgo && irgx_ffi
 
 package exact
 
 /*
-// Links libgist (and its libirregex dependency) so gist_search_cursor and
+// Links libgist (and its libirgx dependency) so gist_search_cursor and
 // gist_run are present in-process. The substrate engine handle comes from
 // irregex/runtime; this file only speaks gist's search ABI over it.
 #cgo CFLAGS:  -I${SRCDIR}/../../../zig-out/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../zig-out/lib -lgist -lirregex
+#cgo LDFLAGS: -L${SRCDIR}/../../../zig-out/lib -lgist -lirgx
 #cgo LDFLAGS: -Wl,-rpath,${SRCDIR}/../../../zig-out/lib
 #include <stdlib.h>
 #include <gist.h>
@@ -60,8 +60,8 @@ func searchNative(ctx context.Context, n *runtime.Native, req analytic.Request) 
 
 	var out *C.gist_cursor
 	callErr := n.Do(func(eng unsafe.Pointer) error {
-		st := C.gist_search_cursor((*C.irregex_engine)(eng), &creq, &out)
-		if st != C.IRREGEX_OK {
+		st := C.gist_search_cursor((*C.irgx_engine)(eng), &creq, &out)
+		if st != C.IRGX_OK {
 			return statusError(st, fmt.Sprintf("search %q", req.Pattern))
 		}
 		return nil
@@ -98,13 +98,13 @@ func (c *nativeCursor) NextBatch(dst []analytic.Match) (int, error) {
 	var written C.size_t
 	st := C.gist_cursor_next_batch(c.ptr, &c.views[0], C.size_t(len(dst)), &written)
 	switch st {
-	case C.IRREGEX_MATCH:
+	case C.IRGX_MATCH:
 		n := int(written)
 		for i := range n {
 			dst[i] = goMatch(&c.views[i])
 		}
 		return n, nil
-	case C.IRREGEX_OK:
+	case C.IRGX_OK:
 		return 0, nil
 	default:
 		return 0, statusError(st, "cursor batch")
@@ -158,9 +158,9 @@ func goBytes(p unsafe.Pointer, n C.size_t) string {
 	return C.GoStringN((*C.char)(p), C.int(n))
 }
 
-func watchCancel(ctx context.Context) (*C.irregex_cancel, func(), error) {
-	var tok *C.irregex_cancel
-	if C.irregex_cancel_new(&tok) != C.IRREGEX_OK {
+func watchCancel(ctx context.Context) (*C.irgx_cancel, func(), error) {
+	var tok *C.irgx_cancel
+	if C.irgx_cancel_new(&tok) != C.IRGX_OK {
 		return nil, nil, fmt.Errorf("irregex: could not allocate a cancel token")
 	}
 	stop, watched := make(chan struct{}), make(chan struct{})
@@ -168,14 +168,14 @@ func watchCancel(ctx context.Context) (*C.irregex_cancel, func(), error) {
 		defer close(watched)
 		select {
 		case <-ctx.Done():
-			C.irregex_cancel_request(tok)
+			C.irgx_cancel_request(tok)
 		case <-stop:
 		}
 	}()
 	return tok, func() {
 		close(stop)
 		<-watched
-		C.irregex_cancel_free(tok)
+		C.irgx_cancel_free(tok)
 	}, nil
 }
 
@@ -183,6 +183,6 @@ func statusError(st C.int32_t, what string) error {
 	if analytic.Status(st).Declined() {
 		return fmt.Errorf("%s: %w (use the gist binary with -P/--engine auto for lookaround)", what, runtime.ErrUnsupportedPattern)
 	}
-	msg := C.GoString(C.irregex_status_message(st))
+	msg := C.GoString(C.irgx_status_message(st))
 	return fmt.Errorf("%s: %s", what, msg)
 }

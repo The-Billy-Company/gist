@@ -15,9 +15,9 @@ import subprocess
 import pytest
 
 import gist
-from irregex.request import Ranked, RankKind
-from irregex.runtime.decode import records
-from irregex.runtime.shell import _scrape_rank
+from irgx.request import Ranked, RankKind
+from irgx.runtime.decode import records
+from irgx.runtime.shell import _scrape_rank
 
 
 def _binary_available() -> bool:

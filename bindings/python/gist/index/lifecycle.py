@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, NotRequired, TypedDict
 
-from irregex.runtime.errors import SearchFailedError
+from irgx.runtime.errors import SearchFailedError
 
 if TYPE_CHECKING:
     import os
@@ -150,7 +150,7 @@ def _command(
     cwd: str | os.PathLike[str] | None,
     timeout: float,
 ) -> subprocess.CompletedProcess[str]:
-    from irregex.runtime.shell import binary
+    from irgx.runtime.shell import binary
 
     try:
         proc = subprocess.run(  # noqa: S603 — fixed executable and argv list

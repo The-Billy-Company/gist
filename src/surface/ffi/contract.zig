@@ -22,7 +22,7 @@ pub const report = substrate.report;
 pub const reportAny = substrate.reportAny;
 pub const beginCall = substrate.beginCall;
 
-/// Pattern semantics — same bit values as `libirregex`, so "ignore case" has
+/// Pattern semantics — same bit values as `libirgx`, so "ignore case" has
 /// one definition across the ecosystem.
 pub const flag_fixed = substrate.flag_fixed;
 pub const flag_ignore_case = substrate.flag_ignore_case;

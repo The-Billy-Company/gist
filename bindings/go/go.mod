@@ -6,8 +6,8 @@
 // static CGO_ENABLED=0 image can import it.
 //
 // The in-process tier is the accelerator, and it is opt-in. It links
-// `libgist` and `libirregex`, so it needs `zig build` to have produced
-// `zig-out/{lib,include}` first — then build `-tags irregex_ffi`. A module
+// `libgist` and `libirgx`, so it needs `zig build` to have produced
+// `zig-out/{lib,include}` first — then build `-tags irgx_ffi`. A module
 // fetched into the read-only module cache has no such artifact, which is
 // exactly why the tag exists.
 //

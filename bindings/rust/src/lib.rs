@@ -6,7 +6,7 @@
 //! reimplement search.
 //!
 //! The shared substrate (contracts, row protocol, transports, typed failures)
-//! lives in the [`irregex`] crate. Kinship / retrieval / sweep live in
+//! lives in the [`irgx`] crate. Kinship / retrieval / sweep live in
 //! [`relate`](https://crates.io/crates/relate); composed verbs live in
 //! [`blast`](https://crates.io/crates/blast). Depending on `gist` does not make
 //! those faces reachable.
@@ -53,7 +53,7 @@
 //!
 //! ## The `native` feature — an in-process warm engine
 //!
-//! Opt into `native` and the crate additionally links `libgist` + `libirregex`
+//! Opt into `native` and the crate additionally links `libgist` + `libirgx`
 //! and exposes the pull-cursor surface: a warm [`Engine`] held open across many
 //! queries, each yielding a pull [`Cursor`] that iterates owned [`Match`]
 //! records, with a thread-safe [`CancelToken`] and per-operation [`Run`] budgets.
@@ -78,14 +78,14 @@ pub mod index;
 pub use exact::{Axis, Group, SearchEngine, SearchRequest, Tally, tally, tally_by};
 #[cfg(feature = "native")]
 pub use exact::{Batches, CancelToken, Cursor, DEFAULT_BATCH, Engine, Run};
-pub use irregex::contract::{
+pub use irgx::contract::{
     Channel, Grade, Match, MatchKind, RankKind, Ranked, Submatch, Unit, Variant,
 };
-pub use irregex::runtime::{
+pub use irgx::runtime::{
     Batch, Error, OwnedRow, OwnedValue, Result, Row, RowSeq, Rows, Stats, Texts, Tier, Value,
 };
 #[cfg(unix)]
-pub use irregex::runtime::{Session, default_socket_path, warm_eligible};
+pub use irgx::runtime::{Session, default_socket_path, warm_eligible};
 
 /// Find `pattern`, returning structured [`Match`] records. For anything beyond a
 /// bare pattern (paths, case-folding, globs, context…) build a [`SearchRequest`].
@@ -138,7 +138,7 @@ pub fn rank(pattern: impl Into<SearchRequest>, limit: u32) -> Result<Vec<Ranked>
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves, [`Error::Io`] on spawn failure.
 pub fn status() -> Result<String> {
-    irregex::runtime::shell::status()
+    irgx::runtime::shell::status()
 }
 
 /// The driven binary's semver.
@@ -146,7 +146,7 @@ pub fn status() -> Result<String> {
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves, [`Error::Io`] on spawn failure.
 pub fn version() -> Result<String> {
-    irregex::runtime::shell::version()
+    irgx::runtime::shell::version()
 }
 
 /// Absolute path to the resolved `gist` binary.
@@ -154,5 +154,5 @@ pub fn version() -> Result<String> {
 /// # Errors
 /// [`Error::NotFound`] when no binary resolves.
 pub fn binary() -> Result<std::path::PathBuf> {
-    irregex::runtime::shell::binary()
+    irgx::runtime::shell::binary()
 }

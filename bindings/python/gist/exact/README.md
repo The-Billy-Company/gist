@@ -1,7 +1,7 @@
 # `gist.exact` — pattern search
 
 The ripgrep-parity face: where is this pattern? Request types live in
-`irregex.request`; this package consumes them.
+`irgx.request`; this package consumes them.
 
 | Module | Concern |
 |---|---|

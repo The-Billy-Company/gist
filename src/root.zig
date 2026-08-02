@@ -64,8 +64,8 @@ pub const session = struct {
 // The library's warm engine, exposed to non-Zig hosts as an
 // `open`/`search`/`close` callback-streaming C ABI — no subprocess, socket,
 // stdout, or exit. Backs the `cffi` Python transport; the `export fn`s below
-// forward into it. Substrate symbols (`irregex_rows_*`, status/fault, schema
-// digest) live in `libirregex` and are not re-exported here.
+// forward into it. Substrate symbols (`irgx_rows_*`, status/fault, schema
+// digest) live in `libirgx` and are not re-exported here.
 pub const ffi = struct {
     pub const contract = @import("surface/ffi/contract.zig");
     pub const session = @import("surface/ffi/session.zig");
@@ -75,9 +75,9 @@ pub const ffi = struct {
     /// legacy triad; backs the Go/cgo binding and any callback-averse host.
     pub const cursor = @import("surface/ffi/cursor.zig");
     /// Analytic row layout + params — owned by the engine substrate so every
-    /// product returns the same `irregex_row`.
+    /// product returns the same `irgx_row`.
     pub const rows = engine.ffi.rows;
-    /// Shared answer cursor; walked by `irregex_rows_*` from `libirregex`.
+    /// Shared answer cursor; walked by `irgx_rows_*` from `libirgx`.
     pub const answer = engine.ffi.answer;
     /// The rank producer's dispatch: one verb materializing an `Answer`.
     /// Kinship/sweep live in `relate`; compose lives in `blast`. A verb this
@@ -91,7 +91,7 @@ pub const ffi = struct {
 /// (`gist_match_fn`) gaining an `i32` abort return was a breaking signature
 /// change that stepped it to 2. Bump only for a breaking layout or
 /// signature change; additive symbols preserve the version. Independent of
-/// `libirregex`'s own `gist_abi_version` (which versions the engine plane).
+/// `libirgx`'s own `gist_abi_version` (which versions the engine plane).
 pub fn abi() u32 {
     return 2;
 }
@@ -134,14 +134,14 @@ export fn gist_close(s: *ffi.session.Session) void {
 }
 
 // ── the pull-cursor surface ──
-// Additive siblings of the callback triad: a host opens an `irregex_engine`,
+// Additive siblings of the callback triad: a host opens an `irgx_engine`,
 // runs `gist_search_cursor` to materialize a `gist_cursor`, then walks it
 // with `gist_cursor_next`/`_next_batch` — inverting control for a caller that
-// can't yield its stack to a callback. Cancellation is an `irregex_cancel`
+// can't yield its stack to a callback. Cancellation is an `irgx_cancel`
 // handle any thread may trip. All statuses are the same `Status` tags; nothing
 // here can `die()` the host, and none of it bumps `abi()` (additive symbols).
 //
-// The engine and the token are `libirregex`'s, not this library's: every
+// The engine and the token are `libirgx`'s, not this library's: every
 // package's `…_run` takes one, and an engine is only interpretable by the copy
 // of the engine code that opened it, so one opener has to serve all four
 // libraries. Search owns what it does WITH a corpus, not the corpus.
@@ -178,9 +178,9 @@ export fn gist_cursor_close(cursor: *ffi.cursor.Cursor) void {
 // Gist's one analytic verb: the definition-first view of an exact query.
 // Kinship, retrieval, and the multi-pattern sweep live in `librelate`;
 // compose lives in `libblast`. The cursor it returns is the substrate's
-// `irregex_rows *`, walked by `libirregex`'s four symbols. Purely additive,
+// `irgx_rows *`, walked by `libirgx`'s four symbols. Purely additive,
 // so `gist_abi_version` stays 2; the plane's own compatibility axis is
-// `irregex_schema_digest`.
+// `irgx_schema_digest`.
 
 /// Run the rank verb and materialize a row cursor into `*out`. Returns 0 on
 /// success, or negative — where −1 (stale) means this tier declines and the

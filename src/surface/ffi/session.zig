@@ -145,7 +145,7 @@ fn searchRequest(s: *Session, pattern_ptr: ?[*]const u8, pattern_len: usize, fla
         return contract.report(.{ .code = error.OutOfMemory })) {
         .got => |got| got,
         // A declinature, not a fault: the cold tier answers this identically, so
-        // it installs nothing and `irregex_last_fault` stays silent about it.
+        // it installs nothing and `irgx_last_fault` stays silent about it.
         .declined => return .stale,
     };
     if (relay.oom) return contract.report(.{ .code = error.OutOfMemory });

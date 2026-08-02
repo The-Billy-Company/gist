@@ -15,9 +15,9 @@ from dataclasses import replace
 import pytest
 
 import gist
-from irregex.request import MatchKind, SearchEngine, SearchRequest
-from irregex.runtime.errors import BadPatternError, UnsupportedPatternError
-from irregex.runtime.shell import _parse_json
+from irgx.request import MatchKind, SearchEngine, SearchRequest
+from irgx.runtime.errors import BadPatternError, UnsupportedPatternError
+from irgx.runtime.shell import _parse_json
 
 
 def _binary_available() -> bool:

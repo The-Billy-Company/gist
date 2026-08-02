@@ -5,8 +5,8 @@ transport (in-process FFI when eligible, else the certified subprocess). This
 module is the other shape a host wants: a **warm engine held open** across many
 queries, each producing a **pull `Cursor`** the caller iterates at its own pace.
 
-It drives the pull-cursor symbols (`irregex_engine_open` / `gist_search_cursor`
-/ `gist_cursor_next` / `_next_batch` / `_close`, plus `irregex_cancel_*`) — the
+It drives the pull-cursor symbols (`irgx_engine_open` / `gist_search_cursor`
+/ `gist_cursor_next` / `_next_batch` / `_close`, plus `irgx_cancel_*`) — the
 callback-free sibling of the push session `native.Handle` uses. Because no
 C-to-Python callback runs during a pull, **cffi releases the GIL for the whole
 native scan**, so one thread can `cancel()` a `search()` another thread is
@@ -37,9 +37,9 @@ import os
 import threading
 from typing import TYPE_CHECKING
 
-from irregex.request import Match, MatchKind, SearchEngine, SearchRequest, Submatch
-from irregex.runtime import native
-from irregex.runtime.errors import GistError, GistNotFoundError, UnsupportedPatternError
+from irgx.request import Match, MatchKind, SearchEngine, SearchRequest, Submatch
+from irgx.runtime import native
+from irgx.runtime.errors import GistError, GistNotFoundError, UnsupportedPatternError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -112,7 +112,7 @@ def _reject_unrepresentable(req: SearchRequest) -> None:
     """Raise `GistError` for any option the cursor ABI cannot honor.
 
     Fail loud rather than answer a subtly different query than the caller asked
-    — the mirror of the engine's own fail-closed `IRREGEX_INVALID` posture.
+    — the mirror of the engine's own fail-closed `IRGX_INVALID` posture.
     """
     bad = [name for name in _UNREPRESENTABLE if getattr(req, name)]
     if req.globs or req.iglobs or req.types or req.not_types:
@@ -166,8 +166,8 @@ class CancelToken:
     def __init__(self) -> None:
         """Allocate a native cancellation token."""
         self._ffi, self._lib = _require_abi()
-        out = self._ffi.new("irregex_cancel **")
-        if self._lib.irregex_cancel_new(out) != _OK:
+        out = self._ffi.new("irgx_cancel **")
+        if self._lib.irgx_cancel_new(out) != _OK:
             msg = "could not allocate a cancellation token"
             raise GistError(msg)
         self._token = out[0]
@@ -175,13 +175,13 @@ class CancelToken:
     def cancel(self) -> None:
         """Request cancellation of any in-flight search using this token."""
         if self._token:
-            self._lib.irregex_cancel_request(self._token)
+            self._lib.irgx_cancel_request(self._token)
 
     def close(self) -> None:
         """Free the native token (idempotent)."""
         token, self._token = self._token, self._ffi.NULL
         if token:
-            self._lib.irregex_cancel_free(token)
+            self._lib.irgx_cancel_free(token)
 
     def __enter__(self) -> CancelToken:
         """Return self for ``with CancelToken() as tok:``."""
@@ -298,10 +298,10 @@ class Engine:
         """Open a warm engine over *paths* (empty = rootless CWD walk)."""
         self._ffi, self._lib = _require_abi()
         self._lock = threading.Lock()
-        out = self._ffi.new("irregex_engine **")
+        out = self._ffi.new("irgx_engine **")
         root_bufs = [self._ffi.new("char[]", os.fsencode(os.fspath(p))) for p in paths]
         root_ptr = self._ffi.new("char *[]", root_bufs) if root_bufs else self._ffi.NULL
-        status = self._lib.irregex_engine_open(root_ptr, len(root_bufs), out)
+        status = self._lib.irgx_engine_open(root_ptr, len(root_bufs), out)
         if status != _OK:
             raise _status_error(status, "engine open")
         self._engine = out[0]
@@ -395,7 +395,7 @@ class Engine:
         with self._lock:
             engine, self._engine = self._engine, self._ffi.NULL
             if engine:
-                self._lib.irregex_engine_close(engine)
+                self._lib.irgx_engine_close(engine)
 
     def __enter__(self) -> Engine:
         """Return self for ``with Engine(...) as eng:``."""

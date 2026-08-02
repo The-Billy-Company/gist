@@ -4,14 +4,20 @@
 # PyPI `irregex` distribution. Runtime engine availability remains separate
 # (GIST_BIN / PATH / in-repo zig-out).
 #
+# The distribution is `gist-search` and the import stays `gist`: the plain
+# `gist` name on PyPI belongs to an unrelated author, so `pip install gist`
+# would fetch a stranger's package. Differing names is the bs4 / PIL / cv2
+# pattern, and `[tool.hatch.build.targets.wheel] packages` keeps the shipped
+# import name unchanged.
+#
 # The floor tracks the `irregex` substrate's, since this package cannot import
 # without it; PEP 695 syntax here makes 3.12 a parse-level requirement too.
 # There is no upper bound: the monorepo this was extracted from pins one
 # interpreter, but a published library has no business refusing 3.15.
 
 [project]
-name = "gist"
-version = "0.1.0"                                                               # x-release-please-version
+name = "gist-search"
+version = "1.0.0"                                                               # x-release-please-version
 description = "Importable Python API for gist exact search."
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -52,4 +58,4 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["gist", "irregex"]
+known-first-party = ["gist", "irgx"]

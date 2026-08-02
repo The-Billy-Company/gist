@@ -24,6 +24,6 @@ so they are declared once beside the generator that lowers them
 declared them first.
 
 Bindings resolve the two foreign contracts from the authoring sibling (or an
-`IRREGEX_*_CONTRACT` override). Parity tests fail closed when a contract is
+`IRGX_*_CONTRACT` override). Parity tests fail closed when a contract is
 unreadable, so a checkout without siblings cannot silently skip the gate.
 `sync_contract.py` is the explicit sibling check.

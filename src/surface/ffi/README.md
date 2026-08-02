@@ -6,7 +6,7 @@ doc_radar:
       contains: ["export fn gist_open", "export fn gist_search", "export fn gist_close", "export fn gist_run"]
     - description: "public header declares the session surface and includes the substrate"
       file: include/gist.h
-      contains: ["int32_t gist_open(", "int32_t gist_search(", "void gist_close(", "int32_t gist_run(", "#include <irregex.h>"]
+      contains: ["int32_t gist_open(", "int32_t gist_search(", "void gist_close(", "int32_t gist_run(", "#include <irgx.h>"]
     - description: "gist's contract keeps search-owned types and re-exports the substrate"
       file: src/surface/ffi/contract.zig
       contains: ["pub const SearchOptions", "pub const SearchRequest", "pub const flag_quiet", "const substrate"]
@@ -38,7 +38,7 @@ is byte-identical to cold `gist --json` and to the UDS daemon.
 
 The C search ABI is gated on one property: **a bad query must never terminate the
 embedding host.** The whole warm path returns typed status codes instead of
-calling `die()` / `exit`. `IRREGEX_STALE` means "answer cold"; it is never a
+calling `die()` / `exit`. `IRGX_STALE` means "answer cold"; it is never a
 dead process. The cold CLI keeps its fatal shell; this path does not touch it.
 
 ## Shape
@@ -46,7 +46,7 @@ dead process. The cold CLI keeps its fatal shell; this path does not touch it.
 Two planes share the session handle. The **exact plane** streams match records
 through a push callback (or a pull cursor). The **rank producer** materializes
 the definition-first view of an exact query into a pull cursor of
-self-describing rows — produced here, walked by `libirregex`. Kinship and
+self-describing rows — produced here, walked by `libirgx`. Kinship and
 sweep live in `librelate`; compose lives in `libblast`.
 
 ### Exact plane
@@ -60,12 +60,12 @@ sweep live in `librelate`; compose lives in `libblast`.
 
 | Symbol | Role |
 | --- | --- |
-| `gist_run(engine, GIST_OP_RANK, params, cancel, out)` | materialize rank into an `irregex_rows *` |
-| `irregex_rows_next` / `_next_batch` / `_stats` / `_close` | walk that cursor (`libirregex`) |
+| `gist_run(engine, GIST_OP_RANK, params, cancel, out)` | materialize rank into an `irgx_rows *` |
+| `irgx_rows_next` / `_next_batch` / `_stats` / `_close` | walk that cursor (`libirgx`) |
 
-A verb this build cannot answer in-process returns `IRREGEX_STALE`. Bindings
+A verb this build cannot answer in-process returns `IRGX_STALE`. Bindings
 shell the CLI for that verb unchanged. An op this library does not own is
-`IRREGEX_INVALID`.
+`IRGX_INVALID`.
 
 ### Files
 
@@ -87,6 +87,6 @@ Row layout, schema table, and the answer cursor live in
 ## Error channels
 
 Status codes and the last-fault pull are substrate vocabulary from
-`libirregex` (`IRREGEX_OK` … `IRREGEX_INVALID`, `irregex_last_fault`). This
+`libirgx` (`IRGX_OK` … `IRGX_INVALID`, `irgx_last_fault`). This
 package translates search failures into that vocabulary once, in
 `contract.zig`'s re-exported `report` / `beginCall` helpers.

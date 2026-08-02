@@ -1,7 +1,7 @@
-"""Pin which `libirregex` this process maps, before anything imports `irregex`.
+"""Pin which `libirgx` this process maps, before anything imports `irgx`.
 
 `libgist` links the engine dynamically and carries a loader-relative rpath, so
-it binds the copy sitting *beside itself*. `irregex`'s loader resolves the
+it binds the copy sitting *beside itself*. `irgx`'s loader resolves the
 engine independently, out of the `irregex` checkout — and in a side-by-side dev
 tree those two files are two different builds of the same source (a product
 build configures its dependency itself, so the sibling's own `zig-out` copy can
@@ -15,7 +15,7 @@ So gist names the copy its own library binds, and the substrate loader — which
 has no way to know a product is in the room — follows it. An installed prefix
 keeps both libraries in one directory, where this resolves to the file that
 loader would have picked anyway and the pin is a no-op. An explicit
-`$IRREGEX_LIB` always wins: a caller who names an engine meant that engine.
+`$IRGX_LIB` always wins: a caller who names an engine meant that engine.
 """
 
 from __future__ import annotations
@@ -49,9 +49,9 @@ def _engine_beside_it() -> str | None:
     product = _product()
     if product is None:
         return None
-    engine = product.resolve().parent / _dylib("irregex")
+    engine = product.resolve().parent / _dylib("irgx")
     return str(engine) if engine.is_file() else None
 
 
-if "IRREGEX_LIB" not in os.environ and (_engine := _engine_beside_it()) is not None:
-    os.environ["IRREGEX_LIB"] = _engine
+if "IRGX_LIB" not in os.environ and (_engine := _engine_beside_it()) is not None:
+    os.environ["IRGX_LIB"] = _engine

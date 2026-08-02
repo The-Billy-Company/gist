@@ -44,7 +44,7 @@ pub const Cursor = struct {
 };
 
 // The engine a cursor is drawn from, and the token that cancels it, are opened
-// by `libirregex` (`irregex_engine_open` / `irregex_cancel_new`) rather than
+// by `libirgx` (`irgx_engine_open` / `irgx_cancel_new`) rather than
 // here. Every package's producer takes one, and an engine can only be read by
 // the copy of the engine code that made it — so the opener is substrate, and
 // this file owns only what search does WITH the corpus it is handed.

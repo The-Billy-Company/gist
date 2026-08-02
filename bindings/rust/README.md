@@ -65,7 +65,7 @@ the repo's `zig-out/bin/gist`. Build it with `zig build`.
 
 The pull-cursor C ABI is the graduation rung, and it never `die()`s:
 every failure is the same typed `Error`. Build with `--features native` and the
-crate additionally links `libgist` + `libirregex` and exposes a warm
+crate additionally links `libgist` + `libirgx` and exposes a warm
 `Engine` held open across queries, each yielding a pull `Cursor` of owned
 `Match` records — the callback-free sibling of the daemon `Session`:
 

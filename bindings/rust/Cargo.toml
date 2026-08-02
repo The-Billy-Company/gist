@@ -3,13 +3,13 @@
 # certified `gist` binary so it needs neither `zig build` nor `zig-out/`, and
 # the whole `bindings/rust/` tree lifts out cleanly for the public OSS release
 # with its own `Cargo.lock` + toolchain. The opt-in `native` feature is the
-# graduation rung: it links `libgist` + `libirregex` and adds the in-process
+# graduation rung: it links `libgist` + `libirgx` and adds the in-process
 # warm `Engine`/`Cursor` surface, still with the subprocess API intact beside it.
 [workspace]
 
 [package]
 name = "gist"
-version = "0.1.0"                                                                                                  # x-release-please-version
+version = "1.0.0"                                                                                                  # x-release-please-version
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
@@ -19,7 +19,7 @@ description = "Importable, rg-parity search API over the GIST code-search kernel
 [lib]
 name = "gist"
 
-# `native` (opt-in) links libgist + libirregex and exposes the in-process
+# `native` (opt-in) links libgist + libirgx and exposes the in-process
 # pull-cursor `Engine`/`Cursor` surface; its `build.rs` resolves the libraries
 # beside the kernel (or `$GIST_LIB_DIR`). Default stays a pure subprocess
 # transport so the tree lifts out cleanly for the OSS release.

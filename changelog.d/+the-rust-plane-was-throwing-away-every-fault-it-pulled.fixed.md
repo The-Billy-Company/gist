@@ -3,8 +3,8 @@ status -3` when the engine had already said which file and which byte.
 
 `plane::fault` exists to enrich that: pull the thread's last fault, render the
 name, the path and the offset into the message. It pulled it, then tested the
-return for `IRREGEX_OK` - which is the pull's "this thread has nothing to
-confess". `IRREGEX_MATCH` is "a fault was written". So the test was inverted:
+return for `IRGX_OK` - which is the pull's "this thread has nothing to
+confess". `IRGX_MATCH` is "a fault was written". So the test was inverted:
 every real incident took the bail-out branch and every message fell back to the
 bare status number, while the one case that got through was the empty slot,
 whose `name` is `""`.

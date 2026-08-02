@@ -39,7 +39,7 @@ The in-process tier is an accelerator, and it is opt-in:
 
 ```bash
 zig build                      # mints zig-out/{lib/libgist.dylib,include/gist.h}
-go build -tags irregex_ffi ./...
+go build -tags irgx_ffi ./...
 ```
 
 This module is nested, so its release tags carry the subdirectory prefix —
@@ -76,6 +76,6 @@ for cur.Next() { m := cur.Match(); /* … */ }
 zig build
 cd bindings/go
 GOWORK=off go test ./...                       # child tier — the default
-GOWORK=off go test -tags irregex_ffi ./...     # cgo tier + child tier
+GOWORK=off go test -tags irgx_ffi ./...        # cgo tier + child tier
 GOWORK=off CGO_ENABLED=0 go test ./...         # child tier with cgo off
 ```

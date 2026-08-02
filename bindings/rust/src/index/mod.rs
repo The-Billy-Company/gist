@@ -14,7 +14,7 @@
 //! changed since the artifact's anchor, so a stale artifact stays *correct* and
 //! merely prunes less.
 
-use irregex::runtime::{Result, plane, shell};
+use irgx::runtime::{Result, plane, shell};
 
 /// A persisted artifact of one of the two engines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,5 +86,5 @@ pub fn analytic_plane() -> bool {
 /// speak the same rows without either reading the other's generated table.
 #[must_use]
 pub fn schema_digest() -> &'static str {
-    irregex::contract::schema::DIGEST
+    irgx::contract::schema::DIGEST
 }

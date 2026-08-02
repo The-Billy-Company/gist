@@ -13,9 +13,9 @@
 use std::path::PathBuf;
 
 use super::SearchRequest;
-use irregex::contract::{RankKind, Ranked};
-use irregex::runtime::relay::{Bin, Invocation, Shape};
-use irregex::runtime::{Query, Result, Row, Wire, answer, struct_size, sys};
+use irgx::contract::{RankKind, Ranked};
+use irgx::runtime::relay::{Bin, Invocation, Shape};
+use irgx::runtime::{Query, Result, Row, Wire, answer, struct_size, sys};
 
 /// The `[row_schemas].ranked` id, and `[analytic.verbs].rank`'s op.
 const OP_RANK: u32 = 17;

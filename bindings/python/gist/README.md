@@ -10,5 +10,5 @@ in `blast`.
 | `index/` | trigram index lifecycle + capabilities |
 | `agent.py` | tool-boundary → `SearchRequest` |
 
-Request types (`Match`, `SearchRequest`, …) are imported from `irregex.request`.
-Transports and errors come from `irregex.runtime`.
+Request types (`Match`, `SearchRequest`, …) are imported from `irgx.request`.
+Transports and errors come from `irgx.runtime`.

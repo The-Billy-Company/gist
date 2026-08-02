@@ -17,14 +17,17 @@
 # alongside the generator that lowers them into every binding. The engine's
 # in-process return vocabulary (`[status_codes]`, `[decline_reasons]`,
 # `[fault_domains]`, `[coordinate_spaces]`) is likewise the engine's, in
-# `irregex/contract/engine.toml`: those codes describe what `include/irregex.h`
+# `irregex/contract/engine.toml`: those codes describe what `include/irgx.h`
 # returns, so they belong to the package that emits them. libgist speaks that
 # vocabulary by linking it rather than redeclaring it, and this repository's
 # Go/Python/Rust mirrors check themselves against the engine's copy.
 
 
+# `dist` and `import` differ on purpose: the plain `gist` name on PyPI belongs
+# to an unrelated author, so what ships is `gist-search` while what a caller
+# writes stays `gist` — the bs4 / PIL / cv2 pattern.
 [package]
-dist = "gist"
+dist = "gist-search"
 import = "gist"
 
 
@@ -57,7 +60,7 @@ import = "gist"
 #
 # ffi · accelerator
 #   The same error-returning resident engine, in-process, so a bad query
-#   surfaces as IRREGEX_STALE rather than a dead host. Layering:
+#   surfaces as IRGX_STALE rather than a dead host. Layering:
 #   src/surface/ffi/contract.zig owns the stable statuses, flags, options and
 #   record layouts; relay.zig translates resident records; session.zig owns
 #   handle lifecycle and execution. `gist_search` takes the complete
@@ -73,7 +76,7 @@ import = "gist"
 #   rootless `uds`, FFI passes SearchRequest.paths as `gist_open` roots, and
 #   Python bounds and keys handles by (cwd, roots) so scopes cannot
 #   cross-contaminate. engine=auto optimistically tries linear FFI, then lets
-#   IRREGEX_STALE fall through to authoritative cold PCRE2.
+#   IRGX_STALE fall through to authoritative cold PCRE2.
 [transports]
 subprocess = { status = "authoritative", detail = "the certified `gist` binary + --json; results come from the same combinePatterns->collectFiles->json.run path the CLI uses" }
 uds = { status = "operational-accelerator", detail = "the daemon answers eligible queries ([session].eligible_modes) from a warm ResidentSession behind a Unix socket, and the front-door client falls open to `subprocess` on any ineligible argv, TTY stdout, readable stdin, absent daemon, decline, or wire hiccup; a large `lines` answer may skip the socket copy entirely via the negotiated fd transport ([session].capabilities)" }

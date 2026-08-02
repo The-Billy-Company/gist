@@ -21,11 +21,11 @@ import threading
 import pytest
 
 import gist
-from irregex.request import SearchRequest
-from irregex.runtime import native as _ffi
-from irregex.runtime import shell as engine
+from irgx.request import SearchRequest
+from irgx.runtime import native as _ffi
+from irgx.runtime import shell as engine
 
-pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirregex/cffi unavailable")
+pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirgx/cffi unavailable")
 
 
 @pytest.fixture

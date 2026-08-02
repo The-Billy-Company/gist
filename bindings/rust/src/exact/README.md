@@ -3,7 +3,7 @@ doc_radar:
   sentinels:
     - description: "SearchRequest is re-exported from the irregex substrate"
       file: bindings/rust/src/exact/mod.rs
-      contains: ["pub use irregex::request::{SearchEngine, SearchRequest}"]
+      contains: ["pub use irgx::request::{SearchEngine, SearchRequest}"]
     - description: "aggregation reads only real matches, never context lines"
       file: bindings/rust/src/exact/aggregate.rs
       contains: ["MatchKind::Match"]
@@ -14,7 +14,7 @@ doc_radar:
 The `ripgrep`-parity half of the crate: same flags, same precedence, same exit
 codes, riding a persisted trigram index.
 
-`SearchRequest` itself lives in `irregex::request` (the engine.toml surface) and
+`SearchRequest` itself lives in `irgx::request` (the engine.toml surface) and
 is re-exported here. Aggregation, ranking, and the native cursor stay in this
 package because they are gist's product face.
 

@@ -30,7 +30,7 @@ They are conveniences over the certified engine — not a second matcher.
 
 1. **Subprocess** — authoritative; drives the installed `gist` binary.
 2. **UDS warm session** — fail-open accelerator when `gist serve` is up.
-3. **In-process FFI** over `libirregex` — Python cffi, the Rust `native`
+3. **In-process FFI** over `libirgx` — Python cffi, the Rust `native`
    feature, and the Go cgo binding all ride the pull-cursor C ABI;
    fail-open, and a bad pattern is a typed error, never a host abort.
 

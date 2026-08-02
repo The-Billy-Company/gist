@@ -1,7 +1,7 @@
 //! Exact search — where is this pattern, byte for byte.
 //!
 //! The rg-shaped half of the binding: [`SearchRequest`] is the whole query
-//! surface, [`Match`](irregex::contract::Match) is one hit, and under `native` a
+//! surface, [`Match`](irgx::contract::Match) is one hit, and under `native` a
 //! warm [`Engine`] / pull [`Cursor`] stream them without a subprocess.
 
 mod aggregate;
@@ -15,6 +15,6 @@ const RANKED_SCHEMA: u32 = 22;
 pub use aggregate::{Axis, Group, Tally, tally, tally_by};
 #[cfg(feature = "native")]
 pub use cursor::{Batches, CancelToken, Cursor, DEFAULT_BATCH, Engine, Run};
-pub use irregex::request::{SearchEngine, SearchRequest};
+pub use irgx::request::{SearchEngine, SearchRequest};
 
 pub(crate) use rank::rank_list;

@@ -23,28 +23,28 @@ use std::time::Duration;
 
 use std::os::raw::{c_char, c_int};
 
-use irregex::contract::{Match, MatchKind, Submatch};
-use irregex::runtime::sys;
-use irregex::runtime::{Error, Result};
+use irgx::contract::{Match, MatchKind, Submatch};
+use irgx::runtime::sys;
+use irgx::runtime::{Error, Result};
 
 use super::{SearchEngine, SearchRequest};
 
 // Link-time declarations for the exact-plane cursor. The analytic plane in
-// `irregex::runtime` resolves producers with `dlsym` and never names these;
-// under `native` this crate links `libgist` + `libirregex`, so the symbols are
+// `irgx::runtime` resolves producers with `dlsym` and never names these;
+// under `native` this crate links `libgist` + `libirgx`, so the symbols are
 // present at link time.
 unsafe extern "C" {
-    fn irregex_engine_open(
+    fn irgx_engine_open(
         roots: *const *const c_char,
         nroots: usize,
-        out: *mut *mut sys::irregex_engine,
+        out: *mut *mut sys::irgx_engine,
     ) -> c_int;
-    fn irregex_engine_close(engine: *mut sys::irregex_engine);
-    fn irregex_cancel_new(out: *mut *mut sys::irregex_cancel) -> c_int;
-    fn irregex_cancel_request(token: *mut sys::irregex_cancel);
-    fn irregex_cancel_free(token: *mut sys::irregex_cancel);
+    fn irgx_engine_close(engine: *mut sys::irgx_engine);
+    fn irgx_cancel_new(out: *mut *mut sys::irgx_cancel) -> c_int;
+    fn irgx_cancel_request(token: *mut sys::irgx_cancel);
+    fn irgx_cancel_free(token: *mut sys::irgx_cancel);
     fn gist_search_cursor(
-        engine: *mut sys::irregex_engine,
+        engine: *mut sys::irgx_engine,
         request: *const sys::SearchRequest,
         out: *mut *mut sys::gist_cursor,
     ) -> c_int;
@@ -70,7 +70,7 @@ pub const DEFAULT_BATCH: usize = 64;
 /// the scan stops at its next record boundary, keeping whatever it gathered. A
 /// token is reusable across searches until dropped.
 pub struct CancelToken {
-    inner: *mut sys::irregex_cancel,
+    inner: *mut sys::irgx_cancel,
 }
 
 // The token is a bare atomic flag behind the pointer; sharing `&CancelToken`
@@ -84,8 +84,8 @@ impl CancelToken {
     /// # Errors
     /// [`Error::Failed`] if the native allocation fails (out of memory).
     pub fn new() -> Result<Self> {
-        let mut out: *mut sys::irregex_cancel = std::ptr::null_mut();
-        let status = unsafe { irregex_cancel_new(&mut out) };
+        let mut out: *mut sys::irgx_cancel = std::ptr::null_mut();
+        let status = unsafe { irgx_cancel_new(&mut out) };
         if status != sys::OK {
             return Err(status_error(status, "allocate cancel token"));
         }
@@ -94,13 +94,13 @@ impl CancelToken {
 
     /// Request cancellation of any in-flight search using this token.
     pub fn cancel(&self) {
-        unsafe { irregex_cancel_request(self.inner) };
+        unsafe { irgx_cancel_request(self.inner) };
     }
 }
 
 impl Drop for CancelToken {
     fn drop(&mut self) {
-        unsafe { irregex_cancel_free(self.inner) };
+        unsafe { irgx_cancel_free(self.inner) };
     }
 }
 
@@ -259,7 +259,7 @@ impl Iterator for Batches {
 /// (the resident engine is single-writer), but the cursors it returns are
 /// independent and iterable in parallel. The corpus frees on [`Drop`].
 pub struct Engine {
-    inner: *mut sys::irregex_engine,
+    inner: *mut sys::irgx_engine,
     lock: Mutex<()>,
 }
 
@@ -289,8 +289,8 @@ impl Engine {
         } else {
             ptrs.as_ptr()
         };
-        let mut out: *mut sys::irregex_engine = std::ptr::null_mut();
-        let status = unsafe { irregex_engine_open(root_ptr, ptrs.len(), &mut out) };
+        let mut out: *mut sys::irgx_engine = std::ptr::null_mut();
+        let status = unsafe { irgx_engine_open(root_ptr, ptrs.len(), &mut out) };
         if status != sys::OK {
             return Err(status_error(status, "engine open"));
         }
@@ -365,7 +365,7 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        unsafe { irregex_engine_close(self.inner) };
+        unsafe { irgx_engine_close(self.inner) };
     }
 }
 
@@ -400,7 +400,7 @@ fn flags(r: &SearchRequest) -> u32 {
 }
 
 /// Fail loud for any option the cursor ABI has no field for — the mirror of the
-/// engine's own fail-closed `IRREGEX_INVALID` posture, so the in-process face
+/// engine's own fail-closed `IRGX_INVALID` posture, so the in-process face
 /// never silently answers a subtly different query than the caller asked.
 fn reject_unrepresentable(r: &SearchRequest) -> Result<()> {
     let mut bad: Vec<&str> = Vec::new();

@@ -4,8 +4,8 @@
 //! (`libgist.a` + `libgist.{dylib,so}` + `include/gist.h`), and the `gist`
 //! **module** (`@import("gist")`) that `relate` and `blast` ride for the
 //! resident daemon and answer keep. The exact engine is a sibling-path dep
-//! (`irregex`, carrying the PCRE2 floor and `libirregex`). `libgist`
-//! dynamically links `libirregex` for the substrate symbols it no longer
+//! (`irregex`, carrying the PCRE2 floor and `libirgx`). `libgist`
+//! dynamically links `libirgx` for the substrate symbols it no longer
 //! exports. The `relate` binary lives in the `relate` package.
 //!
 //! Product executables default to ReleaseFast via `-Doptimize=`; the test
@@ -25,9 +25,9 @@ pub fn build(b: *std.Build) void {
 
     // The engine beneath, at matching optimize. Its module carries the PCRE2
     // floor, so linking this links the whole exact-search stack.
-    const irregex_dep = b.dependency("irregex", .{ .target = target, .optimize = optimize });
+    const irgx_dep = b.dependency("irregex", .{ .target = target, .optimize = optimize });
     const deps = [_]std.Build.Module.Import{
-        .{ .name = "irregex", .module = irregex_dep.module("irregex") },
+        .{ .name = "irregex", .module = irgx_dep.module("irregex") },
     };
 
     // ── the chassis module (`@import("gist")` — what `relate` and `blast` ride) ──
@@ -89,11 +89,11 @@ pub fn build(b: *std.Build) void {
     // ── the C-ABI dual artifact ──
     // Dynamic lib (Python cffi dlopen); owns the header install. Named `gist`
     // — its symbols and header are this product's. Substrate symbols resolve
-    // through a link against libirregex (dynamic), so libgist does not redefine
+    // through a link against libirgx (dynamic), so libgist does not redefine
     // them and a host that also links librelate still sees one vocabulary.
     // Own module (not `chassis`) so the CLI/test binaries do not pick up the
     // dylib link — they never call the C symbols.
-    const irregex_lib = irregex_dep.artifact("irregex");
+    const irgx_lib = irgx_dep.artifact("irgx");
     const abi = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -101,31 +101,31 @@ pub fn build(b: *std.Build) void {
         .pic = true,
         .imports = &deps,
     });
-    abi.linkLibrary(irregex_lib);
+    abi.linkLibrary(irgx_lib);
     // A shipped dylib has to find its substrate beside itself. `linkLibrary`
     // records only this build tree's own output dir — a RELATIVE
     // `.zig-cache/o/<hash>` path, meaningless on a consumer's machine — so
     // `dlopen("libgist.dylib")` from anywhere else cannot resolve
-    // `@rpath/libirregex.dylib` and fails at load. A loader-relative rpath makes
+    // `@rpath/libirgx.dylib` and fails at load. A loader-relative rpath makes
     // the shape we actually ship ("both libraries in one lib dir") the loadable
     // one, without naming an absolute path we do not own.
     abi.addRPathSpecial(if (target.result.os.tag == .macos) "@loader_path" else "$ORIGIN");
     const dynamic_lib = b.addLibrary(.{ .name = "gist", .linkage = .dynamic, .root_module = abi });
     dynamic_lib.installHeader(b.path("include/gist.h"), "gist.h");
-    // A host that #includes <gist.h> also needs <irregex.h>; install the
+    // A host that #includes <gist.h> also needs <irgx.h>; install the
     // engine's header beside ours so one -I covers both.
-    dynamic_lib.installHeader(irregex_dep.path("include/irregex.h"), "irregex.h");
+    dynamic_lib.installHeader(irgx_dep.path("include/irgx.h"), "irgx.h");
     b.installArtifact(dynamic_lib);
     // Static lib (Go cgo / Rust build.rs / C smoke). Zig's archiver leaves
     // Mach-O members non-8-byte-aligned, which Apple's ld64 rejects in a cgo
     // link; re-archive with `libtool -static` on macOS. Linux/LLD tolerates it.
-    // Static consumers link libgist.a AND libirregex.a themselves.
+    // Static consumers link libgist.a AND libirgx.a themselves.
     if (target.result.os.tag == .macos) {
-        // Its own module, deliberately WITHOUT `linkLibrary(irregex_lib)`. On a
+        // Its own module, deliberately WITHOUT `linkLibrary(irgx_lib)`. On a
         // dylib that link is what makes libgist import the substrate instead of
         // redefining it; on a relocatable object there is no import to make, so
         // Zig folds the whole engine archive in — 9 MB of duplicated substrate
-        // that a host linking libirregex.a would then see twice, and whose
+        // that a host linking libirgx.a would then see twice, and whose
         // folded relocations Apple's ld rejects outright (`invalid
         // r_symbolnum=0`). Static consumers link both archives themselves,
         // exactly as the comment above says.
@@ -145,18 +145,18 @@ pub fn build(b: *std.Build) void {
         const static_lib = b.addLibrary(.{ .name = "gist", .linkage = .static, .root_module = abi });
         b.installArtifact(static_lib);
     }
-    // Install libirregex.dylib into this prefix so a binding that only built
+    // Install libirgx.dylib into this prefix so a binding that only built
     // gist still finds both libraries under zig-out/lib.
-    b.installArtifact(irregex_lib);
+    b.installArtifact(irgx_lib);
     // The engine's macOS-aligned `.a` is an installLibFile product of the
     // irregex package, not its named artifact. Copy it from the sibling
     // zig-out after that package has been built (`cd ../irregex && zig build`)
     // so Go cgo / C smoke can link both archives under this prefix.
-    const eng_static_src = b.pathFromRoot("../irregex/zig-out/lib/libirregex.a");
+    const eng_static_src = b.pathFromRoot("../irregex/zig-out/lib/libirgx.a");
     const copy_eng_static = b.addSystemCommand(&.{ "cp", "-f", eng_static_src });
-    const eng_static_out = copy_eng_static.addOutputFileArg("libirregex.a");
-    copy_eng_static.step.dependOn(&irregex_lib.step);
-    b.getInstallStep().dependOn(&b.addInstallLibFile(eng_static_out, "libirregex.a").step);
+    const eng_static_out = copy_eng_static.addOutputFileArg("libirgx.a");
+    copy_eng_static.step.dependOn(&irgx_lib.step);
+    b.getInstallStep().dependOn(&b.addInstallLibFile(eng_static_out, "libirgx.a").step);
 
     // ── the measurement lab ──
     // Deliberately OFF the default install step: a bare `zig build` (and every
@@ -182,9 +182,9 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .imports = &(deps ++ [_]std.Build.Module.Import{
             .{ .name = "gist", .module = chassis },
-            .{ .name = "pmu", .module = irregex_dep.module("pmu") },
-            .{ .name = "probes", .module = irregex_dep.module("probes") },
-            .{ .name = "stats", .module = irregex_dep.module("stats") },
+            .{ .name = "pmu", .module = irgx_dep.module("pmu") },
+            .{ .name = "probes", .module = irgx_dep.module("probes") },
+            .{ .name = "stats", .module = irgx_dep.module("stats") },
         }),
     });
     // Layer-A certify mode reads hardware perf counters through Apple's private
@@ -263,7 +263,7 @@ pub fn build(b: *std.Build) void {
         "test-shards",
         "how many parallel processes `zig build test` splits the unit-test binary across (default: 2x CPU count; 1 restores a single-process run)",
     ) orelse @min(@max(std.Thread.getCpuCount() catch 1, 1) * 2, 64);
-    const brigade = irregex_dep.path("brigade.zig");
+    const brigade = irgx_dep.path("brigade.zig");
     const tests = b.addTest(.{
         .root_module = test_module,
         .test_runner = .{ .path = brigade, .mode = .simple },

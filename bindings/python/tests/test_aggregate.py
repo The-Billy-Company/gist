@@ -15,7 +15,7 @@ import pytest
 
 import gist
 from gist.exact.aggregate import Group, Tally, resolve_axis, tally
-from irregex.request import Match, MatchKind, Submatch
+from irgx.request import Match, MatchKind, Submatch
 
 
 def _binary_available() -> bool:

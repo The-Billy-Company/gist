@@ -240,7 +240,7 @@ test "the fused parallel loader returns OutOfMemory rather than exiting the host
     try t.expect(loads > 0);
 }
 
-test "gist_open answers a walk-time OOM with IRREGEX_OOM and a named fault" {
+test "gist_open answers a walk-time OOM with IRGX_OOM and a named fault" {
     var threaded = std.Io.Threaded.init(t.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
@@ -266,7 +266,7 @@ test "gist_open answers a walk-time OOM with IRREGEX_OOM and a named fault" {
             .ok => session.close(handle),
             .out_of_memory => {
                 ooms += 1;
-                // The status a C host reads: IRREGEX_OOM, a fault (not a
+                // The status a C host reads: IRGX_OOM, a fault (not a
                 // declinature), carrying the taxonomy's own name for it.
                 try t.expectEqual(@as(i32, -2), @intFromEnum(st));
                 try t.expectEqual(contract.Disposition.fault, st.disposition());
@@ -316,7 +316,7 @@ test "the cursor ABI's engine open reports a walk-time OOM through the same seam
         } else |e| {
             if (e != error.OutOfMemory) continue; // some other tier declining
             contract.beginCall();
-            // `libirregex`'s `corpus.open` translates that error exactly so.
+            // `libirgx`'s `corpus.open` translates that error exactly so.
             const st = contract.reportAny(e, .open_failed);
             try t.expectEqual(contract.Status.out_of_memory, st);
             var detail: contract.FaultDetail = undefined;

@@ -1,4 +1,4 @@
-//go:build !cgo || !irregex_ffi
+//go:build !cgo || !irgx_ffi
 
 package exact
 

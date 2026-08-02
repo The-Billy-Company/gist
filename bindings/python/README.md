@@ -29,9 +29,15 @@ total = gist.count("panic", paths=["services"])
 refs = gist.rank("SearchRequest", limit=8)
 ```
 
-Distribution name is `gist`; it imports as `gist`. It depends on the `irregex`
-Python package for the shared substrate (request types, row protocol, shell /
-daemon / native transports).
+```bash
+pip install gist-search
+```
+
+The distribution is `gist-search` but the import stays `gist` — the plain
+`gist` name on PyPI belongs to an unrelated author, so installing under it
+would fetch a stranger's package (the same bs4 / PIL / cv2 split). It depends
+on the `irregex` Python package for the shared substrate (request types, row
+protocol, shell / daemon / native transports), which imports as `irgx`.
 
 ## Layout
 
@@ -42,7 +48,7 @@ daemon / native transports).
 | `gist/agent.py` | tool-boundary dict → `SearchRequest` |
 
 Shared contract mirrors, the analytic ladder, and binary location live under
-`irregex.contract` / `irregex.runtime`.
+`irgx.contract` / `irgx.runtime`.
 
 ```bash
 cd bindings/python && uv sync --group dev && uv run pytest

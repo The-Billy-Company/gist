@@ -30,7 +30,7 @@ those modules link a vendored archive and `go get` needs no toolchain - but
 gist's bindings are subprocess transports over the certified binary, so all
 three suites need a real `zig build` first, and the Go suite fails rather than
 skips without one. And the Python packaging gate stages `libgist` beside
-`libirregex` from the *sibling's* `zig-out`, so that checkout gets built too or
+`libirgx` from the *sibling's* `zig-out`, so that checkout gets built too or
 the assertion silently takes its skip branch. ripgrep is installed on the Linux
 jobs for the same reason: it is the oracle the parity tests compare against, and
 without it on PATH they skip, which is a parity gate that has stopped gating.

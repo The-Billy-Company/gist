@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from irregex.contract import ALIASES, REQUEST_OPTIONS, ROUTING_KEYS
-from irregex.request import SearchRequest
+from irgx.contract import ALIASES, REQUEST_OPTIONS, ROUTING_KEYS
+from irgx.request import SearchRequest
 
 if TYPE_CHECKING:
     from collections.abc import Mapping

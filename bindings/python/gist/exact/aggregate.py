@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from posixpath import dirname, splitext
 from typing import TYPE_CHECKING
 
-from irregex.request import Match, MatchKind
+from irgx.request import Match, MatchKind
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator

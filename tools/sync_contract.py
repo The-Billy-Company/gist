@@ -24,7 +24,7 @@ OWNED = {"analytic.toml": "irregex", "engine.toml": "irregex", "kinship.toml": "
 
 
 def origin(name: str) -> Path | None:
-    env = os.environ.get(f"IRREGEX_{name.removesuffix('.toml').upper()}_CONTRACT")
+    env = os.environ.get(f"IRGX_{name.removesuffix('.toml').upper()}_CONTRACT")
     if env:
         return Path(env)
     author = OWNED[name]

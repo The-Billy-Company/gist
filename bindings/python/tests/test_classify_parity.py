@@ -22,8 +22,8 @@ import pytest
 
 import gist
 from gist import warm_eligible
-from irregex.request import SearchEngine, SearchRequest
-from irregex.runtime.daemon import ffi_eligible
+from irgx.request import SearchEngine, SearchRequest
+from irgx.runtime.daemon import ffi_eligible
 
 
 def _binary_available() -> bool:
@@ -209,7 +209,7 @@ def test_ffi_predicate_extends_uds_with_roots_unicode_and_auto() -> None:
     smart = SearchRequest(pattern="todo", smart_case=True)
     assert warm_eligible(smart) is True
     assert ffi_eligible(smart) is True
-    # -w IS lowered into the C flags (IRREGEX_WORD), so it stays FFI-eligible.
+    # -w IS lowered into the C flags (IRGX_WORD), so it stays FFI-eligible.
     assert ffi_eligible(SearchRequest(pattern="TODO", word=True)) is True
     # The size-checked options entry safely lowers -q and -m N, including
     # falsy -m0; none may be lost to a truthiness sweep.

@@ -34,7 +34,7 @@ REPO = KERNEL
 
 def _climb_file(*rel_parts: str) -> Path | None:
     """Probe every ancestor for *rel_parts; also try irregex/<rel> for a sibling checkout."""
-    override = os.environ.get("IRREGEX_CONTRACT", "").strip()
+    override = os.environ.get("IRGX_CONTRACT", "").strip()
     if override and rel_parts[-1] == "engine.toml":
         p = Path(override)
         return p if p.is_file() else None

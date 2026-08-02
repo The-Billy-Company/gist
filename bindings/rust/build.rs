@@ -1,11 +1,11 @@
-//! Link `libgist` + `libirregex` — only under the opt-in `native` feature.
+//! Link `libgist` + `libirgx` — only under the opt-in `native` feature.
 //! The default crate is a pure subprocess transport and this script is a
 //! no-op; with `--features native` it resolves the libraries beside the
 //! checkout (`<repo>/zig-out/lib`) or at `$GIST_LIB_DIR`, links both, and
 //! burns an rpath so the test/host binary finds them at run time without
 //! `DYLD_LIBRARY_PATH`.
 //!
-//! `libgist` owns the session / exact / analytic-producer symbols; `libirregex`
+//! `libgist` owns the session / exact / analytic-producer symbols; `libirgx`
 //! owns the substrate (status, fault, row cursor, schema digest). A host that
 //! links only one of them is incomplete.
 
@@ -18,15 +18,15 @@ fn main() {
     }
     let dir = resolve_lib_dir().unwrap_or_else(|| {
         panic!(
-            "feature `native` needs libgist + libirregex; build them with \
+            "feature `native` needs libgist + libirgx; build them with \
              `zig build` in the gist checkout (or set $GIST_LIB_DIR to the dir \
-             holding libgist.{{dylib,so}} and libirregex.{{dylib,so}})"
+             holding libgist.{{dylib,so}} and libirgx.{{dylib,so}})"
         )
     });
     let dir = dir.display();
     println!("cargo:rustc-link-search=native={dir}");
     println!("cargo:rustc-link-lib=dylib=gist");
-    println!("cargo:rustc-link-lib=dylib=irregex");
+    println!("cargo:rustc-link-lib=dylib=irgx");
     // rpath so the dylibs resolve at run time (macOS + ELF).
     println!("cargo:rustc-link-arg=-Wl,-rpath,{dir}");
 }
@@ -47,6 +47,6 @@ fn resolve_lib_dir() -> Option<PathBuf> {
 
 fn has_libs(dir: &Path) -> bool {
     let gist = dir.join("libgist.dylib").is_file() || dir.join("libgist.so").is_file();
-    let eng = dir.join("libirregex.dylib").is_file() || dir.join("libirregex.so").is_file();
+    let eng = dir.join("libirgx.dylib").is_file() || dir.join("libirgx.so").is_file();
     gist && eng
 }

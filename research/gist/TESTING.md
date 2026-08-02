@@ -52,7 +52,7 @@ the load-bearing rules: trigram extraction, query planning, freshness
 overlay, crest sieve (see also `irregex/research/crest/TESTING.md`),
 rank fusion inputs, argv catalog buckets, resident/cold parity, daemon
 lifecycle, watcher behavior, and FFI smoke (real C compile/link/run against
-`libirregex`).
+`libirgx`).
 
 Reproduce from ``:
 

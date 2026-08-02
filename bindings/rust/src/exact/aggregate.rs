@@ -24,7 +24,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use irregex::contract::{Match, MatchKind};
+use irgx::contract::{Match, MatchKind};
 
 /// The bucketing axis for a [`tally`] — the match property that decides which
 /// bucket a match falls into.

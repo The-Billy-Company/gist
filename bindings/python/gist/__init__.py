@@ -13,12 +13,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-# Pinning the engine copy has to precede every `irregex` import, because
-# importing `irregex` maps one eagerly. See `_substrate`.
+# Pinning the engine copy has to precede every `irgx` import, because
+# importing `irgx` maps one eagerly. See `_substrate`.
 # isort: off
 from . import _substrate as _pin_the_engine  # noqa: F401
-from irregex.contract import ABI_VERSION, ENGINE_VERSION
-from irregex.request import (
+from irgx.contract import ABI_VERSION, ENGINE_VERSION
+from irgx.request import (
     Match,
     MatchKind,
     Ranked,
@@ -27,8 +27,8 @@ from irregex.request import (
     SearchRequest,
     Submatch,
 )
-from irregex.runtime import shell as engine
-from irregex.runtime.daemon import (
+from irgx.runtime import shell as engine
+from irgx.runtime.daemon import (
     Session,
     SessionGeneration,
     ensure_serve,
@@ -36,7 +36,7 @@ from irregex.runtime.daemon import (
     opening_session,
     warm_eligible,
 )
-from irregex.runtime.errors import (
+from irgx.runtime.errors import (
     BadPatternError,
     GistError,
     GistNotFoundError,
