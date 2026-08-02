@@ -1,0 +1,44 @@
+# The Setup table in CONTRIBUTING.md, made executable:
+#
+#     mise install
+#
+# Every pin here is a mirror, never the authority. In order they track
+# `minimum_zig_version` in build.zig.zon, `channel` in
+# bindings/rust/rust-toolchain.toml, the `go` directive in bindings/go/go.mod,
+# and the `--python` CI hands uv. Bump one and bump its source file in the
+# same commit; otherwise the two drift and CI is the only thing that notices.
+#
+# 2026.4.0 is where lockfile_platforms stopped being experimental. An older
+# mise reads part of [settings] below and ignores the rest without saying so.
+min_version = "2026.4.0"
+
+[tools]
+zig = "0.16.0"
+rust = "1.96.0"
+go = "1.24.13"
+python = "3.12.13"
+"ubi:astral-sh/uv" = "0.11.21"
+
+# The parity oracle. CI already installs it from brew or apt and reasons, in
+# that step's own comment, that the outcome does not turn on which rg release
+# a runner carries - the corpus is a handful of files and three patterns. So
+# this pin is not about the version. It is about presence: the conformance
+# gate exits 1 without rg on PATH rather than skipping, and a gate that fails
+# because the laptop lacks the oracle teaches a contributor nothing. One
+# `mise install` and it is there.
+"aqua:BurntSushi/ripgrep" = "15.2.0"
+
+[settings]
+# mise.lock is committed, so a contributor and CI resolve the same bytes.
+# mise.local.toml and mise.local.lock stay gitignored for machine overrides.
+lockfile = true
+lockfile_platforms = [ "macos-arm64", "macos-x64", "linux-x64", "linux-arm64" ]
+
+# Both are defaults today. Pinned anyway, because this repo ships prebuilt
+# binaries and a stray global config turning provenance checks off should not
+# be possible without editing this file.
+slsa = true
+github_attestations = true
+
+# A bare `mise use <tool>` writes the exact resolved version, never a range.
+pin = true

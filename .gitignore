@@ -32,6 +32,11 @@ upstream/
 /bench/certificate/ledger/ledger.jsonl
 /bench/conformance/targets/artifact/
 
+# Toolchain overrides for one machine. `.mise.toml` and `mise.lock` are
+# tracked; these are the per-checkout escape hatch and nobody else's business.
+mise.local.toml
+mise.local.lock
+
 # Machine-local scratch. Globbed, not literal: ad-hoc probe dirs get named
 # `.local-something`, land one character outside a literal rule, and are then
 # one `git add -A` away from committing a hardcoded home path.

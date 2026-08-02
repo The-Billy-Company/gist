@@ -51,6 +51,23 @@ actually clone.
 | the Rust binding | rustup | `bindings/rust/rust-toolchain.toml` |
 | the Go binding | Go | `bindings/go/go.mod` |
 
+If you run [mise](https://mise.jdx.dev), that whole table is one command:
+
+```bash
+mise install
+```
+
+`.mise.toml` pins every row at the version CI uses and `mise.lock` carries the
+checksums for all four release platforms. The pins are mirrors of the files in
+the third column and never the authority, so bumping one means bumping the
+other in the same commit.
+
+ripgrep is pinned there too, though not because the parity result turns on
+which release you have - it does not, and the CI step that installs it says so.
+It is pinned because the conformance gate exits 1 without an oracle rather than
+skipping, and a gate that fails on a laptop for want of `rg` teaches nobody
+anything.
+
 ```bash
 zig build                 # ReleaseFast binaries, PATH link, trigram index
 zig build check           # compile only - the fastest "did I break it"
