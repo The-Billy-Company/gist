@@ -28,14 +28,6 @@ from irgx.request import (
     Submatch,
 )
 from irgx.runtime import shell as engine
-from irgx.runtime.daemon import (
-    Session,
-    SessionGeneration,
-    ensure_serve,
-    ffi_eligible,
-    opening_session,
-    warm_eligible,
-)
 from irgx.runtime.errors import (
     BadPatternError,
     GistError,
@@ -46,6 +38,14 @@ from irgx.runtime.errors import (
     UnsupportedPatternError,
 )
 
+from ._daemon import (
+    Session,
+    SessionGeneration,
+    ensure_serve,
+    ffi_eligible,
+    opening_session,
+    warm_eligible,
+)
 from .exact import aggregate, ranked
 from .exact.aggregate import Group, Tally, tally
 from .exact.cursor import CancelToken, Cursor, Engine

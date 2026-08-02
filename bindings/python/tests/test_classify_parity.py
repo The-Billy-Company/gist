@@ -22,8 +22,8 @@ import pytest
 
 import gist
 from gist import warm_eligible
+from gist._daemon import ffi_eligible
 from irgx.request import SearchEngine, SearchRequest
-from irgx.runtime.daemon import ffi_eligible
 
 
 def _binary_available() -> bool:

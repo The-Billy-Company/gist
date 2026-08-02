@@ -72,6 +72,7 @@
 //! # Ok::<(), gist::Error>(())
 //! ```
 
+pub mod contract;
 pub mod exact;
 pub mod index;
 

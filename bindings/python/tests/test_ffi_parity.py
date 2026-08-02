@@ -19,8 +19,8 @@ from __future__ import annotations
 import pytest
 
 import gist
+from gist import _native as _ffi
 from irgx.request import Match, SearchEngine, SearchRequest
-from irgx.runtime import native as _ffi
 from irgx.runtime import shell as engine
 
 pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirgx/cffi unavailable")

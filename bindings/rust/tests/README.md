@@ -1,8 +1,15 @@
 # gist crate tests
 
-Behavioral tests over the certified `gist` binary. Contract parity and the
-analytic verb suite live with the crates that own those surfaces
-(`irregex` / `relate`).
+Behavioral tests over the certified `gist` binary, plus the parity gate on the
+one contract this repository authors. The substrate's own mirrors — row schemas,
+analytic verbs, grade bands — are gated in the crates that own them (`irregex` /
+`relate`).
+
+## Contract (needs no binary)
+
+- `contract.rs` — `gist::contract` does not drift from `contract/surface.toml`:
+  the published `dist` / `import` names and the tool-boundary aliases and routing
+  keys. Fails closed on a contract it cannot read.
 
 ## Cold subprocess (needs `gist` binary)
 

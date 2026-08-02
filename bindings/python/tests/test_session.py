@@ -20,8 +20,8 @@ import time
 import pytest
 
 import gist
+from gist._daemon import PROTOCOL_VERSION, SessionGeneration, _decode_ready
 from irgx.request import SearchEngine, SearchRequest
-from irgx.runtime.daemon import PROTOCOL_VERSION, SessionGeneration, _decode_ready
 
 
 def _binary_available() -> bool:
@@ -253,7 +253,7 @@ def test_connect_deadline_against_unresponsive_daemon(corpus) -> None:
     # (the exact shape of the pre-multiplex daemon busy with another client, or
     # a wedged one) must cost at most ~SESSION_IO_TIMEOUT before failing open —
     # never park the caller indefinitely on the handshake recv.
-    from irgx.runtime.daemon import SESSION_IO_TIMEOUT
+    from gist._daemon import SESSION_IO_TIMEOUT
 
     sock_dir = tempfile.mkdtemp(prefix="gistd-")
     sock = os.path.join(sock_dir, "g.sock")

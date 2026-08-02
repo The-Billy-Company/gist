@@ -22,8 +22,8 @@ import threading
 import pytest
 
 import gist
+from gist import _native as _ffi
 from irgx.request import SearchRequest
-from irgx.runtime import native as _ffi
 from irgx.runtime import shell as engine
 
 pytestmark = pytest.mark.skipif(not _ffi.available(), reason="libirgx/cffi unavailable")

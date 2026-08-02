@@ -38,8 +38,9 @@ import threading
 from typing import TYPE_CHECKING
 
 from irgx.request import Match, MatchKind, SearchEngine, SearchRequest, Submatch
-from irgx.runtime import native
 from irgx.runtime.errors import GistError, GistNotFoundError, UnsupportedPatternError
+
+from .. import _native as native
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
