@@ -50,7 +50,7 @@ def _script(exe: str, root: str, indexed: bool, wine: bool = False) -> str:
         f"cd {root}",
         f"export GIST_DIR='{gist_dir}'",
         "rm -rf /tmp/gistdir && mkdir -p /tmp/gistdir",
-        f'echo "TREE $(find . -name \'*.go\' | wc -l | tr -d " ")"',
+        'echo "TREE $(find . -name \'*.go\' | wc -l | tr -d " ")"',
     ]
     if indexed:
         # Fail-loud: if indexing itself declines, the indexed pass must not be
@@ -67,7 +67,7 @@ def _script(exe: str, root: str, indexed: bool, wine: bool = False) -> str:
     p = "'" + PCRE2_PROBE.replace("'", "'\\''") + "'"
     lines += [
         f"{run} -P {p} -c --sort path {flag} . >/tmp/p 2>/dev/null; rc=$?",
-        'echo "PCRE2 $(wc -l < /tmp/p | tr -d \' \') $rc"',
+        "echo \"PCRE2 $(wc -l < /tmp/p | tr -d ' ') $rc\"",
     ]
     return "\n".join(lines)
 
@@ -103,14 +103,19 @@ def run_slate(lane: str, exe: Path, corpus_root: Path, indexed: bool, triple: st
 
 def wine_image_ready() -> tuple[bool, str]:
     """Ensure the Wine lane's image exists, building it once if it does not."""
-    have = subprocess.run(["docker", "image", "inspect", WINE_IMAGE],
-                          capture_output=True).returncode == 0
+    have = (
+        subprocess.run(["docker", "image", "inspect", WINE_IMAGE], capture_output=True).returncode
+        == 0
+    )
     if have:
         return True, WINE_IMAGE
-    proc = subprocess.run(["docker", "build", "--platform", "linux/amd64",
-                           "-t", WINE_IMAGE, "-"],
-                          input=WINE_DOCKERFILE, text=True,
-                          capture_output=True, timeout=TIMEOUT)
+    proc = subprocess.run(
+        ["docker", "build", "--platform", "linux/amd64", "-t", WINE_IMAGE, "-"],
+        input=WINE_DOCKERFILE,
+        text=True,
+        capture_output=True,
+        timeout=TIMEOUT,
+    )
     if proc.returncode != 0:
         return False, (proc.stderr.strip()[-400:] or "docker build declined")
     return True, WINE_IMAGE
@@ -128,49 +133,92 @@ def _in_wine(plat: str, exe: Path, corpus_root: Path, indexed: bool) -> dict:
     if not ok:
         return {"ok": False, "reason": f"Wine lane image unavailable: {image}"}
     cmd = [
-        "docker", "run", "--rm", "--platform", plat,
-        "-v", f"{exe.parent}:/b:ro", "-v", f"{corpus_root}:/corpus:ro",
-        image, "sh", "-c", _script("/b/" + exe.name, "/corpus", indexed, wine=True),
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        plat,
+        "-v",
+        f"{exe.parent}:/b:ro",
+        "-v",
+        f"{corpus_root}:/corpus:ro",
+        image,
+        "sh",
+        "-c",
+        _script("/b/" + exe.name, "/corpus", indexed, wine=True),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
     parsed = _parse(proc.stdout)
     ok = len(parsed["probes"]) == len(PROBES)
-    return {"ok": ok, "image": image, "wine": True,
-            "reason": None if ok else (proc.stderr.strip()[-400:] or "slate produced no probe rows"),
-            **parsed}
+    return {
+        "ok": ok,
+        "image": image,
+        "wine": True,
+        "reason": None if ok else (proc.stderr.strip()[-400:] or "slate produced no probe rows"),
+        **parsed,
+    }
 
 
 def _in_container(plat: str, exe: Path, corpus_root: Path, indexed: bool, image: str) -> dict:
     cmd = [
-        "docker", "run", "--rm", "--platform", plat,
-        "-v", f"{exe.parent}:/b:ro", "-v", f"{corpus_root}:/corpus:ro",
-        image, "sh", "-c", _script("/b/" + exe.name, "/corpus", indexed),
+        "docker",
+        "run",
+        "--rm",
+        "--platform",
+        plat,
+        "-v",
+        f"{exe.parent}:/b:ro",
+        "-v",
+        f"{corpus_root}:/corpus:ro",
+        image,
+        "sh",
+        "-c",
+        _script("/b/" + exe.name, "/corpus", indexed),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
     parsed = _parse(proc.stdout)
     ok = len(parsed["probes"]) == len(PROBES)
-    return {"ok": ok, "image": image,
-            "reason": None if ok else (proc.stderr.strip()[-400:] or "slate produced no probe rows"),
-            **parsed}
+    return {
+        "ok": ok,
+        "image": image,
+        "reason": None if ok else (proc.stderr.strip()[-400:] or "slate produced no probe rows"),
+        **parsed,
+    }
 
 
 def _on_this_machine(lane: str, exe: Path, corpus_root: Path, indexed: bool) -> dict:
     pre = ["arch", "-x86_64"] if lane == "rosetta" else []
     with tempfile.TemporaryDirectory() as gd:
         env = {**os.environ, "GIST_DIR": gd}
-        out = {"tree": len(list(corpus_root.rglob("*.go"))), "index": None, "probes": {}, "pcre2": None}
+        out = {
+            "tree": len(list(corpus_root.rglob("*.go"))),
+            "index": None,
+            "probes": {},
+            "pcre2": None,
+        }
         flag = [] if indexed else ["--no-index"]
         if indexed:
-            rc = subprocess.run([*pre, str(exe), "index"], cwd=corpus_root,
-                                capture_output=True, env=env).returncode
+            rc = subprocess.run(
+                [*pre, str(exe), "index"], cwd=corpus_root, capture_output=True, env=env
+            ).returncode
             out["index"] = "ok" if rc == 0 else "fail"
         for i, (_cls, kind, pat) in enumerate(PROBES):
             f = ["-F"] if kind == "literal" else []
-            p = subprocess.run([*pre, str(exe), *f, pat, *SLATE_FLAGS, *flag, "."],
-                               cwd=corpus_root, capture_output=True, env=env, timeout=TIMEOUT)
+            p = subprocess.run(
+                [*pre, str(exe), *f, pat, *SLATE_FLAGS, *flag, "."],
+                cwd=corpus_root,
+                capture_output=True,
+                env=env,
+                timeout=TIMEOUT,
+            )
             out["probes"][i] = (hashlib.sha256(p.stdout).hexdigest(), p.returncode)
-        p = subprocess.run([*pre, str(exe), "-P", PCRE2_PROBE, "-c", "--sort", "path", *flag, "."],
-                           cwd=corpus_root, capture_output=True, env=env, timeout=TIMEOUT)
+        p = subprocess.run(
+            [*pre, str(exe), "-P", PCRE2_PROBE, "-c", "--sort", "path", *flag, "."],
+            cwd=corpus_root,
+            capture_output=True,
+            env=env,
+            timeout=TIMEOUT,
+        )
         out["pcre2"] = {"files": len(p.stdout.splitlines()), "rc": p.returncode}
         return {"ok": True, "reason": None, **out}
 
@@ -180,7 +228,9 @@ def oracle(exe: Path, corpus_root: Path) -> dict:
     live = run_slate("native", exe, corpus_root, indexed=False)
     idx = run_slate("native", exe, corpus_root, indexed=True)
     if not live["ok"] or not idx["ok"]:
-        raise SystemExit(f"portable: the native oracle itself failed: {live.get('reason') or idx.get('reason')}")
+        raise SystemExit(
+            f"portable: the native oracle itself failed: {live.get('reason') or idx.get('reason')}"
+        )
     return {"live": live, "indexed": idx}
 
 
@@ -197,11 +247,26 @@ def oracle_vs_rg(exe: Path, corpus_root: Path) -> dict:
     for cls, kind, pat in PROBES:
         f = ["-F"] if kind == "literal" else []
         with tempfile.TemporaryDirectory() as gd:
-            g = subprocess.run([str(exe), *f, pat, *SLATE_FLAGS, "--no-index", "."],
-                               cwd=corpus_root, capture_output=True, env={**os.environ, "GIST_DIR": gd})
-        r = subprocess.run(["rg", *f, pat, "-n", "--sort", "path", "."],
-                           cwd=corpus_root, capture_output=True)
-        rows.append({"class": cls, "identical": g.stdout == r.stdout and g.returncode == r.returncode,
-                     "lines": len(r.stdout.splitlines())})
-    return {"checked": True, "rg_version": ver, "identical": sum(r["identical"] for r in rows),
-            "of": len(rows), "rows": rows}
+            g = subprocess.run(
+                [str(exe), *f, pat, *SLATE_FLAGS, "--no-index", "."],
+                cwd=corpus_root,
+                capture_output=True,
+                env={**os.environ, "GIST_DIR": gd},
+            )
+        r = subprocess.run(
+            ["rg", *f, pat, "-n", "--sort", "path", "."], cwd=corpus_root, capture_output=True
+        )
+        rows.append(
+            {
+                "class": cls,
+                "identical": g.stdout == r.stdout and g.returncode == r.returncode,
+                "lines": len(r.stdout.splitlines()),
+            }
+        )
+    return {
+        "checked": True,
+        "rg_version": ver,
+        "identical": sum(r["identical"] for r in rows),
+        "of": len(rows),
+        "rows": rows,
+    }

@@ -1,0 +1,18 @@
+# One Python style across certificate tooling, conformance harnesses, and the
+# published binding. The binding repeats these settings in pyproject.toml so
+# an extracted package formats exactly like the repository around it.
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+  ".venv",
+  ".zig-cache",
+  "zig-out",
+  "zig-pkg",
+]
+
+[lint]
+select = [ "E", "F", "I", "UP", "B", "SIM" ]
+ignore = [ "E501" ]
+
+[lint.isort]
+known-first-party = [ "gist", "irgx" ]

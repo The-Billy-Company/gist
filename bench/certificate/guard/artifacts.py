@@ -29,8 +29,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 
 # Side-cars and headers that prove each layer was minted, not merely named in
 # the header. Every narrower surface the header promises (codex space, the
@@ -38,7 +38,6 @@ import re
 # without a receipt. Both views come from the shared roster, so a new layer
 # widens this gate, the ledger, and the shell completeness check from one row.
 from layers import REQUIRED_LAYER_FILES, REQUIRED_LAYER_HEADERS
-
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]  # guard → certificate → bench → package root

@@ -68,9 +68,9 @@ import argparse
 import csv
 import json
 import math
-from pathlib import Path
 import random
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stats import ALPHA, SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
@@ -209,7 +209,9 @@ def _mined(path: Path) -> dict[str, int] | None:
     return tally
 
 
-def conformance_block(surface: dict | None, mined: dict[str, int] | None, fuzz: dict | None) -> tuple[list[str], int]:
+def conformance_block(
+    surface: dict | None, mined: dict[str, int] | None, fuzz: dict | None
+) -> tuple[list[str], int]:
     """Render the maturity evidence; return (lines, hard_failure_count)."""
     lines: list[str] = []
     bad = 0
@@ -456,7 +458,7 @@ def render(
             "",
             (
                 f"> No class is slower than ripgrep at p<{ALPHA:.2f} **with the index switched "
-                "off**. The \"scanner by design\" claim is therefore not a claim about design but "
+                'off**. The "scanner by design" claim is therefore not a claim about design but '
                 "about implementation, and it does not survive measurement: gist's advantage is "
                 "not the index, it is the walk, the read, and the scan. The index is additive on "
                 "top of a scanner that already wins — which is why turning it off costs a factor, "
@@ -493,7 +495,9 @@ def splice_conformance(cert: Path, lines: list[str]) -> None:
     text = cert.read_text()
     lo, hi = text.find(CONFORMANCE_ANCHOR), text.find(END)
     if lo == -1 or hi == -1 or hi < lo:
-        raise SystemExit("certify_scanner_report: no conformance block to refresh — mint Layer I first")
+        raise SystemExit(
+            "certify_scanner_report: no conformance block to refresh — mint Layer I first"
+        )
     body = "\n".join((*lines, "", *REPRODUCE_BLOCK)).lstrip("\n")
     cert.write_text(text[:lo] + body + "\n\n" + text[hi:])
 
@@ -546,7 +550,9 @@ def residual_ratchet(fuzz: dict, baseline: Path | None) -> int:
     for klass, n in sorted(got.items()):
         allowed = want.get(klass)
         if allowed is None:
-            print(f"certify_scanner_report: NEW residual class `{klass}` ({n}) — not in the baseline")
+            print(
+                f"certify_scanner_report: NEW residual class `{klass}` ({n}) — not in the baseline"
+            )
             bad += 1
         elif n > allowed:
             print(f"certify_scanner_report: residual `{klass}` grew {allowed} → {n}")
@@ -577,7 +583,9 @@ def _read_json(path: Path | None) -> dict | None:
 def main() -> int:
     """CLI entry point."""
     ap = argparse.ArgumentParser(description="gist scanner-mode + conformance report (Layer I)")
-    ap.add_argument("results_dir", type=Path, nargs="?", help="dir of ${class}__{noidx,idx,rg}.json")
+    ap.add_argument(
+        "results_dir", type=Path, nargs="?", help="dir of ${class}__{noidx,idx,rg}.json"
+    )
     ap.add_argument("--certificate", type=Path, required=True)
     ap.add_argument("--csv", type=Path, help="required unless --conformance-only")
     ap.add_argument(
@@ -585,11 +593,22 @@ def main() -> int:
         action="store_true",
         help="re-splice just the flag/mined/fuzz evidence over the last minted timing table",
     )
-    ap.add_argument("--order", type=Path, help="TSV: class<TAB>kind<TAB>pattern (default: <results_dir>/order.tsv)")
-    ap.add_argument("--meta", type=Path, help="JSON: runs/warmup/roots (default: <results_dir>/meta.json)")
+    ap.add_argument(
+        "--order",
+        type=Path,
+        help="TSV: class<TAB>kind<TAB>pattern (default: <results_dir>/order.tsv)",
+    )
+    ap.add_argument(
+        "--meta", type=Path, help="JSON: runs/warmup/roots (default: <results_dir>/meta.json)"
+    )
     ap.add_argument("--conformance", type=Path, help="surface.py --json record")
     ap.add_argument("--mined", type=Path, help="rgsuite run.py results.json")
-    ap.add_argument("--fuzz", type=Path, required=True, help="fuzz.py --json record (mandatory: see FAIL-CLOSED)")
+    ap.add_argument(
+        "--fuzz",
+        type=Path,
+        required=True,
+        help="fuzz.py --json record (mandatory: see FAIL-CLOSED)",
+    )
     ap.add_argument(
         "--conformance-baseline",
         type=Path,
@@ -606,16 +625,22 @@ def main() -> int:
         surface, fuzz = _read_json(args.conformance), _read_json(args.fuzz)
         mined = _mined(args.mined) if args.mined else None
         if fuzz is None:
-            print(f"certify_scanner_report: --fuzz {args.fuzz} is unreadable — the lane is mandatory")
+            print(
+                f"certify_scanner_report: --fuzz {args.fuzz} is unreadable — the lane is mandatory"
+            )
             return 1
         if not (surface or mined):
-            print("certify_scanner_report: --conformance-only needs at least one curated evidence record")
+            print(
+                "certify_scanner_report: --conformance-only needs at least one curated evidence record"
+            )
             return 1
         lines, bad = conformance_block(surface, mined, fuzz)
         bad += ratchet(surface, args.conformance_baseline)
         bad += residual_ratchet(fuzz, args.fuzz_baseline)
         if bad:
-            print(f"certify_scanner_report: REFUSING to splice — {bad} conformance/robustness failure(s)")
+            print(
+                f"certify_scanner_report: REFUSING to splice — {bad} conformance/robustness failure(s)"
+            )
             return 1
         splice_conformance(args.certificate, lines)
         print(f"scanner conformance re-spliced (timing table untouched) → {args.certificate}")

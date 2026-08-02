@@ -45,14 +45,14 @@ Usage
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import json
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
+from pathlib import Path
 
 import _oracle
 
@@ -68,6 +68,7 @@ ALIAS: dict[str, str] = {}
 def declared(table: dict, flag: str, default=None):
     """`table[flag]`, falling back to the flag's long partner."""
     return table.get(flag, table.get(ALIAS.get(flag, ""), default))
+
 
 # A value for every value-taking rg flag, chosen so the flag actually does
 # something on the fixture rather than erroring out. A value-taking flag with no
@@ -203,15 +204,24 @@ UNDO_PAIRS = [
     ("pcre2", ["-P", "--no-pcre2", "fn", "."]),
     ("pre", ["--pre", "cat", "--no-pre", "fn", "."]),
     ("sort-files", ["--sort-files", "--no-sort-files", "fn", "."]),
-    ("glob-ci", ["--iglob", "*.RS", "--glob-case-insensitive", "--no-glob-case-insensitive", "fn", "."]),
+    (
+        "glob-ci",
+        ["--iglob", "*.RS", "--glob-case-insensitive", "--no-glob-case-insensitive", "fn", "."],
+    ),
     ("crlf", ["--crlf", "--no-crlf", "fn", "."]),
-    ("max-columns-preview", ["-M", "4", "--max-columns-preview", "--no-max-columns-preview", "fn", "."]),
+    (
+        "max-columns-preview",
+        ["-M", "4", "--max-columns-preview", "--no-max-columns-preview", "fn", "."],
+    ),
     ("one-file-system", ["--one-file-system", "--no-one-file-system", "fn", "."]),
     ("search-zip", ["-z", "--no-search-zip", "fn", "."]),
     ("encoding", ["-E", "utf-16", "--no-encoding", "fn", "."]),
     ("type-clear-search", ["--type-clear", "rust", "fn", "."]),
     ("type-clear-then-t", ["--type-clear", "rust", "-t", "rust", "fn", "."]),
-    ("type-clear-readd", ["--type-clear", "rust", "--type-add", "rust:*.rs", "-t", "rust", "fn", "."]),
+    (
+        "type-clear-readd",
+        ["--type-clear", "rust", "--type-add", "rust:*.rs", "-t", "rust", "fn", "."],
+    ),
     ("type-clear-list", ["--type-clear", "rust", "--type-list"]),
     # The positive direction has to keep working too: a negation implemented by
     # clobbering shared state would break its own partner.
@@ -249,8 +259,10 @@ def adverse(cwd: str) -> list[dict]:
         if name in UNDO_RESIDUAL:
             row["residual"] = UNDO_RESIDUAL[name]
         if not ok:
-            row["why"] = _diff_note(a, b) if a != b else (
-                f"exit {rc_rg} vs {rc_g}: {err_g.decode(errors='replace').strip()[:100]}"
+            row["why"] = (
+                _diff_note(a, b)
+                if a != b
+                else (f"exit {rc_rg} vs {rc_g}: {err_g.decode(errors='replace').strip()[:100]}")
             )
         rows.append(row)
     return rows
@@ -377,7 +389,7 @@ def _type_registry(b: bytes) -> dict[bytes, set[bytes]]:
 def _diff_note(a: bytes, b: bytes) -> str:
     """The first differing line pair, for a human reading the failure."""
     la, lb = a.splitlines(), b.splitlines()
-    for i, (x, y) in enumerate(zip(la, lb)):
+    for i, (x, y) in enumerate(zip(la, lb, strict=False)):
         if x != y:
             return f"line {i + 1}: rg={x[:60]!r} gist={y[:60]!r}"
     return f"line count rg={len(la)} gist={len(lb)}"
@@ -413,7 +425,9 @@ def rg_flags() -> tuple[list[str], set[str]]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--json", type=Path, help="write the machine record here")
     ap.add_argument("--only", help="probe just the flags containing this substring")
     ap.add_argument("--verbose", action="store_true", help="print every row, not just the losses")

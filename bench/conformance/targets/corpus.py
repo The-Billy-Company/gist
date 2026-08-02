@@ -74,10 +74,10 @@ def _body(rng: random.Random, i: int) -> str:
             f"func (s *{typ}Service) {verb}{n}(ctx context.Context, id string) error {{",
             f"\tconn, err := s.pool.{rng.choice(VERBS)}(ctx);",
             "\tif err != nil {",
-            f"\t\treturn errors.New(\"{typ.lower()}: {verb.lower()} failed\");",
+            f'\t\treturn errors.New("{typ.lower()}: {verb.lower()} failed");',
             "\t}",
             "\tfor _, row := range conn.Rows() {",
-            f"\t\tif row.ID == \"{_uuid_like(rng)}\" {{",
+            f'\t\tif row.ID == "{_uuid_like(rng)}" {{',
             "\t\t\tcontinue",
             "\t\t}",
             f"\t\tif row.Kind == 0x{rng.randrange(1 << 12):03x} {{",
@@ -87,7 +87,7 @@ def _body(rng: random.Random, i: int) -> str:
             # A closure argument closed on its own line is what puts the `})`
             # punctuation pair in the corpus — the class the trigram index cannot
             # prefilter, so it must be present or that probe conforms vacuously.
-            f"\ts.pool.OnClose(func() {{",
+            "\ts.pool.OnClose(func() {",
             "\t\t_ = conn.Close();",
             "\t})",
             "\treturn nil",
@@ -151,4 +151,8 @@ if __name__ == "__main__":
             assert digest_of(a) == ma["sha256"], "digest_of disagrees with generate"
             print(json.dumps(ma))
         sys.exit(0)
-    print(json.dumps(generate(Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/gist-portable-corpus"))))
+    print(
+        json.dumps(
+            generate(Path(sys.argv[1] if len(sys.argv) > 1 else "/tmp/gist-portable-corpus"))
+        )
+    )

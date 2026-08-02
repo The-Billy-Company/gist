@@ -23,10 +23,9 @@ from __future__ import annotations
 import base64
 import contextlib
 import os
-from pathlib import Path
 import re
 import subprocess
-
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 # The CLI (`rg` verb), not gist-bench. `GIST_BIN` first — the same override

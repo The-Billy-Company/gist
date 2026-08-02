@@ -45,15 +45,14 @@ from __future__ import annotations
 
 import argparse
 import atexit
-from dataclasses import dataclass, field
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-
+from dataclasses import dataclass, field
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # rgsuite → conformance → bench → repo
@@ -134,8 +133,7 @@ def run(bin_: str, args: list[str], cwd: Path, env: dict[str, str] | None = None
         [bin_, *args],
         cwd=str(cwd),
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         timeout=90,
     )
     return Out(p.returncode, p.stdout, p.stderr)

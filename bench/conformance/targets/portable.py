@@ -49,8 +49,8 @@ from __future__ import annotations
 import argparse
 import json
 import platform
-import subprocess
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -94,13 +94,17 @@ def score(target: dict, orc: dict, control_errors: list[str]) -> None:
         unique = [e for e in errs if crossbuild.site(e) not in shared]
         if errs and not unique:
             t["tier"] = "tree-broken"
-            t["notes"].append("the tree did not compile for the host either, so this row is not a "
-                              "portability verdict — re-run on a tree that builds")
+            t["notes"].append(
+                "the tree did not compile for the host either, so this row is not a "
+                "portability verdict — re-run on a tree that builds"
+            )
             return
         t["tier"] = "unbuilt"
         if shared:
-            t["notes"].append(f"{len(shared)} of {len(errs)} diagnostics also fire for the host "
-                              "triple (concurrent edit); the rest are target-specific")
+            t["notes"].append(
+                f"{len(shared)} of {len(errs)} diagnostics also fire for the host "
+                "triple (concurrent edit); the rest are target-specific"
+            )
         return
     if not t["identity"]["ok"]:
         t["tier"] = "unbuilt"
@@ -125,24 +129,33 @@ def score(target: dict, orc: dict, control_errors: list[str]) -> None:
             t["notes"].append(f"{pas} pass did not complete: {got.get('reason')}")
             return
         if got.get("tree") != want.get("tree"):
-            t["notes"].append(f"{pas} pass saw {got.get('tree')} corpus files, "
-                              f"oracle saw {want.get('tree')}")
+            t["notes"].append(
+                f"{pas} pass saw {got.get('tree')} corpus files, oracle saw {want.get('tree')}"
+            )
             return
-        diffs = [PROBES[i][0] for i in range(len(PROBES)) if got["probes"].get(i) != want["probes"][i]]
-        t["conform"] = {**t.get("conform", {}),
-                        pas: {"identical": len(PROBES) - len(diffs), "of": len(PROBES), "differing": diffs}}
+        diffs = [
+            PROBES[i][0] for i in range(len(PROBES)) if got["probes"].get(i) != want["probes"][i]
+        ]
+        t["conform"] = {
+            **t.get("conform", {}),
+            pas: {"identical": len(PROBES) - len(diffs), "of": len(PROBES), "differing": diffs},
+        }
         if diffs:
             t["notes"].append(f"{pas} pass differs from the native oracle on: {', '.join(diffs)}")
             return
     if ex["indexed"].get("index") != "ok":
-        t["notes"].append("indexed pass ran but `gist index` declined, so only the live path is proven")
+        t["notes"].append(
+            "indexed pass ran but `gist index` declined, so only the live path is proven"
+        )
         return
     # The lane, not the output, decides the top rung. A translation layer that
     # reproduced every byte still did not prove the real kernel does.
     t["tier"] = ceiling = lane_ceiling(t["lane"])
     if ceiling != "conforms":
-        t["notes"].append(f"every probe class matched the native oracle, but through the "
-                          f"{t['lane'].split(':', 1)[0]} lane — not a native kernel of this platform")
+        t["notes"].append(
+            f"every probe class matched the native oracle, but through the "
+            f"{t['lane'].split(':', 1)[0]} lane — not a native kernel of this platform"
+        )
 
 
 def summarize(rows: list[dict], rg: dict) -> dict:
@@ -151,8 +164,9 @@ def summarize(rows: list[dict], rg: dict) -> dict:
     covered = {}  # rg triple → the strongest tier any gist row reached for it
     for r in rows:
         for cov in r["rg"]:
-            covered[cov["triple"]] = max(covered.get(cov["triple"], "unbuilt"), r["tier"],
-                                         key=lambda t: RANK[t])
+            covered[cov["triple"]] = max(
+                covered.get(cov["triple"], "unbuilt"), r["tier"], key=lambda t: RANK[t]
+            )
     declared = [t["triple"] for t in rg["targets"]]
     published = [t["triple"] for t in rg["targets"] if t["published"]]
     uncovered = [t for t in declared if RANK[covered.get(t, "unbuilt")] < RANK["builds"]]
@@ -194,16 +208,16 @@ def summarize(rows: list[dict], rg: dict) -> dict:
             "covered_at_conforms": at(windows, "conforms"),
             "uncovered": short(windows),
             "why": "the openat/dirfd descent, file map, stat, argv, realpath and stdin "
-                   "classification now go through one comptime seam (src/portal.zig) with a "
-                   "Win32 arm: NtCreateFile against a root handle, a batched NtQueryDirectoryFile "
-                   "drain so the walk stands on the same batched-metadata floor getattrlistbulk "
-                   "and getdents64 give macOS and Linux, demand-paged NT sections instead of a "
-                   "whole-file read, NtQueryInformationFile(.Id) for the volume identity "
-                   "--one-file-system needs, and walker paths normalized to '/' before any ignore "
-                   "rule or depth count sees them. The resident daemon has no unix socket there "
-                   "and declines, which the cold path never depends on. No Windows kernel is "
-                   "reachable from this host, so the executed rung is Wine's Win32, recorded as "
-                   "conforms-wine.",
+            "classification now go through one comptime seam (src/portal.zig) with a "
+            "Win32 arm: NtCreateFile against a root handle, a batched NtQueryDirectoryFile "
+            "drain so the walk stands on the same batched-metadata floor getattrlistbulk "
+            "and getdents64 give macOS and Linux, demand-paged NT sections instead of a "
+            "whole-file read, NtQueryInformationFile(.Id) for the volume identity "
+            "--one-file-system needs, and walker paths normalized to '/' before any ignore "
+            "rule or depth count sees them. The resident daemon has no unix socket there "
+            "and declines, which the cold path never depends on. No Windows kernel is "
+            "reachable from this host, so the executed rung is Wine's Win32, recorded as "
+            "conforms-wine.",
         },
         # Scored against rg's *declared* set rather than the 13 it actually
         # published, so the bar is the harder one. `dominates_posix` is the claim
@@ -219,7 +233,9 @@ def sweep(only: list[str], no_exec: bool, keep: bool) -> dict:
     by_triple = {t["triple"]: t for t in rg["targets"]}
     work = [row for row in MATRIX if not only or row[0] in only]
     if not work:
-        raise SystemExit(f"portable: --only matched no row; known: {', '.join(r[0] for r in MATRIX)}")
+        raise SystemExit(
+            f"portable: --only matched no row; known: {', '.join(r[0] for r in MATRIX)}"
+        )
 
     corpus_root = Path("/tmp/gist-portable-corpus")
     cmeta = corpus_mod.generate(corpus_root)
@@ -227,25 +243,33 @@ def sweep(only: list[str], no_exec: bool, keep: bool) -> dict:
 
     native_exe = PKG / "zig-out" / "bin" / "gist"
     if not native_exe.exists():
-        raise SystemExit(f"portable: no native gist at {native_exe} — "
-                         "run `zig build -Doptimize=ReleaseFast` first")
+        raise SystemExit(
+            f"portable: no native gist at {native_exe} — "
+            "run `zig build -Doptimize=ReleaseFast` first"
+        )
     say("oracle: native slate (live + indexed)…")
     orc = slate.oracle(native_exe, corpus_root)
     vs_rg = slate.oracle_vs_rg(native_exe, corpus_root)
     if vs_rg["checked"]:
-        say(f"oracle: {vs_rg['identical']}/{vs_rg['of']} probe classes byte-identical "
-            f"to {vs_rg['rg_version']}")
+        say(
+            f"oracle: {vs_rg['identical']}/{vs_rg['of']} probe classes byte-identical "
+            f"to {vs_rg['rg_version']}"
+        )
 
     snap, control = crossbuild.frozen(Path("/tmp/gist-portable-src"), host_triple(), say=say)
     src = Path(snap["build_root"])
     if control["ok"]:
         say("snapshot: every target below builds from these exact bytes")
     else:
-        say("control: the snapshot still does not compile, so failed rows will be recorded "
-            "`tree-broken` and the certificate will refuse them")
+        say(
+            "control: the snapshot still does not compile, so failed rows will be recorded "
+            "`tree-broken` and the certificate will refuse them"
+        )
 
-    have_docker = shutil.which("docker") is not None and subprocess.run(
-        ["docker", "info"], capture_output=True).returncode == 0
+    have_docker = (
+        shutil.which("docker") is not None
+        and subprocess.run(["docker", "info"], capture_output=True).returncode == 0
+    )
     root = Path("/tmp/gist-portable-out")
     rows = []
     for triple, cpu, rg_triples, lane in work:
@@ -257,13 +281,24 @@ def sweep(only: list[str], no_exec: bool, keep: bool) -> dict:
             ok, got, why = objfmt.verify(Path(b["exe"]), triple)
             ident = {"ok": ok, "why": why}
         row = {
-            "triple": triple, "cpu": cpu, "lane": lane, "build": b,
-            "identity": ident, "artifact": got, "notes": [], "tier": "unbuilt",
-            "pcre2": None, "conform": {},
-            "rg": [{"triple": rt,
+            "triple": triple,
+            "cpu": cpu,
+            "lane": lane,
+            "build": b,
+            "identity": ident,
+            "artifact": got,
+            "notes": [],
+            "tier": "unbuilt",
+            "pcre2": None,
+            "conform": {},
+            "rg": [
+                {
+                    "triple": rt,
                     **{k: by_triple[rt][k] for k in ("published", "pcre2", "abi", "build_host")},
-                    "abi_flavor": "substituted-gnu" if rt in FLAVOR_SUBSTITUTED else "same"}
-                   for rt in rg_triples],
+                    "abi_flavor": "substituted-gnu" if rt in FLAVOR_SUBSTITUTED else "same",
+                }
+                for rt in rg_triples
+            ],
         }
         say(f" {b['seconds']}s {'ok' if b['ok'] else 'FAILED'}")
         # Both container lanes need Docker; only the local ones don't. Spelling the
@@ -279,15 +314,24 @@ def sweep(only: list[str], no_exec: bool, keep: bool) -> dict:
                     "indexed": slate.run_slate(lane, Path(b["exe"]), corpus_root, True, triple),
                 }
             except subprocess.TimeoutExpired:
-                row["exec"] = {"live": {"ok": False, "reason": f"execution timed out after {slate.TIMEOUT} s"}}
+                row["exec"] = {
+                    "live": {"ok": False, "reason": f"execution timed out after {slate.TIMEOUT} s"}
+                }
             say(" done")
         elif lane == "none":
             row["exec"] = {"live": {"ok": False, "reason": no_lane_why(triple)}}
         elif containerized and not have_docker:
-            row["exec"] = {"live": {"ok": False,
-                                    "reason": "Docker is unavailable on this host, so this lane could not be executed"}}
+            row["exec"] = {
+                "live": {
+                    "ok": False,
+                    "reason": "Docker is unavailable on this host, so this lane could not be executed",
+                }
+            }
         score(row, orc, control["errors"])
-        say(f"[{triple}] → {row['tier']}" + (f"  ({'; '.join(row['notes'])})" if row["notes"] else ""))
+        say(
+            f"[{triple}] → {row['tier']}"
+            + (f"  ({'; '.join(row['notes'])})" if row["notes"] else "")
+        )
         rows.append(row)
         if not keep and b["ok"]:
             shutil.rmtree(out, ignore_errors=True)  # ~25 MB × 22 targets otherwise
@@ -295,17 +339,31 @@ def sweep(only: list[str], no_exec: bool, keep: bool) -> dict:
     return {
         "schema": 1,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "host": {"machine": platform.machine(), "system": platform.system(),
-                 "release": platform.release(), "docker": have_docker,
-                 "zig": subprocess.run(["zig", "version"], capture_output=True, text=True).stdout.strip(),
-                 "cross_toolchains_installed": 0},
+        "host": {
+            "machine": platform.machine(),
+            "system": platform.system(),
+            "release": platform.release(),
+            "docker": have_docker,
+            "zig": subprocess.run(
+                ["zig", "version"], capture_output=True, text=True
+            ).stdout.strip(),
+            "cross_toolchains_installed": 0,
+        },
         "corpus": cmeta,
         "snapshot": snap,
         "control": control,
-        "oracle": {"exe": str(native_exe), "vs_ripgrep": vs_rg,
-                   "tree": orc["live"]["tree"], "probe_classes": len(PROBES)},
-        "ripgrep": {"provenance": rg["provenance"], "verification_tier": rg["verification_tier"],
-                    "declared": len(rg["targets"]), "published": sum(t["published"] for t in rg["targets"])},
+        "oracle": {
+            "exe": str(native_exe),
+            "vs_ripgrep": vs_rg,
+            "tree": orc["live"]["tree"],
+            "probe_classes": len(PROBES),
+        },
+        "ripgrep": {
+            "provenance": rg["provenance"],
+            "verification_tier": rg["verification_tier"],
+            "declared": len(rg["targets"]),
+            "published": sum(t["published"] for t in rg["targets"]),
+        },
         "targets": rows,
         "summary": summarize(rows, rg),
     }
@@ -325,13 +383,17 @@ def selftest() -> int:
     src = (PKG / "bench" / "harness" / "probes.zig").read_text()
     for cls, kind, pat in PROBES:
         # The Zig source escapes backslashes; compare against that spelling.
-        want = f'.class = "{cls}", .kind = .{kind}, .pattern = "{pat.replace(chr(92), chr(92) * 2)}"'
+        want = (
+            f'.class = "{cls}", .kind = .{kind}, .pattern = "{pat.replace(chr(92), chr(92) * 2)}"'
+        )
         if want not in src:
             fails.append(f"probe drift vs probes.zig: {cls} ({want!r} absent)")
     # Count only LIVE rows: probes.zig also carries commented-out classes staged
     # for its next republish, and counting those would make this check demand
     # probes that do not exist yet.
-    live = sum(1 for ln in src.splitlines() if ".class = " in ln and not ln.lstrip().startswith("//"))
+    live = sum(
+        1 for ln in src.splitlines() if ".class = " in ln and not ln.lstrip().startswith("//")
+    )
     if live != len(PROBES):
         fails.append(f"probes.zig declares {live} live classes, harness carries {len(PROBES)}")
 
@@ -360,8 +422,10 @@ def selftest() -> int:
 
     for f in fails:
         say(f"selftest: FAIL {f}")
-    print(f"selftest: {'ok' if not fails else f'{len(fails)} failure(s)'} "
-          f"({len(PROBES)} probe classes, {len(MATRIX)} matrix rows, {len(rg['targets'])} rg triples)")
+    print(
+        f"selftest: {'ok' if not fails else f'{len(fails)} failure(s)'} "
+        f"({len(PROBES)} probe classes, {len(MATRIX)} matrix rows, {len(rg['targets'])} rg triples)"
+    )
     return 1 if fails else 0
 
 
@@ -371,28 +435,40 @@ def status(path: Path) -> int:
         return 1
     d = json.loads(path.read_text())
     s = d["summary"]
-    print(f"sweep {d['generated_at']}  host {d['host']['machine']}-{d['host']['system']}  "
-          f"zig {d['host']['zig']}")
-    print(f"corpus {d['corpus']['files']} files / {d['corpus']['bytes']} B  "
-          f"sha256 {d['corpus']['sha256'][:16]}…")
+    print(
+        f"sweep {d['generated_at']}  host {d['host']['machine']}-{d['host']['system']}  "
+        f"zig {d['host']['zig']}"
+    )
+    print(
+        f"corpus {d['corpus']['files']} files / {d['corpus']['bytes']} B  "
+        f"sha256 {d['corpus']['sha256'][:16]}…"
+    )
     vr = d["oracle"]["vs_ripgrep"]
     if vr.get("checked"):
-        print(f"oracle pinned to {vr['rg_version']}: {vr['identical']}/{vr['of']} classes byte-identical")
+        print(
+            f"oracle pinned to {vr['rg_version']}: {vr['identical']}/{vr['of']} classes byte-identical"
+        )
     for t in TIERS:
         names = s["by_tier"][t]
         print(f"  {t:<11} {len(names):>2}  {', '.join(names)}")
-    print(f"rg declared {s['rg_declared']} (published {s['rg_published']}) — "
-          f"gist builds {s['rg_covered_at_builds']}, runs {s['rg_covered_at_runs']}, "
-          f"conforms {s['rg_covered_at_conforms']}")
+    print(
+        f"rg declared {s['rg_declared']} (published {s['rg_published']}) — "
+        f"gist builds {s['rg_covered_at_builds']}, runs {s['rg_covered_at_runs']}, "
+        f"conforms {s['rg_covered_at_conforms']}"
+    )
     p, w = s["posix"], s["windows"]
-    print(f"  posix   {p['rg_declared']:>2} rg triples — builds {p['covered_at_builds']}, "
-          f"runs {p['covered_at_runs']}, conforms {p['covered_at_conforms']}"
-          + (f"  UNCOVERED {p['uncovered']}" if p["uncovered"] else ""))
-    print(f"  windows {w['rg_declared']:>2} rg triples — builds {w['covered_at_builds']}, "
-          f"runs {w.get('covered_at_runs', 0)}, "
-          f"conforms-wine {w.get('covered_at_conforms_wine', 0)}, "
-          f"conforms {w.get('covered_at_conforms', 0)}"
-          + (f"  UNCOVERED {w['uncovered']}" if w["uncovered"] else ""))
+    print(
+        f"  posix   {p['rg_declared']:>2} rg triples — builds {p['covered_at_builds']}, "
+        f"runs {p['covered_at_runs']}, conforms {p['covered_at_conforms']}"
+        + (f"  UNCOVERED {p['uncovered']}" if p["uncovered"] else "")
+    )
+    print(
+        f"  windows {w['rg_declared']:>2} rg triples — builds {w['covered_at_builds']}, "
+        f"runs {w.get('covered_at_runs', 0)}, "
+        f"conforms-wine {w.get('covered_at_conforms_wine', 0)}, "
+        f"conforms {w.get('covered_at_conforms', 0)}"
+        + (f"  UNCOVERED {w['uncovered']}" if w["uncovered"] else "")
+    )
     print(f"beyond rg: {len(s['beyond_rg'])}  → {', '.join(s['beyond_rg'])}")
     print(f"dominates posix: {s['dominates_posix']}   dominates unqualified: {s['dominates']}")
     return 0
@@ -402,8 +478,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("verb", nargs="?", default="run", choices=("run", "status", "selftest"))
     ap.add_argument("--only", action="append", default=[], metavar="TRIPLE")
-    ap.add_argument("--no-exec", action="store_true", help="build + identify only; skip every execution lane")
-    ap.add_argument("--keep", action="store_true", help="keep the per-target prefixes (~25 MB each)")
+    ap.add_argument(
+        "--no-exec", action="store_true", help="build + identify only; skip every execution lane"
+    )
+    ap.add_argument(
+        "--keep", action="store_true", help="keep the per-target prefixes (~25 MB each)"
+    )
     ap.add_argument("--out", type=Path, default=ARTIFACT / "portable.json")
     a = ap.parse_args()
     if a.verb == "selftest":

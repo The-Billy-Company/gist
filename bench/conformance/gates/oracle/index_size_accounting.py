@@ -20,9 +20,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[3]  # oracle → gates → conformance → bench → repo

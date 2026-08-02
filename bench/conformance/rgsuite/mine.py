@@ -23,10 +23,9 @@ could and couldn't reproduce.
 import base64
 import contextlib
 import json
-from pathlib import Path
 import re
 import sys
-
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 _DEFAULT = HERE.parents[2] / "upstream" / "ripgrep" / "tests"  # optional local ripgrep tests clone
@@ -457,7 +456,11 @@ def mine_block(name, body, consts, srcfile):
     # is stricter than ripgrep's own test (and, for the multi-root walks whose
     # emit order is genuinely nondeterministic, spuriously flaps PASS↔ORDER). Only
     # a real `eqnice!` byte assertion stays "plain".
-    cmp = "sort" if ("sort_lines" in body or ("eqnice!" not in body and ".contains(" in body)) else "plain"
+    cmp = (
+        "sort"
+        if ("sort_lines" in body or ("eqnice!" not in body and ".contains(" in body))
+        else "plain"
+    )
     # Scan code only (string bodies blanked) so keywords inside expected-output
     # blocks — e.g. the word "match" in a binary-warning string — don't masquerade
     # as control flow.

@@ -14,8 +14,8 @@ knows what it cannot gate.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -41,7 +41,9 @@ def main(argv: list[str]) -> int:
     for name, author in OWNED.items():
         src = origin(name)
         if src is None:
-            print(f"missing {author}/contract/{name} — clone the sibling beside gist", file=sys.stderr)
+            print(
+                f"missing {author}/contract/{name} — clone the sibling beside gist", file=sys.stderr
+            )
             rc = 1
             continue
         print(f"ok {name} ← {src}")

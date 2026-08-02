@@ -38,7 +38,15 @@ PKG = Path(__file__).resolve().parent.parent.parent.parent  # this repo root
 # and **live daemon sockets**, which `copytree` cannot copy at all. None of it is
 # a build input, so excluding it is not a shortcut.
 SKIP = shutil.ignore_patterns(
-    ".zig-cache", "zig-cache", "zig-out", ".git", ".local", "artifact", "*.o", "*.a", "*.sock",
+    ".zig-cache",
+    "zig-cache",
+    "zig-out",
+    ".git",
+    ".local",
+    "artifact",
+    "*.o",
+    "*.a",
+    "*.sock",
 )
 
 
@@ -60,8 +68,14 @@ def _mirror(srcdir: Path, dstdir: Path) -> None:
     # `copy_function=copy` (not `copy2`) because preserving mtimes would let
     # Zig's cache confuse a snapshot with the live tree; dangling symlinks and
     # non-regular files are skipped rather than fataling the sweep.
-    shutil.copytree(srcdir, dstdir, ignore=SKIP, symlinks=True,
-                    copy_function=shutil.copy, ignore_dangling_symlinks=True)
+    shutil.copytree(
+        srcdir,
+        dstdir,
+        ignore=SKIP,
+        symlinks=True,
+        copy_function=shutil.copy,
+        ignore_dangling_symlinks=True,
+    )
 
 
 def snapshot(dest: Path) -> dict:
@@ -93,8 +107,14 @@ def snapshot(dest: Path) -> dict:
         b = p.read_bytes()
         d.update(b)
         total += len(b)
-    return {"root": str(dest), "build_root": str(build_root), "path_deps": deps,
-            "files": len(files), "bytes": total, "sha256": d.hexdigest()}
+    return {
+        "root": str(dest),
+        "build_root": str(build_root),
+        "path_deps": deps,
+        "files": len(files),
+        "bytes": total,
+        "sha256": d.hexdigest(),
+    }
 
 
 # The `gist` step rather than the default `install`: this package ships three CLIs
@@ -104,7 +124,9 @@ def snapshot(dest: Path) -> dict:
 STEP = "gist"
 
 
-def _zig(triple: str, prefix: str, src: Path, cpu: str | None = None) -> subprocess.CompletedProcess:
+def _zig(
+    triple: str, prefix: str, src: Path, cpu: str | None = None
+) -> subprocess.CompletedProcess:
     cmd = ["zig", "build", STEP, "-Doptimize=ReleaseFast", f"-Dtarget={triple}", "--prefix", prefix]
     if cpu:
         cmd.append(f"-Dcpu={cpu}")
@@ -114,11 +136,16 @@ def _zig(triple: str, prefix: str, src: Path, cpu: str | None = None) -> subproc
 def control(triple: str, src: Path) -> dict:
     """Compile-check `src` for the host, to tell tree breakage from a port gap."""
     proc = _zig(triple, "/tmp/gist-portable-control", src)
-    return {"ok": proc.returncode == 0, "triple": triple,
-            "errors": [] if proc.returncode == 0 else diagnostics(proc.stderr, limit=40)}
+    return {
+        "ok": proc.returncode == 0,
+        "triple": triple,
+        "errors": [] if proc.returncode == 0 else diagnostics(proc.stderr, limit=40),
+    }
 
 
-def frozen(dest: Path, triple: str, attempts: int = 3, say=lambda _m, end="\n": None) -> tuple[dict, dict]:
+def frozen(
+    dest: Path, triple: str, attempts: int = 3, say=lambda _m, end="\n": None
+) -> tuple[dict, dict]:
     """A snapshot that has *proven* it compiles — the thing a sweep actually needs.
 
     A single freeze is a coin flip: copying 3,300 files takes long enough to catch
@@ -134,17 +161,21 @@ def frozen(dest: Path, triple: str, attempts: int = 3, say=lambda _m, end="\n": 
     """
     for attempt in range(1, attempts + 1):
         snap = snapshot(dest)
-        say(f"snapshot: {snap['files']} files, {snap['bytes']:,} B, "
+        say(
+            f"snapshot: {snap['files']} files, {snap['bytes']:,} B, "
             f"sha256 {snap['sha256'][:16]}… (+ path deps {', '.join(snap['path_deps']) or 'none'})"
-            + (f" — freeze {attempt}/{attempts}" if attempt > 1 else ""))
+            + (f" — freeze {attempt}/{attempts}" if attempt > 1 else "")
+        )
         say(f"control: compile-checking the snapshot for {triple}…", end="")
         ctl = control(triple, Path(snap["build_root"]))
         say(" clean" if ctl["ok"] else f" BROKEN ({len(ctl['errors'])} diagnostics)")
         snap["attempt"], ctl["attempts"] = attempt, attempt
         if ctl["ok"] or attempt == attempts:
             return snap, ctl
-        say("control: a concurrent edit was caught mid-save — re-freezing rather than "
-            "publishing a sweep that cannot distinguish that from a port gap")
+        say(
+            "control: a concurrent edit was caught mid-save — re-freezing rather than "
+            "publishing a sweep that cannot distinguish that from a port gap"
+        )
         for e in ctl["errors"][:3]:
             say(f"  · {e}")
     raise AssertionError("unreachable")  # the loop returns on its final attempt

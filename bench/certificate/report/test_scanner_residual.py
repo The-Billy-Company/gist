@@ -6,10 +6,10 @@ refuse, because a ratchet nobody has watched fail is indistinguishable from a
 constant `return 0` — the certificate would read the same either way.
 """
 
-from pathlib import Path
 import json
 import tempfile
 import unittest
+from pathlib import Path
 
 import scanner as report
 

@@ -50,9 +50,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]  # guard → certificate → bench → package root
@@ -223,7 +222,9 @@ def main(argv: list[str] | None = None) -> int:
         found = row.get("problems")
         problems = [str(p) for p in found] if isinstance(found, list) else []
         if not row.get("present"):
-            print(f"  {mark} {label}: missing — {problems[0] if problems else '?'}", file=sys.stderr)
+            print(
+                f"  {mark} {label}: missing — {problems[0] if problems else '?'}", file=sys.stderr
+            )
             continue
         commit = str(row.get("commit") or "")
         ref = f" · minted at {commit[:12]}" if commit else ""

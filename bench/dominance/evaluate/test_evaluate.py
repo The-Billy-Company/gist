@@ -21,18 +21,16 @@ Run:  python3 -m pytest bench/dominance/evaluate/test_evaluate.py
 
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
-
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 import report  # noqa: E402
-
 
 CONTRACT = report.load_contract()
 CLASSES = tuple(cls for cls, _, _ in __import__("regimes").PROBES)

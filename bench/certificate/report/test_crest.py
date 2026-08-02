@@ -1,8 +1,8 @@
 """Regression tests for the Crest certificate projection."""
 
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 import crest as report
 

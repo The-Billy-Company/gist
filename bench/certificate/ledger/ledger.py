@@ -47,15 +47,15 @@ doesn't clear it is a gate that gets routed around.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
 import hashlib
 import json
 import math
-from pathlib import Path
 import re
 import subprocess
 import sys
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import TypedDict
 
 # The layers a complete mint carries, in certificate order, keyed by the header
@@ -63,9 +63,10 @@ from typing import TypedDict
 # match is a layer the mint dropped — the regression this ledger exists to catch.
 # The roster is shared with the reproducibility gate and the shell completeness
 # check, so adding a layer is one row there rather than three copies here.
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "guard"))  # LAYERS roster lives in the sibling guard/
+sys.path.insert(
+    0, str(Path(__file__).resolve().parent.parent / "guard")
+)  # LAYERS roster lives in the sibling guard/
 from layers import LAYERS
-
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]  # ledger → certificate → bench → package root

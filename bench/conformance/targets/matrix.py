@@ -37,6 +37,7 @@ def lane_ceiling(lane: str) -> str:
     """The strongest tier `lane` is allowed to certify."""
     return LANE_CEILING.get(lane.split(":", 1)[0], "conforms")
 
+
 # The twelve canonical query classes, transcribed from `bench/harness/probes.zig`
 # (kept in step by `selftest`, which parses that file and fails on any drift —
 # a Python harness cannot `@import` Zig data, so the check replaces the copy's
@@ -86,12 +87,27 @@ MATRIX = [
     ("x86_64-linux-musl", None, ("x86_64-unknown-linux-musl",), "docker:linux/amd64"),
     ("aarch64-linux-gnu", None, ("aarch64-unknown-linux-gnu",), "docker:linux/arm64"),
     ("aarch64-linux-musl", None, ("aarch64-unknown-linux-musl",), "docker:linux/arm64"),
-    ("arm-linux-gnueabihf", "generic+v7a", ("armv7-unknown-linux-gnueabihf",), "docker:linux/arm/v7"),
-    ("arm-linux-musleabihf", "generic+v7a", ("armv7-unknown-linux-musleabihf",), "docker:linux/arm/v7"),
+    (
+        "arm-linux-gnueabihf",
+        "generic+v7a",
+        ("armv7-unknown-linux-gnueabihf",),
+        "docker:linux/arm/v7",
+    ),
+    (
+        "arm-linux-musleabihf",
+        "generic+v7a",
+        ("armv7-unknown-linux-musleabihf",),
+        "docker:linux/arm/v7",
+    ),
     ("arm-linux-musleabi", "generic+v7a", ("armv7-unknown-linux-musleabi",), "docker:linux/arm/v7"),
     ("s390x-linux-gnu", None, ("s390x-unknown-linux-gnu",), "docker:linux/s390x"),
     ("x86-linux-gnu", None, ("i686-unknown-linux-gnu",), "docker:linux/386"),
-    ("x86_64-windows-gnu", None, ("x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc"), "wine:linux/amd64"),
+    (
+        "x86_64-windows-gnu",
+        None,
+        ("x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc"),
+        "wine:linux/amd64",
+    ),
     ("aarch64-windows-gnu", None, ("aarch64-pc-windows-msvc",), "none"),
     ("x86-windows-gnu", None, ("i686-pc-windows-msvc",), "wine:linux/amd64"),
     # ── targets ripgrep publishes nothing for ────────────────────────────────
@@ -153,7 +169,7 @@ NO_LANE_WHY = {
     # arch Wine itself cannot load here: it emulates Win32, not the CPU, so an
     # ARM64 PE needs an ARM64 Wine host, which an x86 container lane is not.
     "aarch64-windows": "Wine emulates Win32, not the CPU: an aarch64 PE needs an aarch64 Wine host, "
-                       "which this x86-only container lane cannot provide",
+    "which this x86-only container lane cannot provide",
     "windows": "no Windows machine and no Windows container runtime on this host",
     "freebsd": "FreeBSD runs no Linux container; executing this needs a real FreeBSD host or a full-system VM",
     "netbsd": "NetBSD runs no Linux container; executing this needs a real NetBSD host or a full-system VM",

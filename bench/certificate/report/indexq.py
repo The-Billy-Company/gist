@@ -67,7 +67,7 @@ def read_tsv(path: Path) -> tuple[list[dict], dict[str, str]]:
         if not keys:
             keys = fields
         else:
-            meta = dict(zip(keys, fields))
+            meta = dict(zip(keys, fields, strict=False))
             keys = []
     return list(csv.DictReader(body, delimiter="\t")), meta
 
@@ -112,9 +112,7 @@ def table(rows_by_class: dict[str, dict[str, dict]], classes: list[str]) -> list
 
 
 def totals(rows_by_class: dict[str, dict[str, dict]], classes: list[str]) -> dict[str, int]:
-    return {
-        arm: sum(int(rows_by_class[c][arm]["cand_bytes"]) for c in classes) for arm in ARMS
-    }
+    return {arm: sum(int(rows_by_class[c][arm]["cand_bytes"]) for c in classes) for arm in ARMS}
 
 
 # The Unicode row is carried, and named, rather than quietly dropped: gist's
@@ -143,9 +141,7 @@ def production(rows: list[dict]) -> tuple[list[str], list[str]]:
                 f"pre-wiring {r['flat_bytes']} B — wiring made production worse"
             )
     if not narrowed:
-        failures.append(
-            "the wired path narrowed no class — the cover never reached production"
-        )
+        failures.append("the wired path narrowed no class — the cover never reached production")
 
     flat = sum(int(r["flat_bytes"]) for r in default)
     cover = sum(int(r["cover_bytes"]) for r in default)
@@ -270,11 +266,13 @@ def render(
                 "selectivity bought with a pathologically bigger index is not a better index"
             )
         if build_ratio > MAX_BUILD_RATIO:
-            failures.append(
-                f"gist's build is {build_ratio:.2f}× csearch's (> {MAX_BUILD_RATIO})"
-            )
+            failures.append(f"gist's build is {build_ratio:.2f}× csearch's (> {MAX_BUILD_RATIO})")
         size_note = f"{size_ratio:.2f}× csearch"
-        build_note = f"{1 / build_ratio:.1f}× faster than csearch" if build_ratio < 1 else f"{build_ratio:.2f}× csearch"
+        build_note = (
+            f"{1 / build_ratio:.1f}× faster than csearch"
+            if build_ratio < 1
+            else f"{build_ratio:.2f}× csearch"
+        )
 
     corpus_docs = meta.get("corpus_docs", "?")
     corpus_mib = mib(int(meta.get("corpus_bytes", 0))) if meta.get("corpus_bytes") else "?"
@@ -294,7 +292,7 @@ def render(
         HEADER,
         "",
         (
-            "_The claim under test: **\"your trigram index is csearch-class, not better.\"** "
+            '_The claim under test: **"your trigram index is csearch-class, not better."** '
             "csearch (Google Code Search, Russ Cox 2012) is gist's acknowledged trigram "
             "ancestor, and the honest axis for comparing two indexes is **not** wall time — "
             "that confounds the index with the walk, the IO and the matcher — but **filter "
@@ -324,7 +322,7 @@ def render(
             "planners at all — four are single-literal (every planner emits the same run) and "
             "four are structurally unfilterable (literal-free `\\w{3,8}`, sub-trigram `})` and "
             "`;$`, and `panic|0x` whose two-byte branch makes the disjunction vacuous), where "
-            "the only sound answer is \"no filter\" and both tools give it._"
+            'the only sound answer is "no filter" and both tools give it._'
         ),
         "",
     ]
@@ -463,9 +461,7 @@ def splice(cert: Path, section: str) -> None:
             orphan_lo := prefix.rfind(HEADER, 0, orphan_hi)
         ) != -1:
             prefix = (
-                prefix[:orphan_lo].rstrip()
-                + "\n\n"
-                + prefix[orphan_hi + len(END) :].lstrip("\n")
+                prefix[:orphan_lo].rstrip() + "\n\n" + prefix[orphan_hi + len(END) :].lstrip("\n")
             )
         text = prefix + section + text[hi + len(END) :].lstrip("\n")
     else:
@@ -502,9 +498,7 @@ def main() -> int:
     if args.production_tsv and args.production_tsv.exists():
         prod, _ = read_tsv(args.production_tsv)
 
-    section, failures = render(
-        rows, meta, cost, cost_meta or {}, args.machine, args.zig, prod
-    )
+    section, failures = render(rows, meta, cost, cost_meta or {}, args.machine, args.zig, prod)
     if failures:
         print("certify_indexq_report: REFUSING to splice a win — Layer L is fail-closed:")
         for f in failures:

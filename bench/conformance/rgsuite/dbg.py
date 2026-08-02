@@ -10,12 +10,11 @@ Usage:  python3 dbg.py <name> [<name>…].
 
 import base64
 import json
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
 
 import _oracle as O
-
 
 HERE = Path(__file__).resolve().parent
 spec = {r["name"]: r for r in json.loads((HERE / "spec.json").read_text())}

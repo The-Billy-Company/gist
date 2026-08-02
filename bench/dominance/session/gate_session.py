@@ -36,10 +36,9 @@ import argparse
 import csv
 import json
 import os
+import subprocess
 from pathlib import Path
 from shutil import which
-import subprocess
-
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]

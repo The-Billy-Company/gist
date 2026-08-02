@@ -29,11 +29,11 @@ stdlib only. Deterministic (bootstrap RNG shared with stats).
 
 import argparse
 import json
-from pathlib import Path
 import random
 import re
 import statistics
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stats import SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
@@ -48,7 +48,9 @@ HEADER = "## Layer A — the `--rank` lane (definition-first, the shape rg can't
 # ops scale together); the sharper claim is #5 — it still beats the content-reading
 # scanner (rg) throughout.
 OVERHEAD_CEIL = 12.0
-COVERAGE_FLOOR = 0.90  # ranking surfaces >=90% of the located set; the rest are files past the 4 MiB read bound
+COVERAGE_FLOOR = (
+    0.90  # ranking surfaces >=90% of the located set; the rest are files past the 4 MiB read bound
+)
 # The beats-rg claim (#5) is scoped to the SELECTIVE regime — where the trigram
 # prefilter narrows the corpus to a small candidate minority, giving --rank a
 # structural IO advantage over rg's full re-walk. For a SATURATING needle (a
@@ -100,14 +102,18 @@ def analyze(results_dir: Path, name: str, rng: random.Random, corpus_files: int 
     claim) and the saturating regime (beats-rg reported, not gated — see #5).
     """
     setl = {
-        ln for ln in (results_dir / f"{name}.setl").read_text(errors="surrogateescape").splitlines() if ln
+        ln
+        for ln in (results_dir / f"{name}.setl").read_text(errors="surrogateescape").splitlines()
+        if ln
     }
     rows = parse_rank(results_dir / f"{name}.rank")
     rankset = {p for _, p, _ in rows}
     nloc = len(setl)
     selectivity = (nloc / corpus_files) if corpus_files > 0 else None
     selective = bool(setl) and (
-        selectivity <= SELECTIVE_MAX_FRACTION if selectivity is not None else nloc <= SELECTIVE_MAX_ABS
+        selectivity <= SELECTIVE_MAX_FRACTION
+        if selectivity is not None
+        else nloc <= SELECTIVE_MAX_ABS
     )
 
     pos = {"def": [], "use": [], "gen": [], "mirror": []}

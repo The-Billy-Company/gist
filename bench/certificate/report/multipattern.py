@@ -44,10 +44,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import random
-from statistics import mean
 import sys
+from pathlib import Path
+from statistics import mean
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -100,7 +100,11 @@ def table(header: list[str], align: list[str], rows: list[list[str]]) -> list[st
     """
     cols = list(zip(header, *rows, strict=True))
     width = [max(3, *(len(c) for c in col)) for col in cols]
-    bar = {"l": lambda w: "-" * w, "r": lambda w: "-" * (w - 1) + ":", "c": lambda w: ":" + "-" * (w - 2) + ":"}
+    bar = {
+        "l": lambda w: "-" * w,
+        "r": lambda w: "-" * (w - 1) + ":",
+        "c": lambda w: ":" + "-" * (w - 2) + ":",
+    }
     fit = {
         "l": str.ljust,
         "r": str.rjust,
@@ -108,11 +112,16 @@ def table(header: list[str], align: list[str], rows: list[list[str]]) -> list[st
     }
 
     def row(cells: list[str]) -> str:
-        return "| " + " | ".join(fit[a](c, w) for c, a, w in zip(cells, align, width, strict=True)) + " |"
+        return (
+            "| "
+            + " | ".join(fit[a](c, w) for c, a, w in zip(cells, align, width, strict=True))
+            + " |"
+        )
 
-    return [row(header), "| " + " | ".join(bar[a](w) for a, w in zip(align, width, strict=True)) + " |"] + [
-        row(r) for r in rows
-    ]
+    return [
+        row(header),
+        "| " + " | ".join(bar[a](w) for a, w in zip(align, width, strict=True)) + " |",
+    ] + [row(r) for r in rows]
 
 
 class Cell:
@@ -178,7 +187,9 @@ def check_fail_closed(cells: list[Cell]) -> None:
         )
     broken = [c.n for c in cells if c.rival_state == "fail"]
     if broken:
-        raise Fail(f"the Vectorscan arm errored at N={broken} (a failed rival is not a skipped rival)")
+        raise Fail(
+            f"the Vectorscan arm errored at N={broken} (a failed rival is not a skipped rival)"
+        )
 
     bad_tier = [f"N={c.n}:{c.tier!r}" for c in cells if c.tier not in TIER_OK]
     if bad_tier:
@@ -203,7 +214,9 @@ def check_fail_closed(cells: list[Cell]) -> None:
         )
 
 
-def races(raw: Path, rng: random.Random) -> tuple[dict[str, tuple[float, float, float]], dict[str, object]]:
+def races(
+    raw: Path, rng: random.Random
+) -> tuple[dict[str, tuple[float, float, float]], dict[str, object]]:
     """Arm-2 medians+CI per tool, and gist-vs-each verdicts from `stats`."""
     times = {}
     for tool, _ in E2E + E2E_BROAD:
@@ -216,8 +229,9 @@ def races(raw: Path, rng: random.Random) -> tuple[dict[str, tuple[float, float, 
     # Verdicts are computed against the primary slate's gist run only; the broad
     # pair is compared to its own baseline below, never mixed into these.
     primary = {t for t, _ in E2E}
-    verdicts = {t: dominance(times["gist"], v) for t, v in times.items()
-                if t != "gist" and t in primary}
+    verdicts = {
+        t: dominance(times["gist"], v) for t, v in times.items() if t != "gist" and t in primary
+    }
     return stats, {"verdicts": verdicts, "times": times}
 
 
@@ -303,7 +317,7 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
             if have_rival
             else f"- rival: **Vectorscan absent** — every Vectorscan cell skipped ({vs.get('why', 'unknown')})"
         ),
-        f"- driver `bench/races/multipattern.sh` · arm `bench/multipattern/bench.zig`",
+        "- driver `bench/races/multipattern.sh` · arm `bench/multipattern/bench.zig`",
         "",
         "### Arm 1 — per byte (Hyperscan's home turf)",
         "",
@@ -316,7 +330,11 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
     perbyte_rows = []
     for c in cells:
         rival = f"{c.rival:.2f}" if c.rival else f"_{c.rival_state}_"
-        ratio = f"**{c.ratio:.2f}×**" if c.ratio and c.ratio > 1 else (f"{c.ratio:.2f}×" if c.ratio else "—")
+        ratio = (
+            f"**{c.ratio:.2f}×**"
+            if c.ratio and c.ratio > 1
+            else (f"{c.ratio:.2f}×" if c.ratio else "—")
+        )
         # The tier column is what makes the sweep a tier DECISION rather than a
         # list of numbers: it shows where dispatch hands over, and the ✓ carries
         # that the other mechanism was held to the same oracle at this N too.
@@ -342,6 +360,7 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
     if wins and losses:
         worst = min(losses, key=lambda c: c.ratio or 1)
         lost_at = ", ".join(f"N={c.n}" for c in losses)
+
         # Which side moved is a question the table can answer, so it is measured
         # rather than asserted: compare each tool at the losing N against its own
         # throughput at the neighboring swept widths. A loss where gist held its
@@ -357,7 +376,14 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
                 at = next(i for i, c in enumerate(order) if c.n == cell.n)
             except StopIteration:
                 return (1.0, 1.0)
-            ref = [c for c in (order[at - 1] if at else None, order[at + 1] if at + 1 < len(order) else None) if c]
+            ref = [
+                c
+                for c in (
+                    order[at - 1] if at else None,
+                    order[at + 1] if at + 1 < len(order) else None,
+                )
+                if c
+            ]
             if not ref or not cell.gist or not cell.rival:
                 return (1.0, 1.0)
             g = mean([c.gist for c in ref if c.gist])
@@ -398,7 +424,10 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
             ),
         ]
     elif wins:
-        lines += ["", f"> gist is faster per byte at every N measured (up to {max(c.ratio or 0 for c in wins):.2f}×)."]
+        lines += [
+            "",
+            f"> gist is faster per byte at every N measured (up to {max(c.ratio or 0 for c in wins):.2f}×).",
+        ]
 
     lines += [
         "",
@@ -433,8 +462,10 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
             cmp_cell = "_baseline_"
         else:
             v = verdicts[tool]
-            cmp_cell = f"**{v.speedup:.1f}× slower**" if v.verdict == "win" else (
-                f"{1 / v.speedup:.1f}× faster" if v.verdict == "loss" else "parity"
+            cmp_cell = (
+                f"**{v.speedup:.1f}× slower**"
+                if v.verdict == "win"
+                else (f"{1 / v.speedup:.1f}× faster" if v.verdict == "loss" else "parity")
             )
         e2e_rows.append([label, f"{med:.0f} ms", f"{lo:.0f}–{hi:.0f}", cmp_cell, attribution[tool]])
     lines += table(
@@ -451,9 +482,7 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
             if tool not in stats:
                 continue
             med, lo, hi = stats[tool]
-            rel = "_baseline_" if tool == "gist_broad" else (
-                f"{med / gb:.2f}× gist" if gb else "—"
-            )
+            rel = "_baseline_" if tool == "gist_broad" else (f"{med / gb:.2f}× gist" if gb else "—")
             broad_rows.append([label, f"{med:.0f} ms", f"{lo:.0f}–{hi:.0f}", rel])
         lines += [
             "",
@@ -488,7 +517,11 @@ def render(perbyte: Path, raw: Path, meta: dict, csv_out: Path) -> str:
         rel = (
             f"{alt.speedup:.1f}× slower than gist"
             if alt.verdict == "win"
-            else (f"{1 / alt.speedup:.1f}× faster than gist" if alt.verdict == "loss" else "at parity with gist")
+            else (
+                f"{1 / alt.speedup:.1f}× faster than gist"
+                if alt.verdict == "loss"
+                else "at parity with gist"
+            )
         )
         lines += [
             "",
@@ -529,9 +562,13 @@ def splice(cert: Path, section: str) -> None:
 
 def main() -> int:
     """CLI entry point."""
-    ap = argparse.ArgumentParser(description="gist Layer K (multi-pattern vs Hyperscan) certificate report")
+    ap = argparse.ArgumentParser(
+        description="gist Layer K (multi-pattern vs Hyperscan) certificate report"
+    )
     ap.add_argument("--perbyte", type=Path, required=True, help="perbyte.tsv from multipattern.sh")
-    ap.add_argument("--raw", type=Path, required=True, help="dir of hyperfine e2e-<tool>.json exports")
+    ap.add_argument(
+        "--raw", type=Path, required=True, help="dir of hyperfine e2e-<tool>.json exports"
+    )
     ap.add_argument("--meta", type=Path, required=True)
     ap.add_argument("--certificate", type=Path, required=True)
     ap.add_argument("--csv", type=Path, required=True, help="sidecar multipattern.csv to emit")

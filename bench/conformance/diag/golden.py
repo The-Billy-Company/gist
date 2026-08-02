@@ -67,7 +67,11 @@ CASES: list[tuple[str, str, list[str]]] = [
     ("relate-patterns", "relate", ["patterns", "-e", "Span", "-e", "Tally", "src"]),
     ("relate-search", "relate", ["search", "monotonic clock reading", "src"]),
     ("relate-pack", "relate", ["pack", "diagnostic channel sink", "src", "--top", "3"]),
-    ("irregex-context", "irregex", ["context", "diagnostic sink", "-e", "Sink", "src", "--top", "3"]),
+    (
+        "irregex-context",
+        "irregex",
+        ["context", "diagnostic sink", "-e", "Sink", "src", "--top", "3"],
+    ),
     ("irregex-family", "irregex", ["family", "Tally", "src", "--echo-min", "0.15"]),
     ("irregex-blast", "irregex", ["blast", "Duration", "src"]),
     ("irregex-provenance", "irregex", ["provenance", "the monotonic-awake clock"]),

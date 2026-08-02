@@ -30,12 +30,10 @@ import argparse
 import csv
 import json
 import os
+import subprocess
+import tempfile
 from pathlib import Path
 from shutil import which
-import subprocess
-import sys
-import tempfile
-
 
 HERE = Path(__file__).resolve().parent
 ARTIFACT = HERE.parent / "artifact"

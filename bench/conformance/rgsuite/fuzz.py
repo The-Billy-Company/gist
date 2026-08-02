@@ -55,11 +55,9 @@ Usage
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import contextlib
 import json
 import os
-from pathlib import Path
 import random
 import resource
 import shlex
@@ -67,8 +65,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
+from pathlib import Path
 
 import _oracle
+
 import surface
 
 GIST = str(_oracle.GIST)
@@ -86,7 +87,7 @@ def _plain(root: Path) -> None:
     (root / "src").mkdir()
     (root / "src" / "main.rs").write_text(
         "fn main() {\n    let mut n = 0usize;\n    // TODO: fix panic\n"
-        "    for i in 0..10 { n += i; }\n    println!(\"{n}\");\n}\n"
+        '    for i in 0..10 { n += i; }\n    println!("{n}");\n}\n'
     )
     (root / "src" / "lib.go").write_text(
         "package lib\n\nfunc Handle(ctx context.Context) error {\n"
@@ -391,7 +392,11 @@ def compare(argv: list[str], cwd: str, watermark: dict[str, float]) -> dict:
         # Attribute the wall to the binary that hit it. rg timing out where gist
         # finished is not a gist robustness failure, and folding the two into one
         # "timeout" hides which tool was slow.
-        return {"verdict": "timeout", "klass": "timeout-rg" if rc_rg == 124 else "timeout-gist", "rc": [rc_rg, rc_g]}
+        return {
+            "verdict": "timeout",
+            "klass": "timeout-rg" if rc_rg == 124 else "timeout-gist",
+            "rc": [rc_rg, rc_g],
+        }
     if rc_g == 2 and _oracle.is_design_decline(err_g):
         return {"verdict": "declined", "why": err_g.decode(errors="replace").strip()[:120]}
     if rc_g == 2 and _oracle.is_malformed_refusal(err_g):
@@ -399,7 +404,11 @@ def compare(argv: list[str], cwd: str, watermark: dict[str, float]) -> dict:
     if rc_rg == 2 and rc_g == 2:
         return {"verdict": "both_reject"}
     if rc_g < 0 or rc_rg < 0:  # killed by a signal
-        return {"verdict": "crash", "klass": "crash-rg" if rc_rg < 0 else "crash-gist", "rc": [rc_rg, rc_g]}
+        return {
+            "verdict": "crash",
+            "klass": "crash-rg" if rc_rg < 0 else "crash-gist",
+            "rc": [rc_rg, rc_g],
+        }
     if (declared := _declared_boundary(argv, rc_rg, rc_g, a, b)) is not None:
         return declared
     return {
@@ -466,7 +475,7 @@ def _declared_boundary(argv: list[str], rc_rg: int, rc_g: int, a: bytes, b: byte
 
 def _first_diff(a: bytes, b: bytes) -> str:
     la, lb = a.splitlines(), b.splitlines()
-    for i, (x, y) in enumerate(zip(la, lb)):
+    for i, (x, y) in enumerate(zip(la, lb, strict=False)):
         if x != y:
             return f"line {i + 1}: rg={x[:70]!r} gist={y[:70]!r}"
     return f"line count rg={len(la)} gist={len(lb)}"
@@ -474,7 +483,9 @@ def _first_diff(a: bytes, b: bytes) -> str:
 
 def main() -> int:
     """CLI entry point."""
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--iterations", type=int, default=500)
     ap.add_argument("--seed", type=int, default=0x6E15, help="same seed family as the certificate")
     ap.add_argument("--corpus", choices=sorted(CORPORA), help="restrict to one corpus")

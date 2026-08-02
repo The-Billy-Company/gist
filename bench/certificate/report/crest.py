@@ -158,9 +158,7 @@ def splice(cert: Path, section: str) -> None:
             orphan_lo := prefix.rfind(HEADER, 0, orphan_hi)
         ) != -1:
             prefix = (
-                prefix[:orphan_lo].rstrip()
-                + "\n\n"
-                + prefix[orphan_hi + len(END) :].lstrip("\n")
+                prefix[:orphan_lo].rstrip() + "\n\n" + prefix[orphan_hi + len(END) :].lstrip("\n")
             )
         text = prefix + section + text[hi + len(END) :].lstrip("\n")
     else:

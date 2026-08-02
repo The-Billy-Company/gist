@@ -58,8 +58,14 @@ RANK = {t: i for i, t in enumerate(TIERS)}
 # can never be skimmed as if it had run — and `conforms-wine` is spelled with its
 # lane in the cell, because the whole point of the rung is that a reader must not
 # be able to skim it as `conforms`.
-GLYPH = {"conforms": "**conforms**", "conforms-wine": "conforms *(wine)*", "runs": "runs",
-         "builds": "builds", "unbuilt": "—", "tree-broken": "*(tree broken)*"}
+GLYPH = {
+    "conforms": "**conforms**",
+    "conforms-wine": "conforms *(wine)*",
+    "runs": "runs",
+    "builds": "builds",
+    "unbuilt": "—",
+    "tree-broken": "*(tree broken)*",
+}
 
 
 def rel_to_repo(p: Path) -> str | None:
@@ -99,52 +105,72 @@ def gate(d: dict) -> list[str]:
     # information in either direction, so the sweep is inconclusive rather than
     # negative, and the honest response is to re-run rather than to publish it.
     if broken := s["by_tier"].get("tree-broken"):
-        why.append(f"{len(broken)} row(s) failed on diagnostics that also break the host build "
-                   f"({', '.join(broken)}) — the tree did not compile when the sweep ran; re-run it")
+        why.append(
+            f"{len(broken)} row(s) failed on diagnostics that also break the host build "
+            f"({', '.join(broken)}) — the tree did not compile when the sweep ran; re-run it"
+        )
     if s["windows"]["rg_declared"] == 0:
-        why.append("the sweep carries no Windows rows, so the section could not disclose the Windows gap")
+        why.append(
+            "the sweep carries no Windows rows, so the section could not disclose the Windows gap"
+        )
     # The `builds` floor is symmetric across the partition: a Windows triple rg
     # declares that gist cannot even produce an artifact for is a hole in the
     # unqualified claim, and dropping *some* of the Windows rows must fail as
     # loudly as dropping all of them.
     if unbuilt := s["windows"]["uncovered"]:
-        why.append(f"{len(unbuilt)} Windows triple(s) ripgrep declares that gist does not even build: "
-                   + ", ".join(unbuilt))
+        why.append(
+            f"{len(unbuilt)} Windows triple(s) ripgrep declares that gist does not even build: "
+            + ", ".join(unbuilt)
+        )
     # Windows evidence is a translation layer, so the one thing that must never
     # happen is a Windows triple appearing at the native `conforms` rung. Wine
     # reproducing every byte is not Windows reproducing every byte.
     if s["windows"].get("covered_at_conforms"):
-        why.append(f"{s['windows']['covered_at_conforms']} Windows triple(s) are scored at the native "
-                   "`conforms` rung, but no Windows kernel was executed — a Wine row must stay at "
-                   "`conforms-wine`")
+        why.append(
+            f"{s['windows']['covered_at_conforms']} Windows triple(s) are scored at the native "
+            "`conforms` rung, but no Windows kernel was executed — a Wine row must stay at "
+            "`conforms-wine`"
+        )
     # And the disclosure runs the other way too: if Windows builds but nothing was
     # executed there, the section may not imply an executed Windows matrix.
     if s["windows"]["rg_declared"] and not s["windows"].get("covered_at_runs"):
-        why.append("no Windows triple was executed at all, so the section cannot describe an "
-                   "executed Windows matrix — re-run with the wine lane reachable, or report `builds`")
+        why.append(
+            "no Windows triple was executed at all, so the section cannot describe an "
+            "executed Windows matrix — re-run with the wine lane reachable, or report `builds`"
+        )
     if not s["beyond_rg"]:
-        why.append("gist reached no target outside ripgrep's matrix, so 'strictly larger' is unsupported")
+        why.append(
+            "gist reached no target outside ripgrep's matrix, so 'strictly larger' is unsupported"
+        )
     vs = d["oracle"].get("vs_ripgrep", {})
     if not vs.get("checked"):
-        why.append(f"the native oracle was not pinned to ripgrep ({vs.get('reason', 'not checked')}), "
-                   "so conformance would only mean agreement with ourselves")
+        why.append(
+            f"the native oracle was not pinned to ripgrep ({vs.get('reason', 'not checked')}), "
+            "so conformance would only mean agreement with ourselves"
+        )
     elif vs.get("identical") != vs.get("of"):
-        why.append(f"the native oracle differs from {vs.get('rg_version')} on "
-                   f"{vs['of'] - vs['identical']}/{vs['of']} probe classes")
+        why.append(
+            f"the native oracle differs from {vs.get('rg_version')} on "
+            f"{vs['of'] - vs['identical']}/{vs['of']} probe classes"
+        )
     # A `conforms` row on the host's own native triple proves nothing about
     # cross-compilation — it is the oracle comparing itself. At least one row
     # built for a *different* machine must have conformed.
     native = "aarch64-macos" if d["host"]["machine"] == "arm64" else "x86_64-macos"
     if not [t for t in d["targets"] if t["tier"] == "conforms" and t["triple"] != native]:
-        why.append("no cross-compiled target conformed, so the tier is unproven off the host architecture")
+        why.append(
+            "no cross-compiled target conformed, so the tier is unproven off the host architecture"
+        )
     if d["corpus"]["files"] < 1:
         why.append("the conformance corpus is empty")
     # A matrix is only a matrix if every row describes the same source. ~10 agents
     # edit this package concurrently, so a sweep that did not freeze the tree could
     # have compiled 22 different trees and called the result one comparison.
     if not d.get("snapshot", {}).get("sha256"):
-        why.append("the sweep records no frozen-tree digest, so its rows cannot be shown "
-                   "to describe one identical set of source bytes")
+        why.append(
+            "the sweep records no frozen-tree digest, so its rows cannot be shown "
+            "to describe one identical set of source bytes"
+        )
     return why
 
 
@@ -162,8 +188,11 @@ def render(d: dict) -> str:
     # builds, the interesting residue is not a compiler diagnostic any more — it is
     # which rows had no lane on this host and why, which is a fact about the measuring
     # machine and is reported as one.
-    win_short = [(t["triple"], "; ".join(t["notes"]) or "no reason recorded")
-                 for t in rows if "windows" in t["triple"] and RANK[t["tier"]] < RANK["conforms-wine"]]
+    win_short = [
+        (t["triple"], "; ".join(t["notes"]) or "no reason recorded")
+        for t in rows
+        if "windows" in t["triple"] and RANK[t["tier"]] < RANK["conforms-wine"]
+    ]
 
     lines = [
         START,
@@ -233,9 +262,13 @@ def render(d: dict) -> str:
         size = f"{a['size'] / (1 << 20):.1f} MiB" if a.get("size") else "—"
         lane = t["lane"] if RANK[t["tier"]] >= RANK["runs"] else "—"
         rgs = t["rg"]
-        rg_col = "<br>".join(
-            f"`{c['triple']}`" + (" *(gnu flavor)*" if c["abi_flavor"] != "same" else "") for c in rgs
-        ) or "*none — rg publishes no such asset*"
+        rg_col = (
+            "<br>".join(
+                f"`{c['triple']}`" + (" *(gnu flavor)*" if c["abi_flavor"] != "same" else "")
+                for c in rgs
+            )
+            or "*none — rg publishes no such asset*"
+        )
         ships = "<br>".join("yes" if c["published"] else "**no**" for c in rgs) or "—"
         pc = "yes" if t["pcre2"] else ("—" if t["pcre2"] is None else "**no**")
         cpu = " `-Dcpu=" + t["cpu"] + "`" if t["cpu"] else ""
@@ -276,7 +309,7 @@ def render(d: dict) -> str:
         ),
         "",
         (
-            f"What changed to get there: the descent, the whole-file map, `stat`, `argv`, `realpath` "
+            "What changed to get there: the descent, the whole-file map, `stat`, `argv`, `realpath` "
             "and stdin classification were POSIX calls scattered through the walk, and are now one "
             "seam — `src/portal.zig` — whose Windows arm speaks `NtCreateFile` with a root handle (the "
             "Win32 shape of `openat`), reads a file whole where POSIX maps it, and classifies a handle "
@@ -286,13 +319,17 @@ def render(d: dict) -> str:
             "cold. Nothing about the little-endian POSIX rows moved: the seam is a `comptime` fork, "
             "and the POSIX arm is the call it replaced."
         ),
-        *([
-            "",
-            "The Windows rows that stop short do so for a recorded reason about *this host*, not "
-            "about the artifact:",
-            "",
-            *(f"- `{t}` — {why}" for t, why in win_short),
-        ] if win_short else []),
+        *(
+            [
+                "",
+                "The Windows rows that stop short do so for a recorded reason about *this host*, not "
+                "about the artifact:",
+                "",
+                *(f"- `{t}` — {why}" for t, why in win_short),
+            ]
+            if win_short
+            else []
+        ),
         "",
         (
             "Three asymmetries are worth naming, because they are the substance of the claim rather "
@@ -435,9 +472,7 @@ def splice(cert: Path, section: str) -> None:
             orphan_lo := prefix.rfind(HEADER, 0, orphan_hi)
         ) != -1:
             prefix = (
-                prefix[:orphan_lo].rstrip()
-                + "\n\n"
-                + prefix[orphan_hi + len(END) :].lstrip("\n")
+                prefix[:orphan_lo].rstrip() + "\n\n" + prefix[orphan_hi + len(END) :].lstrip("\n")
             )
         text = prefix + section + text[hi + len(END) :].lstrip("\n")
     else:
@@ -462,8 +497,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="gist Layer H (portability) certificate report")
     ap.add_argument("--certificate", type=Path, required=True)
     ap.add_argument("--json", type=Path, required=True, help="bench/targets/artifact/portable.json")
-    ap.add_argument("--receipt", type=Path, default=None,
-                    help="side-car evidence file (default: <certificate dir>/portable.json)")
+    ap.add_argument(
+        "--receipt",
+        type=Path,
+        default=None,
+        help="side-car evidence file (default: <certificate dir>/portable.json)",
+    )
     args = ap.parse_args()
 
     if not args.json.exists():
@@ -483,8 +522,10 @@ def main() -> int:
     rec = args.receipt or args.certificate.parent / "portable.json"
     rec.write_text(json.dumps(receipt(d), indent=2) + "\n")
     s = d["summary"]
-    print(f"wrote Layer H (portability) → {args.certificate} "
-          f"[{len(s['by_tier']['conforms'])} conforms, {len(s['beyond_rg'])} beyond rg]")
+    print(
+        f"wrote Layer H (portability) → {args.certificate} "
+        f"[{len(s['by_tier']['conforms'])} conforms, {len(s['beyond_rg'])} beyond rg]"
+    )
     print(f"wrote Layer H receipt → {rec}")
     return 0
 

@@ -21,8 +21,8 @@ Shell reads it through the tiny CLI at the bottom::
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import sys
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,11 +49,21 @@ ROSTER: tuple[Layer, ...] = (
     Layer("A-micro", "Layer A — empirical, microscopic"),
     Layer("A-macro", "Layer A — macroscopic dominance"),
     Layer("A-warm", "Layer A — warm tier"),
-    Layer("A-rank", "Layer A — the `--rank` lane", "## Layer A — the `--rank` lane", "certify_rank.csv"),
+    Layer(
+        "A-rank",
+        "Layer A — the `--rank` lane",
+        "## Layer A — the `--rank` lane",
+        "certify_rank.csv",
+    ),
     Layer("B", "Layer B — port-optimality", "## Layer B — port-optimality", "portcert.json"),
     Layer("B'", "Layer B′ — port bound, measured"),
     Layer("C", "Layer C — roofline", "## Layer C — roofline (measured headroom)", "roofline.json"),
-    Layer("D", "Layer D — algorithmic lower bound", "## Layer D — algorithmic lower bound", "lowerbound.csv"),
+    Layer(
+        "D",
+        "Layer D — algorithmic lower bound",
+        "## Layer D — algorithmic lower bound",
+        "lowerbound.csv",
+    ),
     Layer(
         "E",
         "Layer E — crest sieve",

@@ -49,9 +49,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
-from dataclasses import dataclass, field
 import os
-from pathlib import Path
 import random
 import re
 import shutil
@@ -59,7 +57,8 @@ import subprocess
 import sys
 import tempfile
 import time
-
+from dataclasses import dataclass, field
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[3]  # oracle → gates → conformance → bench → repo
@@ -187,7 +186,10 @@ class Pat:
 CURATED = [
     Pat(r"func\s+\w+\(", "required literal 'func'; plain regex, index-prefiltered"),
     Pat(r"func\s+\w+(?=\()", "lookahead: 'func' required, '(' is zero-width — decoys carry 'func'"),
-    Pat(r"import\s+(?!type)\w+", "neg-lookahead: 'import' required; 'import type' decoys must reject"),
+    Pat(
+        r"import\s+(?!type)\w+",
+        "neg-lookahead: 'import' required; 'import type' decoys must reject",
+    ),
     Pat(r"(?<=@)\w+", "lookbehind: only the tail is consumed; '@' is the prefilter anchor"),
     Pat(r"(?<!no_)Handler", "neg-lookbehind: 'no_Handler' decoys must reject, 'Handler' required"),
     Pat(r"(\w+) \1", "backref: repeated word — literal-free, prefilter declines to full scan"),
@@ -215,49 +217,85 @@ def gen_corpus(root: Path) -> None:
         p.write_bytes(text.encode())
 
     # Signal: genuine matches for the curated patterns.
-    w("src/handlers.go", "\n".join([
-        "func Serve(w http.ResponseWriter) {",       # func\s+\w+\( and lookahead
-        "func handle(r *Request) error {",
-        "\treturn nil",                                 # ^\s*return\b
-        "\t// TODO wire the WalletService here",       # \bTODO\b, WalletService
-        "}",
-    ]) + "\n")
-    w("src/imports.go", "\n".join([
-        "import fmt",                                   # import\s+(?!type)
-        "import strings",
-        "// import type decoy — neg-lookahead must reject this line",  # decoy for import(?!type)
-    ]) + "\n")
-    w("src/refs.txt", "\n".join([
-        "ping @griffin now",                            # (?<=@)\w+
-        "email me @support later",
-        "hello hello world",                            # (\w+) \1 and (\w{3,})\s+\1
-        "the the end",
-        "ab-ab pair",                                   # (?P<w>\w+)-(?P=w)
-        "ab-cd decoy",                                  # named-backref decoy (rejects)
-    ]) + "\n")
-    w("src/shadow.txt", "\n".join([
-        "foobarfoo spliced",                            # (foo)bar\1 via shadow literal
-        "foobar foo apart — decoy, no splice",          # decoy: has foo+bar+foo, not contiguous
-    ]) + "\n")
-    w("src/mixed.txt", "\n".join([
-        "ERROR loud",                                   # (?i)error
-        "silent error here",
-        "addr 0xDEADbeef 0x4f",                         # 0x[0-9a-f]{2,}
-        "Widget42 and Gadget7",                         # [A-Z][a-z]{2,}\d+
-        "no_Handler is a decoy",                        # neg-lookbehind decoy (rejects)
-        "the real Handler runs",                        # (?<!no_)Handler matches
-    ]) + "\n")
+    w(
+        "src/handlers.go",
+        "\n".join(
+            [
+                "func Serve(w http.ResponseWriter) {",  # func\s+\w+\( and lookahead
+                "func handle(r *Request) error {",
+                "\treturn nil",  # ^\s*return\b
+                "\t// TODO wire the WalletService here",  # \bTODO\b, WalletService
+                "}",
+            ]
+        )
+        + "\n",
+    )
+    w(
+        "src/imports.go",
+        "\n".join(
+            [
+                "import fmt",  # import\s+(?!type)
+                "import strings",
+                "// import type decoy — neg-lookahead must reject this line",  # decoy for import(?!type)
+            ]
+        )
+        + "\n",
+    )
+    w(
+        "src/refs.txt",
+        "\n".join(
+            [
+                "ping @griffin now",  # (?<=@)\w+
+                "email me @support later",
+                "hello hello world",  # (\w+) \1 and (\w{3,})\s+\1
+                "the the end",
+                "ab-ab pair",  # (?P<w>\w+)-(?P=w)
+                "ab-cd decoy",  # named-backref decoy (rejects)
+            ]
+        )
+        + "\n",
+    )
+    w(
+        "src/shadow.txt",
+        "\n".join(
+            [
+                "foobarfoo spliced",  # (foo)bar\1 via shadow literal
+                "foobar foo apart — decoy, no splice",  # decoy: has foo+bar+foo, not contiguous
+            ]
+        )
+        + "\n",
+    )
+    w(
+        "src/mixed.txt",
+        "\n".join(
+            [
+                "ERROR loud",  # (?i)error
+                "silent error here",
+                "addr 0xDEADbeef 0x4f",  # 0x[0-9a-f]{2,}
+                "Widget42 and Gadget7",  # [A-Z][a-z]{2,}\d+
+                "no_Handler is a decoy",  # neg-lookbehind decoy (rejects)
+                "the real Handler runs",  # (?<!no_)Handler matches
+            ]
+        )
+        + "\n",
+    )
 
     # Literal-carrying decoys that the prefilter ADMITS but PCRE2 must REJECT — proves
     # exactness (no over-match) and that the survivor set is genuinely PCRE2-checked.
-    w("src/decoys.txt", "\n".join([
-        "func = lambda x: x",                           # 'func' present, no \s+\w+\(
-        "refunc(y)",                                    # 'func' substring, lookahead context absent
-        "funcy foobar()",                               # 'func' then non-space → no match
-        "TODOS list",                                   # 'TODO' present, \b fails
-        "aTODO note",
-        "importance matters",                           # 'import' substring, \s+ absent
-    ]) + "\n")
+    w(
+        "src/decoys.txt",
+        "\n".join(
+            [
+                "func = lambda x: x",  # 'func' present, no \s+\w+\(
+                "refunc(y)",  # 'func' substring, lookahead context absent
+                "funcy foobar()",  # 'func' then non-space → no match
+                "TODOS list",  # 'TODO' present, \b fails
+                "aTODO note",
+                "importance matters",  # 'import' substring, \s+ absent
+            ]
+        )
+        + "\n",
+    )
 
     # Overwhelming noise: none of the trigrams above, so every file is elided by the
     # index yet must never appear in any result set (false-positive floor).
@@ -274,7 +312,22 @@ class Gen:
     time-out of), no PCRE-only constructs. Lookahead/backref use literals only, so a
     generated pattern is always comparable when both engines accept it."""
 
-    ATOMS = ("a", "b", "c", "A", "0", "1", "_", ".", r"\d", r"\w", r"\s", "[a-c]", "[^a-c]", "[0-9]")
+    ATOMS = (
+        "a",
+        "b",
+        "c",
+        "A",
+        "0",
+        "1",
+        "_",
+        ".",
+        r"\d",
+        r"\w",
+        r"\s",
+        "[a-c]",
+        "[^a-c]",
+        "[0-9]",
+    )
     QUANTS = ("", "*", "+", "?", "{1,2}", "{2,3}", "*?", "+?")
 
     def __init__(self, r: random.Random):
@@ -289,7 +342,9 @@ class Gen:
         for _ in range(n):
             roll = self.r.random()
             if roll < 0.15:  # lookahead / neg-lookahead on a literal
-                parts.append(("(?=" if self.r.random() < 0.5 else "(?!") + self.r.choice("abc") + ")")
+                parts.append(
+                    ("(?=" if self.r.random() < 0.5 else "(?!") + self.r.choice("abc") + ")"
+                )
             elif roll < 0.25:  # a capture + later backref
                 parts.append(r"(\w+)")
             else:
@@ -318,7 +373,9 @@ def _diff(a: set[Hit], b: set[Hit], la: str, lb: str) -> str:
     return f"only-in-{la}={only_a}  only-in-{lb}={only_b}"
 
 
-def check(gist: str, corpus: Path, files: list[str], pattern: str, rep: Report, why: str = "") -> None:
+def check(
+    gist: str, corpus: Path, files: list[str], pattern: str, rep: Report, why: str = ""
+) -> None:
     """One three-way comparison: gist-indexed vs Python-`re` oracle vs gist --no-index."""
     oracle = oracle_hits(pattern, corpus, files)
     idx = gist_hits(gist, pattern, corpus, indexed=True)
@@ -337,12 +394,20 @@ def check(gist: str, corpus: Path, files: list[str], pattern: str, rep: Report, 
 def do_run(gist: str, corpus: Path, seeds: int) -> int:
     """Index the corpus, run curated + generated + freshness three-way checks."""
     env = {**os.environ}
-    subprocess.run([gist, "index"], cwd=str(corpus), env=env, check=True,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(
+        [gist, "index"],
+        cwd=str(corpus),
+        env=env,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     files = _walk(corpus)
     rep = Report()
 
-    print(f"=== indexed-PCRE2 oracle: {len(CURATED)} curated + {seeds} generated over {len(files)} files ===")
+    print(
+        f"=== indexed-PCRE2 oracle: {len(CURATED)} curated + {seeds} generated over {len(files)} files ==="
+    )
     for pc in CURATED:
         check(gist, corpus, files, pc.pat, rep, pc.why)
 
@@ -363,7 +428,9 @@ def do_run(gist: str, corpus: Path, seeds: int) -> int:
 
     print(f"\nchecked={rep.checked}  skipped(grammar-scope)={rep.skipped}")
     if not rep.parity and not rep.safety:
-        print("✓ ALL PASS — indexed PCRE2 == Python re (independent parity) and == --no-index (index safety)")
+        print(
+            "✓ ALL PASS — indexed PCRE2 == Python re (independent parity) and == --no-index (index safety)"
+        )
         return 0
     for f in rep.parity:
         print("✗ PARITY   " + f)
@@ -374,7 +441,9 @@ def do_run(gist: str, corpus: Path, seeds: int) -> int:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
     pr = sub.add_parser("run", help="build an adversarial corpus, index it, run the differential")
     pr.add_argument("--seeds", type=int, default=200, help="generated safe-core patterns")

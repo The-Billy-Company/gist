@@ -20,16 +20,15 @@ from __future__ import annotations
 
 import argparse
 import atexit
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-
+from dataclasses import dataclass
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # rgsuite → conformance → bench → repo
@@ -160,7 +159,7 @@ def gen_fixtures(root: Path) -> None:
     # invalid utf-8
     w("badutf.txt", b"good line\n\xff\xfe raw bytes match\ntail\n")
     # unicode
-    w("unicode.txt", "café résumé\nΩmega Ω\nนก\n".encode("utf-8"))
+    w("unicode.txt", "café résumé\nΩmega Ω\nนก\n".encode())
     # NUL as line terminator (--null-data)
     w("nuldata.txt", b"reca match\x00recb\x00recc match END\x00")
     # zero-width friendly
@@ -384,7 +383,10 @@ def _mini_diff(a: bytes, b: bytes, ctx: int = 4) -> str:
     if i is None:
         return f"  (equal after normalization; len gist={len(al)} rg={len(bl)})"
     lo = max(0, i - ctx)
-    dec = lambda xs, k: xs[k].decode("utf-8", "replace") if k < len(xs) else "<EOF>"
+
+    def dec(lines: list[bytes], index: int) -> str:
+        return lines[index].decode("utf-8", "replace") if index < len(lines) else "<EOF>"
+
     out = [f"  first diff at line {i} (gist={len(al)} lines, rg={len(bl)} lines):"]
     for k in range(lo, i + ctx + 1):
         mark = ">>" if k == i else "  "

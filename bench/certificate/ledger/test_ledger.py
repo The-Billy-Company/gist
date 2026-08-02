@@ -9,12 +9,12 @@ formatter-dirty. Every certificate here is synthesized — no real bundle, no gi
 no benchmark tools.
 """
 
-from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from unittest import mock
 
 import ledger
@@ -196,9 +196,7 @@ class StoreTests(unittest.TestCase):
     """Round-trip + the fail-closed survey, against a temporary ledger."""
 
     def _store(self, tmp: Path):
-        return mock.patch.multiple(
-            ledger, LEDGER=tmp / "ledger.jsonl", RENDER=tmp / "LEDGER.md"
-        )
+        return mock.patch.multiple(ledger, LEDGER=tmp / "ledger.jsonl", RENDER=tmp / "LEDGER.md")
 
     def test_round_trip_preserves_layer_tuples_and_time_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -286,7 +284,9 @@ class VerifyExitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             with (
-                mock.patch.multiple(ledger, LEDGER=root / "ledger.jsonl", RENDER=root / "LEDGER.md"),
+                mock.patch.multiple(
+                    ledger, LEDGER=root / "ledger.jsonl", RENDER=root / "LEDGER.md"
+                ),
                 redirect_stdout(io.StringIO()),
                 redirect_stderr(io.StringIO()),
             ):

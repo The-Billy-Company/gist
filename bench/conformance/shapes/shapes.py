@@ -40,13 +40,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import random
 import shlex
-from shutil import which
 import subprocess
 import sys
 import tomllib
+from pathlib import Path
+from shutil import which
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # shapes → conformance → bench → repo
@@ -90,7 +90,7 @@ STANDING_REQUIREMENT = (
     "identifiers. Measured cost: **18.1 GB/s literal scan where 35.5 GB/s was",
     "achievable** on code, **13.1 vs 33.4 GB/s** on prose; in the shipped binary",
     "`stepSec` (7 B, 464 true matches) ran **41% slower** than `pgxpool` (7 B, 8856",
-    "true matches) — vastly more real work, less time. Every literal probe was labelled",
+    "true matches) — vastly more real work, less time. Every literal probe was labeled",
     "`rare` or `common`, so two things went unseen: **`pgxpool` was an",
     "unrepresentatively lucky needle** for the rare class (`pg` is a genuinely rare",
     "digraph, so it selects well and looks fast) and stood in for the whole class; and",
@@ -120,6 +120,7 @@ STANDING_REQUIREMENT = (
 def _off_expect(verdict: str, expect: str) -> bool:
     """True when the measured verdict ranks below the declared expectation."""
     return _RANK[verdict] < _RANK[expect]
+
 
 GIST = Path(os.environ.get("GIST_MATRIX_BIN", KERNEL / "zig-out" / "bin" / "gist"))
 RG = os.environ.get("RG", "rg")
@@ -199,8 +200,10 @@ def cmd_parity(shapes: list[dict], default_roots: list[str]) -> int:
         else:
             n = len(ci) if hasattr(ci, "__len__") else "?"
             print(f"  ok   {sh['id']:34} bar={bar:5} agree ({n} rows)")
-    print(f"\n{'FAIL' if fails else 'PASS'}: {len(shapes) - fails}/{len(shapes)} shapes agree "
-          "(gist-idx == gist-noidx == rg)")
+    print(
+        f"\n{'FAIL' if fails else 'PASS'}: {len(shapes) - fails}/{len(shapes)} shapes agree "
+        "(gist-idx == gist-noidx == rg)"
+    )
     return 1 if fails else 0
 
 
@@ -213,10 +216,21 @@ def _hyperfine(cmd: list[str], warmup: int, runs: int) -> list[float]:
         js = Path(tf.name)
     try:
         proc = subprocess.run(
-            ["hyperfine", "--output=pipe", "--ignore-failure=1",
-             "--warmup", str(warmup), "--runs", str(runs),
-             "--export-json", str(js), shlex.join(cmd)],
-            capture_output=True, cwd=str(REPO), env=ENV,
+            [
+                "hyperfine",
+                "--output=pipe",
+                "--ignore-failure=1",
+                "--warmup",
+                str(warmup),
+                "--runs",
+                str(runs),
+                "--export-json",
+                str(js),
+                shlex.join(cmd),
+            ],
+            capture_output=True,
+            cwd=str(REPO),
+            env=ENV,
         )
         if proc.returncode != 0 or not js.stat().st_size:
             return []
@@ -225,8 +239,15 @@ def _hyperfine(cmd: list[str], warmup: int, runs: int) -> list[float]:
         js.unlink(missing_ok=True)
 
 
-def cmd_bench(shapes: list[dict], default_roots: list[str], *, publish: bool, warmup: int,
-              runs: int, only: list[str] | None = None) -> int:
+def cmd_bench(
+    shapes: list[dict],
+    default_roots: list[str],
+    *,
+    publish: bool,
+    warmup: int,
+    runs: int,
+    only: list[str] | None = None,
+) -> int:
     """Time gist-idx vs rg per shape; fail-closed dominance verdict + optional publish."""
     for b in ("hyperfine", RG):
         if which(b) is None:
@@ -253,24 +274,38 @@ def cmd_bench(shapes: list[dict], default_roots: list[str], *, publish: bool, wa
         r_med = S.median_ci(r, rng)[0]
         flag = "  ⚠ off-expect" if _off_expect(d.verdict, sh["expect"]) else ""
         p_str = "<0.001" if d.p < 0.001 else f"{d.p:.3f}"
-        print(f"  {sh['id']:34} {g_med:9.1f} {r_med:9.1f} {d.speedup:7.2f}x {p_str:>7}  "
-              f"{d.verdict}/{sh['expect']}{flag}")
-        rows.append({"id": sh["id"], "expect": sh["expect"], "verdict": d.verdict,
-                     "speedup": round(d.speedup, 3), "p": round(d.p, 4),
-                     "gist_ms": round(g_med, 3), "rg_ms": round(r_med, 3),
-                     "dims": sh["dims"]})
+        print(
+            f"  {sh['id']:34} {g_med:9.1f} {r_med:9.1f} {d.speedup:7.2f}x {p_str:>7}  "
+            f"{d.verdict}/{sh['expect']}{flag}"
+        )
+        rows.append(
+            {
+                "id": sh["id"],
+                "expect": sh["expect"],
+                "verdict": d.verdict,
+                "speedup": round(d.speedup, 3),
+                "p": round(d.p, 4),
+                "gist_ms": round(g_med, 3),
+                "rg_ms": round(r_med, 3),
+                "dims": sh["dims"],
+            }
+        )
     wins = sum(x["verdict"] == "win" for x in rows)
     par = sum(x["verdict"] == "parity" for x in rows)
     loss = sum(x["verdict"] == "loss" for x in rows)
     print(f"\ngist vs rg across {len(rows)} shapes: {wins} win · {par} parity · {loss} loss")
     off = [x["id"] for x in rows if _off_expect(x["verdict"], x["expect"])]
     if off:
-        print(f"  OFF-EXPECT ({len(off)}): {', '.join(off)} — a shape measured WORSE than "
-              "declared; fix the regression or (if intended) lower matrix.toml `expect`")
+        print(
+            f"  OFF-EXPECT ({len(off)}): {', '.join(off)} — a shape measured WORSE than "
+            "declared; fix the regression or (if intended) lower matrix.toml `expect`"
+        )
     upgrades = [x["id"] for x in rows if _RANK[x["verdict"]] > _RANK[x["expect"]]]
     if upgrades:
-        print(f"  upgrade candidates ({len(upgrades)}): {', '.join(upgrades)} — beat their "
-              "declared `expect`; raise it after a second clean run")
+        print(
+            f"  upgrade candidates ({len(upgrades)}): {', '.join(upgrades)} — beat their "
+            "declared `expect`; raise it after a second clean run"
+        )
     if publish:
         _publish(rows, warmup, runs)
     return 1 if off else 0
@@ -291,17 +326,29 @@ def _floor(row: dict) -> float:
 
 def _publish(rows: list[dict], warmup: int, runs: int) -> None:
     """Write matrix_baseline.json (floors) + matrix.csv (rows) + CERTIFICATE_MATRIX.md."""
-    floors = {r["id"]: {"expect": r["expect"], "floor": _floor(r), "measured": r["speedup"]} for r in rows}
-    BASELINE.write_text(json.dumps(
-        {"_comment": "Per-shape committed floors for `matrix.py gate`. win → 0.75× the "
-                     "measured speedup (≥1.0); parity → a fixed 0.75× band; loss → recorded, "
-                     "report-only (currently none declared). Refresh with "
-                     "`GIST_BENCH=1 matrix.py bench --publish` after a deliberate change.",
-         "warmup": warmup, "runs": runs, "floors": floors}, indent=2) + "\n")
+    floors = {
+        r["id"]: {"expect": r["expect"], "floor": _floor(r), "measured": r["speedup"]} for r in rows
+    }
+    BASELINE.write_text(
+        json.dumps(
+            {
+                "_comment": "Per-shape committed floors for `matrix.py gate`. win → 0.75× the "
+                "measured speedup (≥1.0); parity → a fixed 0.75× band; loss → recorded, "
+                "report-only (currently none declared). Refresh with "
+                "`GIST_BENCH=1 matrix.py bench --publish` after a deliberate change.",
+                "warmup": warmup,
+                "runs": runs,
+                "floors": floors,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
     hdr = "id\texpect\tverdict\tspeedup\tp\tgist_ms\trg_ms\tfloor"
     lines = [hdr] + [
         f"{r['id']}\t{r['expect']}\t{r['verdict']}\t{r['speedup']}\t{r['p']}"
-        f"\t{r['gist_ms']}\t{r['rg_ms']}\t{_floor(r)}" for r in rows
+        f"\t{r['gist_ms']}\t{r['rg_ms']}\t{_floor(r)}"
+        for r in rows
     ]
     CSV.write_text("\n".join(lines) + "\n")
     _render_cert(rows)
@@ -311,21 +358,27 @@ def _publish(rows: list[dict], warmup: int, runs: int) -> None:
 def _render_cert(rows: list[dict]) -> None:
     """Human-readable per-shape certificate (measured wins + the declared loss)."""
     g = {"win": "✅ win", "parity": "≈ parity", "loss": "❌ loss"}
-    out = ["# gist CLI-shape admission matrix — measured", "",
-           "_gist cold-indexed vs ripgrep over the six host source roots. A WIN needs "
-           f"a lower median **and** Mann-Whitney p < {S.ALPHA:.2f} (fail-closed). Parity is "
-           "correctness-proven separately (`matrix.py parity`: gist-idx == gist-noidx == rg). "
-           "Every shape is a declared win — the former `-U` losses fell to the parallel "
-           "multiline DFA and the former backref parity to the PCRE2 shadow gate; a future "
-           "declared `loss` would stay report-only in its own row so no aggregate can bury it._", "",
-           "| shape | dims | gist ms | rg ms | speedup | p | verdict |",
-           "|---|---|--:|--:|--:|--:|:--|"]
+    out = [
+        "# gist CLI-shape admission matrix — measured",
+        "",
+        "_gist cold-indexed vs ripgrep over the six host source roots. A WIN needs "
+        f"a lower median **and** Mann-Whitney p < {S.ALPHA:.2f} (fail-closed). Parity is "
+        "correctness-proven separately (`matrix.py parity`: gist-idx == gist-noidx == rg). "
+        "Every shape is a declared win — the former `-U` losses fell to the parallel "
+        "multiline DFA and the former backref parity to the PCRE2 shadow gate; a future "
+        "declared `loss` would stay report-only in its own row so no aggregate can bury it._",
+        "",
+        "| shape | dims | gist ms | rg ms | speedup | p | verdict |",
+        "|---|---|--:|--:|--:|--:|:--|",
+    ]
     for r in rows:
         d = r["dims"]
         dim = f"{d['mode']}·{d['flags']}·{d['scope']}·{d['emit']}·{d['select']}"
         p_str = "<0.001" if r["p"] < 0.001 else f"{r['p']:.3f}"
-        out.append(f"| `{r['id']}` | {dim} | {r['gist_ms']:.1f} | {r['rg_ms']:.1f} "
-                   f"| {r['speedup']:.2f}x | {p_str} | {g[r['verdict']]} |")
+        out.append(
+            f"| `{r['id']}` | {dim} | {r['gist_ms']:.1f} | {r['rg_ms']:.1f} "
+            f"| {r['speedup']:.2f}x | {p_str} | {g[r['verdict']]} |"
+        )
     wins = sum(x["verdict"] == "win" for x in rows)
     par = sum(x["verdict"] == "parity" for x in rows)
     loss = sum(x["verdict"] == "loss" for x in rows)
@@ -335,8 +388,9 @@ def _render_cert(rows: list[dict]) -> None:
 
 
 # ── gate ────────────────────────────────────────────────────────────────────
-def cmd_gate(shapes: list[dict], default_roots: list[str], *, live: bool, force: bool,
-             warmup: int, runs: int) -> int:
+def cmd_gate(
+    shapes: list[dict], default_roots: list[str], *, live: bool, force: bool, warmup: int, runs: int
+) -> int:
     """Assert committed per-shape floors (hermetic), or re-bench first with --live."""
     if live:
         if os.environ.get("GIST_BENCH") != "1" and not force:
@@ -344,7 +398,7 @@ def cmd_gate(shapes: list[dict], default_roots: list[str], *, live: bool, force:
             return 0
         cmd_bench(shapes, default_roots, publish=True, warmup=warmup, runs=runs)
     if not BASELINE.is_file() or not CSV.is_file():
-        print(f"  (no committed matrix certificate — run `matrix.py bench --publish`)")
+        print("  (no committed matrix certificate — run `matrix.py bench --publish`)")
         return 2
     floors = json.loads(BASELINE.read_text())["floors"]
     measured = {}
@@ -367,18 +421,26 @@ def cmd_gate(shapes: list[dict], default_roots: list[str], *, live: bool, force:
             fails += 1
         else:
             print(f"  ok   {sid:34} {m['speedup']:.2f}x clears floor {fl['floor']:.2f}x")
-    print(f"\n{'FAIL' if fails else 'PASS'}: {len(measured) - fails}/{len(measured)} shapes clear their committed floor")
+    print(
+        f"\n{'FAIL' if fails else 'PASS'}: {len(measured) - fails}/{len(measured)} shapes clear their committed floor"
+    )
     return 1 if fails else 0
 
 
 def main() -> int:
     """CLI entry point."""
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("parity")
     b = sub.add_parser("bench")
     b.add_argument("--publish", action="store_true")
-    b.add_argument("--only", action="append", help="re-measure only this shape id (repeatable; disables --publish)")
+    b.add_argument(
+        "--only",
+        action="append",
+        help="re-measure only this shape id (repeatable; disables --publish)",
+    )
     b.add_argument("--warmup", type=int, default=int(os.environ.get("WARMUP", 2)))
     b.add_argument("--runs", type=int, default=int(os.environ.get("RUNS", 8)))
     gt = sub.add_parser("gate")
@@ -393,9 +455,15 @@ def main() -> int:
     if args.cmd == "bench":
         publish = args.publish and not args.only
         if args.publish and args.only:
-            print("  note: --only re-measures a subset; refusing to overwrite the full baseline (publish skipped)")
-        return cmd_bench(shapes, roots, publish=publish, warmup=args.warmup, runs=args.runs, only=args.only)
-    return cmd_gate(shapes, roots, live=args.live, force=args.force, warmup=args.warmup, runs=args.runs)
+            print(
+                "  note: --only re-measures a subset; refusing to overwrite the full baseline (publish skipped)"
+            )
+        return cmd_bench(
+            shapes, roots, publish=publish, warmup=args.warmup, runs=args.runs, only=args.only
+        )
+    return cmd_gate(
+        shapes, roots, live=args.live, force=args.force, warmup=args.warmup, runs=args.runs
+    )
 
 
 if __name__ == "__main__":

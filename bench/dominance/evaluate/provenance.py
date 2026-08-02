@@ -22,11 +22,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-from pathlib import Path
 import platform
 import re
 import subprocess
-
+from pathlib import Path
 
 KERNEL = Path(__file__).resolve().parents[3]  # evaluate → dominance → bench → package root
 REPO = KERNEL
@@ -45,6 +44,7 @@ def _climb_file(*rel_parts: str) -> Path | None:
             if cand.is_file():
                 return cand
     return None
+
 
 # Machine-key contract (mirrors irregex/contract/performance_evidence.toml [provenance].machine_keys).
 MACHINE_KEYS = (

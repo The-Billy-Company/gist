@@ -21,12 +21,11 @@ stdlib only. Deterministic: the bootstrap RNG is seeded.
 """
 
 import argparse
-from dataclasses import dataclass
 import json
 import math
-from pathlib import Path
 import random
-
+from dataclasses import dataclass
+from pathlib import Path
 
 ALPHA = 0.05
 BOOTSTRAP = 10_000

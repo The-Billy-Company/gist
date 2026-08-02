@@ -32,12 +32,11 @@ Usage:
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import time
-
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # corpora → apparatus → bench → repo
@@ -113,7 +112,11 @@ PER_CORPUS: dict[str, list[tuple[str, list[str], str]]] = {
     "subtitles": [
         ("sub-en-literal", ["-c", "-e", "Sherlock Holmes", "en.txt"], "exact"),
         ("sub-en-casei", ["-i", "-c", "-e", "sherlock holmes", "en.txt"], "exact"),
-        ("sub-en-alt", ["-c", "-e", r"Sherlock Holmes|John Watson|Professor Moriarty", "en.txt"], "exact"),
+        (
+            "sub-en-alt",
+            ["-c", "-e", r"Sherlock Holmes|John Watson|Professor Moriarty", "en.txt"],
+            "exact",
+        ),
         ("sub-en-word", ["-w", "-c", "-e", "though", "en.txt"], "exact"),
         ("sub-en-suffix", ["-c", "-e", r"\w+ing that", "en.txt"], "exact"),
         ("sub-ru-literal", ["-c", "-e", "Шерлок Холмс", "ru.txt"], "exact"),
@@ -175,7 +178,11 @@ PER_CORPUS: dict[str, list[tuple[str, list[str], str]]] = {
         ("torture-casei-cyr", ["-i", "-c", "-e", "ЖИЗНЬ"], "set"),
         ("torture-fold-fullwidth", ["-l", "-e", r"ＮＥＥＤＬＥ"], "set"),
         ("torture-crlf-eol", ["--crlf", "-c", "-e", r"NEEDLE_CRLF$"], "set"),
-        ("torture-utf16-E", ["-E", "utf-16", "-l", "-e", "NEEDLE_UTF16", "enc/utf16le_bom.txt"], "exact"),
+        (
+            "torture-utf16-E",
+            ["-E", "utf-16", "-l", "-e", "NEEDLE_UTF16", "enc/utf16le_bom.txt"],
+            "exact",
+        ),
         ("torture-latin1-E", ["-E", "latin-1", "-n", "-e", "café", "enc/latin1.txt"], "exact"),
         ("torture-follow-links", ["-L", "-l", "-e", "NEEDLE_LINK_TARGET", "links"], "set"),
         ("torture-dangling-link", ["-L", "-l", "-e", "NEEDLE_BESIDE_DANGLING", "broken"], "set"),
@@ -184,13 +191,20 @@ PER_CORPUS: dict[str, list[tuple[str, list[str], str]]] = {
 }
 
 
-def run_one(argv: list[str], cwd: Path, env: dict[str, str] | None) -> tuple[int, bytes, bytes, float]:
+def run_one(
+    argv: list[str], cwd: Path, env: dict[str, str] | None
+) -> tuple[int, bytes, bytes, float]:
     """Run argv in cwd; return (rc, stdout, stderr, seconds). 124 = timeout."""
     t0 = time.monotonic()
     try:
         r = subprocess.run(
-            argv, cwd=cwd, capture_output=True, timeout=TIMEOUT,
-            stdin=subprocess.DEVNULL, env=env, check=False,
+            argv,
+            cwd=cwd,
+            capture_output=True,
+            timeout=TIMEOUT,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return 124, b"", b"timeout", time.monotonic() - t0
@@ -249,23 +263,35 @@ def sweep_corpus(name: str, root: Path, engine: str, results: list[dict]) -> tup
         # An unsorted `exact` walk may legitimately differ by whole-line order —
         # never applicable here (exact cases pin --sort path or a single file).
         rec = {
-            "corpus": name, "engine": engine, "case": label, "mode": mode,
-            "argv": args, "ok": ok, "rc_rg": rc_r, "rc_gist": rc_g,
-            "secs_rg": round(t_r, 3), "secs_gist": round(t_g, 3),
+            "corpus": name,
+            "engine": engine,
+            "case": label,
+            "mode": mode,
+            "argv": args,
+            "ok": ok,
+            "rc_rg": rc_r,
+            "rc_gist": rc_g,
+            "secs_rg": round(t_r, 3),
+            "secs_gist": round(t_g, 3),
         }
         if ok:
             passes += 1
         else:
             fails += 1
             rec["stderr_gist"] = err_g.decode("utf-8", "replace")[-400:]
-            print(f"  FAIL [{name}/{engine}] {label}: rg exit {rc_r} vs gist {rc_g} (rg {t_r:.2f}s, gist {t_g:.2f}s)")
+            print(
+                f"  FAIL [{name}/{engine}] {label}: rg exit {rc_r} vs gist {rc_g} (rg {t_r:.2f}s, gist {t_g:.2f}s)"
+            )
             for line in preview_diff(
                 out_r if mode == "exact" else sorted_lines(out_r),
                 out_g if mode == "exact" else sorted_lines(out_g),
             ):
                 print(line)
             if err_g.strip():
-                print("  gist-stderr: " + err_g.decode("utf-8", "replace").strip().splitlines()[-1][:160])
+                print(
+                    "  gist-stderr: "
+                    + err_g.decode("utf-8", "replace").strip().splitlines()[-1][:160]
+                )
         results.append(rec)
     return passes, fails
 
@@ -289,9 +315,11 @@ def main() -> int:
 
     if not GIST.exists():
         sys.exit(f"no gist CLI at {GIST} — run `zig build -Doptimize=ReleaseFast` first")
-    installed = sorted(
-        p.name for p in CORPORA.iterdir() if p.is_dir() and (p / ".corpus-ready").exists()
-    ) if CORPORA.exists() else []
+    installed = (
+        sorted(p.name for p in CORPORA.iterdir() if p.is_dir() and (p / ".corpus-ready").exists())
+        if CORPORA.exists()
+        else []
+    )
     want = args.corpora.split(",") if args.corpora else installed
     missing = [w for w in want if w not in installed]
     if missing:

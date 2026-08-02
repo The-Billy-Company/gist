@@ -41,9 +41,21 @@ ZON_VERSION = re.compile(r"\.version\s*=\s*\"([^\"]+)\"")
 # copies of our own files (and other projects' versions), so walking them turns
 # a parity gate into a scavenger hunt.
 SKIP = {
-    ".git", ".zig-cache", "zig-cache", "zig-out", "zig-pkg", ".local", "target",
-    "vendor", "node_modules", "__pycache__", ".venv", ".pytest_cache", ".ruff_cache",
-    "testdata", "changelog.d",
+    ".git",
+    ".zig-cache",
+    "zig-cache",
+    "zig-out",
+    "zig-pkg",
+    ".local",
+    "target",
+    "vendor",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    ".pytest_cache",
+    ".ruff_cache",
+    "testdata",
+    "changelog.d",
 }
 # Text files only, and only the kinds a manifest is written in.
 SUFFIXES = {".zon", ".toml", ".py", ".rs", ".go", ".zig", ".h", ".json", ".md", ".yml", ".yaml"}
@@ -133,7 +145,10 @@ def main() -> int:
     if args.json:
         print(json.dumps({"version": want, "mirrors": rows, "faults": faults}, indent=2))
     elif faults:
-        print(f"version_parity: {len(faults)} fault(s) against build.zig.zon {want}\n", file=sys.stderr)
+        print(
+            f"version_parity: {len(faults)} fault(s) against build.zig.zon {want}\n",
+            file=sys.stderr,
+        )
         for fault in faults:
             print(f"  {fault}", file=sys.stderr)
         print(

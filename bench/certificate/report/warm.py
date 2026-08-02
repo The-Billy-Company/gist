@@ -24,9 +24,9 @@ stdlib only. Deterministic: the bootstrap RNG is seeded (shared with stats).
 import argparse
 import csv
 import json
-from pathlib import Path
 import random
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from stats import ALPHA, SEED, dominance, load_times_ms, median_ci, quantile  # noqa: E402
@@ -178,7 +178,10 @@ def render(
         gw, gr = _geomean([w for w, _ in ps]), _geomean([r for _, r in ps])
         if gw > 0 and gr > 0:
             parts.append(f"**{gr / gw:.1f}× faster than {label}**")
-    lines += ["", f"**warm gist vs ripgrep across {total} classes: {wins} win · {parity} parity · {loss} loss.**"]
+    lines += [
+        "",
+        f"**warm gist vs ripgrep across {total} classes: {wins} win · {parity} parity · {loss} loss.**",
+    ]
     if parts:
         lines += ["", "Warm geomean: " + " · ".join(parts) + "."]
     if loss == 0 and total > 0:
@@ -198,7 +201,12 @@ def render(
             ),
         ]
     if ctx_rows:
-        lines += ["", "<details><summary>field context (indexed rivals)</summary>\n", *ctx_rows, "\n</details>"]
+        lines += [
+            "",
+            "<details><summary>field context (indexed rivals)</summary>\n",
+            *ctx_rows,
+            "\n</details>",
+        ]
     lines += ["", END]
     return "\n".join(lines) + "\n", csv_rows, loss
 

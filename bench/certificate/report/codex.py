@@ -96,7 +96,9 @@ def render(scale: Path, compressors: Path, machine: str, zig: str, csv_out: Path
     centos = sorted(_rows(scale, "cento"), key=lambda r: r["raw_bytes"])
     comps: dict[int, dict] = {}
     if compressors.exists():
-        comps = _by_raw([json.loads(ln) for ln in compressors.read_text().splitlines() if ln.strip()])
+        comps = _by_raw(
+            [json.loads(ln) for ln in compressors.read_text().splitlines() if ln.strip()]
+        )
     if not builds:
         raise Fail("no build points in scale.jsonl")
 
@@ -141,8 +143,16 @@ def render(scale: Path, compressors: Path, machine: str, zig: str, csv_out: Path
     # everywhere, by a wide margin at the LARGEST corpus (the asymptotic point), and
     # the naive scan itself must grow ~linearly in n (⇒ it is the O(n) baseline).
     naive_pts = sorted(
-        ((int(q["raw_bytes"]), int(q["m"]), float(q["count_ns_per_query"]), float(q["naive_ns_per_query"]))
-         for q in queries if float(q.get("naive_ns_per_query", -1)) > 0),
+        (
+            (
+                int(q["raw_bytes"]),
+                int(q["m"]),
+                float(q["count_ns_per_query"]),
+                float(q["naive_ns_per_query"]),
+            )
+            for q in queries
+            if float(q.get("naive_ns_per_query", -1)) > 0
+        ),
         key=lambda t: t[0],
     )
     if not naive_pts:
@@ -192,9 +202,13 @@ def render(scale: Path, compressors: Path, machine: str, zig: str, csv_out: Path
         foreign = float(c["foreign_bits_per_byte"])
         ratio = foreign / native if native else float("inf")
         if native >= CENTO_NATIVE_CEIL:
-            raise Fail(f"cento native {native:.2f} ≥ {CENTO_NATIVE_CEIL} bits/byte at {_mib(int(c['raw_bytes']))}")
+            raise Fail(
+                f"cento native {native:.2f} ≥ {CENTO_NATIVE_CEIL} bits/byte at {_mib(int(c['raw_bytes']))}"
+            )
         if ratio < CENTO_RATIO_FLOOR:
-            raise Fail(f"cento ratio {ratio:.1f}× < {CENTO_RATIO_FLOOR}× at {_mib(int(c['raw_bytes']))}")
+            raise Fail(
+                f"cento ratio {ratio:.1f}× < {CENTO_RATIO_FLOOR}× at {_mib(int(c['raw_bytes']))}"
+            )
 
     # ── all invariants hold — render + sidecar CSV ───────────────────────────
     with csv_out.open("w") as fh:

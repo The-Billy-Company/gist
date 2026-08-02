@@ -44,18 +44,17 @@ from __future__ import annotations
 import argparse
 import atexit
 import bz2
-from collections.abc import Callable
-from dataclasses import dataclass, field
 import gzip
 import lzma
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
-
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # rgsuite → conformance → bench → repo
@@ -437,7 +436,10 @@ def _mini_diff(a: bytes, b: bytes, ctx: int = 2) -> str:
     )
     if i is None:
         return f"  (equal after normalization; len gist={len(al)} rg={len(bl)})"
-    dec = lambda xs, k: xs[k].decode("utf-8", "replace") if k < len(xs) else "<EOF>"
+
+    def dec(rows: list[bytes], index: int) -> str:
+        return rows[index].decode("utf-8", "replace") if index < len(rows) else "<EOF>"
+
     lines = [f"  first diff at line {i} (gist={len(al)} rg={len(bl)}):"]
     for k in range(max(0, i - ctx), i + ctx + 1):
         mark = ">>" if k == i else "  "

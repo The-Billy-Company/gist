@@ -26,9 +26,8 @@ Optimality's; this module never restates them. stdlib only (tomllib).
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tomllib
-
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # evaluate → dominance → bench → package root

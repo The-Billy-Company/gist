@@ -27,12 +27,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
-
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
@@ -41,7 +40,6 @@ if str(HERE) not in sys.path:
 import provenance  # noqa: E402
 import regimes  # noqa: E402
 import report  # noqa: E402
-
 
 KERNEL = HERE.parents[2]  # evaluate → dominance → bench → package root
 REPO = KERNEL
@@ -53,11 +51,7 @@ ARTIFACT = HERE / "artifact"
 # would otherwise search live — the evaluator just measures it where it can't churn.
 # Historical monorepo slices when present; else the whole package (mirrors field.sh).
 _MONOREPO_ROOTS = ("services", "libs", "clients", "contracts", "scripts", "quality")
-CORPUS_ROOTS = (
-    _MONOREPO_ROOTS
-    if all((REPO / r).is_dir() for r in _MONOREPO_ROOTS)
-    else (".",)
-)
+CORPUS_ROOTS = _MONOREPO_ROOTS if all((REPO / r).is_dir() for r in _MONOREPO_ROOTS) else (".",)
 CORPUS_EXCLUDES = (
     "node_modules",
     "target",

@@ -33,11 +33,10 @@ Exit 0 iff every rule holds.
 
 import argparse
 import json
-from pathlib import Path
 import re
 import sys
 import tomllib
-
+from pathlib import Path
 
 BUCKETS = ("PASS", "ORDER", "FAIL", "NA", "SKIP")
 HERE = Path(__file__).resolve().parent
@@ -127,7 +126,9 @@ def main() -> int:
 
     dangling = [c for c in claims if c not in by_name]
     if dangling:
-        problems.append(f"manifest names {len(dangling)} case(s) absent from results.json: {', '.join(sorted(dangling))}")
+        problems.append(
+            f"manifest names {len(dangling)} case(s) absent from results.json: {', '.join(sorted(dangling))}"
+        )
     double = {c: labels for c, labels in claims.items() if len(labels) > 1}
     if double:
         problems.append(
@@ -135,14 +136,20 @@ def main() -> int:
             + "; ".join(f"{c} → {labels}" for c, labels in sorted(double.items()))
         )
 
-    non_deferred_claim = {c for c, labels in claims.items() if any(not l.startswith("deferred:") for l in labels)}
+    non_deferred_claim = {
+        case
+        for case, labels in claims.items()
+        if any(not label.startswith("deferred:") for label in labels)
+    }
     orphan_skips = sorted(skips - non_deferred_claim)
     if orphan_skips:
         problems.append(
             f"{len(orphan_skips)} SKIP(s) unclaimed by any companion/boundary/irreplayable entry: {', '.join(orphan_skips)}"
         )
     # A companion/boundary/irreplayable entry must claim a real SKIP, not a replayed case.
-    mis_claimed = sorted(c for c in non_deferred_claim if c in by_name and by_name[c]["bucket"] != "SKIP")
+    mis_claimed = sorted(
+        c for c in non_deferred_claim if c in by_name and by_name[c]["bucket"] != "SKIP"
+    )
     if mis_claimed:
         problems.append(
             f"{len(mis_claimed)} non-SKIP case(s) claimed as companion/boundary/irreplayable (should be replayed): {', '.join(mis_claimed)}"

@@ -32,14 +32,13 @@ Usage:  python3 run.py            # score the frozen spec.json
 
 import base64
 import json
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import _oracle as O
 from _oracle import GIST, RG
-
 
 HERE = Path(__file__).resolve().parent
 spec = json.loads((HERE / "spec.json").read_text())
@@ -102,14 +101,23 @@ def _score_exit(rec, rc_g, err_g, rc_rg, err_rg):
     # regression. rg's own exit here is a normal 0/1 (it has no such boundary); gist
     # declines loud and names the fallback. Score it NA uniformly across terminals.
     if rc_g == 2 and rc_rg in (0, 1) and O.is_design_decline(err_g):
-        return "NA", "gist engine decline by design (use -P/--engine auto): " + err_g.decode("utf-8", "replace").strip().split("\n", 1)[0][:90]
+        return "NA", "gist engine decline by design (use -P/--engine auto): " + err_g.decode(
+            "utf-8", "replace"
+        ).strip().split("\n", 1)[0][:90]
     # The other direction of the same boundary: rg answered a pattern NO grammar
     # accepts, because its own `(?:...)` wrapper repaired the user's unbalanced
     # parens (`)(` → `(?:)()`, empty match everywhere) — see `is_malformed_refusal`.
     # gist refusing is the fail-closed contract, so NA, not FAIL.
     if rc_g == 2 and rc_rg in (0, 1) and O.is_malformed_refusal(err_g):
-        return "NA", "malformed in every grammar; rg only answers via its own `(?:...)` wrapper: " + err_g.decode("utf-8", "replace").strip().split("\n", 1)[0][:90]
-    return "FAIL", f"exit rc gist={rc_g} rg={rc_rg} · rg stderr={err_rg.decode('utf-8', 'replace')[:80]!r}"
+        return (
+            "NA",
+            "malformed in every grammar; rg only answers via its own `(?:...)` wrapper: "
+            + err_g.decode("utf-8", "replace").strip().split("\n", 1)[0][:90],
+        )
+    return (
+        "FAIL",
+        f"exit rc gist={rc_g} rg={rc_rg} · rg stderr={err_rg.decode('utf-8', 'replace')[:80]!r}",
+    )
 
 
 def _score_stderr(rc_g, err_g, rc_rg, err_rg):
@@ -259,7 +267,9 @@ def _run_engine(engine_env):
 def main():
     """CLI entry point."""
     if not GIST.exists():
-        sys.exit(f"gist CLI not built at {GIST} — build the sibling gist package (or place a binary at zig-out/bin/gist)")
+        sys.exit(
+            f"gist CLI not built at {GIST} — build the sibling gist package (or place a binary at zig-out/bin/gist)"
+        )
     list_na = "--list-na" in sys.argv[1:]
     any_fails = False
     all_results = {}

@@ -30,7 +30,6 @@ import argparse
 import csv
 from pathlib import Path
 
-
 START = "<!-- SCALE-LAYER-START -->"
 END = "<!-- SCALE-LAYER-END -->"
 HEADER = "## Layer J — positional + substring index tiers at scale (vs zoekt)"
@@ -284,8 +283,10 @@ def _build_verdict(build: list[dict]) -> list[str]:
         reverse=True,
     )
     if not dearer:
-        return [lead + " **And it no longer pays for that in memory**: nothing in this table "
-                f"builds inside {peak:.2f} GiB of peak RSS."]
+        return [
+            lead + " **And it no longer pays for that in memory**: nothing in this table "
+            f"builds inside {peak:.2f} GiB of peak RSS."
+        ]
     return [
         lead
         + f" **Memory is still the lane it loses**: {peak:.2f} GiB peak RSS while indexing, "
@@ -429,7 +430,7 @@ def _race_section(
             (
                 "**The index is not the toucher — and neither is walking.** An earlier "
                 "draft of this layer read gist's flat ~575 MiB as \"the signature of loading a "
-                "389 MiB index rather than paging it\". That was wrong, and it is retired here "
+                '389 MiB index rather than paging it". That was wrong, and it is retired here '
                 "by measurement rather than quietly restated. `vmmap` over a live query shows "
                 "`index.gist` at 354.9 MiB mapped but **11.5 MiB resident — 3.2% of the "
                 "postings blob**: it is demand-paged exactly as designed, since "
@@ -552,7 +553,7 @@ def _positional_section(pareto: list[dict]) -> list[str]:
         "",
         (
             "_A positional tier stores where in a document an ngram occurs, so a filter can "
-            "narrow from \"which files\" to \"which regions\" — the axis Layer D calls the floor. "
+            'narrow from "which files" to "which regions" — the axis Layer D calls the floor. '
             "The question is never whether that helps; it is what it costs. This surface sweeps "
             "two axes over the certificate corpus: a trigram carries block positions only if "
             "its document frequency is below **T** (selective coverage), and at most **cap** "
@@ -667,7 +668,11 @@ def write_sidecar(
     for r in resident:
         # Two control rows share a pattern and differ only by kind, so the key
         # carries both — a side-car row must name exactly one measurement.
-        key = r["pattern"] if "zero-candidate" not in r.get("kind", "") else f"{r['pattern']} ({r['kind']})"
+        key = (
+            r["pattern"]
+            if "zero-candidate" not in r.get("kind", "")
+            else f"{r['pattern']} ({r['kind']})"
+        )
         out.extend(
             f"resident\t{key}\t{col}\t{r.get(col)}"
             for col in ("gist_rss_mib", "gist_fp_mib", "csearch_rss_mib", "csearch_fp_mib")

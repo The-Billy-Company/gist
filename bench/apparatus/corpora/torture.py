@@ -23,10 +23,9 @@ Usage: python3 torture.py <dest-dir>
 """
 
 import os
-from pathlib import Path
 import shutil
 import sys
-
+from pathlib import Path
 
 CAP = 4 << 20  # gist's per-file read-path shape boundary (corpus.per_file_cap)
 
@@ -40,7 +39,9 @@ def build(root: Path) -> None:
     if root.exists():
         shutil.rmtree(root)
     root.mkdir(parents=True, exist_ok=True)
-    w = lambda rel, data: _write(root / rel, data)
+
+    def w(rel: str, data: bytes) -> None:
+        _write(root / rel, data)
 
     # ── read-path size edges ─────────────────────────────────────────────────
     # Needle placed astride every interesting byte boundary of a 4 MiB cap:
@@ -85,7 +86,7 @@ def build(root: Path) -> None:
             "ЖИЗНЬ жизнь NEEDLE_CYRILLIC\n"
             "ＮＥＥＤＬＥ＿ＦＵＬＬＷＩＤＴＨ ０１２３\n"
             "İstanbul ıstanbul NEEDLE_DOTTED_I\n"
-        ).encode()
+        ).encode(),
     )
 
     # ── ignore-hierarchy corner cases ────────────────────────────────────────
@@ -112,7 +113,7 @@ def build(root: Path) -> None:
     w("names/with space.txt", b"NEEDLE_SPACE_NAME\n")
     w("names/colon:name.txt", b"NEEDLE_COLON_NAME\n")
     w("names/-leading-dash.txt", b"NEEDLE_DASH_NAME\n")
-    w("names/uni-\u00e9\u4e2d\u6587.txt", "NEEDLE_UNICODE_NAME\n".encode())
+    w("names/uni-\u00e9\u4e2d\u6587.txt", b"NEEDLE_UNICODE_NAME\n")
     w("names/" + "l" * 200 + ".txt", b"NEEDLE_LONG_NAME\n")
     w("names/CASE.TXT", b"NEEDLE_UPPER_EXT\n")
 
@@ -182,14 +183,13 @@ def build(root: Path) -> None:
             b'#include "ledger.h"\n#include "../vendor/hexdrift/hexdrift.h"\n'
             b"int ledger_entry_%d(struct LedgerEntry *e, int cfg) {\n"
             b"  char out[16];\n"
-            b"  return hexdrift_encode(\"x\", out) + e->amount + cfg;\n}\n" % i,
+            b'  return hexdrift_encode("x", out) + e->amount + cfg;\n}\n' % i,
         )
     # Outside src/, so `LedgerEntry` scoped to src/ genuinely narrows rather
     # than returning the whole population under a different name.
     w(
         "cmd/report.c",
-        b'#include "../src/ledger.h"\n'
-        b"void report(struct LedgerEntry *e) { (void)e; }\n",
+        b'#include "../src/ledger.h"\nvoid report(struct LedgerEntry *e) { (void)e; }\n',
     )
 
     # ── links ────────────────────────────────────────────────────────────────
