@@ -3,6 +3,6 @@
 # crate that depends on this one; the supported floor for that is
 # `rust-version` in Cargo.toml.
 [toolchain]
-channel = "1.96.0"
+channel = "1.97.1"
 profile = "minimal"
 components = [ "rustfmt", "clippy" ]
