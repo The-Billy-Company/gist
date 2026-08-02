@@ -14,8 +14,14 @@ import (
 // rebuilds the shared index the rest of this machine's tools are riding.
 func fixture(t *testing.T) *Corpus {
 	t.Helper()
+	// Fatal rather than Skip, the policy `exact/engine_test.go` already states:
+	// this module answers every verb by running the binary, so a missing one is a
+	// broken environment, not an absent optional capability. Skipping turned that
+	// into a green tick over a suite that had exercised nothing — the failure mode
+	// worth fearing on CI, where a `zig build` that silently produced no binary
+	// would read as a passing lifecycle suite.
 	if _, err := runtime.Binary(runtime.ToolGist); err != nil {
-		t.Skipf("no gist binary: %v", err)
+		t.Fatalf("gist binary required (build with `zig build` or set GIST_BIN): %v", err)
 	}
 	root := t.TempDir()
 	t.Setenv("GIST_DIR", t.TempDir())
@@ -74,15 +80,16 @@ func TestRefreshBuildsAndReportsTheIndex(t *testing.T) {
 	}
 }
 
-// TestAtlasReportsEveryArtifact pins that all three compression artifacts are
-// reported separately: quote needs the shelf specifically, so "the atlas is ready"
-// must not stand in for "the shelf is ready".
-func TestAtlasReportsEveryArtifact(t *testing.T) {
-	c := fixture(t)
-	if _, err := runtime.Binary(runtime.ToolRelate); err != nil {
-		t.Skipf("no relate binary: %v", err)
-	}
-	empty, err := c.Atlas(t.Context())
+// TestAtlasReportsNothingReadyWhenNothingIsBuilt is the half of the artifact
+// contract that needs no producer: reading a fresh artifact home must report
+// every artifact absent rather than defaulting one to ready.
+//
+// Split out from the build half below because that half needs the relate binary,
+// which this package cannot produce and public CI cannot clone. Left fused, the
+// whole assertion skipped wherever relate was missing — so the reader half, which
+// is entirely gist's own code and runs anywhere, was never exercised on CI at all.
+func TestAtlasReportsNothingReadyWhenNothingIsBuilt(t *testing.T) {
+	empty, err := fixture(t).Atlas(t.Context())
 	if err != nil {
 		t.Fatalf("atlas: %v", err)
 	}
@@ -91,7 +98,22 @@ func TestAtlasReportsEveryArtifact(t *testing.T) {
 			t.Errorf("%s reported ready in a fresh artifact home: %+v", name, a)
 		}
 	}
+}
 
+// TestAtlasReportsEveryArtifact pins that all three compression artifacts are
+// reported separately: quote needs the shelf specifically, so "the atlas is ready"
+// must not stand in for "the shelf is ready".
+//
+// The one test here that genuinely cannot run without relate: the artifacts it
+// reads are relate's to write, and no other producer substitutes for it. Unlike
+// irregex's ladder tests — which only needed *a* producer and so moved to gist —
+// this is a real cross-package integration, so it skips rather than relocating
+// into a repository that does not own the API under test.
+func TestAtlasReportsEveryArtifact(t *testing.T) {
+	c := fixture(t)
+	if _, err := runtime.Binary(runtime.ToolRelate); err != nil {
+		t.Skipf("no relate binary, and only relate writes the atlas this reads: %v", err)
+	}
 	built, err := c.RefreshAtlas(t.Context(), false)
 	if err != nil {
 		t.Fatalf("refresh atlas: %v", err)
