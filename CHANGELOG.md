@@ -1,7 +1,7 @@
 # Changelog
 
-All notable changes to `gist` (the product chassis; ships the `gist` and
-`relate` binaries) are documented here. Format follows
+All notable changes to `gist` (indexed code search; also the chassis module that
+`relate` and `blast` ride) are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/); versions track
 `build.zig.zon`.
 
