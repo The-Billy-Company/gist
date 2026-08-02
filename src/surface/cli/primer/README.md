@@ -27,7 +27,7 @@ computed here rather than restated per shell:
   field are rivals, which is how `-i`/`-s`/`-S` and
   `--context-separator`/`--no-context-separator` rule each other out without a
   hand-kept list.
-- **Shared candidate sets** are hoisted once per file, so the 239 file types and
+- **Shared candidate sets** are hoisted once per file, so the 241 file types and
   233 encodings are written once and referenced by every flag that takes one.
 
 Three exhaustive `switch`es over the action union decide what a flag takes, what

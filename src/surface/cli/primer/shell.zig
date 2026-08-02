@@ -297,7 +297,7 @@ pub fn powershell(buf: *std.ArrayList(u8), gpa: std.mem.Allocator, s: Surface) v
     // Script-scope, evaluated once when the profile sources this file. Two
     // flags over one registry (`-t` and `-T`) share the array rather than
     // carrying a copy each, which is the difference between a 30 KB file and a
-    // 110 KB one for a 239-row type table.
+    // 110 KB one for a 241-row type table.
     for (sets.items) |e| {
         buf.print(gpa, "${s}_{s} = @(\n", .{ s.tool, e.name }) catch oom();
         for (e.choices) |c| {

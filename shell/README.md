@@ -51,7 +51,7 @@ the category, and spends the saved effort on three things:
   `rg --type-list` and re-parsing it, every time. gist's menu is an array
   written into the file at generation: **~0.065 ms against ripgrep's ~5 ms,
   about 77×** (both sinks stubbed alike, so only the gather is timed; a busier
-  machine puts rg nearer 9 ms and moves gist's side hardly at all). Its 239
+  machine puts rg nearer 9 ms and moves gist's side hardly at all). Its 241
   candidates each arrive with that type's globs attached, where rg discards
   them and offers 224 bare names.
 - **A grouped menu.** `gist -<TAB>` offers its 282 candidates under five
