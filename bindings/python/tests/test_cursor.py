@@ -1,9 +1,10 @@
 """Idiomatic in-process Engine/Cursor tests (pull-cursor surface).
 
 Proves the warm `gist.Engine` + pull `gist.Cursor` produce records
-byte-identical to the certified cold subprocess (`engine.run`) — same order,
-paths, line numbers, text, and submatch spans — so, transitively through the
-cold path's own rg certification, Engine ≡ cold ≡ rg. Then it pins the four
+byte-identical to the certified cold subprocess (`engine.run`) — same paths, line
+numbers, text, and submatch spans, under the `--sort path` order both tiers
+promise (see `_cold`) — so, transitively through the cold path's own rg
+certification, Engine ≡ cold ≡ rg. Then it pins the four
 hosted invariants the push/`_ffi` transport doesn't expose at this boundary:
 `batches()` is the same record stream chunked, a `max_results` budget stops at a
 record boundary while still reporting `matched`, a pre-tripped `CancelToken`
@@ -40,7 +41,19 @@ def corpus(tmp_path):
 
 
 def _cold(corpus, **fields) -> list:
-    return engine.run(SearchRequest(paths=(str(corpus),), **fields), cwd=None)
+    """The certified cold path, walked in the one order both tiers promise.
+
+    The warm tier hands its records back path-sorted. The cold walk emits them in
+    the filesystem's `readdir` order, which gist declines to promise — `--sort
+    path` is the documented knob that asks for one. Unpinned, this oracle agrees
+    on a machine whose `readdir` happens to come out sorted and disagrees on a
+    machine where it doesn't, which is a property of the tmpdir, not of the two
+    tiers. Pinned, it still compares every field of every record.
+    """
+    return engine.run(
+        SearchRequest(paths=(str(corpus),), extra_flags=("--sort", "path"), **fields),
+        cwd=None,
+    )
 
 
 @pytest.mark.parametrize(

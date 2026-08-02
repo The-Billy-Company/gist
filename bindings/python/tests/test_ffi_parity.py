@@ -2,7 +2,8 @@
 
 Proves the cffi transport (`gist/_ffi.py` over `libirgx`) is byte-identical to
 the certified cold subprocess — same `run`/`files`/`count` answers, same record
-ORDER, same submatch offsets — and that it reconciles writes (read-your-writes)
+order WITHIN each file, same submatch offsets (cross-file order is a documented
+degree of freedom; see `_by_file`) — and that it reconciles writes (read-your-writes)
 and declines an unsupported pattern to cold instead of aborting. Since the cold
 path is itself certified against ripgrep, FFI ≡ cold ≡ rg transitively.
 
@@ -209,15 +210,15 @@ def test_explicit_roots_equal_cold(corpus, paths: tuple[str, ...]) -> None:
     req = SearchRequest(pattern="TODO", paths=paths)
     warm = _ffi.run(req, cwd=None)
     assert warm is not None
-    assert warm == engine.run(req, cwd=None)
-    assert _ffi.files(req, cwd=None) == engine.files(req, cwd=None)
+    assert _by_file(warm) == _by_file(engine.run(req, cwd=None))
+    assert sorted(_ffi.files(req, cwd=None)) == sorted(engine.files(req, cwd=None))
     assert _ffi.count(req, cwd=None) == engine.count(req, cwd=None)
 
 
 def test_absolute_root_equals_cold_and_handle_scope_isolated(corpus) -> None:
     scoped = SearchRequest(pattern="TODO", paths=(str(corpus / "pkg"),))
     rootless = SearchRequest(pattern="TODO")
-    assert _ffi.run(scoped, cwd=None) == engine.run(scoped, cwd=None)
+    assert _by_file(_ffi.run(scoped, cwd=None)) == _by_file(engine.run(scoped, cwd=None))
     scoped_count = _ffi.count(scoped, cwd=None)
     rootless_count = _ffi.count(rootless, cwd=None)
     assert scoped_count is not None
@@ -286,7 +287,7 @@ def test_unsupported_pattern_declines_to_cold(corpus) -> None:
 
 def test_auto_uses_ffi_only_for_linear_compatible_patterns(corpus) -> None:
     linear = SearchRequest(pattern="TODO", engine=SearchEngine.AUTO)
-    assert _ffi.run(linear, cwd=None) == engine.run(linear, cwd=None)
+    assert _by_file(_ffi.run(linear, cwd=None)) == _by_file(engine.run(linear, cwd=None))
 
     pcre = SearchRequest(pattern=r"(?=lookahead)", engine=SearchEngine.AUTO)
     assert _ffi.run(pcre, cwd=None) is None
