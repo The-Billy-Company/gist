@@ -57,7 +57,14 @@ keywords = [
   "pattern-matching",
 ]
 dependencies = [
-  "irregex",
+  # Bounded on both sides, and neither bound is boilerplate. `irgx` is the import
+  # this package opens with, and it only exists from 1.0.0 — the 0.1.0 already on
+  # the index is the pre-rename placeholder, so an unbounded requirement resolved
+  # to a distribution that cannot satisfy a single line of this one. The ceiling
+  # is the other half of the same fact: 1.0.0 is where the substrate froze the C
+  # ABI and the `irgx` Python surface, and a 2.0 is by definition free to move
+  # both. This is a face over an ABI, not a consumer of a loose utility.
+  "irregex>=1.0.0,<2",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",

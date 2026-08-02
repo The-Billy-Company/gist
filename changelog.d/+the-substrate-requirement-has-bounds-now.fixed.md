@@ -1,0 +1,5 @@
+The published wheel asks for `irregex>=1.0.0,<2` instead of a bare `irregex`.
+
+Unbounded, the resolver satisfied it with `irregex==0.1.0` - the pre-rename placeholder on the index, which has no `irgx` module in it at all. So `pip install gist-search` installed two packages and then failed on line 20 of `gist/__init__.py`, importing a name the dependency it just fetched has never exported. The floor is 1.0.0 because that is where `irgx` starts existing; the ceiling is the same fact from the other side, since 1.0.0 is where the substrate froze the C ABI and the `irgx` surface and a 2.0 is by definition free to move both. This is a face over an ABI, not a consumer of a loose utility.
+
+The release gate that reads the built wheel's `Requires-Dist` now asserts the bound as well as the name. It was passing on a requirement that could resolve to something unusable, which is the shape of gate worth strengthening: the floor-install step downstream did catch the broken import, but only because a version old enough to prove it happens to be published. An unbounded requirement is wrong either way, and a release cannot be taken back.

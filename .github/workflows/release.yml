@@ -82,6 +82,14 @@ jobs:
       # scripts are stdlib, and syncing the project first would make them resolve
       # that very path entry against a sibling checkout a release job has no
       # reason to clone.
+      #
+      # "Names irregex" was the whole assertion once, and it passed while the
+      # requirement was a bare `irregex` — which the resolver satisfied with the
+      # 0.1.0 pre-rename placeholder, a distribution with no `irgx` module in it
+      # at all. The floor gate below caught the import error, but only because
+      # that older version happens to exist; an unbounded requirement is wrong
+      # whether or not the index currently holds something old enough to prove it.
+      # So the lower bound is asserted here, where a release can still be stopped.
       - name: The published dependency must resolve from the index
         run: |
           set -euo pipefail
@@ -93,12 +101,16 @@ jobs:
           text = zf.read(name).decode()
           reqs = re.findall(r"^Requires-Dist:\s*(.+)$", text, re.M)
           print("Requires-Dist:", reqs or "(none)")
-          if not any(r.split()[0].split("[")[0].strip() == "irregex" for r in reqs):
+          substrate = [r for r in reqs if r.split()[0].split("[")[0].strip() == "irregex"]
+          if not substrate:
               sys.exit("the wheel does not depend on irregex — the substrate would be missing")
           bad = [r for r in reqs if "@" in r or "file://" in r]
           if bad:
               sys.exit(f"a direct/path reference would ship: {bad}")
-          print("dependency metadata is index-resolvable")
+          if not any(re.search(r"(>=|==|~=)\s*\d", r) for r in substrate):
+              sys.exit(f"the substrate requirement has no lower bound, so a pre-rename "
+                       f"release can satisfy it: {substrate}")
+          print("dependency metadata is index-resolvable and bounded")
           PY
 
       # The gate that earns its place: install the built artifact on the declared
