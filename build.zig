@@ -166,21 +166,31 @@ pub fn build(b: *std.Build) void {
         repack.addArtifactArg(obj);
         b.getInstallStep().dependOn(&b.addInstallLibFile(aligned_a, "libgist.a").step);
     } else {
+        // Installed as a FILE, not an artifact. `installArtifact` publishes a
+        // name into the table a dependent's `dep.artifact("gist")` searches,
+        // and the dylib above already owns `gist`; a second registration makes
+        // that lookup ambiguous and panics the build runner in the DEPENDENT,
+        // never here — invisible on a laptop, since this is the arm macOS does
+        // not take. The macOS arm is already file-shaped for its own reason, so
+        // this makes both arms install `libgist.a` the same way.
         const static_lib = b.addLibrary(.{ .name = "gist", .linkage = .static, .root_module = abi });
-        b.installArtifact(static_lib);
+        b.getInstallStep().dependOn(&b.addInstallLibFile(static_lib.getEmittedBin(), "libgist.a").step);
     }
     // Install libirgx.dylib into this prefix so a binding that only built
     // gist still finds both libraries under zig-out/lib.
     b.installArtifact(irgx_lib);
-    // The engine's macOS-aligned `.a` is an installLibFile product of the
-    // irregex package, not its named artifact. Copy it from the sibling
-    // zig-out after that package has been built (`cd ../irregex && zig build`)
-    // so Go cgo / C smoke can link both archives under this prefix.
-    const eng_static_src = b.pathFromRoot("../irregex/zig-out/lib/libirgx.a");
-    const copy_eng_static = b.addSystemCommand(&.{ "cp", "-f", eng_static_src });
-    const eng_static_out = copy_eng_static.addOutputFileArg("libirgx.a");
-    copy_eng_static.step.dependOn(&irgx_lib.step);
-    b.getInstallStep().dependOn(&b.addInstallLibFile(eng_static_out, "libirgx.a").step);
+    // And the engine's archive, which is the other half of what a static
+    // consumer links. It is an install-file product of the irregex package
+    // rather than a named artifact, so it comes across as a named lazy path.
+    // This used to be `cp ../irregex/zig-out/lib/libirgx.a`, which read a
+    // different build than the one gist is being compiled against: under
+    // `-Dtarget=x86_64-linux-gnu` it copied this laptop's Mach-O archive into
+    // the Linux prefix, and it needed someone to have run `zig build` over
+    // there first. Off the dependency graph it is the right target, built to
+    // order.
+    b.getInstallStep().dependOn(
+        &b.addInstallLibFile(irgx_dep.namedLazyPath("libirgx.a"), "libirgx.a").step,
+    );
 
     // ── the measurement lab ──
     // Deliberately OFF the default install step: a bare `zig build` (and every
