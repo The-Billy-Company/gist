@@ -2,8 +2,8 @@
 
 Search-only face of the GIST kernel. The shared substrate (`contract`,
 `runtime`, `schema.gen.rs`) lives in
-[`irregex/bindings/rust`](../../../../irregex/bindings/rust/); kinship and
-composed verbs live in their own packages.
+[`irregex/bindings/rust`](https://github.com/The-Billy-Company/irregex/tree/main/bindings/rust);
+kinship and composed verbs live in their own packages.
 
 | Module | Job |
 |---|---|

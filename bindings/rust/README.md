@@ -8,9 +8,9 @@ that any Rust automation can call instead of hand-rolling `std::process::Command
 argv and `--json` parsing per site.
 
 The shared substrate — contracts, row protocol, transports, typed failures —
-lives in the sibling [`irregex`](../../../irregex/bindings/rust/) crate. Kinship
-and composed verbs are their own crates (`relate`, `blast`); depending on `gist`
-does not make them reachable.
+lives in the [`irregex`](https://github.com/The-Billy-Company/irregex/tree/main/bindings/rust)
+crate. Kinship and composed verbs are their own crates (`relate`, `blast`);
+depending on `gist` does not make them reachable.
 
 ```rust
 for m in gist::search(r"func\s+\w+\(")? {
@@ -62,7 +62,7 @@ for m in engine.search(&gist::SearchRequest::new("TODO"))? {
 
 ```toml
 # In this checkout:
-irregex = { version = "0.1.0", path = "../../../irregex/bindings/rust" }
+irregex = { version = "1.0.0", path = "../../../irregex/bindings/rust" }
 
 # Once published:
 # cargo add irregex

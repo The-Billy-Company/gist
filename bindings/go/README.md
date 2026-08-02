@@ -37,7 +37,7 @@ This module is nested, so its release tags carry the subdirectory prefix —
 
 Shared types (`Request`, `Match`, analytic params, the row decoder, the fallback
 ladder) come from
-[`irregex/bindings/go/{analytic,runtime}`](../../../irregex/bindings/go/).
+[`irregex/bindings/go/{analytic,runtime}`](https://github.com/The-Billy-Company/irregex/tree/main/bindings/go).
 
 ## Using it
 
