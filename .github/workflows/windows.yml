@@ -77,10 +77,10 @@ jobs:
       run:
         working-directory: gist
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: gist
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: The-Billy-Company/irregex
           path: irregex

@@ -34,8 +34,8 @@ jobs:
       run:
         working-directory: bindings/python
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
 
       # Every face starts at 1.0.0 together — that is the release where the
       # C ABI is frozen, so it would read badly for the thing being frozen to
@@ -105,7 +105,7 @@ jobs:
       - name: Check the metadata the index will read
         run: uvx twine check dist/*
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: bindings/python/dist/*
@@ -121,7 +121,7 @@ jobs:
       # The OIDC token Trusted Publishing exchanges for an upload credential.
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist

@@ -70,10 +70,10 @@ jobs:
       run:
         working-directory: gist
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: gist
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: The-Billy-Company/irregex
           path: irregex
@@ -114,10 +114,10 @@ jobs:
         python: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: gist
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: The-Billy-Company/irregex
           path: irregex
@@ -125,7 +125,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v7
       # ripgrep is the oracle for the parity tests, not a convenience: without
       # it on PATH they take their documented skip branch, and a parity gate
       # that skips is a parity gate that has stopped gating. The corpus those
@@ -171,10 +171,10 @@ jobs:
     # deliberately fails rather than skips when it is absent.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: gist
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: The-Billy-Company/irregex
           path: irregex
@@ -182,7 +182,7 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           # Workspace-relative on purpose: this input is read by the action, not
           # by a shell, so it does not follow a step's working directory.
@@ -208,10 +208,10 @@ jobs:
     # The opt-in `native` feature is the graduation rung and is not this gate.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: gist
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: The-Billy-Company/irregex
           path: irregex
@@ -260,7 +260,7 @@ jobs:
     # a different Zig would be checking against a different grid.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
@@ -322,8 +322,8 @@ jobs:
     # 3.12 is the floor the rest of the repository declares.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       # Enumerated, not listed, for the same reason the formatter's file set is:
       # a written-down list of suites silently stops covering the one added next
       # week. Every suite here is a plain `unittest.main()` script, so running it
@@ -396,8 +396,8 @@ jobs:
     # Stdlib-only, no Zig and no build — it reads lines.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - run: uv run --no-project --python 3.12 python tools/version_parity.py
 
   changelog:
@@ -425,8 +425,8 @@ jobs:
     # job only asks whether the fragments that exist are well-formed.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
       - name: every fragment is one towncrier recognizes
         run: |
           set -euo pipefail
