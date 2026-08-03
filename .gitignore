@@ -6,6 +6,10 @@ zig-pkg/
 
 # Rust (bindings/rust)
 target/
+# The crates.io landing page, minted from the repository README by
+# `tools/registry_readme.py`. Generated at package time, never committed:
+# a checked-in copy is a second README to keep in step with the first.
+bindings/rust/PROJECT_README.md
 
 # Python (bindings/python)
 __pycache__/

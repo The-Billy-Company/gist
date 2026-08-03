@@ -15,7 +15,14 @@ rust-version = "1.85"
 license = "Apache-2.0"
 publish = false
 description = "Indexed code search for Rust - ripgrep-parity regex search over a persisted trigram index, with ranked definition-first results."
-readme = "README.md"
+# The crates.io landing page is the repository's own README, not the short one
+# beside these sources - crates.io shows a README as the whole project page, and
+# a visitor who lands there has nowhere else to look. Cargo has no metadata hook,
+# so `tools/registry_readme.py` mints a link-corrected copy here and this points
+# at it. Regenerate immediately before `cargo package`, never earlier: a missing
+# file fails loudly and a stale one would ship quietly, so absent is the safe
+# state to leave it in. The file is gitignored, and `cargo build` never reads it.
+readme = "PROJECT_README.md"
 homepage = "https://github.com/The-Billy-Company/gist"
 repository = "https://github.com/The-Billy-Company/gist"
 documentation = "https://github.com/The-Billy-Company/gist/blob/main/bindings/rust/README.md"
