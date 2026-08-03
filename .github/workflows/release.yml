@@ -163,3 +163,63 @@ jobs:
           name: dist
           path: dist
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+  # ── crates.io
+  #
+  # A sibling of `publish`, not a step inside it. The two registries fail
+  # independently, and a wheel that already uploaded must not be rolled back
+  # because a crate upload failed — nor the reverse. Each gates on the same tag
+  # and reads the same version, so they cannot disagree about what they publish.
+  #
+  # ONE-TIME SETUP: crates.io Trusted Publishing, so there is no registry token
+  # to rotate or leak. On crates.io, add a trusted publisher to this crate
+  # pointing at this repository, workflow `release.yml`, environment `crates-io`.
+  # The first version had to be published by hand with an API token; crates.io
+  # requires a crate to exist before it will accept a publisher configuration.
+  crates:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      # The OIDC token crates.io exchanges for a short-lived registry token.
+      id-token: write
+    defaults:
+      run:
+        working-directory: bindings/rust
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # No toolchain action and no cache: `bindings/rust/rust-toolchain.toml`
+      # pins the channel and the runner's rustup honours it, and a release
+      # builds from source or not at all — a cache is writable by any workflow
+      # on any branch, which is the wrong trade for an artifact being published.
+      - name: The tag must name the version being published
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          declared=$(python3 -c \
+            "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']['version'])")
+          if [ "$tag" != "$declared" ]; then
+            echo "::error::tag v$tag would publish crate version $declared." \
+                 "Tag the version the crate declares, or bump Cargo.toml." >&2
+            exit 1
+          fi
+          echo "tag v$tag matches the declared crate version"
+
+      # crates.io renders a README as the entire project page, so the one it gets
+      # is a link-corrected copy of the repository README rather than the short
+      # one beside these sources. It is gitignored and minted here, immediately
+      # before publishing: absent fails loudly, stale would ship quietly.
+      - name: Mint the registry landing page
+        working-directory: .
+        run: python3 tools/registry_readme.py
+
+      - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        id: auth
+
+      # --locked: publish the dependency graph that was tested, not whatever the
+      # index happens to offer at upload time.
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
