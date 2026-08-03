@@ -300,17 +300,33 @@ jobs:
           GO_TAG: bindings/go/${{ github.ref_name }}
         run: |
           set -euo pipefail
-          # Idempotent: re-running a release must not fail on a tag it already
-          # created, and must never move one that exists. A version the proxy has
-          # served is immutable, so moving the tag would publish a lie.
-          if existing=$(gh api "repos/$REPO/git/ref/tags/$GO_TAG" --jq '.object.sha' 2>/dev/null); then
-            if [ "$existing" = "$SHA" ]; then
-              echo "$GO_TAG already points at $SHA; nothing to do"
+          # Idempotent, and judged on module content rather than on the commit.
+          # What the proxy publishes is the `bindings/go` subtree, so two commits
+          # with an identical subtree are the same module — a re-run, or a version
+          # tag cut a few commits after the Go tag, is a no-op rather than a
+          # collision. A subtree that actually differs is the real hazard: the
+          # proxy has already served those bytes under this version and will never
+          # serve different ones, so moving the tag would publish a lie.
+          if ref=$(gh api "repos/$REPO/git/ref/tags/$GO_TAG" 2>/dev/null); then
+            # An annotated tag's ref names the tag object, which has to be
+            # dereferenced to reach the commit it wraps.
+            kind=$(printf '%s' "$ref" | python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["type"])')
+            obj=$(printf '%s' "$ref" | python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])')
+            if [ "$kind" = "tag" ]; then
+              commit=$(gh api "repos/$REPO/git/tags/$obj" --jq '.object.sha')
+            else
+              commit=$obj
+            fi
+            before=$(gh api "repos/$REPO/git/trees/$commit:bindings/go" --jq '.sha')
+            now=$(gh api "repos/$REPO/git/trees/$SHA:bindings/go" --jq '.sha')
+            if [ "$before" = "$now" ]; then
+              echo "$GO_TAG already publishes this exact module ($now); nothing to do"
               exit 0
             fi
-            echo "::error::$GO_TAG already exists at $existing, which is not this" \
-                 "commit. A published Go version is immutable in the proxy; cut a" \
-                 "new version rather than moving the tag." >&2
+            echo "::error::$GO_TAG already exists and publishes a different" \
+                 "bindings/go ($before, not $now). A published Go version is" \
+                 "immutable in the proxy; cut a new version rather than moving" \
+                 "the tag." >&2
             exit 1
           fi
           # Annotated, in two calls: the object carries the message, the ref makes
