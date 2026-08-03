@@ -223,3 +223,85 @@ jobs:
       - run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+  # ── Go module
+  #
+  # There is no registry to upload to: the proxy reads tags straight from the
+  # repository. But a module in a subdirectory is resolved by a
+  # subdirectory-prefixed tag, so `v1.2.3` publishes nothing for `bindings/go`
+  # and `bindings/go/v1.2.3` publishes everything. The release that pushes the
+  # first tag pushes the second, because a second tag typed by hand is the step
+  # that gets forgotten.
+  #
+  # The App token is required rather than preferred: the enterprise blocks the
+  # Actions identity from the writes this needs, and the same App already signs
+  # the release PR.
+  go-module:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      # No checkout. The tag is created through the API, so there is no clone to
+      # make, no full history to fetch, and no credential written into a
+      # `.git/config` that a later step could package up. The commit is
+      # `github.sha`, which is the commit the version tag already names.
+      - name: Tag the Go module at this commit
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          GO_TAG: bindings/go/${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Idempotent: re-running a release must not fail on a tag it already
+          # created, and must never move one that exists. A version the proxy has
+          # served is immutable, so moving the tag would publish a lie.
+          if existing=$(gh api "repos/$REPO/git/ref/tags/$GO_TAG" --jq '.object.sha' 2>/dev/null); then
+            if [ "$existing" = "$SHA" ]; then
+              echo "$GO_TAG already points at $SHA; nothing to do"
+              exit 0
+            fi
+            echo "::error::$GO_TAG already exists at $existing, which is not this" \
+                 "commit. A published Go version is immutable in the proxy; cut a" \
+                 "new version rather than moving the tag." >&2
+            exit 1
+          fi
+          # Annotated, in two calls: the object carries the message, the ref makes
+          # it visible. A lightweight ref alone would lose the note entirely.
+          obj=$(gh api "repos/$REPO/git/tags" -f tag="$GO_TAG" -f object="$SHA" \
+                  -f type=commit -f "message=Go module $GITHUB_REF_NAME
+
+          The module lives in a subdirectory, so the proxy resolves it by a
+          subdirectory-prefixed tag rather than the repository's own version tag." \
+                --jq '.sha')
+          gh api "repos/$REPO/git/refs" -f ref="refs/tags/$GO_TAG" -f sha="$obj" --jq '.ref'
+          echo "created $GO_TAG at $SHA"
+
+      # The proxy ingests a version on first request, so asking for it here means
+      # the first real `go get` is a cache hit rather than the request that pays
+      # for ingestion — and a failure here is a loud signal that the tag did not
+      # produce a usable module.
+      - name: Prove the proxy can serve it
+        env:
+          MODULE: github.com/${{ github.repository }}/bindings/go
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5; do
+            if GOFLAGS='' go list -m "$MODULE@$VERSION"; then
+              echo "proxy serves $MODULE@$VERSION"
+              exit 0
+            fi
+            echo "not visible yet (attempt $attempt); waiting"
+            sleep 15
+          done
+          echo "::error::$MODULE@$VERSION never became resolvable through the" \
+               "module proxy. The tag exists, so this is an ingestion problem." >&2
+          exit 1
