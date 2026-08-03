@@ -5,7 +5,9 @@
 # pure Python and depends on `irregex` for every native byte it touches. So one
 # `py3-none-any` wheel covers every platform, and — unlike the sibling — an
 # sdist is genuinely buildable, because this project is self-contained under
-# `bindings/python` rather than rooted above its own sources.
+# `bindings/python` rather than rooted above its own sources. The one thing it
+# reaches up for is the repository README, which is the long description — so
+# the sdist carries a corrected copy of it and a source build reads that.
 #
 # The distribution is `gist-search`; the import stays `gist`. The plain `gist`
 # name on PyPI belongs to an unrelated author, so publishing under it is not

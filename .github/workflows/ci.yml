@@ -536,6 +536,14 @@ jobs:
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       - run: uv run --no-project --python 3.12 python tools/version_parity.py
 
+      # Every index this project publishes to shows the repository README as the
+      # project's page, and each one resolves a relative link against its own
+      # URL rather than against GitHub. `registry_readme.py` corrects that at
+      # package time; this proves, on every commit, that it still can — a link
+      # to a file somebody moved fails here rather than at the release, or worse,
+      # as a well-formed URL on a published page pointing at nothing.
+      - run: uv run --no-project --python 3.12 python tools/registry_readme.py --check
+
   changelog:
     name: changelog
     # Neither repository had anything checking its news fragments, and the
