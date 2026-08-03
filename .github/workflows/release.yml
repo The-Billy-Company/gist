@@ -215,12 +215,52 @@ jobs:
         working-directory: .
         run: python3 tools/registry_readme.py
 
+      # Idempotent, for the same reason the Go tag step is: re-running a release
+      # — a retry after a flake, or a dispatch on an existing tag — must not fail
+      # because the version is already on the index. A published version is
+      # immutable there, so "already present" is success, not a collision.
+      - name: Is this version already on the index?
+        id: state
+        run: |
+          set -euo pipefail
+          read -r crate version prefix <<<"$(python3 -c "
+          import pathlib, tomllib
+          pkg = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']
+          n = pkg['name']
+          # The sparse index shards by name length, then by leading characters.
+          prefix = {1: '1', 2: '2', 3: f'3/{n[0]}'}.get(len(n), f'{n[0:2]}/{n[2:4]}')
+          print(n, pkg['version'], prefix)")"
+          # The sparse index is the authority cargo itself reads, and it needs no
+          # auth. A crate with no versions yet answers 404 with an XML body, which
+          # the parser treats as "no versions" rather than as a failure.
+          already=$(curl -sS "https://index.crates.io/$prefix/$crate" 2>/dev/null \
+            | python3 -c "
+          import json, sys
+          want = sys.argv[1]
+          found = set()
+          for line in sys.stdin:
+              if not line.strip():
+                  continue
+              try:
+                  found.add(json.loads(line)['vers'])
+              except (ValueError, KeyError):
+                  pass
+          print('true' if want in found else 'false')" "$version")
+          echo "already=$already" >> "$GITHUB_OUTPUT"
+          if [ "$already" = "true" ]; then
+            echo "$crate $version is already on crates.io; nothing to publish"
+          else
+            echo "$crate $version is not on crates.io yet"
+          fi
+
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+        if: steps.state.outputs.already == 'false'
         id: auth
 
       # --locked: publish the dependency graph that was tested, not whatever the
       # index happens to offer at upload time.
-      - run: cargo publish --locked
+      - if: steps.state.outputs.already == 'false'
+        run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
   # ── Go module
