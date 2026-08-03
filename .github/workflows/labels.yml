@@ -1,0 +1,79 @@
+name: labels
+
+# The repository's labels: verified on a pull request, written on main.
+#
+# Labels are ordinarily edited in a web form, which means the set a repository
+# actually has drifts from the set anyone believes it has, silently, and a label
+# that does not exist is not an error anywhere — Dependabot and the issue
+# templates both just drop the ones they cannot find. So `.github/labels.json`
+# is the declaration and this job is the only writer.
+#
+# `verify` is the half that runs before merge. It needs no token and touches no
+# network: it proves the glob rules against stated cases, and it fails when any
+# other file under `.github` asks for a label no row declares — which is the
+# drop-it-silently bug, caught while it is still a diff. That is why the
+# Dependabot streams and the issue templates are in `paths`: they are the other
+# half of the contract, so editing one re-checks the whole set.
+#
+# `--prune` deletes a namespaced label that the file no longer declares, which is
+# how a renamed area stops lingering. It can only reach names inside a namespace
+# the file itself declares, so GitHub's bare defaults and any label a maintainer
+# invents by hand survive a run untouched.
+#
+# The two path lists are spelled out rather than shared through a YAML anchor,
+# because an anchor makes zizmor report that its analysis may be incomplete, and
+# a security linter that has to hedge is worth more than five saved lines.
+on:
+  pull_request:
+    paths:
+      - .github/labels.json
+      - .github/scripts/triage.py
+      - .github/workflows/labels.yml
+      - .github/dependabot.yml
+      - .github/ISSUE_TEMPLATE/**
+  push:
+    branches: [main]
+    paths:
+      - .github/labels.json
+      - .github/scripts/triage.py
+      - .github/workflows/labels.yml
+      - .github/dependabot.yml
+      - .github/ISSUE_TEMPLATE/**
+  workflow_dispatch:
+
+permissions: {}
+
+# Two pushes racing the same label set would interleave create and delete calls.
+concurrency:
+  group: labels-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # No token, no network, nothing written — safe to run a fork's own copy.
+      - run: python3 .github/scripts/triage.py verify
+
+  sync:
+    name: sync
+    runs-on: ubuntu-latest
+    # A pull request may only ask whether the config holds; main writes it.
+    if: github.event_name != 'pull_request'
+    needs: verify
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: python3 .github/scripts/triage.py sync --prune
+        env:
+          GH_TOKEN: ${{ github.token }}

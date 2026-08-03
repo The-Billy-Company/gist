@@ -1,0 +1,89 @@
+name: triage
+
+# What a pull request is, said in labels, from facts rather than from memory.
+#
+# Two jobs because they answer to different audiences. `label` writes what the
+# diff already proves — which areas moved, which languages, how much, and what
+# the title claims — so a reviewer can sort a list of pull requests without
+# opening any of them. `title` blocks, because the squash commit subject IS the
+# pull request title (see the repository's merge settings), and release-please
+# reads that history to decide the next version. An unconventional title is
+# therefore not a style nit; it is a release that silently does not happen.
+#
+# ── Why pull_request_target
+# Labeling requires `pull-requests: write`, and a `pull_request` run from a fork
+# gets a read-only token, so the whole feature would be dead for exactly the
+# contributors it is meant to serve. `pull_request_target` runs in the base
+# repository's context with a writable token, which is also why it is dangerous
+# — so nothing here ever touches the pull request's code. The checkout takes its
+# default ref, which under this trigger is the base branch, and the taxonomy and
+# script that run are therefore the reviewed ones on main. The pull request's
+# own content reaches this workflow only as data, through the API, never as
+# something executed: not a build, not a test, not a script, not an interpolated
+# string. Two further consequences worth stating rather than discovering: a
+# `branches:` filter keeps a stale copy of this file on an abandoned branch from
+# ever being the one that runs, and a pull request that edits this workflow is
+# checked by main's version of it, not its own.
+#
+# ── Dependabot labels its own pull requests
+# A run that Dependabot initiated gets a read-only token no matter which trigger
+# started it, because a compromised dependency must not be able to write to the
+# repository it just entered. So `label` declines those rather than failing on
+# every one of them, and the `labels:` key in `dependabot.yml` carries the same
+# taxonomy for its update streams — which is what that key is for. `title` still
+# runs there, since reading a title needs nothing, and it is how Dependabot's
+# configured commit prefixes stay honest.
+on:
+  # zizmor: ignore[dangerous-triggers] no PR code is checked out, built, or interpolated — see the note above
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+# Nothing is granted by default; each job asks for exactly what it writes.
+permissions: {}
+
+# A retitle or a force-push obsoletes the previous answer rather than racing it.
+concurrency:
+  group: triage-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: label
+    runs-on: ubuntu-latest
+    # Dependabot's own runs cannot hold a writable token; dependabot.yml labels
+    # those. Anything else, including a fork, is labeled here.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Nothing here pushes with the checkout credential, and leaving it in
+          # .git/config is how it ends up inside an uploaded artifact.
+          persist-credentials: false
+      # The pull request number arrives through the environment rather than
+      # inline, so no field of the event is ever spliced into a shell script.
+      - run: python3 .github/scripts/triage.py apply --pr "$PR"
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+
+  title:
+    name: conventional title
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      # The accepted types come from labels.json, which release-please's
+      # changelog sections are held to, so this check cannot drift into
+      # accepting a type the release tooling would then ignore.
+      - run: python3 .github/scripts/triage.py check --pr "$PR"
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
