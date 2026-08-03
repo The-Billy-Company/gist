@@ -35,8 +35,9 @@
     "── The tag cascades",
     "Merging the release PR tags `vX.Y.Z`, which is what `release.yml` waits",
     "for to publish the wheels. A tag pushed by GITHUB_TOKEN does NOT trigger",
-    "another workflow, so that hand-off only happens when the workflow runs",
-    "with RELEASE_PLEASE_TOKEN — see .github/workflows/release-please.yml."
+    "another workflow, so that hand-off only happens because release-please runs",
+    "as the `billy-company-release` GitHub App rather than as Actions — see",
+    ".github/workflows/release-please.yml."
   ],
 
   "release-type": "simple",

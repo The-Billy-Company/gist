@@ -13,12 +13,15 @@
 #    `towncrier build --version <the version the PR bumps to>` and push that
 #    onto the PR branch, so the tag and the notes land together.
 #
-# 2. A tag pushed with the default GITHUB_TOKEN does not start another workflow
-#    — GitHub's guard against recursive CI. With only GITHUB_TOKEN the release
-#    PR still works, but `release.yml` will not fire on the tag and the wheels
-#    have to be published by hand (`workflow_dispatch`). Set a repository secret
-#    RELEASE_PLEASE_TOKEN (a fine-grained PAT with contents + pull-requests
-#    write) and the hand-off happens on its own.
+# 2. This runs as a GitHub App, not as Actions, and it has to. Two independent
+#    walls make the default GITHUB_TOKEN useless here: the enterprise forbids the
+#    Actions identity from creating pull requests at all, and a tag GITHUB_TOKEN
+#    pushes does not start another workflow (GitHub's recursive-CI guard), so
+#    `release.yml` would never fire and the wheels would need publishing by hand.
+#    An installation token is a different actor and clears both. The App is
+#    `billy-company-release`; its id is the org variable RELEASE_APP_ID and its
+#    signing key the org secret RELEASE_APP_PRIVATE_KEY, shared by every repo in
+#    the ecosystem so there is one thing to rotate.
 name: release-please
 
 on:
@@ -40,10 +43,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write # Push the release branch and its version bumps.
-      pull-requests: write # Open and label the release PR.
-      issues: write # Comment on issues closed by the release.
+      # Deliberately no write here. Every write below is made with the App's
+      # installation token, which carries its own contents/pull-requests/issues
+      # grants; leaving GITHUB_TOKEN read-only keeps the Actions identity out of
+      # the release path entirely rather than granting it rights it cannot use.
+      contents: read
     steps:
+      # Exchange the App's signing key for an installation token scoped to this
+      # repo, valid one hour. Fails loudly if the App is not installed here.
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          # Narrow the token to the three grants release-please actually uses. A
+          # minted token otherwise inherits everything the installation holds, so
+          # without this a permission added to the App later would silently widen
+          # every release run.
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+
       # release-please reads the commit history through the GitHub API, so there
       # is nothing to check out and nothing to build.
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
@@ -51,4 +71,4 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           target-branch: main
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
