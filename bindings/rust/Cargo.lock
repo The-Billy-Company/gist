@@ -48,10 +48,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "gist"
+name = "gist-search"
 version = "1.0.0"
 dependencies = [
- "irregex",
+ "irgx",
  "serde",
  "serde_json",
  "tempfile",
@@ -75,7 +75,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "irregex"
+name = "irgx"
 version = "1.0.0"
 dependencies = [
  "serde",
