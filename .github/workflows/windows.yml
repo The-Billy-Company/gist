@@ -148,7 +148,7 @@ jobs:
       # step exists to exercise is not even compiled anywhere else; here they
       # are the arms that run.
       - name: zig build test
-        run: zig build test -Dtarget=$env:ZIG_TARGET -j1
+        run: zig build test "-Dtarget=$($env:ZIG_TARGET)" -j1
 
       # The artifacts an install ships — the CLI plus the staticlib and dynlib
       # the C ABI and the Python/Rust faces link against. The installed CLI is
@@ -157,7 +157,7 @@ jobs:
       # is a real and recurring shape (safety-checked arithmetic, reads of
       # `undefined`), so it gets built as it ships.
       - name: zig build (ReleaseFast)
-        run: zig build -Dtarget=$env:ZIG_TARGET -Doptimize=ReleaseFast -j1
+        run: zig build "-Dtarget=$($env:ZIG_TARGET)" -Doptimize=ReleaseFast -j1
 
       # The conformance gate that ports. It is self-oracling — the
       # index-accelerated answer is diffed against gist's own `--no-index` full
