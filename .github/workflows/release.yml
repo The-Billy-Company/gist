@@ -176,12 +176,12 @@ jobs:
   # The first version had to be published by hand with an API token; crates.io
   # requires a crate to exist before it will accept a publisher configuration.
   crates:
+    name: crates
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:
-      # The OIDC token crates.io exchanges for a short-lived registry token.
-      id-token: write
+      id-token: write # crates.io exchanges this OIDC token for a short-lived registry token.
     defaults:
       run:
         working-directory: bindings/rust
@@ -276,10 +276,11 @@ jobs:
   # Actions identity from the writes this needs, and the same App already signs
   # the release PR.
   go-module:
+    name: go-module
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: read # The tag is cut with the App token below, not with GITHUB_TOKEN.
     steps:
       - id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
