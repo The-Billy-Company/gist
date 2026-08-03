@@ -1,14 +1,25 @@
 name: triage
 
-# What a pull request is, said in labels, from facts rather than from memory.
+# What a pull request or an issue is, said in labels, from facts rather than from
+# memory.
 #
-# Two jobs because they answer to different audiences. `label` writes what the
+# Three jobs, because they answer to different audiences. `label` writes what the
 # diff already proves — which areas moved, which languages, how much, and what
 # the title claims — so a reviewer can sort a list of pull requests without
 # opening any of them. `title` blocks, because the squash commit subject IS the
 # pull request title (see the repository's merge settings), and release-please
 # reads that history to decide the next version. An unconventional title is
 # therefore not a style nit; it is a release that silently does not happen.
+#
+# ── Why an issue is labeled by a different rule
+# `sort` does the same job for issues, but it can ask far less: there is no diff,
+# so no area, language, or size is a fact about an issue. What is a fact is that
+# nobody has classified it yet, which is what `status/needs-triage` records, and
+# it comes off by itself as soon as a real label lands — hence the `labeled` and
+# `unlabeled` triggers. An issue title is prose far more often than it is a
+# conventional commit, so `sort` reads one when it parses and says nothing when it
+# does not. It never blocks: `title`'s grammar is for text about to become a
+# commit message, and holding a bug report to it would be hostile.
 #
 # ── Why pull_request_target
 # Labeling requires `pull-requests: write`, and a `pull_request` run from a fork
@@ -38,13 +49,19 @@ on:
   pull_request_target:
     branches: [main]
     types: [opened, reopened, synchronize, edited, ready_for_review]
+  # An issue carries no code, so this trigger has none of pull_request_target's
+  # hazard. A run started by this workflow's own token cannot start another, which
+  # is what keeps `labeled` from feeding itself.
+  issues:
+    types: [opened, reopened, edited, labeled, unlabeled]
 
 # Nothing is granted by default; each job asks for exactly what it writes.
 permissions: {}
 
-# A retitle or a force-push obsoletes the previous answer rather than racing it.
+# A retitle, a force-push, or a second label obsoletes the previous answer rather
+# than racing it. Whichever subject fired, exactly one of these numbers is set.
 concurrency:
-  group: triage-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  group: triage-${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
@@ -52,8 +69,13 @@ jobs:
     name: label
     runs-on: ubuntu-latest
     # Dependabot's own runs cannot hold a writable token; dependabot.yml labels
-    # those. Anything else, including a fork, is labeled here.
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
+    # those. Anything else, including a fork, is labeled here. The event guard is
+    # not decoration: on an issue event `github.event.pull_request` is null, and a
+    # null compared against a string in an Actions expression is unequal, so
+    # without it this job would run on every issue and fail for want of a number.
+    if: >-
+      github.event_name == 'pull_request_target'
+      && github.event.pull_request.user.login != 'dependabot[bot]'
     permissions:
       contents: read
       pull-requests: write
@@ -73,6 +95,7 @@ jobs:
   title:
     name: conventional title
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target'
     permissions:
       contents: read
       pull-requests: read
@@ -86,4 +109,20 @@ jobs:
       - run: python3 .github/scripts/triage.py check --pr "$PR"
         env:
           PR: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+
+  sort:
+    name: sort
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues'
+    permissions:
+      contents: read
+      issues: write # the whole job is putting labels onto the issue
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: python3 .github/scripts/triage.py apply --issue "$ISSUE"
+        env:
+          ISSUE: ${{ github.event.issue.number }}
           GH_TOKEN: ${{ github.token }}
