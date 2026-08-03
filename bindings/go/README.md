@@ -13,10 +13,22 @@ faces into a consumer that only wants search.
 go get github.com/The-Billy-Company/gist/bindings/go
 ```
 
-That is the whole story: the default build is **pure Go and needs no native
-artifact**. Every verb answers by running the installed `gist` binary, the
-transport `contract/surface.toml` calls authoritative, so a `CGO_ENABLED=0`
-static image can import this module unchanged.
+The module path is not itself importable — there is no package at its root.
+Import the one you want:
+
+```go
+import (
+    "github.com/The-Billy-Company/gist/bindings/go/exact"
+    "github.com/The-Billy-Company/gist/bindings/go/index"
+)
+```
+
+The default build is **pure Go and needs no native artifact**. Every verb
+answers by running the installed `gist` binary, the transport
+`contract/surface.toml` calls authoritative, so a `CGO_ENABLED=0` static image
+can import this module unchanged. That binary does have to be on `PATH` (or
+`$GIST_BIN`); [the repository](https://github.com/The-Billy-Company/gist) builds
+it with `zig build`.
 
 The in-process tier is an accelerator, and it is opt-in:
 
@@ -25,8 +37,9 @@ zig build                      # mints zig-out/{lib/libgist.dylib,include/gist.h
 go build -tags irgx_ffi ./...
 ```
 
-This module is nested, so its release tags carry the subdirectory prefix —
-`bindings/go/v0.1.0`, not `v0.1.0`.
+This module is nested, so the proxy resolves it by a subdirectory-prefixed tag —
+`bindings/go/v1.0.0`, not `v1.0.0`. `go get` handles that for you; it only
+matters if you are reading the tag list.
 
 ## Layout
 

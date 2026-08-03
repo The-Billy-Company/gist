@@ -13,6 +13,11 @@ The distribution is `gist-search` but the import stays `gist`. The plain `gist`
 name on PyPI belongs to an unrelated author, so installing under it would fetch
 a stranger's package; this is the same bs4 / PIL / cv2 split.
 
+This package is the bindings, not the engine: every verb answers by running the
+`gist` binary, so that has to be on `PATH` (or `$GIST_BIN`). Without it the
+first call raises `GistNotFoundError` rather than failing quietly. See
+[what it needs](#what-it-needs).
+
 ```python
 import gist
 
