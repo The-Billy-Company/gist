@@ -435,7 +435,10 @@ pub const Pair = struct {
     fn openWindows(io: std.Io) WaitError!Pair {
         var dir_buf: [portal.max_path]u8 = undefined;
         var path_buf: [portal.max_path]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, "{s}/gist-pair.{x}.{x}", .{
+        // Unlike Win32 file APIs, Winsock's AF_UNIX parser does not normalize
+        // forward slashes. Hand it the native separator or bind fails with
+        // WSAEINVAL before the pair exists.
+        const path = std.fmt.bufPrint(&path_buf, "{s}\\gist-pair.{x}.{x}", .{
             portal.scratchDir(&dir_buf),
             portal.processId(),
             seq.fetchAdd(1, .monotonic),
