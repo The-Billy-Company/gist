@@ -11,6 +11,13 @@ target/
 # a checked-in copy is a second README to keep in step with the first.
 bindings/rust/PROJECT_README.md
 
+# Go (bindings/go) — the cross-repo development override. A published go.mod
+# carries no `replace`, because Go ignores one in a dependency; a `go.work` is
+# the sanctioned way to point at a sibling checkout instead of the proxy, and it
+# is one developer's local wiring rather than a fact about the module.
+go.work
+go.work.sum
+
 # Python (bindings/python)
 __pycache__/
 *.py[cod]
