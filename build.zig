@@ -307,8 +307,11 @@ pub fn build(b: *std.Build) void {
     bg.shard(test_step, tests, .{});
     // The lab harness compiles against both the engine and the daemon, so a
     // product refactor can break it in a way `zig build` alone would not catch.
-    // (`stats.zig`'s verdict math is tested in the package that owns it.)
-    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = bench_mod })).step);
+    // Its memory-mapping and PMU instruments are POSIX-only; the Windows lane
+    // tests the shipped product and ABI, while their own package tests the
+    // verdict math.
+    if (target.result.os.tag != .windows)
+        test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = bench_mod })).step);
 
     const debug_tests = if (test_module == chassis) tests else b.addTest(.{
         .root_module = chassis,

@@ -579,7 +579,8 @@ pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
 
-    var it = std.process.Args.Iterator.init(init.minimal.args);
+    var it = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
+    defer it.deinit();
     _ = it.skip(); // argv[0]
     const mode = it.next() orelse "bench";
 

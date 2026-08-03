@@ -12,6 +12,7 @@
 //! package as `@import("gist")`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const engine = @import("irregex");
 
 const api = engine.api;
@@ -213,14 +214,10 @@ test {
     _ = @import("surface/cli/primer/shell.zig"); // `--generate complete-{bash,fish,powershell}`
     _ = @import("surface/cli/primer/zsh.zig"); // `--generate complete-zsh`: captioned groups, baked sets
 
-    // The daemon's two end-to-end suites stand or fall with its transport: both
-    // build a real `AF_UNIX` socketpair and poll it, which is the one thing a
-    // platform without `portal.resident_sessions` has no version of. Gated at the
-    // aggregator rather than skipped inside, because `socketpair`/`pollfd` are not
-    // merely absent on Windows — they are untyped, so *analyzing* the file is the
-    // error, and a runtime `SkipZigTest` never gets the chance to run. They return
-    // with the transport (rung 2) instead of needing a rewrite.
-    if (comptime portal.resident_sessions) {
+    // These two suites use POSIX socketpair/poll fixtures. Windows exercises its
+    // distinct resident transport end to end in the native workflow instead;
+    // merely analyzing these fixtures there fails before a test can skip.
+    if (comptime portal.resident_sessions and builtin.os.tag != .windows) {
         _ = @import("exec/session/daemon/client/client_test.zig"); // wedged-daemon → cold deadline (no hang)
         _ = @import("exec/session/daemon/serve/serve_test.zig"); // end-to-end daemon lifecycle + client round-trip
     }
