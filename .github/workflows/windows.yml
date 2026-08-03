@@ -338,10 +338,9 @@ jobs:
             & $gist index
             if ($LASTEXITCODE -ne 0) { throw "index exited $LASTEXITCODE" }
 
-            # GitHub's PowerShell host exposes a non-console stdin handle, so a
-            # pathless cold invocation correctly treats it as piped input. Name
-            # the CWD only for this oracle; warm probes stay rootless/eligible.
-            $cold = (& $gist 'NEEDLE_HERE' . -l --no-heading --no-index) -join "`n"
+            # Keep the oracle rootless too: `--no-index` forces cold while the
+            # shared stdin shape keeps path rendering byte-identical to warm.
+            $cold = (& $treeQuery 'NEEDLE_HERE' -l --no-index) -join "`n"
             if ($LASTEXITCODE -ne 0) { throw "cold reference walk exited $LASTEXITCODE" }
 
             $daemon = Start-Process -FilePath $gist -ArgumentList 'serve' -PassThru -WindowStyle Hidden
