@@ -15,6 +15,7 @@ into a no-op behind a green suite.
 from __future__ import annotations
 
 import functools
+import importlib.metadata
 import shutil
 import tomllib
 
@@ -123,6 +124,6 @@ def test_every_gist_verb_resolves_in_the_loaded_library() -> None:
 
 
 @pytest.mark.skipif(not _HAVE_BINARY, reason="no gist binary available")
-def test_engine_version_matches_contract() -> None:
-    """The driven binary is the engine this package mirrors, not some other build."""
-    assert engine.version() == substrate.ENGINE_VERSION
+def test_binary_version_matches_distribution() -> None:
+    """The driven binary and this package are the same gist release."""
+    assert engine.version() == importlib.metadata.version(_contract.PACKAGE_DIST)

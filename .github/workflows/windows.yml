@@ -103,7 +103,7 @@ jobs:
       - name: Provision Zig
         shell: pwsh
         run: |
-          $ver = '$env:ZIG_VERSION'
+          $ver = $env:ZIG_VERSION
           $floor = Select-String -Path build.zig.zon -Pattern '\.minimum_zig_version = "([^"]+)"'
           if (-not $floor) { throw 'no minimum_zig_version in build.zig.zon' }
           $declared = $floor.Matches[0].Groups[1].Value
@@ -125,7 +125,9 @@ jobs:
           # root rather than reconstructing its name — the convention has
           # already changed once (0.16 reordered it to arch-os-version).
           $into = Join-Path $env:RUNNER_TEMP 'zig'
-          Expand-Archive -LiteralPath $zip -DestinationPath $into -Force
+          New-Item -ItemType Directory -Force -Path $into | Out-Null
+          tar.exe -xf $zip -C $into
+          if ($LASTEXITCODE -ne 0) { throw "tar could not extract the Zig archive" }
           $root = (Get-ChildItem -Directory -LiteralPath $into | Select-Object -First 1).FullName
           if (-not $root) { throw "the archive extracted no directory into $into" }
           Add-Content -LiteralPath $env:GITHUB_PATH -Value $root
