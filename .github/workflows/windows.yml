@@ -312,6 +312,17 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $gist = Join-Path (Get-Location) 'zig-out\bin\gist.exe'
           if (-not (Test-Path -LiteralPath $gist)) { throw "no gist.exe at $gist" }
+          # The runner hosts pwsh with stdin attached to a regular file/pipe.
+          # That is correctly a stream search to gist, but this step needs the
+          # rootless TREE shape to reach the resident tier. A tiny cmd shim gives
+          # each warm probe Windows' NUL character device while preserving argv,
+          # stdout, stderr, and the native exit code.
+          $treeQuery = Join-Path $env:RUNNER_TEMP 'gist-tree-query.cmd'
+          @"
+          @echo off
+          "$gist" %* <NUL
+          exit /b %ERRORLEVEL%
+          "@ | Set-Content -LiteralPath $treeQuery -Encoding ascii
 
           $tree = Join-Path $env:RUNNER_TEMP 'warm-tier'
           Remove-Item -Recurse -Force -LiteralPath $tree -ErrorAction SilentlyContinue
@@ -350,7 +361,7 @@ jobs:
               # bytes to compare.
               $env:GIST_TRACE = 'warm'
               $trace = Join-Path $env:RUNNER_TEMP 'warm-trace.txt'
-              $warm = (& $gist 'NEEDLE_HERE' -l 2> $trace) -join "`n"
+              $warm = (& $treeQuery 'NEEDLE_HERE' -l 2> $trace) -join "`n"
               if ($LASTEXITCODE -ne 0) { throw "warm query exited $LASTEXITCODE" }
               $lens = (Get-Content -Raw -LiteralPath $trace)
               if ($lens -notmatch '\[warm\]') { throw "the daemon was resident but the query ran cold:`n$lens" }
@@ -365,20 +376,20 @@ jobs:
               # flushSync barrier the daemon crosses before dispatch, or this
               # answers the tree as it was.
               'NEEDLE_HERE' | Set-Content -LiteralPath (Join-Path $tree 'sub\c.txt')
-              $after = (& $gist 'NEEDLE_HERE' -l) -join "`n"
+              $after = (& $treeQuery 'NEEDLE_HERE' -l) -join "`n"
               if ($LASTEXITCODE -ne 0) { throw "post-write query exited $LASTEXITCODE" }
               if ($after -notmatch 'sub/c\.txt') { throw "a file written before the query is missing from it:`n$after" }
 
               # The reverse direction, which a create-only watcher would pass by
               # accident: the match must LEAVE when the bytes do.
               Remove-Item -LiteralPath (Join-Path $tree 'sub\c.txt') -Force
-              $gone = (& $gist 'NEEDLE_HERE' -l) -join "`n"
+              $gone = (& $treeQuery 'NEEDLE_HERE' -l) -join "`n"
               if ($gone -match 'sub/c\.txt') { throw "a deleted file survived in the warm answer:`n$gone" }
 
               # An in-place content edit changes no directory membership at all,
               # so it is the case a coarse watcher misses entirely.
               'nothing to find' | Set-Content -LiteralPath (Join-Path $tree 'sub\b.txt')
-              $edited = (& $gist 'NEEDLE_HERE' -l) -join "`n"
+              $edited = (& $treeQuery 'NEEDLE_HERE' -l) -join "`n"
               if ($edited -match 'sub/b\.txt') { throw "an in-place edit was not seen:`n$edited" }
               if ($edited -notmatch 'a\.txt') { throw "the edit answer lost an untouched match:`n$edited" }
             } finally {
