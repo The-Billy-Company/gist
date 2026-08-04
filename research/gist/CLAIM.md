@@ -94,7 +94,11 @@ Each arrow has one authority:
   file open only while live clocks prove their bytes current.
 - **The matcher owns truth.** Linear regex, fixed-string, or resource-capped
   PCRE2 executes against current bytes.
-- **Ranking owns presentation.** It reorders the complete verified hit set.
+- **Ranking owns presentation.** It scores every file in the complete verified
+  hit set — nothing is excluded from the fusion — then presents the best
+  `--rank[=N]` (default 20). Membership never shrinks from ranking; only the
+  view does. The same complete set stays one flag away, unranked, through
+  `-l`/full output.
 
 This separation is the core safety property. Gist can become faster by adding
 better proofs, never by weakening the answer.
@@ -130,8 +134,10 @@ Bounded context flags retain ripgrep semantics, while `--rank` fuses
 declaration geometry, lexical density, shape rarity, path depth, and
 authored-vs-generated or mirrored classification through weighted Reciprocal
 Rank Fusion. Generated code is deliberately weighted strongly enough to lose
-the lexical and declaration advantages its boilerplate creates. The complete
-set remains available.
+the lexical and declaration advantages its boilerplate creates. `--rank`
+answers with a bounded top-K view (default 20) tuned for what an agent should
+read first; the complete, unranked set remains available through the ordinary
+search verbs (`-l`, full output) that ranking never gates.
 
 ### Tools need a stable surface
 
@@ -202,7 +208,7 @@ and a compatibility surface mined against the live ripgrep oracle.
 
 ## 4. Evidence before adjectives
 
-The tracked differential replay passes all 409 scoreable ripgrep cases on
+The tracked differential replay passes all 411<!-- x-rgsuite-total --> scoreable ripgrep cases on
 each independent walk engine with zero in-scope failures. The committed
 certificate records statistically gated wins in all 12 registered cold query
 classes; its other layers audit port pressure, roofline headroom, candidate
