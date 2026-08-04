@@ -518,6 +518,30 @@ jobs:
           print(f"{len(modules)} modules import cleanly")
           PY
 
+  topology:
+    # `contract/gist.zone` declares this package's import topology - the zone
+    # stack, the sealed deep modules, the guest lists, the reach ceiling, the
+    # cycle ban - and until this job existed, nothing read it. Zig has no
+    # visibility rules between files inside a package and its analysis is lazy
+    # enough that a genuine import cycle still compiles, so every boundary the
+    # READMEs describe was convention with nothing standing behind it. A
+    # declaration nobody enforces is a comment.
+    #
+    # Pinned like every other tool in this file, and installed the same way, so
+    # this job's verdict moves when we move it. No Zig and no build: zoning reads
+    # the tree, not a build graph, so it is one of the fastest jobs here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      # The fix is in the code, or in a `variance ... because "..."` that says
+      # what would retire it - never in quietly widening the contract to match
+      # what the imports happen to do today.
+      - name: Import topology
+        run: uv run --no-project --with zoning==0.1.0 zoning verify
+
   version:
     name: version
     # One number lives in `build.zig.zon`; the publishing manifests that cannot
