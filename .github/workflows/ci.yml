@@ -530,6 +530,7 @@ jobs:
     # Pinned like every other tool in this file, and installed the same way, so
     # this job's verdict moves when we move it. No Zig and no build: zoning reads
     # the tree, not a build graph, so it is one of the fastest jobs here.
+    name: topology
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
