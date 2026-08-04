@@ -5,3 +5,10 @@
 
 # style: ruff formats the bench and tooling python
 3b7ef85ca4ce0e858cabf3d7fe6fba6d8eaf0c35
+
+# docs(irregex): retarget comments to kernel/corpus/surface layout
+# 84% of its replaced lines are one path becoming another. Three lines in the
+# tree still blame to it, which is the whole benefit - an audit of this history
+# found that authored work had already overwritten nearly everything the
+# rename and reflow sweeps touched, so there is little left here to hide.
+c74c4206594d79f5ce55ea796ee416523bfa47be
