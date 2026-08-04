@@ -220,6 +220,11 @@ schedule and is pinned as a dependency, never mirrored here - ask it with
 so run `towncrier build --version <the version the PR bumps to>` and push it
 onto the release branch - the tag and the notes should land together.
 
+This repository's tag, changelog, and publish steps are one instance of a
+model shared across every Billy-Company OSS package - see
+[RELEASING.md](https://github.com/The-Billy-Company/.github/blob/main/RELEASING.md)
+for the lifecycle this feeds into and why it's shaped this way.
+
 ## Commits and pull requests
 
 Commit subjects here are a conventional prefix plus a lowercase sentence that
