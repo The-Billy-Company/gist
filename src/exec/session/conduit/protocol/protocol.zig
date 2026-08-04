@@ -120,7 +120,7 @@ pub fn decodeReady(payload: []const u8) WireError!Ready {
 //
 // Every name a caller may bind to, gathered here from the chapters below. Zig
 // has no visibility rules between files in a package, so this list — plus the
-// `seal` on this directory in `contract/irregex.ward` — is what makes the
+// `seal` on this directory in `contract/gist.zone` — is what makes the
 // chapters internals rather than five more public modules.
 
 // The typed frame: opcode vocabulary, framing, and fd transport.

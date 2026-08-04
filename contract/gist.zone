@@ -6,7 +6,7 @@
 // through `@import("irregex")`; a file import cannot cross a package
 // boundary). The `relate` face and its CLI vocabulary moved into the
 // `relate` package; they import this chassis for the daemon and the answer
-// keep. Judged by `ward verify`.
+// keep. Judged by `zoning verify`.
 
 package gist {
     // root.zig is the chassis module's public face: it re-exports the cli,
@@ -17,7 +17,7 @@ package gist {
 }
 
 // Tiers, low to high. An import may only point back up the page.
-tiers {
+zones {
     // The `--generate` primer — man page and shell completions rendered from
     // the face's flag table. Shared face vocabulary (flags, manifest, grade,
     // reprise) moved with the relate face into the `relate` package; what

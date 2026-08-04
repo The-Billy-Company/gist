@@ -246,9 +246,9 @@ grows two spellings of the same bug.
 ## Architecture is machine-checked
 
 Zig has no visibility rules between files in a package, so every boundary the
-READMEs describe would be convention. [`contract/gist.ward`](contract/gist.ward)
+READMEs describe would be convention. [`contract/gist.zone`](contract/gist.zone)
 is the machine-checkable half. If your change needs a new import edge, edit the
-contract in the same commit and say why in the exception. Do not route around
+contract in the same commit and say why in the variance. Do not route around
 it.
 
 The flag surface has the same property: [`contract/surface.toml`](contract/surface.toml)
