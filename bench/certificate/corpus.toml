@@ -1,0 +1,72 @@
+# What gist is allowed to publish a certificate OVER.
+#
+# Read by `guard/publish.py` (vendored); enforced by
+# `guard/artifacts.py --public-safe`, which `mint/mint.sh` runs immediately
+# before it copies a bundle into `artifact/`. This file is per-package and
+# committed: what counts as a public corpus is a property of what gist measures,
+# not of the gate that checks it.
+#
+# WHY THIS FILE EXISTS. Every certificate minted before the repository split was
+# measured over a private monorepo, and said so in five places at once: a
+# manifest listing twenty thousand proprietary paths with sizes and hashes, a
+# `machine.json` naming that tree's roots and commit, and absolute `/Users/…`
+# invocations throughout the command log. The receipts were therefore gitignored,
+# and every gate that reads committed evidence has answered "pending
+# regeneration" ever since — the claims stayed in the README while the proof left
+# the repository. A corpus nobody outside can fetch is not just a privacy
+# problem; it is an unreproducible measurement. So the corpus is now declared,
+# not discovered, and a bundle over an undeclared tree fails the mint.
+
+# ── The Layer A dominance corpus ──────────────────────────────────────────────
+#
+# Synthetic and generated rather than a famous public tree, for one reason the
+# alternatives cannot satisfy: the 12 probe classes are Go-shaped, and their
+# floors encode *selectivity*, not just vocabulary. `literal-rare` (`pgxpool`)
+# exists to price what the trigram index buys when a needle is in a few files.
+# On the Linux kernel it matches nothing; on gist's own tree it matches nothing;
+# on a Go monorepo that happens to import pgx it matches, but no such tree is
+# pinnable at a tag we control. The generator is shaped to the probe registry and
+# its `selftest` fails if any class goes vacuous or if a selective class drifts
+# saturating — which is a stronger guarantee than any real tree offers, because a
+# real tree can silently stop exercising a class between two tags.
+#
+# The famous public trees are still used, for the jobs they are actually good at:
+# `bench/apparatus/corpora/fetch.sh` pins linux v6.10, cpython 3.13.0,
+# TypeScript 5.8.3, an OpenSubtitles slice, and the adversarial `torture` tree,
+# and `sweep.py` runs the byte-exact gist-vs-rg differential over all of them.
+# That is a correctness claim over real-world shapes; this is a timing claim over
+# a tree whose selectivity is known. Neither substitutes for the other.
+[corpus.gist-synthetic-go-v1]
+description = "16,000 deterministic Go-shaped files (~38 MiB), one seed, all 12 probe classes non-vacuous with pgxpool selective at ~1.6%"
+roots = ["."]
+allow_prefixes = ["pkg"]
+fetch = "python3 bench/conformance/targets/corpus.py <dir> --files 16000"
+sha256 = "bc43a9a536882b934f5972bcc02ded4dc682a5e0adec50e40af4de14b5a91527"
+
+# ── The self corpus ───────────────────────────────────────────────────────────
+#
+# gist searching its own checkout. Honest, tiny, and publishable, but it cannot
+# carry Layer A: `pgxpool` does not occur here, so `literal-rare` would measure
+# index and walk fixed cost while wearing the name of a selectivity class. Kept
+# declared because the lifecycle and footprint lanes legitimately measure it, and
+# a lane with no declared corpus cannot publish at all.
+[corpus.gist-self-v1]
+description = "the gist checkout itself — lifecycle, footprint, and index-size lanes only, never Layer A"
+roots = ["src", "bench", "bindings", "editor", "shell"]
+allow_prefixes = ["src/", "bench/", "bindings/", "editor/", "shell/"]
+fetch = "git clone https://github.com/The-Billy-Company/gist"
+
+# ── Never present in a published bundle ───────────────────────────────────────
+#
+# Absolute home paths are caught structurally by `publish.py` and need no entry
+# here. These are the substrings that would say "this was minted over the private
+# monorepo" even after the paths were made relative — the roots that tree has and
+# no public corpus does. A bundle carrying one is not redactable; re-mint it.
+[deny]
+substrings = [
+  "Billy-Company",
+  "services/backend",
+  "services/ai",
+  "clients/web",
+  "infra/pulumi",
+]

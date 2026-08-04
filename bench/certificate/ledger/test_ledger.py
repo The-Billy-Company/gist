@@ -1,16 +1,26 @@
 """Hermetic tests for the certificate mint ledger (ledger.py).
 
+VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+(`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
+
 Pins the four contracts the ledger exists to hold: a **dropped layer is loud**
-(the regression that used to surface far away as a documentation failure), the
-macro verdict is read from the *certificate* so a historical mint reconstructs
-as published, a **commit is provenance** that can be absent without consequence,
-and the rendered table lands column-aligned so a mint never leaves the tree
-formatter-dirty. Every certificate here is synthesized — no real bundle, no git,
-no benchmark tools.
+(the regression that used to surface far away as a documentation failure), a
+**moved headline is named with both sides** so a silent regression cannot hide
+behind a re-mint, a **commit is provenance** that can be absent without
+consequence, and the rendered table lands column-aligned so a mint never leaves
+the tree formatter-dirty. Every certificate here is synthesized — no real
+bundle, no git, no benchmark tools.
+
+Because this file is vendored, every case is driven from the package's own
+charter rather than from any one package's layers: the fixture builds its
+headers from the roster and the drop test removes whichever layer the roster
+happens to end with. How a specific headline is *scraped* is a per-package
+contract and is tested next to that package's `guard/profile.py`.
 """
 
 import io
 import json
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -19,38 +29,33 @@ from unittest import mock
 
 import ledger
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "guard"))
+from profile import CHARTER  # noqa: E402
+
+#: Any rostered layer will do for the drop test — what is under test is that a
+#: gap is reported, not which layer left. Taking the last one keeps the fixture
+#: honest when a package rosters only one.
+DROPPABLE = tuple(ledger.LAYERS)[-1]
+
 
 def _certificate(
     *,
     layers: tuple[str, ...] = tuple(ledger.LAYERS),
     files: int = 20435,
     mib: float = 199.9,
-    tally: tuple[int, int, int, int] = (12, 12, 0, 0),
-    crest: float | None = 8.4,
-    speedups: tuple[tuple[str, str], ...] = (("foo", "4.0x"), ("a|b", "9.0x")),
+    body: str = "",
 ) -> str:
     """Synthesize a certificate carrying exactly ``layers``.
 
     Headers come from the roster itself, so the fixture tracks the contract
-    instead of duplicating it: adding a layer to ``LAYERS`` widens these tests.
+    instead of duplicating it: adding a layer to the charter widens these tests.
+    ``body`` appends package-specific prose for a caller that needs a headline to
+    be scrapeable; the generic cases never do.
     """
     out = ["# Dominance-and-Fit Certificate", "", f"corpus: **{files}** files · {mib} MiB", ""]
     for name in layers:
         out += [f"## {ledger.LAYERS[name]} — section", ""]
-        if name == "A-macro":
-            classes, win, parity, loss = tally
-            out += [
-                f"gist vs ripgrep across {classes} classes: "
-                f"{win} win · {parity} parity · {loss} loss",
-                "",
-                "| class | pattern | speedup |",
-                "| --- | --- | --- |",
-                *(f"| c{i} | {pat} | {ratio} |" for i, (pat, ratio) in enumerate(speedups)),
-                "",
-            ]
-        if name == "E" and crest is not None:
-            out += [f"**{crest}× geomean end-to-end speedup**", ""]
-    return "\n".join(out) + "\n"
+    return "\n".join(out) + "\n" + body
 
 
 def _bundle(root: Path, *, text: str | None = None, machine: dict[str, object] | None = None):
@@ -62,31 +67,6 @@ def _bundle(root: Path, *, text: str | None = None, machine: dict[str, object] |
     return root
 
 
-class MacroParseTests(unittest.TestCase):
-    """The macro verdict comes from the certificate body, not a side-car CSV."""
-
-    def test_tally_is_read_from_the_summary_line(self) -> None:
-        macro = ledger._macro(_certificate(tally=(12, 10, 1, 1)))
-        assert (macro["classes"], macro["wins"], macro["parity"], macro["loss"]) == (12, 10, 1, 1)
-
-    def test_a_pattern_containing_a_pipe_does_not_shift_the_speedup_column(self) -> None:
-        """`a|b` splits the row, so the column is found by shape, not position.
-
-        4.0 and 9.0 must *both* land: their geomean is exactly 6.0, which a
-        dropped or misread alternation row cannot produce.
-        """
-        assert ledger._macro(_certificate())["rg_geomean"] == 6.0
-
-    def test_an_ambiguous_row_is_skipped_rather_than_guessed(self) -> None:
-        """Two ratio-shaped cells in one row is unreadable — it must not be averaged in."""
-        text = _certificate(speedups=(("foo", "4.0x"), ("9.0x", "9.0x")))
-        assert ledger._macro(text)["rg_geomean"] == 4.0
-
-    def test_a_certificate_without_a_macro_layer_reports_zeroes_not_a_crash(self) -> None:
-        macro = ledger._macro(_certificate(layers=("A-micro",)))
-        assert (macro["wins"], macro["rg_geomean"]) == (0, None)
-
-
 class ReadMintTests(unittest.TestCase):
     def test_a_complete_mint_carries_every_roster_layer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,17 +75,25 @@ class ReadMintTests(unittest.TestCase):
             assert mint.layers == tuple(ledger.LAYERS)
             assert mint.absent == ()
             assert (mint.corpus_files, mint.corpus_mib) == (20435, 199.9)
-            assert mint.crest_geomean == 8.4
             assert mint.platform == "darwin"
 
+    def test_a_headline_the_certificate_does_not_state_records_none_not_zero(self) -> None:
+        """A bare roster carries no numbers; recording 0 would read as a total loss."""
+        if not CHARTER.headlines:
+            self.skipTest(f"{CHARTER.package} declares no headline numbers")
+        with tempfile.TemporaryDirectory() as tmp:
+            mint = ledger.read_mint(_bundle(Path(tmp)))
+            assert mint is not None
+            assert all(mint.headline(h.key) is None for h in CHARTER.headlines)
+
     def test_a_dropped_layer_is_recorded_as_absent(self) -> None:
-        """The regression this ledger exists to catch: eight numbers improve, one layer vanishes."""
-        kept = tuple(n for n in ledger.LAYERS if n != "A-warm")
+        """The regression this ledger exists to catch: the numbers improve, one layer vanishes."""
+        kept = tuple(n for n in ledger.LAYERS if n != DROPPABLE)
         with tempfile.TemporaryDirectory() as tmp:
             mint = ledger.read_mint(_bundle(Path(tmp), text=_certificate(layers=kept)))
             assert mint is not None
-            assert mint.absent == ("A-warm",)
-            assert "A-warm" not in mint.layers
+            assert mint.absent == (DROPPABLE,)
+            assert DROPPABLE not in mint.layers
 
     def test_a_missing_certificate_is_none_not_an_exception(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -150,6 +138,9 @@ class CommitIsProvenanceTests(unittest.TestCase):
 
 
 class DeltaTests(unittest.TestCase):
+    #: A baseline value per headline, distinct so a swapped key is visible.
+    BASELINE = {spec.key: float(i + 2) for i, spec in enumerate(CHARTER.headlines)}
+
     def _mint(self, **over) -> ledger.Mint:
         base = dict(
             recorded="2026-07-24T00:00:00Z",
@@ -160,27 +151,52 @@ class DeltaTests(unittest.TestCase):
             corpus_files=20435,
             layers=tuple(ledger.LAYERS),
             absent=(),
-            wins=12,
-            rg_geomean=6.0,
-            crest_geomean=8.4,
+            headlines=dict(self.BASELINE),
         )
         return ledger.Mint(**(base | over))
 
     def test_a_dropped_layer_shouts(self) -> None:
-        kept = tuple(n for n in ledger.LAYERS if n != "A-warm")
-        changes = ledger.delta(self._mint(layers=kept, absent=("A-warm",)), self._mint())
-        assert any("LAYERS DROPPED: A-warm" in c for c in changes)
+        kept = tuple(n for n in ledger.LAYERS if n != DROPPABLE)
+        changes = ledger.delta(self._mint(layers=kept, absent=(DROPPABLE,)), self._mint())
+        assert any(f"LAYERS DROPPED: {DROPPABLE}" in c for c in changes)
 
     def test_a_regained_layer_is_reported_calmly(self) -> None:
-        kept = tuple(n for n in ledger.LAYERS if n != "A-warm")
-        changes = ledger.delta(self._mint(), self._mint(layers=kept, absent=("A-warm",)))
-        assert any("layers added: A-warm" in c for c in changes)
+        kept = tuple(n for n in ledger.LAYERS if n != DROPPABLE)
+        changes = ledger.delta(self._mint(), self._mint(layers=kept, absent=(DROPPABLE,)))
+        assert any(f"layers added: {DROPPABLE}" in c for c in changes)
         assert not any("DROPPED" in c for c in changes)
 
     def test_moved_numbers_are_named_with_both_sides(self) -> None:
-        changes = ledger.delta(self._mint(rg_geomean=8.4, corpus_files=20400), self._mint())
-        assert "cold vs rg geomean 6.0 -> 8.4" in changes
+        if not CHARTER.headlines:
+            self.skipTest(f"{CHARTER.package} declares no headline numbers")
+        spec = CHARTER.headlines[0]
+        was = self.BASELINE[spec.key]
+        moved = self._mint(
+            corpus_files=20400, headlines=dict(self.BASELINE) | {spec.key: was + 1.0}
+        )
+        changes = ledger.delta(moved, self._mint())
+        assert any(f"{spec.column} " in c and f"{was:g} -> {was + 1:g}" in c for c in changes)
         assert "corpus 20435 -> 20400 files" in changes
+
+    def test_a_direction_is_reported_as_improvement_or_regression_not_a_bare_delta(self) -> None:
+        """A number moving the wrong way must SAY so — a bare arrow reads as neutral."""
+        if not CHARTER.headlines:
+            self.skipTest(f"{CHARTER.package} declares no headline numbers")
+        spec = CHARTER.headlines[0]
+        worse = self.BASELINE[spec.key] + (-1.0 if spec.rising else 1.0)
+        changes = ledger.delta(
+            self._mint(headlines=dict(self.BASELINE) | {spec.key: worse}), self._mint()
+        )
+        assert any("REGRESSED" in c for c in changes), changes
+
+    def test_a_headline_that_stopped_being_claimed_is_not_a_regression_to_zero(self) -> None:
+        """Dropping a claim and losing at it are different events with different fixes."""
+        if not CHARTER.headlines:
+            self.skipTest(f"{CHARTER.package} declares no headline numbers")
+        spec = CHARTER.headlines[0]
+        gone = {k: v for k, v in self.BASELINE.items() if k != spec.key}
+        changes = ledger.delta(self._mint(headlines=gone), self._mint())
+        assert any("NO LONGER CLAIMED" in c for c in changes), changes
 
     def test_the_first_mint_is_not_a_regression(self) -> None:
         assert ledger.delta(self._mint(), None) == ["first recorded mint for this platform"]
@@ -263,19 +279,19 @@ class VerifyExitTests(unittest.TestCase):
 
     def test_a_recorded_but_incomplete_mint_passes_by_default(self) -> None:
         """`record` already cleared the drift; a layer gap has a different owner and remedy."""
-        kept = tuple(n for n in ledger.LAYERS if n != "A-warm")
+        kept = tuple(n for n in ledger.LAYERS if n != DROPPABLE)
         with tempfile.TemporaryDirectory() as tmp:
             code = self._run(Path(tmp), ["verify"], layers=kept, record=True)
         assert code == 0
 
     def test_the_same_incomplete_mint_fails_when_completeness_is_demanded(self) -> None:
-        kept = tuple(n for n in ledger.LAYERS if n != "A-warm")
+        kept = tuple(n for n in ledger.LAYERS if n != DROPPABLE)
         with tempfile.TemporaryDirectory() as tmp:
             code = self._run(Path(tmp), ["verify", "--require-layers"], layers=kept, record=True)
         assert code == 1
 
     def test_status_never_fails_on_either_condition(self) -> None:
-        kept = tuple(n for n in ledger.LAYERS if n != "A-warm")
+        kept = tuple(n for n in ledger.LAYERS if n != DROPPABLE)
         with tempfile.TemporaryDirectory() as tmp:
             code = self._run(Path(tmp), ["status"], layers=kept, record=False)
         assert code == 0

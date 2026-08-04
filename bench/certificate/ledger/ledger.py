@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
 """Mint ledger — the certificate's history, so a re-mint is never silent.
 
-The Dominance-and-Fit Certificate is a *rewritten* artifact: ``zig build certify``
-regenerates the whole file, and each of Layers B–G is spliced back afterward by
-its own reporter. That design is honest per-mint but amnesiac across mints —
-nothing in the tree remembered what the previous certificate said, so a re-mint
-that improved eight numbers and silently dropped a whole layer looked identical
-to a clean one. Documentation pinned to those numbers then failed far away from
-the cause, and the only way to reconstruct what happened was to pickaxe git.
+VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+(`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`). What this
+package certifies and which numbers are worth watching come from its own
+``guard/profile.py`` charter; nothing below names a layer or a metric.
+
+A certificate is a *rewritten* artifact: the mint regenerates the whole file and
+each layer is spliced back afterward by its own reporter. That design is honest
+per-mint but amnesiac across mints — nothing in the tree remembered what the
+previous certificate said, so a re-mint that improved eight numbers and silently
+dropped a whole layer looked identical to a clean one. Documentation pinned to
+those numbers then failed far away from the cause, and the only way to
+reconstruct what happened was to pickaxe git.
 
 This ledger is that memory. Every mint appends one row recording what the
-certificate *claimed* — corpus, the layers actually present, the cold verdict
-tally and geomean over ripgrep, the crest speedup — keyed by a content digest of
-``CERTIFICATE.md``. Two questions become cheap:
+certificate *claimed* — corpus, the layers actually present, and each headline
+number the charter declares — keyed by a content digest of ``CERTIFICATE.md``.
+Two questions become cheap:
 
   * "did the certificate change?"  -> ``verify`` (fail-closed; a certificate on
     disk that no row describes is unrecorded drift, and it names the delta)
@@ -49,35 +54,33 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import math
 import re
 import subprocess
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict
 
-# The layers a complete mint carries, in certificate order, keyed by the header
-# substring that proves each one was spliced. A layer absent from this roster's
-# match is a layer the mint dropped — the regression this ledger exists to catch.
-# The roster is shared with the reproducibility gate and the shell completeness
-# check, so adding a layer is one row there rather than three copies here.
+# What this package certifies — the layers a complete mint carries, keyed by the
+# header substring that proves each was spliced, and the headline numbers worth
+# watching across mints. A layer absent from the roster's match is a layer the
+# mint dropped: the regression this ledger exists to catch. The charter is shared
+# with the reproducibility gate and the shell completeness check, so adding a
+# layer is one row there rather than three copies here.
 sys.path.insert(
     0, str(Path(__file__).resolve().parent.parent / "guard")
-)  # LAYERS roster lives in the sibling guard/
-from layers import LAYERS
+)  # the package's charter lives in the sibling guard/
+from profile import CHARTER
+
+LAYERS = CHARTER.probes
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[2]  # ledger → certificate → bench → package root
+KERNEL = HERE.parents[2]  # ledger → certificate → bench → package root
 LEDGER = HERE / "ledger.jsonl"
 RENDER = HERE / "LEDGER.md"
 CERTIFICATE = "CERTIFICATE.md"
 
 CORPUS_RE = re.compile(r"corpus:?\s+\*{0,2}(\d+)\*{0,2} files · ([\d.]+) MiB")
-CREST_RE = re.compile(r"\*\*([\d.]+)× geomean end-to-end speedup\*\*")
-TALLY_RE = re.compile(r"across (\d+) classes: (\d+) win · (\d+) parity · (\d+) loss")
-SPEEDUP_RE = re.compile(r"^([\d.]+)x$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,12 +96,10 @@ class Mint:
     corpus_mib: float = 0.0
     layers: tuple[str, ...] = ()
     absent: tuple[str, ...] = ()
-    classes: int = 0
-    wins: int = 0
-    parity: int = 0
-    loss: int = 0
-    rg_geomean: float | None = None
-    crest_geomean: float | None = None
+    #: This mint's headline numbers, keyed by ``Headline.key`` from the package
+    #: charter. A key that is absent or ``None`` means the mint did not make that
+    #: claim — never that the claim was zero.
+    headlines: dict[str, float | None] = field(default_factory=dict)
     commit: str | None = None  # provenance only — never gated on
     note: str = ""
 
@@ -106,52 +107,9 @@ class Mint:
     def short(self) -> str:
         return self.digest[:12]
 
-
-def _geomean(values: list[float]) -> float | None:
-    usable = [v for v in values if v > 0]
-    return math.exp(sum(map(math.log, usable)) / len(usable)) if usable else None
-
-
-class _Macro(TypedDict):
-    classes: int
-    wins: int
-    parity: int
-    loss: int
-    rg_geomean: float | None
-
-
-def _macro(text: str) -> _Macro:
-    """Cold-race verdict tally + geomean speedup over ripgrep, read from the certificate.
-
-    Parsed from the document rather than the side-car CSV so a historical mint
-    reconstructs exactly as it was published — the certificate is the artifact
-    under version control; the CSVs on disk only ever describe the latest run.
-    """
-    tally = TALLY_RE.search(text)
-    lines, section = text.splitlines(), []
-    for i, line in enumerate(lines):
-        if line.startswith("## ") and LAYERS["A-macro"] in line:
-            rest = lines[i + 1 :]
-            end = next((j for j, ln in enumerate(rest) if ln.startswith("## ")), len(rest))
-            section = rest[:end]
-            break
-    # The speedup column is positional, but a pattern containing `|` (the literal
-    # alternation class) shifts it — so take the one cell shaped like a ratio.
-    speedups = []
-    for row in section:
-        if not row.startswith("|"):
-            continue
-        ratios = [m.group(1) for cell in row.split("|") if (m := SPEEDUP_RE.match(cell.strip()))]
-        if len(ratios) == 1:
-            speedups.append(float(ratios[0]))
-    geo = _geomean(speedups)
-    return {
-        "classes": int(tally.group(1)) if tally else 0,
-        "wins": int(tally.group(2)) if tally else 0,
-        "parity": int(tally.group(3)) if tally else 0,
-        "loss": int(tally.group(4)) if tally else 0,
-        "rg_geomean": round(geo, 2) if geo else None,
-    }
+    def headline(self, key: str) -> float | None:
+        """This mint's value for one headline, or None when it did not claim it."""
+        return self.headlines.get(key)
 
 
 def read_mint(bundle: Path, *, note: str = "", text: str | None = None) -> Mint | None:
@@ -180,29 +138,22 @@ def read_mint(bundle: Path, *, note: str = "", text: str | None = None) -> Mint 
     headers = [ln for ln in text.splitlines() if ln.startswith("#")]
     present = tuple(name for name, needle in LAYERS.items() if any(needle in h for h in headers))
     corpus = CORPUS_RE.search(text)
-    crest = CREST_RE.search(text)
     os_field = str(machine.get("os", "")).strip()
     commit = str(machine.get("git_commit", "")).strip() or None
-    macro = _macro(text)
 
     return Mint(
         recorded=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         platform=os_field.split()[0].lower() if os_field else "unknown",
         machine=str(machine.get("cpu_model", "")) or "unknown",
-        bundle=str(bundle.relative_to(REPO) if bundle.is_relative_to(REPO) else bundle),
+        bundle=str(bundle.relative_to(KERNEL) if bundle.is_relative_to(KERNEL) else bundle),
         digest=hashlib.sha256(text.encode()).hexdigest(),
         corpus_files=int(corpus.group(1)) if corpus else 0,
         corpus_mib=float(corpus.group(2)) if corpus else 0.0,
         layers=present,
         absent=tuple(name for name in LAYERS if name not in present),
-        crest_geomean=float(crest.group(1)) if crest else None,
+        headlines=CHARTER.measure(bundle, text),
         commit=commit,
         note=note,
-        classes=macro["classes"],
-        wins=macro["wins"],
-        parity=macro["parity"],
-        loss=macro["loss"],
-        rg_geomean=macro["rg_geomean"],
     )
 
 
@@ -252,6 +203,13 @@ def _table(header: list[str], rows: list[list[str]]) -> list[str]:
     return [fit(header), fit(["-" * w for w in width]), *map(fit, rows)]
 
 
+def _cell(value: float | None, unit: str) -> str:
+    """One headline as a table cell — an em dash where a mint made no such claim."""
+    if value is None:
+        return "—"
+    return f"{value:g}{unit}"
+
+
 def render(mints: list[Mint] | None = None) -> None:
     """Regenerate the human look-back table from the machine record."""
     mints = load() if mints is None else mints
@@ -265,15 +223,21 @@ def render(mints: list[Mint] | None = None) -> None:
         "> number back to a tree; nothing gates on it.",
         "",
     ]
-    header = ["recorded", "platform", "corpus", "cold vs rg", "crest", "layers", "absent", "commit"]
+    header = [
+        "recorded",
+        "platform",
+        "corpus",
+        *(h.column for h in CHARTER.headlines),
+        "layers",
+        "absent",
+        "commit",
+    ]
     rows = [
         [
             m.recorded,
             m.platform,
             f"{m.corpus_files} files · {m.corpus_mib} MiB" if m.corpus_files else "—",
-            f"{m.wins}W/{m.parity}P/{m.loss}L"
-            + (f" · {m.rg_geomean}× geo" if m.rg_geomean else ""),
-            f"{m.crest_geomean}×" if m.crest_geomean else "—",
+            *(_cell(m.headline(h.key), h.unit) for h in CHARTER.headlines),
             " ".join(m.layers) or "—",
             " ".join(m.absent) or "none",
             m.commit[:12] if m.commit else "—",
@@ -297,18 +261,19 @@ def delta(current: Mint, previous: Mint | None) -> list[str]:
         changes.append(f"layers added: {', '.join(gained)}")
     if current.corpus_files != previous.corpus_files:
         changes.append(f"corpus {previous.corpus_files} -> {current.corpus_files} files")
-    for label, now, before in (
-        ("cold vs rg geomean", current.rg_geomean, previous.rg_geomean),
-        ("crest geomean", current.crest_geomean, previous.crest_geomean),
-    ):
-        if now != before:
-            changes.append(f"{label} {before} -> {now}")
-    verdicts = (current.wins, current.parity, current.loss)
-    if verdicts != (previous.wins, previous.parity, previous.loss):
-        changes.append(
-            f"verdicts {previous.wins}W/{previous.parity}P/{previous.loss}L -> "
-            f"{verdicts[0]}W/{verdicts[1]}P/{verdicts[2]}L"
-        )
+    for spec in CHARTER.headlines:
+        now, before = current.headline(spec.key), previous.headline(spec.key)
+        if now == before:
+            continue
+        # A number that vanished is not a number that got worse; say which.
+        if now is None:
+            changes.append(f"{spec.column} NO LONGER CLAIMED (was {before:g}{spec.unit})")
+        elif before is None:
+            changes.append(f"{spec.column} now claimed at {now:g}{spec.unit}")
+        else:
+            improved = (now > before) == spec.rising
+            way = "improved" if improved else "REGRESSED"
+            changes.append(f"{spec.column} {way} {before:g} -> {now:g}{spec.unit}")
     return changes or ["content changed, headline numbers identical"]
 
 
@@ -356,13 +321,13 @@ def _print_survey(report: list[dict[str, object]]) -> None:
 
 def backfill(root: Path, limit: int) -> int:
     """Seed the ledger from the certificate's git history (commit = date + reference)."""
-    rel = f"{root.relative_to(REPO)}/{CERTIFICATE}" if root.is_relative_to(REPO) else None
+    rel = f"{root.relative_to(KERNEL)}/{CERTIFICATE}" if root.is_relative_to(KERNEL) else None
     if rel is None:
         print("backfill needs a bundle inside the repo", file=sys.stderr)
         return 1
     try:
         log = subprocess.check_output(
-            ["git", "-C", str(REPO), "log", f"-{limit}", "--format=%H %cI", "--", rel],
+            ["git", "-C", str(KERNEL), "log", f"-{limit}", "--format=%H %cI", "--", rel],
             text=True,
             stderr=subprocess.DEVNULL,
         )
@@ -377,7 +342,7 @@ def backfill(root: Path, limit: int) -> int:
         sha, _, when = line.partition(" ")
         try:
             text = subprocess.check_output(
-                ["git", "-C", str(REPO), "show", f"{sha}:{rel}"],
+                ["git", "-C", str(KERNEL), "show", f"{sha}:{rel}"],
                 text=True,
                 stderr=subprocess.DEVNULL,
             )
@@ -403,7 +368,7 @@ def backfill(root: Path, limit: int) -> int:
             f"  + {recovered.recorded} {recovered.short} layers={' '.join(recovered.layers) or '—'}"
         )
     save(mints)
-    print(f"backfilled {added} mint(s) from git history -> {LEDGER.relative_to(REPO)}")
+    print(f"backfilled {added} mint(s) from git history -> {LEDGER.relative_to(KERNEL)}")
     return 0
 
 
@@ -459,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         if added:
             save(mints)
-            print(f"recorded {len(added)} mint(s) -> {LEDGER.relative_to(REPO)}")
+            print(f"recorded {len(added)} mint(s) -> {LEDGER.relative_to(KERNEL)}")
         return 0
 
     if verb in {"verify", "status"}:
@@ -506,11 +471,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps([asdict(m) for m in reversed(mints)], indent=2))
             return 0
         for m in reversed(mints):
+            numbers = "  ".join(
+                f"{h.column} {_cell(m.headline(h.key), h.unit)}" for h in CHARTER.headlines
+            )
             print(
                 f"  {m.recorded}  {m.platform:<8} {m.short}  "
-                f"{m.corpus_files} files  {m.wins}W/{m.parity}P/{m.loss}L  "
-                f"rg {f'{m.rg_geomean}×' if m.rg_geomean else '—':<7} "
-                f"crest {f'{m.crest_geomean}×' if m.crest_geomean else '—':<6} "
+                f"{m.corpus_files} files  {numbers}  "
                 f"absent: {' '.join(m.absent) or 'none'}"
             )
         return 0
@@ -532,7 +498,7 @@ def main(argv: list[str] | None = None) -> int:
         return backfill(root, args.limit)
 
     render()
-    print(f"rendered {RENDER.relative_to(REPO)}")
+    print(f"rendered {RENDER.relative_to(KERNEL)}")
     return 0
 
 

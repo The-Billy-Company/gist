@@ -48,17 +48,17 @@ them first).
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[2]  # guard → certificate → bench → package root
+KERNEL = HERE.parents[2]  # guard → certificate → bench → package root
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from artifacts import check_artifacts  # noqa: E402
+from profile import CHARTER  # noqa: E402
 
 # Platform token (first word of machine.json ``os``, lowered) -> human label.
 # The release requires a fresh, valid certificate for each of these.
@@ -106,29 +106,29 @@ def discover_bundles(root: Path) -> dict[str, Path]:
 
 
 def speeds_summary(bundle: Path) -> str:
-    """One-line cold-race verdict tally vs ripgrep, read from certify_macro.csv.
+    """This bundle's headline numbers on one line, as the package's charter defines them.
 
-    This is the "current benchmark speeds" the release attaches — surfaced in the
-    gate log so a human sees the numbers on each machine, not just a green check.
+    This is the "current benchmark numbers" the release attaches — surfaced in
+    the gate log so a human sees what each machine actually measured, not just a
+    green check. Read through the same charter hook the ledger uses, so the
+    release note and the recorded history can never disagree.
     """
-    macro = bundle / "certify_macro.csv"
-    if not macro.is_file():
-        return "speeds unavailable (no certify_macro.csv)"
-    tally = {"win": 0, "parity": 0, "loss": 0}
-    classes: set[str] = set()
+    certificate = bundle / "CERTIFICATE.md"
+    if not certificate.is_file():
+        return "numbers unavailable (no CERTIFICATE.md)"
+    if not CHARTER.headlines:
+        return f"{CHARTER.package} tracks no headline number"
     try:
-        with macro.open(newline="") as source:
-            for row in csv.DictReader(source, delimiter="\t"):
-                classes.add(row.get("class", ""))
-                if row.get("tool") == "rg":
-                    verdict = row.get("verdict", "")
-                    if verdict in tally:
-                        tally[verdict] += 1
-    except (OSError, csv.Error) as error:
-        return f"speeds unreadable ({error})"
+        measured = CHARTER.measure(bundle, certificate.read_text(errors="replace"))
+    except OSError as error:
+        return f"numbers unreadable ({error})"
     return (
-        f"{tally['win']} win / {tally['parity']} parity / {tally['loss']} loss "
-        f"vs rg across {len(classes)} classes"
+        " / ".join(
+            f"{value:g}{spec.unit} {spec.column}"
+            for spec in CHARTER.headlines
+            if (value := measured.get(spec.key)) is not None
+        )
+        or "numbers unavailable (this mint claimed none)"
     )
 
 
@@ -156,7 +156,7 @@ def verify_release(
             ok = False
             rows.append(row)
             continue
-        row["dir"] = str(bundle.relative_to(REPO) if bundle.is_relative_to(REPO) else bundle)
+        row["dir"] = str(bundle.relative_to(KERNEL) if bundle.is_relative_to(KERNEL) else bundle)
         problems = check_artifacts(bundle)
         if problems == ["__ABSENT__"]:
             problems = [f"{label} bundle is absent or pending regeneration"]

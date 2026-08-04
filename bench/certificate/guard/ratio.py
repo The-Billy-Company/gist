@@ -39,7 +39,6 @@ HERE = Path(__file__).resolve().parent
 ARTIFACT = HERE.parent / "artifact"
 BASELINE = HERE / "ratio_baseline.json"
 KERNEL = HERE.parents[2]  # guard → certificate → bench → package root
-REPO = KERNEL
 MACRO = ARTIFACT / "certify_macro.csv"
 COMPETE = HERE.parents[1] / "dominance" / "races" / "field.sh"
 
@@ -173,7 +172,7 @@ def _hf_min_ms(cmd: str, out_json: Path, *, warmup: int, runs: int) -> float:
         check=False,
         capture_output=True,
         text=True,
-        cwd=str(REPO),
+        cwd=str(KERNEL),
     )
     if proc.returncode != 0 or not out_json.is_file():
         raise SystemExit(
