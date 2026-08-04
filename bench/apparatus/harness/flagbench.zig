@@ -35,13 +35,14 @@
 
 const std = @import("std");
 const gist = @import("irregex");
-const simd = gist.simd;
+const simd = gist.scan.simd;
 const Meter = @import("pmu").Meter;
 
 const Regex = gist.regex.Regex;
-const Matcher = gist.matcher.Matcher;
-const Emitter = gist.emit.Emitter;
-const json = gist.emit_json;
+const Matcher = gist.regex.ladder.Matcher;
+const captures = gist.regex.captures;
+const Emitter = gist.emit.output.Emitter;
+const json = gist.emit.json;
 const Opts = gist.argv.Opts;
 
 const corpus_mod = gist.corpus;
@@ -198,7 +199,7 @@ fn profileLineNum(gpa: std.mem.Allocator, io: std.Io, meter: *Meter, corpus: *co
     var wbuf: [24]u8 = undefined;
     for (edges) |v| {
         const f = try std.fmt.bufPrint(&fbuf, "{d}", .{v});
-        const w = gist.emit.writeDecimal(&wbuf, v);
+        const w = gist.emit.output.writeDecimal(&wbuf, v);
         if (!std.mem.eql(u8, f, w)) std.debug.panic("writeDecimal != fmt for {d}: '{s}' vs '{s}'", .{ v, f, w });
     }
 
@@ -218,7 +219,7 @@ fn profileLineNum(gpa: std.mem.Allocator, io: std.Io, meter: *Meter, corpus: *co
     // Byte-identity across the full sample, then time each path.
     for (nums) |v| {
         const f = try std.fmt.bufPrint(&fbuf, "{d}", .{v});
-        const w = gist.emit.writeDecimal(&wbuf, v);
+        const w = gist.emit.output.writeDecimal(&wbuf, v);
         if (!std.mem.eql(u8, f, w)) std.debug.panic("writeDecimal != fmt for {d}", .{v});
     }
 
@@ -237,7 +238,7 @@ fn profileLineNum(gpa: std.mem.Allocator, io: std.Io, meter: *Meter, corpus: *co
     c0 = meter.counters();
     acc = 0;
     for (nums) |v| {
-        const w = gist.emit.writeDecimal(&wbuf, v);
+        const w = gist.emit.output.writeDecimal(&wbuf, v);
         acc +%= w.len +% wbuf[0];
     }
     c1 = meter.counters();
@@ -296,7 +297,7 @@ fn refLineHits(a: std.mem.Allocator, m: *const Matcher, lines: []const []const u
 /// and a per-file arena reset bounding the render buffer exactly as the parallel
 /// engine's per-file scratch does. `sim`/`caps` come from a STABLE allocator —
 /// never the reset arena, whose memory the next file reclaims.
-fn emitBest(io: std.Io, meter: *Meter, work: *std.heap.ArenaAllocator, m: *const Matcher, o: Opts, sim: *Matcher.Sim, caps: ?*gist.captures.Caps, per: []const []const []const u8, corpus: *const Corpus, reps: usize, out_bytes: *u64, files_with: *usize) Sample {
+fn emitBest(io: std.Io, meter: *Meter, work: *std.heap.ArenaAllocator, m: *const Matcher, o: Opts, sim: *Matcher.Sim, caps: ?*captures.Caps, per: []const []const []const u8, corpus: *const Corpus, reps: usize, out_bytes: *u64, files_with: *usize) Sample {
     const a = work.allocator();
     const gate: ?simd.Gate = if (m.required().len > 0) .of(m.required()) else null;
     var s = Sample{ .ns = std.math.maxInt(u64), .cycles = 0, .has_pmu = false, .bytes = corpus.bytes };
@@ -454,7 +455,7 @@ fn profileReplace(gpa: std.mem.Allocator, io: std.Io, meter: *Meter, corpus: *co
     for (emit_needles) |ndl| {
         var m = Matcher{ .linear = Regex.compile(gpa, ndl) catch continue };
         defer m.deinit();
-        var caps = gist.captures.Caps{ .linear = gist.captures.Captures.compile(gpa, ndl, .{}) catch continue };
+        var caps = captures.Caps{ .linear = captures.Captures.compile(gpa, ndl, .{}) catch continue };
         defer caps.deinit();
         var sim = try Matcher.Sim.init(gpa, &m);
         defer sim.deinit();

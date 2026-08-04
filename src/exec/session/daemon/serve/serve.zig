@@ -63,7 +63,7 @@ const corpus = @import("irregex").corpus;
 const frame_mod = @import("irregex").inner.corpus.frame;
 const fault = @import("irregex").fault;
 const portal = @import("irregex").portal;
-const home = @import("irregex").home;
+const home = @import("irregex").index.home;
 const net = std.Io.net;
 const Dir = std.Io.Dir;
 

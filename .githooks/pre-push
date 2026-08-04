@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly zero=0000000000000000000000000000000000000000
+readonly remote_name="${1:-origin}"
+
+base_for() {
+  local local_sha=$1 candidate
+
+  for candidate in \
+    "$(git symbolic-ref --quiet "refs/remotes/${remote_name}/HEAD" 2>/dev/null || true)" \
+    "refs/remotes/${remote_name}/main" \
+    "refs/remotes/${remote_name}/master"
+  do
+    [[ -n "${candidate}" ]] || continue
+    git rev-parse --verify "${candidate}^{commit}" >/dev/null 2>&1 || continue
+    git merge-base "${local_sha}" "${candidate}"
+    return
+  done
+
+  git hash-object -t tree /dev/null
+}
+
+lint_ref() (
+  local local_sha=$1 remote_sha=$2 base work snapshot
+  local -a markdown=() archive=()
+
+  [[ "${local_sha}" != "${zero}" ]] || return 0
+  if [[ "${remote_sha}" == "${zero}" ]]; then
+    base=$(base_for "${local_sha}")
+  else
+    base=${remote_sha}
+  fi
+
+  work=$(mktemp -d "${TMPDIR:-/tmp}/markdown-pre-push.XXXXXX")
+  trap 'rm -rf "${work}"' EXIT
+  git diff --name-only -z --diff-filter=ACMR "${base}" "${local_sha}" -- '*.md' >"${work}/paths"
+  mapfile -d '' -t markdown <"${work}/paths"
+  ((${#markdown[@]})) || return 0
+
+  snapshot=${work}/tree
+  mkdir "${snapshot}"
+  archive=("${markdown[@]}")
+  if git cat-file -e "${local_sha}:.markdownlint-cli2.jsonc" 2>/dev/null; then
+    archive+=(.markdownlint-cli2.jsonc)
+  fi
+  git archive "${local_sha}" -- "${archive[@]}" | tar -x -C "${snapshot}"
+
+  printf 'pre-push: linting %d Markdown file(s) at %.12s\n' "${#markdown[@]}" "${local_sha}"
+  command -v npx >/dev/null 2>&1 || {
+    printf 'pre-push: npx is required to run Markdown discipline\n' >&2
+    return 1
+  }
+  (cd "${snapshot}" && npx --yes markdownlint-cli2@0.23.1 --no-globs -- "${markdown[@]}")
+)
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  lint_ref "${local_sha}" "${remote_sha}"
+done

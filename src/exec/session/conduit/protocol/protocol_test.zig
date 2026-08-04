@@ -478,7 +478,7 @@ test "annals encode/decode: decline round-trips as null; malformed payloads fail
 }
 
 test "query_ext round-trips the corpus-partition trailer" {
-    const genus = @import("irregex").commands.scope.genus;
+    const genus = @import("irregex").scope.genus;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     // Every combination of selected × negated genus survives the wire, because a
@@ -532,7 +532,7 @@ test "query_ext round-trips the corpus-partition trailer" {
 }
 
 test "a genus byte claiming an unknown genus fails closed" {
-    const genus = @import("irregex").commands.scope.genus;
+    const genus = @import("irregex").scope.genus;
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
     var buf: std.ArrayList(u8) = .empty;
@@ -549,7 +549,7 @@ test "a genus byte claiming an unknown genus fails closed" {
 }
 
 test "genus Set bits round-trip every subset, and reject the impossible" {
-    const genus = @import("irregex").commands.scope.genus;
+    const genus = @import("irregex").scope.genus;
     // All 8 subsets of the 3-genus partition survive bits→fromBits unchanged.
     for (0..8) |raw| {
         const b: u8 = @intCast(raw);

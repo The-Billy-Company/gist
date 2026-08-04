@@ -28,7 +28,7 @@ const encoding = @import("irregex").inner.corpus.encoding;
 const intent = @import("irregex").inner.cold.intent;
 const oom = @import("irregex").inner.cli.outcome.oom;
 const primer = @import("../../cli/primer/primer.zig");
-const types = @import("irregex").commands.scope.types;
+const types = @import("irregex").scope.types;
 
 const Act = catalog.Act;
 const Choice = primer.Choice;
