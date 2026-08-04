@@ -541,7 +541,7 @@ jobs:
       # what would retire it - never in quietly widening the contract to match
       # what the imports happen to do today.
       - name: Import topology
-        run: uv run --no-project --with zoning==0.1.0 zoning verify
+        run: uv run --no-project --with zoning==0.1.1 zoning verify
 
   version:
     name: version

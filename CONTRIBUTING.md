@@ -51,7 +51,7 @@ actually clone.
 | the Rust binding | rustup | `bindings/rust/rust-toolchain.toml` |
 | the Go binding | Go | `bindings/go/go.mod` |
 | the discipline gate | markdownlint-cli2, typos, shellcheck, golangci-lint | the actions in [`ci.yml`](.github/workflows/ci.yml), mirrored into `.mise.toml` |
-| the topology gate | [zoning](https://github.com/The-Billy-Company/zoning) **0.1.0** | the `topology` job in [`ci.yml`](.github/workflows/ci.yml), mirrored into `.mise.toml` |
+| the topology gate | [zoning](https://github.com/The-Billy-Company/zoning) **0.1.1** | the `topology` job in [`ci.yml`](.github/workflows/ci.yml), mirrored into `.mise.toml` |
 
 If you run [mise](https://mise.jdx.dev), that whole table is one command:
 
