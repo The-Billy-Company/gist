@@ -40,9 +40,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # corpora → apparatus → bench → repo
-REPO = KERNEL
 GIST = KERNEL / "zig-out" / "bin" / "gist"
-CORPORA = Path(os.environ.get("GIST_CORPORA_DIR", REPO / ".local" / "gist-corpora"))
+CORPORA = Path(os.environ.get("GIST_CORPORA_DIR", KERNEL / ".local" / "gist-corpora"))
 TIMEOUT = int(os.environ.get("SWEEP_TIMEOUT", "300"))
 
 # The oracle needs rg's full uncapped stream, and hint lines would pollute

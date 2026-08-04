@@ -1,0 +1,20 @@
+# Vendored shared apparatus — byte-identical across irregex/gist/relate/blast.
+# Paths are package-root-relative. Regenerate with
+# `python3 bench/apparatus/shared_drift.py --update`, then land the refreshed
+# manifest in EVERY package in the same change.
+28d31e809aa3c4736e6dcf4614f3ea66961763c79dbe1ac614fdb9211ceca2a5  bench/apparatus/corpora/ecosystem.sh
+bddd18823bf2761e10b084d2175410c2529ae3176dd7b7f66f43d7e5d7bb1856  bench/apparatus/field.sh
+900c09f23838e572a037c4e33b7fadc5dcef0d7c63a5b61fd0ce310e83bb2b48  bench/apparatus/hyperfine.py
+60e027f30b5ea0fb0b9615baaed057b16814f9973816ed50c92c3afeb696f384  bench/apparatus/provenance.py
+0c146f04d9bce2b7ad7b9319a8785079e9217445f71fce3d39d9fe68e284c996  bench/apparatus/roots.sh
+38f97c97e539c0910e7c780ceab9205b2ff3ac7db94b4706f10fc1a0b9234201  bench/apparatus/shared_drift.py
+0d2f0511b6a5cff5c9798e4f2dfbe3a6194ecaf124eeb172a1ac4f46ee631863  bench/apparatus/statcore.py
+4cf15173659eb544cd394b78d2dfadcd819aee2c13815641513b98494c48373c  bench/apparatus/test_provenance.py
+cb5c208e6a3c4add5ecc8be12a3dcbd0cfe8bbfc0c81dcf28728b36a20ad73fc  bench/apparatus/test_statcore.py
+9528807284c6526403f52169fd80aeabd9366e2aaf77e29f0d4aa79b6dd6c981  bench/certificate/guard/artifacts.py
+2b066416d3a1546ff7e9fa55f21862fbe6a8161e7f7673ff8b106794a7375fe5  bench/certificate/guard/charter.py
+32213f907893974d7d7ee357355c8ef4b8b62ca10d620810eaead8eb78665a93  bench/certificate/guard/publish.py
+a902b4f8eaa31a33907e5cad04852069097d06f78d7cf3b3c7cebda1ab9be891  bench/certificate/guard/release.py
+1d06fe1bcd20b409655280a5b353d66ca5e1a54040904477603d0c7aa6681b8b  bench/certificate/guard/test_release.py
+6b2e2cfb6991009d38ef2f235e2ee699c6cce6c60023c070ae39c986080649a1  bench/certificate/ledger/ledger.py
+391330cf575db490c770507fa95f83a0569c8f7cde06b2784e63b4024f9c4e53  bench/certificate/ledger/test_ledger.py
