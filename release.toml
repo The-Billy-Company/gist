@@ -1,0 +1,25 @@
+# Release contract for gist, read by
+# The-Billy-Company/.github/actions/package-release. See that action's
+# README.md for the full schema; this file states only the facts specific to
+# this repository.
+
+[package]
+name = "gist"
+version_source = "build.zig.zon"
+version_kind = "zig-zon"
+
+[changelog]
+directory = "changelog.d"
+file = "CHANGELOG.md"
+ignore = [".gitkeep", "README.md"]
+types = ["added", "changed", "deprecated", "removed", "fixed", "security"]
+stem_pattern = '^\+[a-z0-9]+(-[a-z0-9]+)*$'
+min_body_chars = 40
+
+[ci]
+required_check = "release-ready"
+default_branch = "main"
+
+[registries]
+pypi = "gist-search"
+crates = "gist"

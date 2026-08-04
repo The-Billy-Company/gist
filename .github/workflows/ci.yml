@@ -541,7 +541,7 @@ jobs:
       # what would retire it - never in quietly widening the contract to match
       # what the imports happen to do today.
       - name: Import topology
-        run: uv run --no-project --with zoning==0.1.1 zoning verify
+        run: uv run --no-project --with zoning==0.2.0 zoning verify --complete
 
   version:
     name: version
@@ -620,3 +620,28 @@ jobs:
             echo "::error::${fragments} fragments on disk but towncrier rendered none — the wiring is broken, not the tree" >&2
             exit 1
           fi
+
+  release-ready:
+    # The one check `release.yml`'s preflight polls for on the exact tagged
+    # commit (`release.toml`'s `[ci].required_check`). Everything above feeds
+    # into it, so a red job blocks the tag rather than the publish workflow
+    # discovering it minutes into a wheel build. `if: always()` is required —
+    # the default `if` on a job would skip this one the moment anything
+    # upstream failed, which is exactly the case it has to report on.
+    if: always()
+    needs: [engine, python, go, rust, discipline, fmt, certificate, topology, version, changelog]
+    runs-on: ubuntu-latest
+    steps:
+      - name: every required job is green
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          python3 -c "
+          import json, os
+          needs = json.loads(os.environ['NEEDS'])
+          failed = sorted(name for name, info in needs.items() if info['result'] != 'success')
+          if failed:
+              raise SystemExit(f'not release-ready: {failed} did not succeed')
+          print(f'release-ready: {len(needs)} required jobs all succeeded')
+          "

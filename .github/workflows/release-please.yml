@@ -7,11 +7,14 @@
 #
 # ── Two things worth knowing before the first release
 #
-# 1. The changelog is NOT written by this workflow. towncrier owns CHANGELOG.md
-#    and the fragments under changelog.d/ are the notes people actually read, so
-#    the config sets `skip-changelog`. Before merging the release PR, run
-#    `towncrier build --version <the version the PR bumps to>` and push that
-#    onto the PR branch, so the tag and the notes land together.
+# 1. towncrier, not release-please, owns CHANGELOG.md — the curated fragments
+#    under changelog.d/ are the notes people actually read, so the config sets
+#    `skip-changelog`. The `fold changelog` job below folds them into
+#    CHANGELOG.md at the exact version this PR bumps to and pushes that onto
+#    the PR branch; it re-runs on every push to main while the PR stays open,
+#    so the fold never falls behind whatever fragments are on the branch when
+#    someone finally merges. `release.yml`'s preflight re-checks the fold
+#    landed before it will publish anything.
 #
 # 2. This runs as a GitHub App, not as Actions, and it has to. Two independent
 #    walls make the default GITHUB_TOKEN useless here: the enterprise forbids the
@@ -50,6 +53,10 @@ jobs:
       # grants; leaving GITHUB_TOKEN read-only keeps the Actions identity out of
       # the release path entirely rather than granting it rights it cannot use.
       contents: read
+    outputs:
+      # The JSON object of the currently open release PR — set only while one
+      # is unmerged. The fold-changelog job below is what actually reads it.
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       # Exchange the App's signing key for an installation token scoped to this
       # repo, valid one hour. Fails loudly if the App is not installed here.
@@ -69,9 +76,63 @@ jobs:
 
       # release-please reads the commit history through the GitHub API, so there
       # is nothing to check out and nothing to build.
-      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           target-branch: main
           token: ${{ steps.app-token.outputs.token }}
+
+  # Folds changelog.d/ into CHANGELOG.md on the release PR's own branch, at the
+  # exact version release-please just bumped `build.zig.zon` to on that
+  # branch — read back through the shared `version` command rather than
+  # re-parsed here, so this job agrees with the preflight by construction
+  # instead of by two authors keeping two regexes in sync.
+  fold-changelog:
+    name: fold changelog
+    needs: release-please
+    if: needs.release-please.outputs.pr != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ fromJson(needs.release-please.outputs.pr).headBranchName }}
+
+      - id: version
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: version
+          args: --root .
+
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: false
+
+      - name: Fold changelog.d fragments into CHANGELOG.md at this PR's version
+        run: |
+          set -euo pipefail
+          version=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' \
+            <<<'${{ steps.version.outputs.result }}')
+          uv run --no-project --python 3.12 --with towncrier==25.8.0 \
+            towncrier build --yes --version "$version"
+          if git diff --quiet -- CHANGELOG.md changelog.d; then
+            echo "nothing new to fold at $version"
+            exit 0
+          fi
+          git config user.name 'billy-company-release[bot]'
+          git config user.email 'billy-company-release[bot]@users.noreply.github.com'
+          git add CHANGELOG.md changelog.d
+          git commit -m "chore(changelog): fold fragments for v$version"
+          git push origin "HEAD:${{ fromJson(needs.release-please.outputs.pr).headBranchName }}"
