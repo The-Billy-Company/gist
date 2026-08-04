@@ -540,8 +540,12 @@ jobs:
       # The fix is in the code, or in a `variance ... because "..."` that says
       # what would retire it - never in quietly widening the contract to match
       # what the imports happen to do today.
+      #
+      # `--complete` adds the claim no law can make: every package here carries a
+      # contract. A green run over the packages that opted in says nothing about
+      # the one somebody adds next week, and coverage nobody checks decays.
       - name: Import topology
-        run: uv run --no-project --with zoning==0.2.0 zoning verify --complete
+        run: uv run --no-project --with zoning==1.0.0 zoning verify --complete
 
   version:
     name: version

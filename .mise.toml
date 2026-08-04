@@ -51,7 +51,7 @@ shellcheck = "0.11.0"
 # with `uv run --with`; bump the two in the same commit. Like the npm row, a
 # `pipx:` pin locks a version and nothing else: the PyPI wheel already carries
 # the static binary, and a file for an exact version is immutable.
-"pipx:zoning" = "0.1.1"
+"pipx:zoning" = "1.0.0"
 
 # Deliberately absent: ruff, yamllint, taplo, editorconfig-checker, zizmor, towncrier.
 # CI installs each with `uv run --no-project --with <pkg>==<version>`, and
