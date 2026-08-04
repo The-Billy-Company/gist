@@ -63,7 +63,7 @@ import functools
 import io
 import json
 import os
-from pathlib import Path
+import pathlib
 import re
 import subprocess
 import sys
@@ -71,8 +71,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-
-TAXONOMY = Path(__file__).resolve().parent.parent / "labels.json"
+# Imported as a module rather than `from pathlib import Path`, so this file has no
+# from-import to place. The same bytes are linted by five repositories, and their
+# isort settings disagree about where a from-import belongs among the plain ones;
+# with none present, there is nothing left for them to disagree about.
+TAXONOMY = pathlib.Path(__file__).resolve().parent.parent / "labels.json"
 
 # Only a pull request has a diff, and only an issue can be sitting unread, so a
 # trigger is legible for one subject or the other. `commit` reads a title, which
@@ -91,8 +94,10 @@ WHENS = frozenset({"unlabeled"})
 # taxonomy, so the accepted prefixes and the `type/*` labels cannot disagree.
 # The spec's colon-and-a-space is enforced, so `fix:no space` is a finding
 # rather than a near miss — git log renders the two very differently.
-TITLE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]+)\))?(?P<breaking>!)?"
-                   r": (?P<subject>.*\S.*)$")
+TITLE = re.compile(
+    r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]+)\))?(?P<breaking>!)?"
+    r": (?P<subject>.*\S.*)$"
+)
 
 # `labels: bug` and `labels: ["a", "b"]` — the two inline forms GitHub documents
 # for Dependabot streams and issue templates. A bare `labels:` opening a nested
@@ -105,7 +110,7 @@ def _shape(glob: str) -> re.Pattern[str]:
     """.gitignore's wildcards, compiled: `*` stops at a slash and `**` spans them."""
     out, i = [], 0
     while i < len(glob):
-        if glob.startswith("/**/", i):      # a/**/b spans zero directories too
+        if glob.startswith("/**/", i):  # a/**/b spans zero directories too
             out.append("/(?:.+/)?")
             i += 4
         elif glob.startswith("**/", i) and not i:
@@ -137,43 +142,79 @@ class Hub:
     """GitHub, spoken through the `gh` CLI every runner already carries."""
 
     def __init__(self, repo: str | None) -> None:
-        self.repo = repo or os.environ.get("GITHUB_REPOSITORY") or self.gh(
-            "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
+        self.repo = (
+            repo
+            or os.environ.get("GITHUB_REPOSITORY")
+            or self.gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
+        )
 
     def gh(self, *args: str) -> str:
         # S603/S607: `gh` is resolved from PATH by name on purpose — it is
         # preinstalled on every GitHub runner and lives at a different path on each
         # platform, so a hardcoded one would be the fragile spelling. No shell is
         # involved and no argument is ever built from a pull request's contents.
-        done = subprocess.run(("gh", *args), capture_output=True,  # noqa: S603, S607
-                              text=True, check=False)
+        done = subprocess.run(  # noqa: S603
+            ("gh", *args),  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         if done.returncode:
             sys.exit(f"gh {' '.join(args)} failed:\n{done.stderr.strip()}")
         return done.stdout.strip()
 
     def labels(self) -> dict[str, dict]:
-        listed = self.gh("label", "list", "-R", self.repo, "--limit", "500",
-                         "--json", "name,color,description")
+        listed = self.gh(
+            "label",
+            "list",
+            "-R",
+            self.repo,
+            "--limit",
+            "500",
+            "--json",
+            "name,color,description",
+        )
         return {row["name"]: row for row in json.loads(listed or "[]")}
 
     def write(self, name: str, color: str, note: str) -> None:
-        self.gh("label", "create", name, "-R", self.repo, "--force",
-                "--color", color, "--description", note)
+        self.gh(
+            "label",
+            "create",
+            name,
+            "-R",
+            self.repo,
+            "--force",
+            "--color",
+            color,
+            "--description",
+            note,
+        )
 
     def erase(self, name: str) -> None:
         self.gh("label", "delete", name, "-R", self.repo, "--yes")
 
     def subject(self, kind: str, number: int) -> dict:
-        shown = json.loads(self.gh(kind, "view", str(number), "-R", self.repo,
-                                   "--json", "title,labels"))
-        return {"title": shown["title"], "pull": kind == "pr",
-                "labels": {row["name"] for row in shown["labels"]}}
+        shown = json.loads(
+            self.gh(kind, "view", str(number), "-R", self.repo, "--json", "title,labels")
+        )
+        return {
+            "title": shown["title"],
+            "pull": kind == "pr",
+            "labels": {row["name"] for row in shown["labels"]},
+        }
 
     def files(self, number: int) -> list[tuple[str, int]]:
-        raw = self.gh("api", "--paginate", f"repos/{self.repo}/pulls/{number}/files",
-                      "--jq", ".[] | [.filename, (.additions + .deletions)] | @tsv")
-        return [(path, int(lines)) for path, lines in
-                (line.split("\t") for line in raw.splitlines() if line)]
+        raw = self.gh(
+            "api",
+            "--paginate",
+            f"repos/{self.repo}/pulls/{number}/files",
+            "--jq",
+            ".[] | [.filename, (.additions + .deletions)] | @tsv",
+        )
+        return [
+            (path, int(lines))
+            for path, lines in (line.split("\t") for line in raw.splitlines() if line)
+        ]
 
     def relabel(self, kind: str, number: int, add: list[str], drop: list[str]) -> None:
         edit = [kind, "edit", str(number), "-R", self.repo]
@@ -213,8 +254,11 @@ class Forge:
         data = json.dumps(body).encode() if body is not None else None
         # Both S310s below are the same audit — is the scheme one urlopen should
         # honor — and `__init__` is the only place a scheme enters this class.
-        ask = urllib.request.Request(f"{self.api}/repos/{self.repo}/{path}",  # noqa: S310
-                                     data=data, method=method)
+        ask = urllib.request.Request(  # noqa: S310
+            f"{self.api}/repos/{self.repo}/{path}",
+            data=data,
+            method=method,
+        )
         ask.add_header("Authorization", f"token {self.token}")
         if data:
             ask.add_header("Content-Type", "application/json")
@@ -222,8 +266,10 @@ class Forge:
             with urllib.request.urlopen(ask, timeout=30) as answer:  # noqa: S310
                 raw = answer.read()
         except urllib.error.HTTPError as refused:
-            sys.exit(f"forgejo {method} {path} → {refused.code}: "
-                     f"{refused.read().decode(errors='replace')[:400]}")
+            sys.exit(
+                f"forgejo {method} {path} → {refused.code}: "
+                f"{refused.read().decode(errors='replace')[:400]}"
+            )
         return json.loads(raw) if raw else None
 
     def paged(self, path: str) -> list[dict]:
@@ -246,26 +292,37 @@ class Forge:
         known = self.labels()
         # A create has to hand back the row it minted, or the next write would
         # have no id to PATCH and would try to create the same label again.
-        known[name] = (self.call("PATCH", f"labels/{known[name]['id']}", body)
-                       if name in known else self.call("POST", "labels", body))
+        known[name] = (
+            self.call("PATCH", f"labels/{known[name]['id']}", body)
+            if name in known
+            else self.call("POST", "labels", body)
+        )
 
     def erase(self, name: str) -> None:
         self.call("DELETE", f"labels/{self.labels().pop(name)['id']}")
 
     def subject(self, kind: str, number: int) -> dict:
         shown = self.call("GET", f"issues/{number}")
-        return {"title": shown["title"], "pull": shown.get("pull_request") is not None,
-                "labels": {row["name"] for row in shown["labels"]}}
+        return {
+            "title": shown["title"],
+            "pull": shown.get("pull_request") is not None,
+            "labels": {row["name"] for row in shown["labels"]},
+        }
 
     def files(self, number: int) -> list[tuple[str, int]]:
-        return [(row["filename"], row["additions"] + row["deletions"])
-                for row in self.paged(f"pulls/{number}/files")]
+        return [
+            (row["filename"], row["additions"] + row["deletions"])
+            for row in self.paged(f"pulls/{number}/files")
+        ]
 
     def relabel(self, kind: str, number: int, add: list[str], drop: list[str]) -> None:
         known = self.labels()
         if add:
-            self.call("POST", f"issues/{number}/labels",
-                      {"labels": [known[name]["id"] for name in add]})
+            self.call(
+                "POST",
+                f"issues/{number}/labels",
+                {"labels": [known[name]["id"] for name in add]},
+            )
         for name in drop:
             self.call("DELETE", f"issues/{number}/labels/{known[name]['id']}")
 
@@ -297,7 +354,7 @@ class Taxonomy:
             sys.exit("labels.json: duplicate label name")
 
     @classmethod
-    def load(cls, path: Path = TAXONOMY) -> Taxonomy:
+    def load(cls, path: pathlib.Path = TAXONOMY) -> Taxonomy:
         return cls(json.loads(path.read_text()))
 
     def owned(self, subject: str) -> set[str]:
@@ -332,9 +389,7 @@ class Taxonomy:
     def weighed(self, changes: list[tuple[str, int]]) -> int:
         """Changed lines, ignoring the paths nobody reads line by line."""
         return sum(
-            lines
-            for path, lines in changes
-            if not any(hit(path, g) for g in self.unweighted)
+            lines for path, lines in changes if not any(hit(path, g) for g in self.unweighted)
         )
 
     def sized(self, lines: int) -> str | None:
@@ -364,22 +419,22 @@ class Taxonomy:
 # The glob rules, stated as the cases that would break if the compiler drifted.
 # Each is a claim about .gitignore's behavior, not about this implementation's.
 GLOBS = (
-    ("src/query.zig", "src/*", True),               # `*` covers one segment
-    ("src/exec/query.zig", "src/*", False),         # and stops at the separator
-    ("src/exec/query.zig", "src/**", True),         # `**` spans them
+    ("src/query.zig", "src/*", True),  # `*` covers one segment
+    ("src/exec/query.zig", "src/*", False),  # and stops at the separator
+    ("src/exec/query.zig", "src/**", True),  # `**` spans them
     ("src/a/b/c/query.zig", "src/**", True),
-    ("src", "src/**", False),                       # the slash has to be there
-    ("src/exec", "src/exec/**", False),             # a subtree is not its own root
+    ("src", "src/**", False),  # the slash has to be there
+    ("src/exec", "src/exec/**", False),  # a subtree is not its own root
     ("src/execution/x.zig", "src/exec/**", False),  # nor is a longer sibling
-    ("src/query.zig", "src/**/query.zig", True),    # `/**/` spans zero directories
+    ("src/query.zig", "src/**/query.zig", True),  # `/**/` spans zero directories
     ("src/a/b/query.zig", "src/**/query.zig", True),
-    ("services/vox/main.rs", "**/vox/**", True),    # a leading `**/` is optional
+    ("services/vox/main.rs", "**/vox/**", True),  # a leading `**/` is optional
     ("vox/main.rs", "**/vox/**", True),
-    ("Cargo.toml", "Cargo.toml", True),             # slashless: the name, any depth
+    ("Cargo.toml", "Cargo.toml", True),  # slashless: the name, any depth
     ("bindings/rust/Cargo.toml", "Cargo.toml", True),
     ("bindings/Cargo.toml.bak", "Cargo.toml", False),
     ("a/b/notes.md", "*.md", True),
-    ("a+b/c.rs", "a+b/**", True),                   # path metacharacters are literal
+    ("a+b/c.rs", "a+b/**", True),  # path metacharacters are literal
     ("axb/c.rs", "a+b/**", False),
 )
 
@@ -389,10 +444,10 @@ GLOBS = (
 TITLES = (
     ("feat: add a thing", "feat"),
     ("fix(engine): stop the leak", "fix"),
-    ("feat!: drop the old ABI", "feat"),                 # breaking, no scope
+    ("feat!: drop the old ABI", "feat"),  # breaking, no scope
     ("refactor(surface)!: rename the verb", "refactor"),  # breaking, with scope
-    ("fix:no space", None),                              # the spec wants ": "
-    ("fix: ", None),                                     # and a real subject
+    ("fix:no space", None),  # the spec wants ": "
+    ("fix: ", None),  # and a real subject
     ("FIX: shouting", None),
     ("just a sentence", None),
     ("feat(: unbalanced", None),
@@ -403,54 +458,70 @@ def verify(tax: Taxonomy) -> int:
     """Is the config sound? Offline, tokenless, and safe to run on a fork's PR."""
     bad = [(p, g, want) for p, g, want in GLOBS if hit(p, g) is not want]
     for path, glob, want in bad:
-        print(f"::error::glob {glob!r} should{'' if want else ' not'} match {path!r}",
-              file=sys.stderr)
+        print(
+            f"::error::glob {glob!r} should{'' if want else ' not'} match {path!r}",
+            file=sys.stderr,
+        )
 
     for title, want in TITLES:
         found = TITLE.match(title)
         got = found["type"] if found else None
         if got != want:
             bad.append((title, got, want))
-            print(f"::error::title {title!r} parsed as {got!r}, expected {want!r}",
-                  file=sys.stderr)
+            print(
+                f"::error::title {title!r} parsed as {got!r}, expected {want!r}",
+                file=sys.stderr,
+            )
 
     # A mark has to survive being re-read, or it earns its own removal forever.
     for name in sorted(tax.marks):
         settled = tax.sorts("a bug report, in prose", {name, "bug"})
         if name not in tax.sorts("a bug report, in prose", set()) or name in settled:
             bad.append((name, "when", "unlabeled"))
-            print(f"::error::{name!r} does not survive a second reading: it must be "
-                  f"earned on an unlabeled issue and released once one is classified",
-                  file=sys.stderr)
+            print(
+                f"::error::{name!r} does not survive a second reading: it must be "
+                f"earned on an unlabeled issue and released once one is classified",
+                file=sys.stderr,
+            )
 
     declared = {row["name"] for row in tax.rows}
     for name, where in sorted(cited(TAXONOMY.parent).items()):
         if name in declared:
             continue
         bad.append((name, where, None))
-        print(f"::error file={where[0]}::label {name!r} is asked for by "
-              f"{', '.join(sorted(set(where)))} but no row in {TAXONOMY.name} "
-              f"declares it, so GitHub will drop it silently", file=sys.stderr)
+        print(
+            f"::error file={where[0]}::label {name!r} is asked for by "
+            f"{', '.join(sorted(set(where)))} but no row in {TAXONOMY.name} "
+            f"declares it, so GitHub will drop it silently",
+            file=sys.stderr,
+        )
 
     for row in tax.rows:
         if (word := row.get("when")) and word not in WHENS:
             bad.append((row["name"], "when", word))
-            print(f"::error::{row['name']!r} is earned `when: {word}`, which is not "
-                  f"a question this script knows how to ask ({', '.join(sorted(WHENS))})",
-                  file=sys.stderr)
+            print(
+                f"::error::{row['name']!r} is earned `when: {word}`, which is not "
+                f"a question this script knows how to ask ({', '.join(sorted(WHENS))})",
+                file=sys.stderr,
+            )
 
     dead = sorted(n for n in tax.machine if "/" not in n)
     for name in dead:
-        print(f"::error::{name!r} is earned by a rule but sits outside every "
-              f"namespace, so `sync --prune` could never clean it up", file=sys.stderr)
+        print(
+            f"::error::{name!r} is earned by a rule but sits outside every "
+            f"namespace, so `sync --prune` could never clean it up",
+            file=sys.stderr,
+        )
 
     bad += wired(tax)
 
     if bad or dead:
         return 1
-    print(f"ok: {len(GLOBS)} glob and {len(TITLES)} title cases, {len(declared)} "
-          f"labels, {len(tax.types)} commit types, every citation resolves, "
-          f"both forges wired")
+    print(
+        f"ok: {len(GLOBS)} glob and {len(TITLES)} title cases, {len(declared)} "
+        f"labels, {len(tax.types)} commit types, every citation resolves, "
+        f"both forges wired"
+    )
     return 0
 
 
@@ -496,21 +567,26 @@ def wired(tax: Taxonomy) -> list[tuple]:
         apply(tax, forge(), 1, "issue", dry=False)
     if any("labels" in path for _, path, _ in seen if path.startswith("issues/1/")):
         faults.append(("forgejo", "sort", "labeled a pull request"))
-        print("::error::the issue path labeled a pull request; on Forgejo the "
-              "`issues` event fires for both, so it has to decline one", file=sys.stderr)
+        print(
+            "::error::the issue path labeled a pull request; on Forgejo the "
+            "`issues` event fires for both, so it has to decline one",
+            file=sys.stderr,
+        )
 
     # An issue with nothing on it earns its mark, and the mark goes out as an id.
     subject, seen[:] = {"title": "prose, not a commit message", "labels": []}, []
     marks, hub = sorted(tax.marks), forge()
     with quiet:
         apply(tax, hub, 2, "issue", dry=False)
-    put = [body for method, path, body in seen
-           if method == "POST" and path == "issues/2/labels"]
+    put = [body for method, path, body in seen if method == "POST" and path == "issues/2/labels"]
     ids = {hub.known[name]["id"] for name in marks} if hub.known else set()
     if marks and not any(isinstance(b, dict) and set(b["labels"]) == ids for b in put):
         faults.append(("forgejo", "relabel", put))
-        print(f"::error::{', '.join(marks)} did not reach Forgejo as the numeric "
-              f"id of a row it had just minted (sent {put!r})", file=sys.stderr)
+        print(
+            f"::error::{', '.join(marks)} did not reach Forgejo as the numeric "
+            f"id of a row it had just minted (sent {put!r})",
+            file=sys.stderr,
+        )
 
     # What `sync` does to a mirror comes down to this one write and the two cases it
     # has to tell apart. A row the instance already carries is corrected in place by
@@ -531,18 +607,23 @@ def wired(tax: Taxonomy) -> list[tuple]:
     calls = [(method, path) for method, path, _ in seen if method in {"POST", "PATCH"}]
     if ("PATCH", "labels/41") not in calls:
         faults.append(("forgejo", "write", stale["name"]))
-        print(f"::error::a label the instance already carried was not corrected by "
-              f"its id ({calls!r}), so a mirror's existing labels could never be "
-              f"updated", file=sys.stderr)
+        print(
+            f"::error::a label the instance already carried was not corrected by "
+            f"its id ({calls!r}), so a mirror's existing labels could never be "
+            f"updated",
+            file=sys.stderr,
+        )
     if [method for method, _ in calls].count("POST") != 1:
         faults.append(("forgejo", "write", calls))
-        print(f"::error::writing one new label twice did not create it once and then "
-              f"edit it ({calls!r}); the id a create hands back is not being kept",
-              file=sys.stderr)
+        print(
+            f"::error::writing one new label twice did not create it once and then "
+            f"edit it ({calls!r}); the id a create hands back is not being kept",
+            file=sys.stderr,
+        )
     return faults
 
 
-def cited(root: Path) -> dict[str, list[str]]:
+def cited(root: pathlib.Path) -> dict[str, list[str]]:
     """Every label another config asks GitHub to apply, and which file asks.
 
     Dependabot and the issue templates name labels by string, and GitHub silently
@@ -570,18 +651,17 @@ def cited(root: Path) -> dict[str, list[str]]:
 SHARED = ("type/", "size/", "status/")
 
 
-def kin(root: Path) -> list[Path]:
+def kin(root: pathlib.Path) -> list[pathlib.Path]:
     """Sibling checkouts carrying this same script, found beside this one."""
     return sorted(
-        peer for peer in root.parent.iterdir()
-        if peer.is_dir() and peer != root
-        and (peer / ".github/scripts/triage.py").is_file()
+        peer
+        for peer in root.parent.iterdir()
+        if peer.is_dir() and peer != root and (peer / ".github/scripts/triage.py").is_file()
     )
 
 
 def common(rows: list[dict]) -> dict[str, dict]:
-    return {r["name"]: r for r in rows
-            if r["name"].startswith(SHARED) or "/" not in r["name"]}
+    return {r["name"]: r for r in rows if r["name"].startswith(SHARED) or "/" not in r["name"]}
 
 
 def peers(tax: Taxonomy) -> int:
@@ -599,7 +679,7 @@ def peers(tax: Taxonomy) -> int:
     decision rather than a mistake. A name they both carry and describe
     differently is the failure, because there is only one palette.
     """
-    root, mine = TAXONOMY.parent.parent, Path(__file__).resolve()
+    root, mine = TAXONOMY.parent.parent, pathlib.Path(__file__).resolve()
     if not (found := kin(root)):
         print(f"no sibling checkout beside {root.name} — nothing to compare")
         return 0
@@ -614,9 +694,17 @@ def peers(tax: Taxonomy) -> int:
             if here.get(name) == there.get(name):
                 continue
             absent = name not in here or name not in there
-            notes.append((not absent, f"{name}: " + (
-                f"only in {root.name if name in here else peer.name}" if absent
-                else "declared differently in the two")))
+            notes.append(
+                (
+                    not absent,
+                    f"{name}: "
+                    + (
+                        f"only in {root.name if name in here else peer.name}"
+                        if absent
+                        else "declared differently in the two"
+                    ),
+                )
+            )
 
         drift += sum(bad for bad, _ in notes)
         print(f"{peer.name}: {'ok' if not notes else f'{len(notes)} to look at'}")
@@ -639,8 +727,7 @@ def sync(tax: Taxonomy, hub: Hub | Forge, prune: bool, dry: bool) -> int:
         note = row.get("description", "")
         was = have.get(name)
         # Forgejo hands a color back with its `#`, GitHub without one.
-        if (was and was["color"].lstrip("#").lower() == color.lower()
-                and was["description"] == note):
+        if was and was["color"].lstrip("#").lower() == color.lower() and was["description"] == note:
             continue
         verb = "update" if was else "create"
         print(f"{verb} {name} #{color} — {note}")
@@ -649,8 +736,7 @@ def sync(tax: Taxonomy, hub: Hub | Forge, prune: bool, dry: bool) -> int:
 
     # Only inside a namespace this file declares: a bare label was never ours.
     stale = sorted(
-        n for n in have
-        if "/" in n and n.split("/", 1)[0] in tax.namespaces and n not in declared
+        n for n in have if "/" in n and n.split("/", 1)[0] in tax.namespaces and n not in declared
     )
     for name in stale:
         print(f"{'prune' if prune else 'stale (keep)'} {name}")
@@ -711,8 +797,11 @@ def check(tax: Taxonomy, hub: Hub | Forge, pr: int) -> int:
         return 0
     types = ", ".join(sorted(tax.types))
     found = TITLE.match(title.strip())
-    why = (f"unknown type {found['type']!r}" if found
-           else "not shaped like `type: subject` or `type(scope): subject`")
+    why = (
+        f"unknown type {found['type']!r}"
+        if found
+        else "not shaped like `type: subject` or `type(scope): subject`"
+    )
     print(
         f"::error title=Pull request title is not a conventional commit::"
         f"{title!r} is {why}. The squash commit becomes release history, so the "
@@ -725,16 +814,25 @@ def check(tax: Taxonomy, hub: Hub | Forge, pr: int) -> int:
 
 def show(tax: Taxonomy, as_json: bool) -> int:
     if as_json:
-        print(json.dumps({"owned": {s: sorted(tax.owned(s)) for s in REACH},
-                          "types": tax.types,
-                          "namespaces": sorted(tax.namespaces),
-                          "unweighted": list(tax.unweighted)}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "owned": {s: sorted(tax.owned(s)) for s in REACH},
+                    "types": tax.types,
+                    "namespaces": sorted(tax.namespaces),
+                    "unweighted": list(tax.unweighted),
+                },
+                indent=2,
+            )
+        )
         return 0
     # GitHub's order, not the file's: the file groups by family to stay readable,
     # but what a maintainer wants to preview is the dropdown they will actually see.
     for row in sorted(tax.rows, key=lambda r: r["name"]):
-        how = next((f"{k}={row[k]}" for k in ("paths", "commit", "from", "when")
-                    if k in row), "by hand")
+        how = next(
+            (f"{k}={row[k]}" for k in ("paths", "commit", "from", "when") if k in row),
+            "by hand",
+        )
         print(f"{row['name']:22s} #{row['color']:6s}  {how}")
     return 0
 
@@ -753,11 +851,11 @@ def main(argv: list[str] | None = None) -> int:
     # `apply` reads either subject. `check` blocks on a title that is about to
     # become a commit message, which is only ever a pull request's.
     subject = verbs.add_parser("apply", parents=[parent]).add_mutually_exclusive_group(
-        required=True)
+        required=True
+    )
     subject.add_argument("--pr", type=int)
     subject.add_argument("--issue", type=int)
-    verbs.add_parser("check", parents=[parent]).add_argument("--pr", type=int,
-                                                            required=True)
+    verbs.add_parser("check", parents=[parent]).add_argument("--pr", type=int, required=True)
 
     args = cli.parse_args(argv)
     tax = Taxonomy.load()
@@ -772,8 +870,13 @@ def main(argv: list[str] | None = None) -> int:
         return sync(tax, hub, args.prune, args.dry)
     if args.verb == "apply":
         pull = args.pr is not None
-        return apply(tax, hub, args.pr if pull else args.issue,
-                     "pr" if pull else "issue", args.dry)
+        return apply(
+            tax,
+            hub,
+            args.pr if pull else args.issue,
+            "pr" if pull else "issue",
+            args.dry,
+        )
     return check(tax, hub, args.pr)
 
 
