@@ -1,8 +1,15 @@
 # Importable Python face of gist search. Depends on the shared `irregex`
 # substrate (row protocol, request types, shell/daemon/native transports).
 # Local checkouts resolve the path editably; a published wheel depends on the
-# PyPI `irregex` distribution. Runtime engine availability remains separate
-# (GIST_BIN / PATH / in-repo zig-out).
+# PyPI `irregex` distribution.
+#
+# The wheel bundles its own `gist` CLI under `gist/bin/` (`hatch_build.py`,
+# built per-platform by `scripts/build_wheels.py`) — a real `pip install
+# gist-search` needs no separate `zig build` to satisfy the README's first
+# example. `irgx.runtime.shell._resolve` still checks an explicit `GIST_BIN`
+# override and a sibling dev checkout's `zig-out/bin/gist` FIRST, so a
+# contributor's local build always wins over the packaged copy; PATH stays the
+# final fallback for a `gist` installed some other way.
 #
 # The distribution is `gist-search` and the import stays `gist`: the plain
 # `gist` name on PyPI belongs to an unrelated author, so `pip install gist`
@@ -17,7 +24,7 @@
 
 [project]
 name = "gist-search"
-version = "1.0.0"                                                                                                                                  # x-release-please-version
+version = "1.1.0"                                                                                                                                  # x-release-please-version
 description = "Indexed code search for Python - ripgrep-parity regex search over a persisted trigram index, with ranked definition-first results."
 # The long description is the repository's own README, lifted and link-corrected
 # at build time by `hatch_readme.py`. PyPI opens onto the project's front door,
@@ -63,11 +70,17 @@ dependencies = [
   # Bounded on both sides, and neither bound is boilerplate. `irgx` is the import
   # this package opens with, and it only exists from 1.0.0 — the 0.1.0 already on
   # the index is the pre-rename placeholder, so an unbounded requirement resolved
-  # to a distribution that cannot satisfy a single line of this one. The ceiling
-  # is the other half of the same fact: 1.0.0 is where the substrate froze the C
-  # ABI and the `irgx` Python surface, and a 2.0 is by definition free to move
-  # both. This is a face over an ABI, not a consumer of a loose utility.
-  "irregex>=1.0.0,<2",
+  # to a distribution that cannot satisfy a single line of this one. The floor is
+  # 1.1.0, not 1.0.0, because that is the release where `_resolve` learned its
+  # fourth rung — a binary a product's own wheel bundled at `<name>/bin/<name>` —
+  # and this package's whole reason to bundle a `gist` binary at all depends on
+  # the shared resolver knowing to look for it there. Below 1.1.0, a fresh `pip
+  # install gist-search` would carry the CLI and never find it. The ceiling is
+  # the other half of the same fact: 1.0.0 (unmoved by that fix) is where the
+  # substrate froze the C ABI and the `irgx` Python surface, and a 2.0 is by
+  # definition free to move both. This is a face over an ABI, not a consumer of
+  # a loose utility.
+  "irregex>=1.1.0,<2",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -107,6 +120,13 @@ path = "hatch_readme.py"
 
 [tool.hatch.build.targets.wheel]
 packages = [ "gist" ]
+# Populated by `hatch_build.py` (`gist/bin/gist[.exe]`) — not a source path,
+# hence not one of `packages` above, but an inclusion the wheel target has to
+# declare before the custom hook's `force_include` can add to it.
+artifacts = [ "gist/bin/*" ]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "hatch_build.py"
 
 [tool.uv.sources]
 irregex = { path = "../../../irregex/bindings/python", editable = true }

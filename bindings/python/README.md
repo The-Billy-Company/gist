@@ -14,9 +14,13 @@ name on PyPI belongs to an unrelated author, so installing under it would fetch
 a stranger's package; this is the same bs4 / PIL / cv2 split.
 
 This package is the bindings, not the engine: every verb answers by running the
-`gist` binary, so that has to be on `PATH` (or `$GIST_BIN`). Without it the
-first call raises `GistNotFoundError` rather than failing quietly. See
-[what it needs](#what-it-needs).
+`gist` binary. The wheel bundles a native build of it per platform, so a plain
+`pip install gist-search` needs nothing else — no `PATH`, no `$GIST_BIN`, no
+`zig build`. An explicit `GIST_BIN`, or a sibling dev checkout's own
+`zig-out/bin/gist`, still wins over the bundled copy for anyone building the
+engine from source; `PATH` remains the last resort for a `gist` installed some
+other way. Absent all three, the first call raises `GistNotFoundError` rather
+than failing quietly. See [what it needs](#what-it-needs).
 
 ```python
 import gist
@@ -43,10 +47,14 @@ which imports as `irgx`.
 
 ## What it needs
 
-The `gist` binary on `PATH` (or `$GIST_BIN`), which
+Nothing beyond the wheel itself on the six platforms it publishes for
+(macOS arm64/x86_64, Linux x86_64/aarch64, Windows amd64/arm64) — the
+published wheel for your platform already carries a native `gist` build.
+Building from source instead, or running on a platform with no published
+wheel, needs the `gist` binary on `PATH` (or `$GIST_BIN`), which
 [the repository](https://github.com/The-Billy-Company/gist) builds with
-`zig build`. No index is required; without one gist scans the live tree and
-returns the same answers, just slower.
+`zig build`. No index is required either way; without one gist scans the live
+tree and returns the same answers, just slower.
 
 ## Layout
 
