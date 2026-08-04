@@ -28,7 +28,6 @@ import subprocess
 from pathlib import Path
 
 KERNEL = Path(__file__).resolve().parents[3]  # evaluate → dominance → bench → package root
-REPO = KERNEL
 
 
 def _climb_file(*rel_parts: str) -> Path | None:
@@ -153,7 +152,7 @@ def gist_versions(gist_bin: Path | None) -> tuple[str, str]:
     return engine or "unknown", abi or "unknown"
 
 
-def machine(repo: Path = REPO, gist_bin: Path | None = None) -> dict[str, object]:
+def machine(repo: Path = KERNEL, gist_bin: Path | None = None) -> dict[str, object]:
     """Capture the full machine provenance block (all MACHINE_KEYS)."""
     system = platform.system()
     arch = platform.machine()

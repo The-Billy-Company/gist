@@ -56,7 +56,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # rgsuite → conformance → bench → repo
-REPO = KERNEL
 FIX = Path()  # temp fixture root, set in main()
 
 RG = os.environ.get("RG_BIN", "rg")
@@ -358,17 +357,17 @@ def _repo_cases() -> list[Case]:
             "repo:sort-path",
             ["--sort", "path", "-n", "-H", "TODO"],
             "services/backend",
-            REPO,
+            KERNEL,
             env=env,
         ),
         Case(
-            "repo:sortr-path", ["--sortr", "path", "-l", "func"], "services/backend", REPO, env=env
+            "repo:sortr-path", ["--sortr", "path", "-l", "func"], "services/backend", KERNEL, env=env
         ),
         Case(
             "repo:sort-modified",
             ["--sort", "modified", "-l", "WalletService"],
             "services/backend/api",
-            REPO,
+            KERNEL,
             env=env,
         ),
     ]
@@ -596,7 +595,7 @@ def _median(bin_: str, args: list[str]) -> float:
     for _ in range(3):
         t0 = time.perf_counter()
         try:
-            run(bin_, args, REPO, {**os.environ})
+            run(bin_, args, KERNEL, {**os.environ})
         except subprocess.TimeoutExpired:
             return float("inf")
         ts.append(time.perf_counter() - t0)

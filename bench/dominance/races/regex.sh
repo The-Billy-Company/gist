@@ -55,7 +55,7 @@ slate=(
   "alt-mixed    panic|0x"
 )
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 tools_raw="$(compete_tools regex)"
 mapfile -t tools <<< "${tools_raw}"
 echo

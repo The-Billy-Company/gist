@@ -50,7 +50,6 @@ from shutil import which
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # shapes → conformance → bench → repo
-REPO = KERNEL
 MATRIX = HERE / "shapes.toml"
 BASELINE = HERE / "baseline.json"
 CSV = HERE / "shapes.csv"
@@ -126,7 +125,7 @@ GIST = Path(os.environ.get("GIST_MATRIX_BIN", KERNEL / "zig-out" / "bin" / "gist
 RG = os.environ.get("RG", "rg")
 # Scope every tool to the same logical corpus (mirrors _compete.sh fairness): no
 # VCS walker, the repo root .gitignore as the one shared ignore, unsorted walk.
-BASE = ["--no-ignore-vcs", "--ignore-file", str(REPO / ".gitignore"), "--sort", "none"]
+BASE = ["--no-ignore-vcs", "--ignore-file", str(KERNEL / ".gitignore"), "--sort", "none"]
 # gist's default ~25k-token agent-context output budget would clip a repo-wide
 # result and perturb the rg oracle (a product feature, not a search difference);
 # every race/gate here compares against rg's uncapped output, so lift the soft cap
@@ -148,8 +147,8 @@ def _cmd(binary: str, shape: dict, roots: list[str], *, extra: list[str]) -> lis
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
-    """Run one argv at REPO root; return (exit_code, stdout_text)."""
-    p = subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO), env=ENV)
+    """Run one argv at KERNEL root; return (exit_code, stdout_text)."""
+    p = subprocess.run(cmd, capture_output=True, text=True, cwd=str(KERNEL), env=ENV)
     return p.returncode, p.stdout
 
 
@@ -229,7 +228,7 @@ def _hyperfine(cmd: list[str], warmup: int, runs: int) -> list[float]:
                 shlex.join(cmd),
             ],
             capture_output=True,
-            cwd=str(REPO),
+            cwd=str(KERNEL),
             env=ENV,
         )
         if proc.returncode != 0 or not js.stat().st_size:

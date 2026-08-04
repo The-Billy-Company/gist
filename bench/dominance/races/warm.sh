@@ -24,7 +24,7 @@ warm_needles=(pgxpool context.Context "func " TODO queryLiteral rate_limit zzqxv
 
 echo "building gist + prechecking every warm cell against rg…"
 compete_build_gist_index || exit 1
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 for needle in "${warm_needles[@]}"; do
   gcmd="$(compete_lit_cmd gist "${needle}")"
   rcmd="$(compete_lit_cmd rg "${needle}")"
@@ -47,7 +47,7 @@ for t in "${all_tools[@]}"; do
   [[ "${kind}" = unindexed ]] && tools+=("${t}")
 done
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 echo
 echo "warm query — gist resident p50 vs unindexed scanners (hyperfine mean, runs=8):"
 echo "fields: <tool> <ms> (<gist speedup>)"

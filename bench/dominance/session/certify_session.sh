@@ -69,7 +69,7 @@ compete_build_gist_index || exit 1
 }
 
 echo "measuring the persistent client → daemon path (warm p50 per needle)…"
-(cd "${REPO}" && "${BENCH_EXE}" session) || exit 1
+(cd "${CORPUS}" && "${BENCH_EXE}" session) || exit 1
 [[ -s "${SESSION_CSV}" ]] || {
   echo "gist-bench session emitted no ${SESSION_CSV}" >&2
   exit 1
@@ -84,7 +84,7 @@ echo "warm persistent-client latency vs ripgrep cold (fresh process), runs=${RUN
 printf '%-16s %8s %8s %12s %12s %9s\n' needle d_files rg_files warm_p50 rg_mean speedup
 printf '%-16s %8s %8s %12s %12s %9s\n' ---------------- ------- ------- ------------ ------------ ---------
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 : > "${MACRO}"
 logsum=0
 n=0

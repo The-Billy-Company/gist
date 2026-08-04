@@ -68,7 +68,7 @@ compete_install_gist_bin || exit 1
 
 fsize() { stat -f%z "$1" 2> /dev/null || stat -c%s "$1" 2> /dev/null || echo 0; }
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 echo
 echo "### SOUNDNESS — gist ≡ rg over the live tree, no-prefilter patterns (the gate) ###"
 fails=0

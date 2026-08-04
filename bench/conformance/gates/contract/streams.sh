@@ -41,9 +41,9 @@ echo "building gist (ReleaseFast) + copying binary…"
   }
 compete_install_gist_bin || exit 1
 # The index must exist for the read-elision + --rank paths (the plain walk needs none).
-[[ -f "${OUT}/index.gist" ]] || (cd "${REPO}" && "${GIST_BIN}" index > /dev/null 2>&1)
+[[ -f "${OUT}/index.gist" ]] || (cd "${CORPUS}" && "${GIST_BIN}" index > /dev/null 2>&1)
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 O="$(mktemp)"
 E="$(mktemp)"
 trap 'rm -f "${O}" "${E}"' EXIT

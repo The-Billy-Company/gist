@@ -42,8 +42,7 @@ import regimes  # noqa: E402
 import report  # noqa: E402
 
 KERNEL = HERE.parents[2]  # evaluate → dominance → bench → package root
-REPO = KERNEL
-RAW_ROOT = REPO / ".local" / "gist-evaluation"
+RAW_ROOT = KERNEL / ".local" / "gist-evaluation"
 ARTIFACT = HERE / "artifact"
 
 # The scoped corpus + heavy-dir excludes mirror `bench/races/_compete.sh` (its ROOTS
@@ -51,7 +50,7 @@ ARTIFACT = HERE / "artifact"
 # would otherwise search live — the evaluator just measures it where it can't churn.
 # Historical monorepo slices when present; else the whole package (mirrors field.sh).
 _MONOREPO_ROOTS = ("services", "libs", "clients", "contracts", "scripts", "quality")
-CORPUS_ROOTS = _MONOREPO_ROOTS if all((REPO / r).is_dir() for r in _MONOREPO_ROOTS) else (".",)
+CORPUS_ROOTS = _MONOREPO_ROOTS if all((KERNEL / r).is_dir() for r in _MONOREPO_ROOTS) else (".",)
 CORPUS_EXCLUDES = (
     "node_modules",
     "target",
@@ -99,12 +98,12 @@ def _freeze_corpus(dst: Path) -> Path:
     is the code corpus, not gigabytes of build output.
     """
     dst.mkdir(parents=True, exist_ok=True)
-    gitignore = REPO / ".gitignore"
+    gitignore = KERNEL / ".gitignore"
     if gitignore.exists():
         shutil.copy2(gitignore, dst / ".gitignore")
     excludes = [arg for e in CORPUS_EXCLUDES for arg in ("--exclude", e)]
     for root in CORPUS_ROOTS:
-        src = REPO / root
+        src = KERNEL / root
         if not src.is_dir():
             continue
         subprocess.run(
@@ -166,7 +165,7 @@ def _measure(args, contract: dict) -> dict:
     """Drive every requested regime on this machine and assemble the bundle."""
     method = _methodology(contract, args.runs, args.warmup)
     runs, warmup = method["runs"], method["warmup"]
-    machine = provenance.machine(REPO, REPO / ".local" / "gist-bin")
+    machine = provenance.machine(KERNEL, KERNEL / ".local" / "gist-bin")
     mid = machine["machine_id"]
     raw_dir = RAW_ROOT / mid
     gist_dir = raw_dir / "gist-index"
@@ -213,7 +212,7 @@ def _measure(args, contract: dict) -> dict:
         regime_out["resource"] = regimes.resource_lane(bridge, gist_dir, corpus["total_bytes"])
     if "scale" in want and args.foreign:
         print("[evaluate] scale curves over foreign corpora…")
-        corpora_dir = REPO / ".local" / "gist-corpora"
+        corpora_dir = KERNEL / ".local" / "gist-corpora"
         regime_out["scale"] = regimes.scale_lane(bridge, corpora_dir, warmup=warmup, runs=runs)
     if "concurrency" in want:
         print("[evaluate] concurrency (many-agent load against the resident daemon)…")
