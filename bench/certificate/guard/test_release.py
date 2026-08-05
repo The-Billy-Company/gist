@@ -23,10 +23,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from profile import CHARTER
 from unittest import mock
 
 import release
-from profile import CHARTER
 
 
 def _bundle(root: Path, *, os_field: str, commit: str | None = "a" * 40) -> Path:

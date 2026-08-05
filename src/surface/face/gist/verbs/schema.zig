@@ -10,7 +10,7 @@ const std = @import("std");
 const corpus_mod = @import("irregex").corpus;
 const args = @import("irregex").argv;
 const beacon = @import("irregex").inner.cli.beacon;
-const genus = @import("irregex").commands.scope.genus;
+const genus = @import("irregex").scope.genus;
 const jsonstr = @import("irregex").inner.cli.jsonstr;
 const assay = @import("irregex").assay;
 
@@ -338,7 +338,7 @@ test "--schema is valid JSON derived from the parser catalog" {
     // agent is told which module decides each one, so relocating either fails
     // the build rather than leaving the manifest pointing at nothing.
     comptime {
-        _ = @import("irregex").commands.scope.charter;
+        _ = @import("irregex").scope.charter;
         _ = @import("irregex").preference;
     }
     try t.expect(std.mem.indexOf(u8, manifest, "\"irregex/src/corpus/scope/charter.zig\"") != null);
@@ -362,7 +362,7 @@ test "--schema is valid JSON derived from the parser catalog" {
     // flags the catalog really has, or an agent would be told about a spelling
     // that exits 2.
     comptime {
-        _ = @import("irregex").commands.scope.genus;
+        _ = @import("irregex").scope.genus;
     }
     const partition = parsed.value.object.get("search").?.object.get("corpus_partition").?.object;
     try t.expect(std.mem.eql(u8, partition.get("source_of_truth").?.string, "irregex/src/corpus/scope/genus.zig"));

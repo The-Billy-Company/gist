@@ -78,7 +78,7 @@ const session = gist.session;
 const Request = session.request.Request;
 const ResidentSession = session.resident.ResidentSession;
 const render = session.render;
-const parallel = gist.parallel;
+const parallel = gist.math.parallel;
 const Dir = std.Io.Dir;
 const Span = gist.assay.Span; // the package instrumentation floor: monotonic Span
 

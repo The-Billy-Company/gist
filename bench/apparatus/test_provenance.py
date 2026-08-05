@@ -45,9 +45,7 @@ class ManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             listing = _corpus(root, {"a.txt": b"abc", "sub/b.txt": b"de"})
-            corpus = provenance.write_manifest(
-                root / "m.tsv", root, listing, allow_dirty=False
-            )
+            corpus = provenance.write_manifest(root / "m.tsv", root, listing, allow_dirty=False)
             rows = (root / "m.tsv").read_text().splitlines()
         assert (corpus.files, corpus.total, corpus.unstable) == (2, 5, [])
         assert rows[0] == "path\tsize_bytes\tsha256"
@@ -80,9 +78,7 @@ class ManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             listing = _corpus(root, {"sub/b.txt": b"de", "a.txt": b"abc"})
-            corpus = provenance.write_manifest(
-                root / "m.tsv", root, listing, allow_dirty=False
-            )
+            corpus = provenance.write_manifest(root / "m.tsv", root, listing, allow_dirty=False)
         assert corpus.sha256 == want.hexdigest()
 
     def test_a_churned_file_leaves_the_digest_too(self) -> None:
@@ -124,9 +120,7 @@ class ManifestTests(unittest.TestCase):
             root = Path(tmp)
             listing = _corpus(root, {f"f{i}.txt": b"x" * 8 for i in range(300)})
             (root / "f7.txt").unlink()
-            corpus = provenance.write_manifest(
-                root / "m.tsv", root, listing, allow_dirty=True
-            )
+            corpus = provenance.write_manifest(root / "m.tsv", root, listing, allow_dirty=True)
             rows = (root / "m.tsv").read_text().splitlines()[1:]
         assert corpus.unstable == ["f7.txt"]
         assert corpus.files == 299 and len(rows) == 299
@@ -171,9 +165,7 @@ class ManifestTests(unittest.TestCase):
                 self.skipTest("this filesystem refuses non-UTF-8 filenames")
             listing = root / "paths.list"
             listing.write_bytes(raw)
-            corpus = provenance.write_manifest(
-                root / "m.tsv", root, listing, allow_dirty=False
-            )
+            corpus = provenance.write_manifest(root / "m.tsv", root, listing, allow_dirty=False)
             written = (root / "m.tsv").read_bytes()
         assert corpus.files == 1
         assert raw + b"\t1\t" in written
@@ -286,11 +278,16 @@ class MachineTests(unittest.TestCase):
             out = Path(tmp) / "bundle"
             code = provenance.main(
                 [
-                    "--out", str(out),
-                    "--root", str(corpus),
-                    "--source-root", str(source),
-                    "--corpus-id", "probe-v1",
-                    "--paths-list", str(listing),
+                    "--out",
+                    str(out),
+                    "--root",
+                    str(corpus),
+                    "--source-root",
+                    str(source),
+                    "--corpus-id",
+                    "probe-v1",
+                    "--paths-list",
+                    str(listing),
                 ]
             )
             assert code == 0

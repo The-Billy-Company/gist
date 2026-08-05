@@ -1,0 +1,23 @@
+# One narrow override for the script beside this file, which is shared
+# byte-for-byte with five sibling repositories - `triage.py peers` is the gate
+# that proves it, and this config is what lets that gate be satisfiable here.
+#
+# The problem it solves: `ruff format` is not a ceiling, it is a target. It
+# reflows code *to* the width it is given, so an 88-column file and a 100-column
+# file are different bytes even when both are under 100. gist formats at 100;
+# irregex, relate, blast, and sheng all format at 88. Identical bytes therefore
+# cannot pass `ruff format --check` in gist and in the siblings at once unless
+# one width wins, and 88 is the only one that can - it is the narrowest, so it
+# also satisfies every repo that allows more.
+#
+# `extend` rather than a fresh config: a nested ruff.toml replaces its parent
+# outright, which would quietly drop the rule selection and the isort
+# first-party list the root declares. Extending keeps every one of gist's own
+# rules and changes exactly the one setting that has to differ.
+#
+# Reach is exactly right and not by luck: ruff resolves settings per file from
+# the nearest config upward, and .github/scripts/ holds nothing but the shared
+# script. No file gist actually owns is formatted differently because of this.
+extend = "../../ruff.toml"
+
+line-length = 88

@@ -31,8 +31,8 @@ snapshot — every row a real file with a real digest, and none of them the byte
 that were searched.
 
 `field.sh` here is the apparatus; `dominance/races/field.sh` is the roster. The
-split is the same one the vendoring draws: *how* a rival is indexed and timed is
-identical in every package, *which* rivals gist races and how each is invoked is
+split is the same one the vendoring draws: _how_ a rival is indexed and timed is
+identical in every package, _which_ rivals gist races and how each is invoked is
 gist's alone.
 
 `harness/` holds the binary but not the instruments. The 12-class probe

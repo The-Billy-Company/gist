@@ -57,8 +57,9 @@ KERNEL = HERE.parents[2]  # guard → certificate → bench → package root
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from artifacts import check_artifacts  # noqa: E402
 from profile import CHARTER  # noqa: E402
+
+from artifacts import check_artifacts  # noqa: E402
 
 # Platform token (first word of machine.json ``os``, lowered) -> human label.
 # The release requires a fresh, valid certificate for each of these.

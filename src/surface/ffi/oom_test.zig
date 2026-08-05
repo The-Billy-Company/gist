@@ -28,7 +28,7 @@ const api = @import("irregex").api;
 const fault = @import("irregex").fault;
 const ignore = @import("irregex").inner.corpus.ignore;
 const loadpar = @import("irregex").inner.corpus.loadpar;
-const cold = @import("irregex").commands.search;
+const cold = @import("irregex").engine.search;
 const assay = @import("irregex").assay;
 
 const Dir = std.Io.Dir;

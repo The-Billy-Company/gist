@@ -238,8 +238,10 @@ def main() -> int:
         corpus = charter.corpora.get(sys.argv[2])
         if corpus is None:
             known = ", ".join(sorted(charter.corpora)) or "(none)"
-            print(f"publish: no corpus {sys.argv[2]!r} in {CHARTER_PATH.name}; declared: {known}",
-                  file=sys.stderr)
+            print(
+                f"publish: no corpus {sys.argv[2]!r} in {CHARTER_PATH.name}; declared: {known}",
+                file=sys.stderr,
+            )
             return 2
         print(" ".join(corpus.roots) if verb == "roots" else corpus.fetch)
         return 0

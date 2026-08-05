@@ -36,9 +36,9 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
+from profile import CHARTER
 
 from charter import read_json, read_tsv
-from profile import CHARTER
 from publish import check_public_safe
 
 HERE = Path(__file__).resolve().parent

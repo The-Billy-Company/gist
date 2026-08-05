@@ -1,12 +1,12 @@
 # Publish the wheel matrix to PyPI when a version tag is pushed.
 #
-# Runs the `wheels` build on macOS, mirroring `irregex/.github/workflows/release.yml`:
+# Runs the `build` job on macOS, mirroring `irregex/.github/workflows/release.yml`:
 # Zig cross-compiles all six targets from one machine in about a minute, no CI
 # fan-out and no emulation needed to *produce* the artifacts. But producing a
 # cross-compiled executable is not the same claim as running one, and this
 # project ships a binary a subprocess actually execs — an ELF that loads on
 # nothing, or a Windows PE with the wrong calling convention, would build
-# cleanly here and fail on every user's machine. So `smoke` follows `wheels`
+# cleanly here and fail on every user's machine. So `smoke` follows `build`
 # with one job per target, each on the real GitHub-hosted runner for that OS
 # and architecture, installing the just-built wheel and running an authentic
 # search through it — the thing `import gist` alone cannot prove.
@@ -39,13 +39,97 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  wheels:
+  # The shared release contract (`release.toml` + the org's `package-release`
+  # action), run once before anything is built: is the tag the version
+  # `build.zig.zon` and every mirror declare, is the changelog folded with
+  # the exact `## [X.Y.Z]` heading and no fragment left un-folded, did
+  # `release-ready` go green on this exact commit, and is this commit
+  # actually reachable from `main`? The search family also releases in a
+  # fixed order — `irregex` before `gist`/`relate`, both before `blast` — so
+  # this additionally probes that this package's declared floor of
+  # `irregex` is already on the registries it depends on, rather than
+  # discovering the gap when the built wheel's floor-install step 404s.
+  # Every step below is conditioned on an actual tag, so a `workflow_dispatch`
+  # dry run (no tag) passes through as a no-op and `build` still runs
+  # unpublished.
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: version
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: version
+          args: --root . --tag ${{ github.ref_name }}
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: changelog
+          args: >-
+            --root . --require-fragments-empty
+            --version ${{ fromJSON(steps.version.outputs.result).version }}
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: tag-ancestor
+          args: ${{ github.repository }} ${{ github.sha }} --branch main
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: ci-status
+          args: ${{ github.repository }} ${{ github.sha }}
+
+      - name: Read the declared irregex floor
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: dep
+        run: |
+          set -euo pipefail
+          floor=$(python3 -c "
+          import re
+          text = open('bindings/python/pyproject.toml').read()
+          print(re.search(r'\"irregex>=([0-9.]+)', text)[1])")
+          echo "irregex_floor=$floor" >> "$GITHUB_OUTPUT"
+      - if: startsWith(github.ref, 'refs/tags/v')
+        id: dep-pypi
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: registry-probe
+          args: pypi irregex ${{ steps.dep.outputs.irregex_floor }}
+      - if: startsWith(github.ref, 'refs/tags/v')
+        id: dep-crates
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: registry-probe
+          args: crates irgx ${{ steps.dep.outputs.irregex_floor }}
+      - name: irregex's declared floor must already be published
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          PYPI: ${{ steps.dep-pypi.outputs.result }}
+          CRATES: ${{ steps.dep-crates.outputs.result }}
+          FLOOR: ${{ steps.dep.outputs.irregex_floor }}
+        run: |
+          set -euo pipefail
+          if [ "$PYPI" != present ] || [ "$CRATES" != present ]; then
+            echo "::error::irregex $FLOOR is not yet published (pypi: $PYPI, crates: $CRATES)." \
+                 "The search family releases in order — irregex before gist — so publish" \
+                 "irregex first." >&2
+            exit 1
+          fi
+          echo "irregex $FLOOR is on both registries"
+
+  build:
+    name: build
+    needs: preflight
     runs-on: macos-latest
     defaults:
       run:
         working-directory: bindings/python
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Both setups cache by default, and a cache is writable by any workflow on
@@ -57,26 +141,68 @@ jobs:
         with:
           version: 0.16.0
           use-cache: false
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: false
 
+      # `preflight` already re-verified this against every mirror; the shared
+      # action reads it the same way here so this job's own artifact never
+      # disagrees with what preflight just approved.
       - name: The tag must name the version being published
         if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          declared=$(uv run --no-project --python 3.12 python -c \
-            "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
-          if [ "$tag" != "$declared" ]; then
-            echo "::error::tag v$tag would publish gist-search $declared." \
-                 "Tag the Python distribution's version, or bump pyproject.toml." >&2
-            exit 1
-          fi
-          echo "tag v$tag matches the declared version"
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: version
+          args: --root . --tag ${{ github.ref_name }}
 
       - name: Build every target
         run: uv run --no-project --python 3.12 python scripts/build_wheels.py
+
+      # A local checkout resolves `irregex` through a `[tool.uv.sources]` path,
+      # which is right for development — but that key is uv-specific and never
+      # reaches core metadata, so what actually ships is whatever `Requires-Dist`
+      # ended up saying. Assert on a built artifact rather than on the source,
+      # because the source entry is supposed to be there and a release cannot be
+      # taken back. Any one of the six wheels answers identically: the
+      # dependency declaration does not vary by platform.
+      #
+      # "Names irregex" was the whole assertion once, and it passed while the
+      # requirement was a bare `irregex` — which the resolver satisfied with the
+      # 0.1.0 pre-rename placeholder, a distribution with no `irgx` module in it
+      # at all. The floor gate below caught the import error, but only because
+      # that older version happens to exist; an unbounded requirement is wrong
+      # whether or not the index currently holds something old enough to prove it.
+      # So the lower bound is asserted here, where a release can still be stopped.
+      - name: The published dependency must resolve from the index
+        run: |
+          set -euo pipefail
+          uv run --no-project --python 3.12 --with packaging==25.0 python - <<'PY'
+          import pathlib, re, sys, zipfile
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name
+          whl = next(pathlib.Path("dist").glob("*.whl"))
+          zf = zipfile.ZipFile(whl)
+          name = next(n for n in zf.namelist() if n.endswith(".dist-info/METADATA"))
+          text = zf.read(name).decode()
+          lines = re.findall(r"^Requires-Dist:\s*(.+)$", text, re.M)
+          print("Requires-Dist:", lines or "(none)")
+          # `packaging` rather than string surgery, because a requirement's own
+          # grammar is what the index reads. Splitting on whitespace found the name
+          # only while the requirement carried no specifier: `irregex<2,>=1.0.0` has
+          # no space in it, so the moment a bound was added the name stopped
+          # matching and the gate reported the dependency missing.
+          reqs = [Requirement(line) for line in lines]
+          substrate = [r for r in reqs if canonicalize_name(r.name) == "irregex"]
+          if not substrate:
+              sys.exit("the wheel does not depend on irregex — the substrate would be missing")
+          if direct := [str(r) for r in reqs if r.url]:
+              sys.exit(f"a direct/path reference would ship: {direct}")
+          floors = {">=", "==", "~=", ">"}
+          if not any(s.operator in floors for r in substrate for s in r.specifier):
+              sys.exit(f"the substrate requirement has no lower bound, so a pre-rename "
+                       f"release can satisfy it: {[str(r) for r in substrate]}")
+          print("dependency metadata is index-resolvable and bounded")
+          PY
 
       # Fails fast, on the build host, before the six-way native matrix below
       # spends its minutes: installs the macOS-arm64 wheel this host is native
@@ -103,7 +229,7 @@ jobs:
       - name: Check the metadata the index will read
         run: uvx twine check dist/*.whl
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wheels
           path: bindings/python/dist/*.whl
@@ -119,7 +245,7 @@ jobs:
   # where that surfaces — not in a bug report.
   smoke:
     name: smoke (${{ matrix.target }})
-    needs: wheels
+    needs: build
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -190,18 +316,43 @@ jobs:
     name: publish
     # Only a tag publishes. A manual run builds and verifies and stops there.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [wheels, smoke]
+    needs: [preflight, build, smoke]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
       # The OIDC token Trusted Publishing exchanges for an upload credential.
       id-token: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: wheels
           path: dist
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - id: tag
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      # Probed before the OIDC token is minted, the same idempotency the
+      # `crates` job proves below: a retry after a flake, or a dispatch on a
+      # tag that already shipped, must land on "already there" rather than
+      # spend a credential on an upload PyPI will reject anyway.
+      - id: probe
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: registry-probe
+          args: pypi gist-search ${{ steps.tag.outputs.version }}
+      - name: probe answered
+        env:
+          STATE: ${{ steps.probe.outputs.result }}
+          STEPS_TAG_OUTPUTS_VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$STATE" = error ]; then
+            echo "::error::PyPI did not answer for gist-search ${STEPS_TAG_OUTPUTS_VERSION} —" \
+                 "a network failure is never treated as \"absent\"." >&2
+            exit 1
+          fi
+          echo "gist-search ${STEPS_TAG_OUTPUTS_VERSION} on PyPI: $STATE"
+      - if: steps.probe.outputs.result == 'absent'
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+
   # ── crates.io
   #
   # A sibling of `publish`, not a step inside it. The two registries fail
@@ -217,6 +368,7 @@ jobs:
   crates:
     name: crates
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: preflight
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:
@@ -225,26 +377,18 @@ jobs:
       run:
         working-directory: bindings/rust
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # No toolchain action and no cache: `bindings/rust/rust-toolchain.toml`
-      # pins the channel and the runner's rustup honours it, and a release
-      # builds from source or not at all — a cache is writable by any workflow
-      # on any branch, which is the wrong trade for an artifact being published.
+      # `preflight` already re-verified this against every mirror; reading it
+      # the same way here means this job's own artifact never disagrees with
+      # what preflight just approved.
       - name: The tag must name the version being published
-        run: |
-          set -euo pipefail
-          tag="${GITHUB_REF_NAME#v}"
-          declared=$(python3 -c \
-            "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']['version'])")
-          if [ "$tag" != "$declared" ]; then
-            echo "::error::tag v$tag would publish crate version $declared." \
-                 "Tag the version the crate declares, or bump Cargo.toml." >&2
-            exit 1
-          fi
-          echo "tag v$tag matches the declared crate version"
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: version
+          args: --root . --tag ${{ github.ref_name }}
 
       # crates.io renders a README as the entire project page, so the one it gets
       # is a link-corrected copy of the repository README rather than the short
@@ -254,51 +398,39 @@ jobs:
         working-directory: .
         run: python3 tools/registry_readme.py
 
-      # Idempotent, for the same reason the Go tag step is: re-running a release
-      # — a retry after a flake, or a dispatch on an existing tag — must not fail
-      # because the version is already on the index. A published version is
-      # immutable there, so "already present" is success, not a collision.
-      - name: Is this version already on the index?
-        id: state
+      # Idempotent, for the same reason the Go tag step is, and probed before
+      # the OIDC token below is minted: re-running a release — a retry after a
+      # flake, or a dispatch on an existing tag — must not fail because the
+      # version is already on the index. A published version is immutable
+      # there, so "already present" is success, not a collision, and a
+      # registry that does not answer is never treated as "absent."
+      - id: tag
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - id: state
+        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        with:
+          command: registry-probe
+          args: crates gist ${{ steps.tag.outputs.version }}
+      - name: probe answered
+        env:
+          STATE: ${{ steps.state.outputs.result }}
+          STEPS_TAG_OUTPUTS_VERSION: ${{ steps.tag.outputs.version }}
         run: |
           set -euo pipefail
-          read -r crate version prefix <<<"$(python3 -c "
-          import pathlib, tomllib
-          pkg = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']
-          n = pkg['name']
-          # The sparse index shards by name length, then by leading characters.
-          prefix = {1: '1', 2: '2', 3: f'3/{n[0]}'}.get(len(n), f'{n[0:2]}/{n[2:4]}')
-          print(n, pkg['version'], prefix)")"
-          # The sparse index is the authority cargo itself reads, and it needs no
-          # auth. A crate with no versions yet answers 404 with an XML body, which
-          # the parser treats as "no versions" rather than as a failure.
-          already=$(curl -sS "https://index.crates.io/$prefix/$crate" 2>/dev/null \
-            | python3 -c "
-          import json, sys
-          want = sys.argv[1]
-          found = set()
-          for line in sys.stdin:
-              if not line.strip():
-                  continue
-              try:
-                  found.add(json.loads(line)['vers'])
-              except (ValueError, KeyError):
-                  pass
-          print('true' if want in found else 'false')" "$version")
-          echo "already=$already" >> "$GITHUB_OUTPUT"
-          if [ "$already" = "true" ]; then
-            echo "$crate $version is already on crates.io; nothing to publish"
-          else
-            echo "$crate $version is not on crates.io yet"
+          if [ "$STATE" = error ]; then
+            echo "::error::crates.io did not answer for gist ${STEPS_TAG_OUTPUTS_VERSION} —" \
+                 "a network failure is never treated as \"absent\"." >&2
+            exit 1
           fi
+          echo "gist ${STEPS_TAG_OUTPUTS_VERSION} on crates.io: $STATE"
 
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
-        if: steps.state.outputs.already == 'false'
+        if: steps.state.outputs.result == 'absent'
         id: auth
 
       # --locked: publish the dependency graph that was tested, not whatever the
       # index happens to offer at upload time.
-      - if: steps.state.outputs.already == 'false'
+      - if: steps.state.outputs.result == 'absent'
         run: cargo publish --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
@@ -317,6 +449,7 @@ jobs:
   go-module:
     name: go-module
     if: startsWith(github.ref, 'refs/tags/v')
+    needs: preflight
     runs-on: ubuntu-latest
     permissions:
       contents: read # The tag is cut with the App token below, not with GITHUB_TOKEN.

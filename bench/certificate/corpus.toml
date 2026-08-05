@@ -38,8 +38,8 @@
 # a tree whose selectivity is known. Neither substitutes for the other.
 [corpus.gist-synthetic-go-v1]
 description = "16,000 deterministic Go-shaped files (~38 MiB), one seed, all 12 probe classes non-vacuous with pgxpool selective at ~1.6%"
-roots = ["."]
-allow_prefixes = ["pkg"]
+roots = [ "." ]
+allow_prefixes = [ "pkg" ]
 fetch = "python3 bench/conformance/targets/corpus.py <dir> --files 16000"
 sha256 = "bc43a9a536882b934f5972bcc02ded4dc682a5e0adec50e40af4de14b5a91527"
 
@@ -52,8 +52,8 @@ sha256 = "bc43a9a536882b934f5972bcc02ded4dc682a5e0adec50e40af4de14b5a91527"
 # a lane with no declared corpus cannot publish at all.
 [corpus.gist-self-v1]
 description = "the gist checkout itself — lifecycle, footprint, and index-size lanes only, never Layer A"
-roots = ["src", "bench", "bindings", "editor", "shell"]
-allow_prefixes = ["src/", "bench/", "bindings/", "editor/", "shell/"]
+roots = [ "src", "bench", "bindings", "editor", "shell" ]
+allow_prefixes = [ "src/", "bench/", "bindings/", "editor/", "shell/" ]
 fetch = "git clone https://github.com/The-Billy-Company/gist"
 
 # ── Never present in a published bundle ───────────────────────────────────────
