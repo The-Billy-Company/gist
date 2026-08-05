@@ -108,10 +108,7 @@ def main() -> int:
     rows = [{"path": str(p), "line": n, "total": got} for p, n, got in claims]
     for path, number, got in claims:
         if got != want:
-            faults.append(
-                f"{path}:{number}: claims {got} scoreable cases, "
-                f"{RESULTS} says {want}"
-            )
+            faults.append(f"{path}:{number}: claims {got} scoreable cases, {RESULTS} says {want}")
     if not rows:
         faults.append("no x-rgsuite-total mirrors found — evidence_parity has nothing to guard")
 

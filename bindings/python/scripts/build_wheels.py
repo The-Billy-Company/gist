@@ -64,12 +64,54 @@ _EXE = "bin/gist.exe"
 # x86_64-v2 / aarch64-baseline CPU split. This table is deliberately identical
 # to that one so the two packages' wheels describe one platform per name.
 MATRIX = (
-    Target("macos-arm64", "aarch64-macos.11.0", "macosx_11_0_arm64", _BIN, "baseline", ("darwin", "arm64")),
-    Target("macos-x86_64", "x86_64-macos.11.0", "macosx_11_0_x86_64", _BIN, "x86_64_v2", ("darwin", "x86_64")),
-    Target("linux-x86_64", "x86_64-linux-gnu.2.17", "manylinux_2_17_x86_64", _BIN, "x86_64_v2", ("linux", "x86_64")),
-    Target("linux-aarch64", "aarch64-linux-gnu.2.17", "manylinux_2_17_aarch64", _BIN, "baseline", ("linux", "aarch64")),
-    Target("windows-x86_64", "x86_64-windows.win10_rs4-gnu", "win_amd64", _EXE, "x86_64_v2", ("win32", "AMD64")),
-    Target("windows-arm64", "aarch64-windows.win10_rs4-gnu", "win_arm64", _EXE, "baseline", ("win32", "ARM64")),
+    Target(
+        "macos-arm64",
+        "aarch64-macos.11.0",
+        "macosx_11_0_arm64",
+        _BIN,
+        "baseline",
+        ("darwin", "arm64"),
+    ),
+    Target(
+        "macos-x86_64",
+        "x86_64-macos.11.0",
+        "macosx_11_0_x86_64",
+        _BIN,
+        "x86_64_v2",
+        ("darwin", "x86_64"),
+    ),
+    Target(
+        "linux-x86_64",
+        "x86_64-linux-gnu.2.17",
+        "manylinux_2_17_x86_64",
+        _BIN,
+        "x86_64_v2",
+        ("linux", "x86_64"),
+    ),
+    Target(
+        "linux-aarch64",
+        "aarch64-linux-gnu.2.17",
+        "manylinux_2_17_aarch64",
+        _BIN,
+        "baseline",
+        ("linux", "aarch64"),
+    ),
+    Target(
+        "windows-x86_64",
+        "x86_64-windows.win10_rs4-gnu",
+        "win_amd64",
+        _EXE,
+        "x86_64_v2",
+        ("win32", "AMD64"),
+    ),
+    Target(
+        "windows-arm64",
+        "aarch64-windows.win10_rs4-gnu",
+        "win_arm64",
+        _EXE,
+        "baseline",
+        ("win32", "ARM64"),
+    ),
 )
 
 
