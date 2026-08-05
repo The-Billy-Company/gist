@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) void {
 
     // The engine beneath, at matching optimize. Its module carries the PCRE2
     // floor, so linking this links the whole exact-search stack.
-    const irgx_dep = b.dependency("irregex", .{ .target = target, .optimize = optimize });
+    const irgx_dep = b.dependency("irregex", .{ .target = target, .optimize = optimize, .@"lib-optimize" = optimize });
     const deps = [_]std.Build.Module.Import{
         .{ .name = "irregex", .module = irgx_dep.module("irregex") },
     };
