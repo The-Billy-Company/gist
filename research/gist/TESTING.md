@@ -1,7 +1,7 @@
 # Gist — the evidence story
 
 Gist has several independent evidence layers. The tracked ripgrep replay is
-**fully green**: 411/411 scoreable mined cases pass on each walk engine, with
+**fully green**: 411<!-- x-rgsuite-total -->/411 scoreable mined cases pass on each walk engine, with
 zero deferred divergences. This document distinguishes a passing parity proof
 from complete accounting of the surface.
 
@@ -58,7 +58,7 @@ The tracked ripgrep 15.2.0 snapshot contains 446 invocations **per engine**:
 | NA     |    14 | deliberate, documented product boundary                   |
 | SKIP   |    21 | accounted companion, boundary, or irreplayable obligation |
 
-Supported-surface parity is therefore **411/411 = 100%**.
+Supported-surface parity is therefore **411<!-- x-rgsuite-total -->/411 = 100%**.
 `check_results.py` proves that every PASS/NA/SKIP is accounted for and that the
 README and result artifact agree; with zero FAIL rows the strict gate passes
 without `--allow-fail`.

@@ -24,6 +24,17 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{ .default_target = default_target });
     const optimize = b.standardOptimizeOption(.{});
 
+    // Debug info is worth its size to a local `relate`/`blast` build and
+    // worth nothing to someone who ran `pip install gist-search` — on ELF the
+    // CLI's DWARF outweighs its own machine code roughly four to one. This
+    // acts on the installed `gist` binary alone: `Step.Compile` derives a
+    // whole-artifact strip decision from its root module's `.strip` field
+    // (see `lib/std/Build/Step/Compile.zig`), so setting it only on the CLI's
+    // face module below leaves the C-ABI dylib/archive that `relate`,
+    // `blast`, Go cgo, and Rust `build.rs` link exactly as debuggable as it
+    // always was.
+    const strip = b.option(bool, "strip", "Omit debug info from the installed gist CLI (packaging)");
+
     // The engine beneath, at matching optimize. Its module carries the PCRE2
     // floor, so linking this links the whole exact-search stack.
     const irgx_dep = b.dependency("irregex", .{ .target = target, .optimize = optimize, .@"lib-optimize" = optimize });
@@ -94,6 +105,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/surface/face/gist/main.zig"),
             .target = target,
             .optimize = cli_optimize,
+            .strip = strip,
             .imports = &face_imports,
         }),
     });

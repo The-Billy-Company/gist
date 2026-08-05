@@ -565,6 +565,16 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: uv run --no-project --python 3.12 python tools/version_parity.py
 
+      # The mined rgsuite total (README.md, TESTING.md, CLAIM.md) — the number
+      # that drifted to 409 in one doc while the tracked replay had already
+      # grown to 411, silently, because nothing compared them.
+      - run: uv run --no-project --python 3.12 python tools/evidence_parity.py
+
+      # The one README shaped like results.json's own bucket table — accounts
+      # for every SKIP/FAIL and catches that specific file's drift independent
+      # of the cross-document total above.
+      - run: uv run --no-project --python 3.12 python bench/conformance/rgsuite/check_results.py
+
       # Every index this project publishes to shows the repository README as the
       # project's page, and each one resolves a relative link against its own
       # URL rather than against GitHub. `registry_readme.py` corrects that at

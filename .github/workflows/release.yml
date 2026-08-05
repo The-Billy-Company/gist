@@ -1,18 +1,22 @@
-# Publish the Python distribution to PyPI when a version tag is pushed.
+# Publish the wheel matrix to PyPI when a version tag is pushed.
 #
-# Deliberately much smaller than the sibling `irregex` release. That package
-# carries a compiled engine and needs a five-target wheel matrix; this one is
-# pure Python and depends on `irregex` for every native byte it touches. So one
-# `py3-none-any` wheel covers every platform, and — unlike the sibling — an
-# sdist is genuinely buildable, because this project is self-contained under
-# `bindings/python` rather than rooted above its own sources. The one thing it
-# reaches up for is the repository README, which is the long description — so
-# the sdist carries a corrected copy of it and a source build reads that.
+# Runs the `build` job on macOS, mirroring `irregex/.github/workflows/release.yml`:
+# Zig cross-compiles all six targets from one machine in about a minute, no CI
+# fan-out and no emulation needed to *produce* the artifacts. But producing a
+# cross-compiled executable is not the same claim as running one, and this
+# project ships a binary a subprocess actually execs — an ELF that loads on
+# nothing, or a Windows PE with the wrong calling convention, would build
+# cleanly here and fail on every user's machine. So `smoke` follows `build`
+# with one job per target, each on the real GitHub-hosted runner for that OS
+# and architecture, installing the just-built wheel and running an authentic
+# search through it — the thing `import gist` alone cannot prove.
 #
-# The distribution is `gist-search`; the import stays `gist`. The plain `gist`
-# name on PyPI belongs to an unrelated author, so publishing under it is not
-# available and installing under it would fetch a stranger's package. Naming
-# them differently is the bs4 / PIL / cv2 pattern.
+# Wheels only, no sdist. The Python project lives under `bindings/python` while
+# the engine sources live at the repository root, so an sdist rooted at the
+# project would not contain the thing it needs to build — the same reason
+# `irregex` ships none. Six wheels cover every platform anyone is installing
+# on; shipping a source archive that cannot build itself would be worse than
+# shipping none.
 #
 # ONE-TIME SETUP: this uses PyPI Trusted Publishing, so there is no API token to
 # rotate or leak. On PyPI, add a trusted publisher for the `gist-search` project
@@ -22,8 +26,8 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # Buildable and verifiable without publishing, so the artifact can be
-  # exercised without minting a version.
+  # Buildable and verifiable without publishing, so the matrix — and the
+  # native smoke tests — can be exercised without minting a version.
   workflow_dispatch:
 
 permissions:
@@ -35,21 +39,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The shared release contract (`release.toml` + the org's `package-release`
+  # action), run once before anything is built: is the tag the version
+  # `build.zig.zon` and every mirror declare, is the changelog folded with
+  # the exact `## [X.Y.Z]` heading and no fragment left un-folded, did
+  # `release-ready` go green on this exact commit, and is this commit
+  # actually reachable from `main`? The search family also releases in a
+  # fixed order — `irregex` before `gist`/`relate`, both before `blast` — so
+  # this additionally probes that this package's declared floor of
+  # `irregex` is already on the registries it depends on, rather than
+  # discovering the gap when the built wheel's floor-install step 404s.
+  # Every step below is conditioned on an actual tag, so a `workflow_dispatch`
+  # dry run (no tag) passes through as a no-op and `build` still runs
+  # unpublished.
   preflight:
     name: preflight
-    # The shared release contract (`release.toml` + the org's `package-release`
-    # action), run once before anything is built: is the tag the version
-    # `build.zig.zon` and every mirror declare, is the changelog folded with
-    # the exact `## [X.Y.Z]` heading and no fragment left un-folded, did
-    # `release-ready` go green on this exact commit, and is this commit
-    # actually reachable from `main`? The search family also releases in a
-    # fixed order — `irregex` before `gist`/`relate`, both before `blast` — so
-    # this additionally probes that this package's declared floor of
-    # `irregex` is already on the registries it depends on, rather than
-    # discovering the gap when the built wheel's floor-install step 404s.
-    # Every step below is conditioned on an actual tag, so a `workflow_dispatch`
-    # dry run (no tag) passes through as a no-op and `build` still runs
-    # unpublished.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -120,7 +124,7 @@ jobs:
   build:
     name: build
     needs: preflight
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     defaults:
       run:
         working-directory: bindings/python
@@ -128,6 +132,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # Both setups cache by default, and a cache is writable by any workflow on
+      # any branch. That is a fine trade for CI, where a poisoned entry costs a
+      # confusing red X; it is the wrong trade here, where the artifact this job
+      # builds gets signed and published. A release builds from source or not
+      # at all.
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: 0.16.0
+          use-cache: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: false
@@ -142,20 +155,16 @@ jobs:
           command: version
           args: --root . --tag ${{ github.ref_name }}
 
-      - name: Build sdist + wheel
-        run: uv build --out-dir dist
+      - name: Build every target
+        run: uv run --no-project --python 3.12 python scripts/build_wheels.py
 
       # A local checkout resolves `irregex` through a `[tool.uv.sources]` path,
       # which is right for development — but that key is uv-specific and never
       # reaches core metadata, so what actually ships is whatever `Requires-Dist`
-      # ended up saying. Assert on the built artifact rather than on the source,
+      # ended up saying. Assert on a built artifact rather than on the source,
       # because the source entry is supposed to be there and a release cannot be
-      # taken back.
-      #
-      # `--no-project` for the same reason, here and in the tag check above: both
-      # scripts are stdlib, and syncing the project first would make them resolve
-      # that very path entry against a sibling checkout a release job has no
-      # reason to clone.
+      # taken back. Any one of the six wheels answers identically: the
+      # dependency declaration does not vary by platform.
       #
       # "Names irregex" was the whole assertion once, and it passed while the
       # requirement was a bare `irregex` — which the resolver satisfied with the
@@ -195,44 +204,127 @@ jobs:
           print("dependency metadata is index-resolvable and bounded")
           PY
 
-      # The gate that earns its place: install the built artifact on the declared
-      # floor, from the index for its dependencies, and prove it imports. A
-      # `requires-python` that is a guess installs cleanly and then fails at
-      # import, which is the worst possible place to find out.
-      - name: Prove the declared floor on the built artifact
+      # Fails fast, on the build host, before the six-way native matrix below
+      # spends its minutes: installs the macOS-arm64 wheel this host is native
+      # for and runs a real search, not just an import. `smoke` repeats this on
+      # every other target's own hardware.
+      - name: Prove a real search on the build host's own wheel
         run: |
           set -euo pipefail
           uv venv --python 3.12 /tmp/floor
           uv pip install --python /tmp/floor/bin/python --find-links dist gist-search
+          mkdir -p /tmp/floor-corpus
+          printf 'def unique_marker_fn_8f3a():\n    return 42\n' > /tmp/floor-corpus/needle.py
           # From a directory that is not the project, so the import resolves to
           # the installed wheel rather than the working copy beside it.
           cd /tmp && /tmp/floor/bin/python -c "
-          import gist
-          print('floor import OK:', gist.__name__)
+          import gist, subprocess
+          matches = gist.search(r'unique_marker_fn_8f3a', cwd='/tmp/floor-corpus')
+          assert len(matches) == 1, matches
+          assert matches[0].line_number == 1, matches[0]
+          subprocess.run([gist.binary(), '--version'], check=True)
+          print('floor import + real search + raw CLI exec OK:', gist.binary())
           "
 
       - name: Check the metadata the index will read
-        run: uvx twine check dist/*
+        run: uvx twine check dist/*.whl
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dist
-          path: bindings/python/dist/*
+          name: wheels
+          path: bindings/python/dist/*.whl
           if-no-files-found: error
+
+  # Import success is not product success. Each of these runs on the real
+  # architecture its target names — not QEMU, not Rosetta — and installs
+  # *only* the one wheel `pip`'s own tag matching picks out of the six in
+  # `dist/`, then drives a real search through the bundled binary with no
+  # `PATH`/`GIST_BIN` override and no source checkout for `_resolve`'s
+  # checkout-local rung to find. If tag matching ever put the wrong wheel on a
+  # host, or a cross-compiled binary refused to load on its own kernel, this is
+  # where that surfaces — not in a bug report.
+  smoke:
+    name: smoke (${{ matrix.target }})
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: macos-arm64, runner: macos-latest }
+          - { target: macos-x86_64, runner: macos-15-intel }
+          - { target: linux-x86_64, runner: ubuntu-latest }
+          - { target: linux-aarch64, runner: ubuntu-24.04-arm }
+          - { target: windows-x86_64, runner: windows-2025 }
+          - { target: windows-arm64, runner: windows-11-arm }
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: wheels
+          path: dist
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: false
+
+      # `shell: bash` on every OS (Windows runners ship Git Bash) so one script
+      # covers all six targets; the venv's own layout (`bin/` vs `Scripts/`) is
+      # the only thing that still forks.
+      - name: Install the wheel pip's tag matching picks for this host
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.12 .smoke
+          py=.smoke/bin/python
+          [ -f "$py" ] || py=.smoke/Scripts/python.exe
+          echo "py=$py" >> "$GITHUB_ENV"
+          # No --no-index: gist-search's own wheel comes from ./dist (the
+          # candidate about to be published), irregex resolves from the real
+          # PyPI index — the dependency a real `pip install gist-search` gets.
+          uv pip install --python "$py" --find-links dist gist-search
+          "$py" -c "
+          import gist, pathlib, sys
+          print('installed from wheel; resolved binary:', gist.binary())
+          assert pathlib.Path(gist.binary()).is_file(), 'resolved path does not exist'
+          "
+
+      - name: Run a real search through the bundled binary — no PATH, no GIST_BIN
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p corpus
+          printf 'def unique_marker_fn_8f3a():\n    return 42\n' > corpus/needle.py
+          "$py" -c "
+          import subprocess
+          import gist
+
+          matches = gist.search(r'unique_marker_fn_8f3a', cwd='corpus')
+          assert len(matches) == 1, f'expected 1 match, got {matches!r}'
+          assert matches[0].line_number == 1, matches[0]
+          assert 'unique_marker_fn_8f3a' in matches[0].text, matches[0]
+
+          no_hits = gist.search(r'no_such_pattern_anywhere_zz9', cwd='corpus')
+          assert no_hits == [], f'a pattern absent from the corpus matched: {no_hits!r}'
+
+          # The raw executable, invoked directly — proves the cross-compiled
+          # binary itself loads and runs on this kernel, independent of the
+          # Python subprocess wrapper around it.
+          proc = subprocess.run([gist.binary(), '--version'], capture_output=True, text=True, check=True)
+          print('real search + raw CLI exec OK:', gist.version(), proc.stdout.strip() or proc.stderr.strip())
+          "
 
   publish:
     name: publish
     # Only a tag publishes. A manual run builds and verifies and stops there.
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [preflight, build]
+    needs: [preflight, build, smoke]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write # PyPI exchanges this OIDC token for one upload credential.
+      id-token: write # The OIDC token Trusted Publishing exchanges for an upload credential.
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: dist
+          name: wheels
           path: dist
       - id: tag
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -259,6 +351,7 @@ jobs:
           echo "gist-search ${STEPS_TAG_OUTPUTS_VERSION} on PyPI: $STATE"
       - if: steps.probe.outputs.result == 'absent'
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+
   # ── crates.io
   #
   # A sibling of `publish`, not a step inside it. The two registries fail

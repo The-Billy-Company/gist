@@ -460,7 +460,7 @@ Measured that way, **186 of 186 documented flags conform**: 176 are
 byte-identical and 10 differ only at a declared boundary whose residual check is
 re-verified on every run, with 0 rejected and 0 undeclared divergences.
 
-Alongside that sit **411/411** of ripgrep's mined integration cases and 27/27
+Alongside that sit **411<!-- x-rgsuite-total -->/411** of ripgrep's mined integration cases and 27/27
 adverse undo pairs, where a negation must actually undo, on a fixture where the
 two answers differ.
 
@@ -816,7 +816,7 @@ resident-versus-cold answers.
 The tracked ripgrep 15.2.0 snapshot contains 446 invocations per walk engine:
 
 - **Mined upstream suite** – 411 PASS, 0 ORDER, 0 FAIL, 14 NA, and 21 SKIP.
- Supported-surface parity is **411/411 = 100%**, so every supported-surface case
+ Supported-surface parity is **411<!-- x-rgsuite-total -->/411 = 100%**, so every supported-surface case
  matches ripgrep, with zero deferred divergences.
 - **Multiline** – 30/30 adversarial cases pass for stdout, exit code, and
  indexed-versus-`--no-index` equality.
