@@ -100,9 +100,10 @@ def version(path: str) -> str:
             field = line.split()
             if len(field) >= 3 and field[0] == "mod":
                 return field[2]
-    if head := _run([path, "--version"], 10).strip().splitlines():
-        if found := SEMVER.search(head[0]):
-            return found.group(0)
+    if (head := _run([path, "--version"], 10).strip().splitlines()) and (
+        found := SEMVER.search(head[0])
+    ):
+        return found.group(0)
     lone = _run([path, "version"], 10).strip().splitlines()
     return lone[0] if len(lone) == 1 and SEMVER.fullmatch(lone[0]) else ""
 

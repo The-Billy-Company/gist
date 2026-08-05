@@ -119,7 +119,7 @@ PATHS_LIST="${OUT}/paths.list"
 # package's `corpus.toml` — a bundle scoped that way cannot be published at all.
 # What a mint measures is stated by the caller (`GIST_ROOTS`, matching the
 # `roots` of a declared corpus) or it is the corpus root; there is no third
-# answer inferred from the neighbourhood.
+# answer inferred from the neighborhood.
 if [[ -n "${GIST_ROOTS:-}" ]]; then
   read -ra ROOTS <<< "${GIST_ROOTS//[:,]/ }"
 else
@@ -130,7 +130,7 @@ fi
 # what it is scoped to and in what is actually on the disk there. Checked here
 # rather than only at publish, because publish is minutes later and a mint that
 # never publishes skipped the check entirely: that is how a run with an
-# inherited `GIST_CORPUS_ROOT` measured a 16,000-file Go corpus and labelled the
+# inherited `GIST_CORPUS_ROOT` measured a 16,000-file Go corpus and labeled the
 # bundle `ecosystem-v1` without a word.
 if [[ -n "${CERT_CORPUS_ID:-}" ]]; then
   _field_absent=()

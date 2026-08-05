@@ -161,7 +161,9 @@ def verify() -> int:
     """
     want, have = pinned(), observed()
     if not want:
-        print(f"shared_drift: no manifest at {MANIFEST} — run --update to mint one", file=sys.stderr)
+        print(
+            f"shared_drift: no manifest at {MANIFEST} — run --update to mint one", file=sys.stderr
+        )
         return 2
 
     missing = sorted(n for n in set(want) - set(have) if carried(n))

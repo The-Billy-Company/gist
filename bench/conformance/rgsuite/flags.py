@@ -361,7 +361,11 @@ def _repo_cases() -> list[Case]:
             env=env,
         ),
         Case(
-            "repo:sortr-path", ["--sortr", "path", "-l", "func"], "services/backend", KERNEL, env=env
+            "repo:sortr-path",
+            ["--sortr", "path", "-l", "func"],
+            "services/backend",
+            KERNEL,
+            env=env,
         ),
         Case(
             "repo:sort-modified",

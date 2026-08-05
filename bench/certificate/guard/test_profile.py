@@ -17,11 +17,10 @@ No real bundle, no git, no benchmark tools.
 """
 
 import json
+import profile
 import tempfile
 import unittest
 from pathlib import Path
-
-import profile
 
 
 def _certificate(
@@ -75,7 +74,7 @@ class MeasureTests(unittest.TestCase):
         assert all(v is None for v in _measure(_certificate(tally=None)).values())
 
     def test_a_later_layers_table_cannot_leak_into_the_macro_geomean(self) -> None:
-        """The section ends at the next `## ` — a neighbouring 100x row must not count."""
+        """The section ends at the next `## ` — a neighboring 100x row must not count."""
         trailer = "\n".join(
             [
                 "## Layer I — scanner mode + ripgrep conformance (no index)",
@@ -98,14 +97,10 @@ def _bundle(root: Path, *, cells: dict[str, str], index: dict[str, object] | Non
     (root / "raw").mkdir(exist_ok=True)
     rows = ["class\ttool", *(cell.removesuffix(".json").replace("__", "\t") for cell in cells)]
     (root / "certify_macro.csv").write_text("\n".join(rows) + "\n")
-    (root / "certify.csv").write_text(
-        "\n".join(["class", *sorted(profile.CERT_CLASSES)]) + "\n"
-    )
+    (root / "certify.csv").write_text("\n".join(["class", *sorted(profile.CERT_CLASSES)]) + "\n")
     for cell, command in cells.items():
         (root / "raw" / cell).write_text(
-            json.dumps(
-                {"results": [{"command": command, "times": [0.1], "exit_codes": [0]}]}
-            )
+            json.dumps({"results": [{"command": command, "times": [0.1], "exit_codes": [0]}]})
         )
     (root / "command-log.txt").write_text(
         "".join(f"{cell}\t{command}\n" for cell, command in cells.items())

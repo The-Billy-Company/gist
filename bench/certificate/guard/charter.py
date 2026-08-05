@@ -251,8 +251,7 @@ def main(charter: Charter, argv: list[str]) -> int:
     view = argv[1] if len(argv) > 1 else "headers"
     if view not in views:
         print(
-            f"{charter.package} profile: unknown view {view!r} — "
-            f"pick one of {', '.join(views)}",
+            f"{charter.package} profile: unknown view {view!r} — pick one of {', '.join(views)}",
             file=sys.stderr,
         )
         return 2
