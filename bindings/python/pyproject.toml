@@ -71,16 +71,19 @@ dependencies = [
   # this package opens with, and it only exists from 1.0.0 — the 0.1.0 already on
   # the index is the pre-rename placeholder, so an unbounded requirement resolved
   # to a distribution that cannot satisfy a single line of this one. The floor is
-  # 1.1.0, not 1.0.0, because that is the release where `_resolve` learned its
+  # 2.0.0, not 1.0.0, because that is the release where `_resolve` learned its
   # fourth rung — a binary a product's own wheel bundled at `<name>/bin/<name>` —
   # and this package's whole reason to bundle a `gist` binary at all depends on
-  # the shared resolver knowing to look for it there. Below 1.1.0, a fresh `pip
-  # install gist-search` would carry the CLI and never find it. The ceiling is
-  # the other half of the same fact: 1.0.0 (unmoved by that fix) is where the
-  # substrate froze the C ABI and the `irgx` Python surface, and a 2.0 is by
-  # definition free to move both. This is a face over an ABI, not a consumer of
-  # a loose utility.
-  "irregex>=1.1.0,<2",
+  # the shared resolver knowing to look for it there (the fourth-rung commit
+  # landed the same release cycle as an unrelated ABI-growing `feat!:`, so the
+  # tag that actually ships it is 2.0.0, not the 1.1.0 an isolated feature bump
+  # would have produced). Below that floor, a fresh `pip install gist-search`
+  # would carry the CLI and never find it. The ceiling holds the other half of
+  # the same shape: this package imports `irgx.contract`, `irgx.request`, and
+  # `irgx.runtime` directly, so a THIRD major (whatever next moves that surface)
+  # is not accepted sight-unseen — `bindings/python/tests/` running clean
+  # against 2.x is what earns 2.x its place here, not a guess about semver.
+  "irregex>=2.0.0,<3",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
