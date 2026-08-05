@@ -626,6 +626,7 @@ jobs:
           fi
 
   release-ready:
+    name: release-ready
     # The one check `release.yml`'s preflight polls for on the exact tagged
     # commit (`release.toml`'s `[ci].required_check`). Everything above feeds
     # into it, so a red job blocks the tag rather than the publish workflow

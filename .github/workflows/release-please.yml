@@ -109,6 +109,7 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
           ref: ${{ fromJson(needs.release-please.outputs.pr).headBranchName }}
+          persist-credentials: false
 
       - id: version
         uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
@@ -124,7 +125,7 @@ jobs:
         run: |
           set -euo pipefail
           version=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' \
-            <<<'${{ steps.version.outputs.result }}')
+            <<<"${STEPS_VERSION_OUTPUTS_RESULT}")
           uv run --no-project --python 3.12 --with towncrier==25.8.0 \
             towncrier build --yes --version "$version"
           if git diff --quiet -- CHANGELOG.md changelog.d; then
@@ -135,4 +136,13 @@ jobs:
           git config user.email 'billy-company-release[bot]@users.noreply.github.com'
           git add CHANGELOG.md changelog.d
           git commit -m "chore(changelog): fold fragments for v$version"
-          git push origin "HEAD:${{ fromJson(needs.release-please.outputs.pr).headBranchName }}"
+          # persist-credentials is false above, so this one push authenticates
+          # with a header scoped to the single git invocation instead of a
+          # token left sitting in .git/config for any later step to read.
+          header=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ${header}" \
+            push origin "HEAD:${TARGET_BRANCH}"
+        env:
+          STEPS_VERSION_OUTPUTS_RESULT: ${{ steps.version.outputs.result }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          TARGET_BRANCH: ${{ fromJson(needs.release-please.outputs.pr).headBranchName }}
