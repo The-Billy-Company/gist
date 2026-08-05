@@ -13,7 +13,7 @@ const std = @import("std");
 const request = @import("irregex").session.request;
 const wire = @import("../wire.zig");
 const frame = @import("opcodes.zig");
-const genus = @import("irregex").commands.scope.genus;
+const genus = @import("irregex").scope.genus;
 
 const WireError = frame.WireError;
 

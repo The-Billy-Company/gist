@@ -78,7 +78,7 @@ jobs:
       && github.event.pull_request.user.login != 'dependabot[bot]'
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # applying the labels a diff earned is the whole job.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,7 +98,7 @@ jobs:
     if: github.event_name == 'pull_request_target'
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: read # the title check reads the pull request it is judging, nothing else.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

@@ -19,7 +19,7 @@
 
 const std = @import("std");
 const request = @import("irregex").session.request;
-const run = @import("irregex").commands.search;
+const run = @import("irregex").engine.search;
 const session_spawn = @import("../../conduit/spawn.zig");
 const rendezvous = @import("../../conduit/rendezvous.zig");
 const standdown = @import("../../warden/standdown.zig");

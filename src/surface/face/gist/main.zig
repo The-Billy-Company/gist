@@ -49,7 +49,7 @@ const status = chassis.faces.status; // read-only index introspection
 const config = chassis.faces.config; // `gist config` — the persisted-configuration stack
 const schema = chassis.faces.schema; // `--schema` JSON manifest
 const primer = chassis.faces.primer; // `--generate` man page + shell completions
-const search = gist.commands.search; // the unified search engine (bare shorthand + `gist rg`)
+const search = gist.engine.search; // the unified search engine (bare shorthand + `gist rg`)
 const serve = chassis.session.serve; // `gist serve` — the resident warm daemon
 const client = chassis.session.client; // the warm CLI fast path (daemon dial + cold fallback)
 
@@ -262,7 +262,7 @@ const Argv = struct {
     }
     fn next(self: *Argv) ?[]const u8 {
         while (self.inner.next()) |a| {
-            if (!self.literal and gist.commands.scope.charter.consumed(a)) continue;
+            if (!self.literal and gist.scope.charter.consumed(a)) continue;
             if (std.mem.eql(u8, a, "--")) self.literal = true;
             return a;
         }
@@ -326,7 +326,7 @@ fn run(init: std.process.Init) !void {
     // and render format every summary/trace call site consults.
     gist.assay.install(.{});
 
-    gist.commands.scope.charter.honorNoConfig(gpa, init.minimal.args);
+    gist.scope.charter.honorNoConfig(gpa, init.minimal.args);
 
     var it = try Argv.init(init.minimal.args, gpa);
     _ = it.skip(); // argv[0]

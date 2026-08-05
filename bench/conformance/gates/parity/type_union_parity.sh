@@ -69,19 +69,19 @@ export GIST_NO_CONFIG=1
 # Zig, and the answer would silently become vacuous wherever a language is
 # missing. So the corpus is synthesized here: every case is then the same case on
 # every machine, and the non-vacuity floors below mean something.
-REPO="${WORK}/corpus"
-mkdir -p "${REPO}/src" "${REPO}/web" "${REPO}/vendor"
+CORPUS="${WORK}/corpus"
+mkdir -p "${CORPUS}/src" "${CORPUS}/web" "${CORPUS}/vendor"
 for f in src/handler.go src/util.go src/serve.py src/model.py src/lib.rs \
   web/api.ts web/App.tsx web/Panel.tsx; do
-  printf 'let action = "run";\n' > "${REPO}/${f}"
+  printf 'let action = "run";\n' > "${CORPUS}/${f}"
 done
 # A file that matches the needle and the custom type, but is gitignored: `-t` may
 # un-hide, never un-ignore, so this one must stay out of every answer below.
-printf 'let action = "run";\n' > "${REPO}/vendor/Ignored.tsx"
-printf 'vendor/\n' > "${REPO}/.gitignore"
+printf 'let action = "run";\n' > "${CORPUS}/vendor/Ignored.tsx"
+printf 'vendor/\n' > "${CORPUS}/.gitignore"
 # rg (and gist) apply .gitignore only inside a repository, so the ignore case has
 # no subject without one.
-(cd "${REPO}" && git init -q . && git add -A 2> /dev/null) || {
+(cd "${CORPUS}" && git init -q . && git add -A 2> /dev/null) || {
   echo "FAILED: could not create the synthetic corpus repo" >&2
   exit 1
 }
@@ -94,7 +94,7 @@ count() { wc -l < "$1" | tr -d ' '; }
 setof() {
   local dst="$1" tool="$2"
   shift 2
-  (cd "${REPO}" && "${tool}" -l "$@" < /dev/null 2> /dev/null) | LC_ALL=C sort -u > "${dst}"
+  (cd "${CORPUS}" && "${tool}" -l "$@" < /dev/null 2> /dev/null) | LC_ALL=C sort -u > "${dst}"
 }
 
 # gist and rg answer the same question, and the answer is not empty.

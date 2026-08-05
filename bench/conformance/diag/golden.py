@@ -36,7 +36,6 @@ import sys
 from pathlib import Path
 
 KERNEL = Path(__file__).resolve().parents[3]  # diag → conformance → bench → repo root
-REPO = KERNEL
 BIN = KERNEL / "zig-out" / "bin"
 GOLDEN_DIR = Path(__file__).resolve().parent / "golden"
 
@@ -88,7 +87,7 @@ def run_case(binary: str, argv: list[str]) -> str:
         sys.exit(f"missing binary {exe} — build with `zig build -Doptimize=ReleaseFast` first")
     proc = subprocess.run(
         [str(exe), *argv],
-        cwd=REPO,
+        cwd=KERNEL,
         env=ENV,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

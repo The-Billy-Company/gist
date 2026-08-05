@@ -102,7 +102,9 @@ TITLE = re.compile(
 # `labels: bug` and `labels: ["a", "b"]` — the two inline forms GitHub documents
 # for Dependabot streams and issue templates. A bare `labels:` opening a nested
 # block is deliberately not matched; that key belongs to something else.
-CITES = re.compile(r"^[ \t]*labels:[ \t]*(\[[^\]]*\]|[^\[\s#][^#\n]*?)[ \t]*$", re.MULTILINE)
+CITES = re.compile(
+    r"^[ \t]*labels:[ \t]*(\[[^\]]*\]|[^\[\s#][^#\n]*?)[ \t]*$", re.MULTILINE
+)
 
 
 @functools.cache
@@ -145,7 +147,9 @@ class Hub:
         self.repo = (
             repo
             or os.environ.get("GITHUB_REPOSITORY")
-            or self.gh("repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
+            or self.gh(
+                "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"
+            )
         )
 
     def gh(self, *args: str) -> str:
@@ -195,7 +199,9 @@ class Hub:
 
     def subject(self, kind: str, number: int) -> dict:
         shown = json.loads(
-            self.gh(kind, "view", str(number), "-R", self.repo, "--json", "title,labels")
+            self.gh(
+                kind, "view", str(number), "-R", self.repo, "--json", "title,labels"
+            )
         )
         return {
             "title": shown["title"],
@@ -340,7 +346,9 @@ def forge(repo: str | None) -> Hub | Forge:
         return Hub(repo)
     if named := repo or os.environ.get("GITHUB_REPOSITORY", ""):
         return Forge(api, token, named)
-    sys.exit("FORGEJO_API_URL is set but the repository is not — pass --repo OWNER/NAME")
+    sys.exit(
+        "FORGEJO_API_URL is set but the repository is not — pass --repo OWNER/NAME"
+    )
 
 
 class Taxonomy:
@@ -389,7 +397,9 @@ class Taxonomy:
     def weighed(self, changes: list[tuple[str, int]]) -> int:
         """Changed lines, ignoring the paths nobody reads line by line."""
         return sum(
-            lines for path, lines in changes if not any(hit(path, g) for g in self.unweighted)
+            lines
+            for path, lines in changes
+            if not any(hit(path, g) for g in self.unweighted)
         )
 
     def sized(self, lines: int) -> str | None:
@@ -578,7 +588,11 @@ def wired(tax: Taxonomy) -> list[tuple]:
     marks, hub = sorted(tax.marks), forge()
     with quiet:
         apply(tax, hub, 2, "issue", dry=False)
-    put = [body for method, path, body in seen if method == "POST" and path == "issues/2/labels"]
+    put = [
+        body
+        for method, path, body in seen
+        if method == "POST" and path == "issues/2/labels"
+    ]
     ids = {hub.known[name]["id"] for name in marks} if hub.known else set()
     if marks and not any(isinstance(b, dict) and set(b["labels"]) == ids for b in put):
         faults.append(("forgejo", "relabel", put))
@@ -640,7 +654,9 @@ def cited(root: pathlib.Path) -> dict[str, list[str]]:
                 # `*` is release.yml's documented catch-all, not a label anybody
                 # expects to exist, and demanding a row for it would be nonsense.
                 if name and name != "*":
-                    asked.setdefault(name, []).append(str(path.relative_to(root.parent)))
+                    asked.setdefault(name, []).append(
+                        str(path.relative_to(root.parent))
+                    )
     return asked
 
 
@@ -656,12 +672,18 @@ def kin(root: pathlib.Path) -> list[pathlib.Path]:
     return sorted(
         peer
         for peer in root.parent.iterdir()
-        if peer.is_dir() and peer != root and (peer / ".github/scripts/triage.py").is_file()
+        if peer.is_dir()
+        and peer != root
+        and (peer / ".github/scripts/triage.py").is_file()
     )
 
 
 def common(rows: list[dict]) -> dict[str, dict]:
-    return {r["name"]: r for r in rows if r["name"].startswith(SHARED) or "/" not in r["name"]}
+    return {
+        r["name"]: r
+        for r in rows
+        if r["name"].startswith(SHARED) or "/" not in r["name"]
+    }
 
 
 def peers(tax: Taxonomy) -> int:
@@ -688,7 +710,9 @@ def peers(tax: Taxonomy) -> int:
     for peer in found:
         notes: list[tuple[bool, str]] = []
         if (peer / ".github/scripts/triage.py").read_bytes() != mine.read_bytes():
-            notes.append((True, "triage.py differs — the engine is meant to be one file"))
+            notes.append(
+                (True, "triage.py differs — the engine is meant to be one file")
+            )
         there = common(json.loads((peer / ".github/labels.json").read_text())["labels"])
         for name in sorted(here.keys() | there.keys()):
             if here.get(name) == there.get(name):
@@ -727,7 +751,11 @@ def sync(tax: Taxonomy, hub: Hub | Forge, prune: bool, dry: bool) -> int:
         note = row.get("description", "")
         was = have.get(name)
         # Forgejo hands a color back with its `#`, GitHub without one.
-        if was and was["color"].lstrip("#").lower() == color.lower() and was["description"] == note:
+        if (
+            was
+            and was["color"].lstrip("#").lower() == color.lower()
+            and was["description"] == note
+        ):
             continue
         verb = "update" if was else "create"
         print(f"{verb} {name} #{color} — {note}")
@@ -736,7 +764,9 @@ def sync(tax: Taxonomy, hub: Hub | Forge, prune: bool, dry: bool) -> int:
 
     # Only inside a namespace this file declares: a bare label was never ours.
     stale = sorted(
-        n for n in have if "/" in n and n.split("/", 1)[0] in tax.namespaces and n not in declared
+        n
+        for n in have
+        if "/" in n and n.split("/", 1)[0] in tax.namespaces and n not in declared
     )
     for name in stale:
         print(f"{'prune' if prune else 'stale (keep)'} {name}")
@@ -777,7 +807,9 @@ def apply(tax: Taxonomy, hub: Hub | Forge, number: int, kind: str, dry: bool) ->
     add = sorted(want - on)
     drop = sorted((on & tax.owned(kind)) - want)
     print(f"#{number} {said}")
-    print(f"  keep {sorted(on & want) or '—'}\n  add  {add or '—'}\n  drop {drop or '—'}")
+    print(
+        f"  keep {sorted(on & want) or '—'}\n  add  {add or '—'}\n  drop {drop or '—'}"
+    )
     if dry or not (add or drop):
         return 0
 
@@ -844,10 +876,14 @@ def main(argv: list[str] | None = None) -> int:
 
     cli = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     verbs = cli.add_subparsers(dest="verb", required=True)
-    verbs.add_parser("show", parents=[parent]).add_argument("--json", action="store_true")
+    verbs.add_parser("show", parents=[parent]).add_argument(
+        "--json", action="store_true"
+    )
     verbs.add_parser("verify", parents=[parent])
     verbs.add_parser("peers", parents=[parent])
-    verbs.add_parser("sync", parents=[parent]).add_argument("--prune", action="store_true")
+    verbs.add_parser("sync", parents=[parent]).add_argument(
+        "--prune", action="store_true"
+    )
     # `apply` reads either subject. `check` blocks on a title that is about to
     # become a commit message, which is only ever a pull request's.
     subject = verbs.add_parser("apply", parents=[parent]).add_mutually_exclusive_group(
@@ -855,7 +891,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     subject.add_argument("--pr", type=int)
     subject.add_argument("--issue", type=int)
-    verbs.add_parser("check", parents=[parent]).add_argument("--pr", type=int, required=True)
+    verbs.add_parser("check", parents=[parent]).add_argument(
+        "--pr", type=int, required=True
+    )
 
     args = cli.parse_args(argv)
     tax = Taxonomy.load()

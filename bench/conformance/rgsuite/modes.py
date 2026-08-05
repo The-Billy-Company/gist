@@ -32,7 +32,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # rgsuite → conformance → bench → repo
-REPO = KERNEL
 FIX = Path()  # temp fixture root, set in main()
 
 RG = os.environ.get("RG_BIN", "rg")
@@ -192,7 +191,7 @@ class Case:
     name: str
     args: list[str]  # argv shared by gist + rg (pattern + flags), path appended
     path: str  # relative to cwd
-    cwd: Path = REPO
+    cwd: Path = KERNEL
     stdin: bytes | None = None
     sort_lines: bool = False
     is_json: bool = False
@@ -306,7 +305,7 @@ def _repo_cases(mode: str) -> list[Case]:
     subtree = "services/backend"
 
     def add(name, args, **kw):
-        cs.append(Case(name, args, subtree, cwd=REPO, sort_lines=True, **kw))
+        cs.append(Case(name, args, subtree, cwd=KERNEL, sort_lines=True, **kw))
 
     if mode in ("all", "core"):
         add("repo:func", [r"func \w+\(", "-n", "-H"])
@@ -430,7 +429,7 @@ def _median(bin_: str, args: list[str]) -> float:
     ts = []
     for _ in range(3):
         try:
-            ts.append(run(bin_, args, REPO).secs)
+            ts.append(run(bin_, args, KERNEL).secs)
         except subprocess.TimeoutExpired:
             return float("inf")
     ts.sort()

@@ -31,7 +31,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # evaluate → dominance → bench → package root
-REPO = KERNEL
 ARTIFACT = HERE / "artifact"
 
 
@@ -168,7 +167,7 @@ def _verify_operational(bundle: dict) -> list[str]:
 
 
 # ── claim freshness ───────────────────────────────────────────────────────────
-def verify_claims(contract: dict, repo: Path = REPO) -> tuple[list[str], dict[str, object]]:
+def verify_claims(contract: dict, repo: Path = KERNEL) -> tuple[list[str], dict[str, object]]:
     """Resolve each contract claim to a live value; return (problems, values)."""
     problems: list[str] = []
     values: dict[str, object] = {}

@@ -86,7 +86,7 @@ zip_cmd() { # <tool> <dir> — count-only, recursive, transparent decompression
   esac
 }
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 echo
 echo "cold -z query — fresh process over ${COUNT} compressed files (hyperfine mean, runs=${RUNS}):"
 echo "fields: <tool> <ms> (<gist speedup>)"

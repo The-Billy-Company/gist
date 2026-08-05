@@ -34,6 +34,8 @@ command -v rg > /dev/null || {
 echo "building gist (ReleaseFast) + copying binary…"
 # Install without executing: the gate must test `zig-out/bin/gist`, never a
 # hash-named cache artifact selected by timestamp.
+# shellcheck disable=SC2154 # KERNEL: exported by gist_resolve_roots (roots.sh),
+# called from field.sh two `source` hops up — outside what shellcheck traces.
 (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) \
   || {
     echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
@@ -41,9 +43,10 @@ echo "building gist (ReleaseFast) + copying binary…"
   }
 compete_install_gist_bin || exit 1
 # The index must exist for the read-elision + --rank paths (the plain walk needs none).
-[[ -f "${OUT}/index.gist" ]] || (cd "${REPO}" && "${GIST_BIN}" index > /dev/null 2>&1)
+# shellcheck disable=SC2154 # OUT: assigned in field.sh itself, same hop as above.
+[[ -f "${OUT}/index.gist" ]] || (cd "${CORPUS}" && "${GIST_BIN}" index > /dev/null 2>&1)
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 O="$(mktemp)"
 E="$(mktemp)"
 trap 'rm -f "${O}" "${E}"' EXIT

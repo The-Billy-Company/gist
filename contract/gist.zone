@@ -48,6 +48,28 @@ zones {
     face        surface/face/**
 }
 
+// Reach outside the package: the modules the build graph hands us.
+//
+// Everything above orders what this package owns. These are the only names it
+// says that it does not, and each is a dependency `build.zig` has to satisfy.
+// `std`, `builtin` and `root` are the language's, granted without asking.
+
+// The engine, everywhere. This package IS the product chassis over it, so a
+// scoped grant would only be a list of every zone: the whole tree compiles
+// against `@import("irregex")` because a file import cannot cross a package
+// boundary.
+use irregex
+
+// The version string, injected by `b.addOptions` — one fact about the build
+// that no byte in this tree can know.
+use build_options
+
+// A face dispatches through this package's own module rather than by path: a
+// binary's root file is its own module root, so relative imports beneath it
+// would not resolve, and every driver is analyzed inside the chassis instead.
+// It reads as a self-import because it is one; see root.zig's `faces` shelf.
+use gist by face
+
 // Guest lists: regions only the named importers may reach at all.
 
 // The face is this package's one product surface. Nothing else in the tree

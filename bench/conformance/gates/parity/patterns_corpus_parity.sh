@@ -244,11 +244,11 @@ chk() {
   local label="$1" pat="$2"
   shift 2
 
-  (cd "${REPO}" && "${GIST}" -F -l "${pat}" "$@" < /dev/null 2> /dev/null) \
+  (cd "${CORPUS}" && "${GIST}" -F -l "${pat}" "$@" < /dev/null 2> /dev/null) \
     | LC_ALL=C sort -u > "${WORK}/.oracle"
-  (cd "${REPO}" && "${RELATE}" patterns -F -e "${pat}" --by file "$@" < /dev/null 2> /dev/null) \
+  (cd "${CORPUS}" && "${RELATE}" patterns -F -e "${pat}" --by file "$@" < /dev/null 2> /dev/null) \
     | paths_of_patterns > "${WORK}/.armed"
-  (cd "${REPO}" && GIST_DIR="${EMPTY_GIST_DIR}" "${RELATE}" patterns -F -e "${pat}" --by file "$@" < /dev/null 2> /dev/null) \
+  (cd "${CORPUS}" && GIST_DIR="${EMPTY_GIST_DIR}" "${RELATE}" patterns -F -e "${pat}" --by file "$@" < /dev/null 2> /dev/null) \
     | paths_of_patterns > "${WORK}/.stripped"
 
   local n_oracle n_pruned

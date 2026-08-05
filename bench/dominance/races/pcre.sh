@@ -44,7 +44,7 @@ slate=(
   "backref-word    \\b(\\w{3,})\\b.*\\b\\1\\b"
 )
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 tools_raw="$(compete_pcre_tools)"
 mapfile -t tools <<< "${tools_raw}"
 echo

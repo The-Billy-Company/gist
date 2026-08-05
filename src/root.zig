@@ -16,7 +16,7 @@ const builtin = @import("builtin");
 const engine = @import("irregex");
 
 const api = engine.api;
-const ngram = engine.ngram;
+const ngram = engine.index.ngram;
 const portal = engine.portal;
 
 /// This package's semver, read from `build.zig.zon`'s `.version` — the single
