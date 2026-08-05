@@ -24,7 +24,7 @@ echo "building competitor indexes (over gist's exact corpus where possible)…"
 compete_build_csearch
 compete_build_zoekt
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 # A spread: a guaranteed MISS (pure index win), very-selective symbols, medium,
 # common tokens that touch thousands of files, and a 2-byte punctuation needle.
 needles=("$@")

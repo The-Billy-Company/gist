@@ -7,6 +7,33 @@ them with `python3 tools/<name>.py`.
 |---|---|
 | `sync_contract.py` | Verifies the foreign contracts are reachable as sibling checkouts (`../irregex`, `../relate`). |
 | `version_parity.py` | Proves every mirror of this package's version still equals `build.zig.zon`, and that the release bot was told about each one. |
+| `registry_readme.py` | Verifies every relative link in `README.md` still resolves, and mints the link-corrected copy PyPI and crates.io publish. |
+
+## The README, on an index that is not GitHub
+
+PyPI and crates.io each show a README as the whole project page, and each
+resolves a relative link against its own URL rather than against GitHub. A
+repository-relative path is a 404 under `pypi.org/project/gist-search/`, and on
+crates.io a well-formed URL into the crate's own subdirectory pointing at a file
+that was never there - the worse of the two, because nothing looks broken.
+
+`registry_readme.py` is the one rewriter both ends share. It absolutizes every
+relative target against the `repository` URL the manifest already declares -
+`raw` for an image, `tree` or `blob` by what the path is on disk - and refuses
+outright on a target the repository does not contain. Python calls it from
+`bindings/python/hatch_readme.py` at wheel-build time, so the corrected page
+exists only inside the artifact. Cargo has no metadata hook, so for crates.io
+this writes `bindings/rust/PROJECT_README.md`, which is gitignored and which
+`readme` points at: `cargo package` fails loudly if it was never generated, and
+`cargo build` never reads it.
+
+```bash
+python3 tools/registry_readme.py --check   # the gate (CI's `version` job)
+python3 tools/registry_readme.py           # mint bindings/rust/PROJECT_README.md
+```
+
+Mint it immediately before `cargo package`, never earlier. A missing file fails
+loudly; a stale one would ship quietly, so absent is the state to leave it in.
 
 ## One version, and where the copies are
 

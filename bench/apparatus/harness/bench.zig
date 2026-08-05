@@ -19,8 +19,8 @@
 const std = @import("std");
 const gist = @import("irregex");
 const Span = gist.assay.Span; // the package instrumentation floor: monotonic Span
-const verify = gist.verify; // data-parallel candidate verify (scan/verify.zig)
-const simd = gist.simd; // SIMD substring `contains` (scan/simd.zig)
+const verify = gist.scan.verify; // data-parallel candidate verify (scan/verify.zig)
+const simd = gist.scan.simd; // SIMD substring `contains` (scan/simd.zig)
 const certify = @import("certify.zig");
 
 test {
@@ -29,7 +29,7 @@ test {
     // what is left here is this harness's own declarations.
     std.testing.refAllDecls(@This());
 }
-const Index = gist.trigram.Index;
+const Index = gist.index.trigram.Index;
 const Regex = gist.regex.Regex;
 const Dir = std.Io.Dir;
 // The two product surfaces this harness needs, and the reason it lives in this
@@ -72,7 +72,7 @@ const regex_templates = [_][]const u8{
 const corpus_mod = gist.corpus;
 const Corpus = corpus_mod.Corpus;
 const load = corpus_mod.load;
-const out_dir = gist.home.default_out_dir;
+const out_dir = gist.index.home.default_out_dir;
 
 // Fixed adversarial slate: rare symbol, dotted ident, trailing-space keyword,
 // 3-byte floor, punctuation grams, guaranteed-absent negatives, a 2-byte needle
@@ -579,7 +579,8 @@ pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
 
-    var it = std.process.Args.Iterator.init(init.minimal.args);
+    var it = try std.process.Args.Iterator.initAllocator(init.minimal.args, gpa);
+    defer it.deinit();
     _ = it.skip(); // argv[0]
     const mode = it.next() orelse "bench";
 

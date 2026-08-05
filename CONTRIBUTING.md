@@ -51,6 +51,7 @@ actually clone.
 | the Rust binding | rustup | `bindings/rust/rust-toolchain.toml` |
 | the Go binding | Go | `bindings/go/go.mod` |
 | the discipline gate | markdownlint-cli2, typos, shellcheck, golangci-lint | the actions in [`ci.yml`](.github/workflows/ci.yml), mirrored into `.mise.toml` |
+| the topology gate | [zoning](https://github.com/The-Billy-Company/zoning) **0.1.1** | the `topology` job in [`ci.yml`](.github/workflows/ci.yml), mirrored into `.mise.toml` |
 
 If you run [mise](https://mise.jdx.dev), that whole table is one command:
 
@@ -219,6 +220,11 @@ schedule and is pinned as a dependency, never mirrored here - ask it with
 so run `towncrier build --version <the version the PR bumps to>` and push it
 onto the release branch - the tag and the notes should land together.
 
+This repository's tag, changelog, and publish steps are one instance of a
+model shared across every Billy-Company OSS package - see
+[RELEASING.md](https://github.com/The-Billy-Company/.github/blob/main/RELEASING.md)
+for the lifecycle this feeds into and why it's shaped this way.
+
 ## Commits and pull requests
 
 Commit subjects here are a conventional prefix plus a lowercase sentence that
@@ -246,10 +252,15 @@ grows two spellings of the same bug.
 ## Architecture is machine-checked
 
 Zig has no visibility rules between files in a package, so every boundary the
-READMEs describe would be convention. [`contract/gist.ward`](contract/gist.ward)
+READMEs describe would be convention. [`contract/gist.zone`](contract/gist.zone)
 is the machine-checkable half. If your change needs a new import edge, edit the
-contract in the same commit and say why in the exception. Do not route around
+contract in the same commit and say why in the variance. Do not route around
 it.
+
+`mise install` puts `zoning` on your PATH, so you can run it while you edit
+instead of reading its verdict in review: `zoning verify` is what the topology
+job runs, `zoning map` draws the zone stack, and `zoning status --suggest`
+drafts the variance a new edge would need.
 
 The flag surface has the same property: [`contract/surface.toml`](contract/surface.toml)
 is what `--schema`, the manual, and every shell completion are generated from,

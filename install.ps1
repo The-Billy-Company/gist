@@ -246,7 +246,13 @@ if (-not $NoEditor -and $env:GIST_VIM_INSTALL -ne '0') {
         $how = Place-Artifact -Source $plugin -Destination $dest
         if (-not $how) { continue }
         & $exe.Source @($editor.Args) -c "helptags $(Join-Path $dest 'doc')" -c 'qall!' 2>&1 | Out-Null
-        Write-Note "$($editor.Exe): gist plugin -> $dest ($how) - :help gist"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Note "$($editor.Exe): gist plugin -> $dest ($how) - :help gist"
+        } else {
+            # Placement succeeded. The plugin mints missing tags on first load,
+            # so an editor rejecting this eager headless pass is non-fatal.
+            Write-Warn "$($editor.Exe): plugin placed at $dest; helptags will be generated on first load"
+        }
     }
 }
 
@@ -259,3 +265,6 @@ if (-not $NoIndex) {
     if ($LASTEXITCODE -ne 0) { throw "gist index exited $LASTEXITCODE" }
     & $gist status
 }
+
+# Do not leak a best-effort editor command's native status as the installer's.
+exit 0

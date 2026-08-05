@@ -198,6 +198,15 @@ def test_it_does_not_redefine_the_substrates_vocabulary(installed: Path):
     see one engine ABI. If the link were dropped — or the engine's own `export fn`
     surface pulled into this module — both libraries would define the same names and
     which one a call reached would depend on load order.
+
+    Only the export table is asserted, and deliberately not "it records libirgx as a
+    dependency". Whether that record survives is the linker's decision, not this
+    repository's: ELF drops an `--as-needed` library that no undefined symbol needs, so
+    a product whose statically linked Zig already satisfies everything records nothing
+    while Mach-O keeps the entry regardless. The sibling products differ from each
+    other on exactly that line today with identical `build.zig` link calls, which is
+    the proof it is not a contract. Absent redefinition is what makes the vocabulary
+    single; the dependency table only ever explained it.
     """
     product = installed / f"lib{PRODUCT}{SUFFIX}"
     exported = _exported_symbols(product)
@@ -205,11 +214,7 @@ def test_it_does_not_redefine_the_substrates_vocabulary(installed: Path):
     assert not restated, (
         f"lib{PRODUCT} defines {len(restated)} of the substrate's own names, so a process "
         f"holding both has two answers for each: {restated[:8]}"
-    )
-    records = _recorded_dependencies(product)
-    assert f"lib{SUBSTRATE}" in records, (
-        f"lib{PRODUCT} neither defines the substrate's names nor records needing the "
-        f"library that does:\n{records}"
+        f"\nWhat it records that it needs:\n{_recorded_dependencies(product)}"
     )
 
 

@@ -19,7 +19,10 @@
 name = "gist-search"
 version = "1.0.0"                                                                                                                                  # x-release-please-version
 description = "Indexed code search for Python - ripgrep-parity regex search over a persisted trigram index, with ranked definition-first results."
-readme = "README.md"
+# The long description is the repository's own README, lifted and link-corrected
+# at build time by `hatch_readme.py`. PyPI opens onto the project's front door,
+# not onto a second one kept beside this file.
+dynamic = [ "readme" ]
 requires-python = ">=3.12"
 license = "Apache-2.0"
 authors = [ { name = "The Billy Company" } ]
@@ -57,7 +60,14 @@ keywords = [
   "pattern-matching",
 ]
 dependencies = [
-  "irregex",
+  # Bounded on both sides, and neither bound is boilerplate. `irgx` is the import
+  # this package opens with, and it only exists from 1.0.0 — the 0.1.0 already on
+  # the index is the pre-rename placeholder, so an unbounded requirement resolved
+  # to a distribution that cannot satisfy a single line of this one. The ceiling
+  # is the other half of the same fact: 1.0.0 is where the substrate froze the C
+  # ABI and the `irgx` Python surface, and a 2.0 is by definition free to move
+  # both. This is a face over an ABI, not a consumer of a loose utility.
+  "irregex>=1.0.0,<2",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -89,6 +99,12 @@ Changelog = "https://github.com/The-Billy-Company/gist/blob/main/CHANGELOG.md"
 requires = [ "hatchling" ]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata.hooks.custom]
+path = "hatch_readme.py"
+
+[tool.hatch.build.targets.sdist.hooks.custom]
+path = "hatch_readme.py"
+
 [tool.hatch.build.targets.wheel]
 packages = [ "gist" ]
 
@@ -99,6 +115,9 @@ irregex = { path = "../../../irregex/bindings/python", editable = true }
 dev = [
   "pytest>=9.0",
   "ruff>=0.15",
+  # The build backend, here because `test_description.py` drives the metadata
+  # hook that decides what PyPI shows.
+  "hatchling>=1.27",
   # Test-only, never a runtime dependency: the in-process tier is opportunistic
   # and fails open to the subprocess without it (see the header). In the
   # originating monorepo it arrived transitively from the sibling cffi kernels; a

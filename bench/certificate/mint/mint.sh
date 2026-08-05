@@ -1,42 +1,55 @@
 #!/usr/bin/env bash
-# certify.sh — full Dominance-and-Fit Certificate (Layers A–F).
+# mint.sh — gist's Dominance-and-Fit Certificate: Layers A, H, and I.
 #
-# Layer A has three lanes: microscopic (`zig build certify` — cycles/byte for the
-# in-process verify kernel; auto-re-runs under sudo when available for PMU),
-# macroscopic (this script's hyperfine race — cold fresh-process gist vs the
-# field, fail-closed bootstrap-CI + Mann-Whitney vs ripgrep), the warm resident
-# tier, and the `--rank` lane. Layers B/B′/C/D/E/F are then spliced automatically
-# via `certify_layers.sh` so the committed artifact never ships a header that
-# promises the layers and delivers one.
+# THIS PACKAGE CERTIFIES WHAT IT BUILDS. gist ships the `gist` binary, so it
+# certifies claims that need one running: Layer A's four lanes (microscopic
+# cycles/byte, the macroscopic cold race vs the field, the warm resident tier,
+# and the `--rank` lane), Layer H's portability matrix, and Layer I's scanner
+# mode with the index taken away. The engine's own bounds (B/B′/C/D/E/J/L) are
+# minted by `irregex`, and retrieval + multi-pattern (F/G/K) by `relate`, each
+# over its own corpus with its own ledger — this mint neither drives nor waits
+# on them, which is why there is no `splice.sh` here any more.
+#
+# The roster this script must satisfy is `guard/profile.py`; the completeness
+# gate at the end reads it rather than a second list kept in step by hand.
 #
 # The 12 classes are byte-identical to certify.zig's probes, so the macroscopic
 # table and the microscopic table in CERTIFICATE.md map 1:1 by class name.
 #
-# Field + fairness scoping come from _compete.sh (same roots, same ignore set,
-# each tool on its fastest honest path). gist + indexed rivals cold-load an index
-# built ONCE over the same corpus; rg/ugrep/ag/grep re-walk + re-scan.
+# Field + fairness scoping come from `dominance/races/field.sh` (same roots, same
+# ignore set, each tool on its fastest honest path). gist + indexed rivals
+# cold-load an index built ONCE over the same corpus; rg/ugrep/ag/grep re-walk.
 #
 # Usage:  bash bench/certificate/mint/mint.sh          (RUNS=20 WARMUP=3 by default)
 #         RUNS=40 bash bench/certificate/mint/mint.sh  (tighten the CIs)
 #         CERT_SUDO=1 CERT_PUBLISH_DIR=bench/certificate/artifact \
-#           bash bench/certificate/mint/mint.sh        (B–E refresh; CERT_FULL=1 = this)
+#           bash bench/certificate/mint/mint.sh        (mint + publish the receipts)
+#
+# Env:  CERT_CORPUS_ID   which declared corpus this is measured over; must name a
+#                        row in `bench/certificate/corpus.toml`, whose `fetch`
+#                        recipe the floor runs if that tree isn't already here
+#                        (default: gist-self-v1)
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+# Exported BEFORE the floor is sourced: it is what the floor reads to decide
+# which tree to measure, and — more to the point — to refuse the run if the tree
+# it would walk is not the one this bundle will claim.
+export CERT_CORPUS_ID="${CERT_CORPUS_ID:-gist-self-v1}"
 # shellcheck source=../../dominance/races/field.sh
 source "${HERE}/../../dominance/races/field.sh"
 need_hyperfine
 
 # Refuse to mint a certificate whose machine.git_commit could not equal a clean
 # HEAD — unless CERT_ALLOW_DIRTY=1 (local refresh / coworking trees).
-if ! git -C "${REPO}" rev-parse --verify HEAD > /dev/null 2>&1; then
+if ! git -C "${KERNEL}" rev-parse --verify HEAD > /dev/null 2>&1; then
   echo "certificate aborted: cannot resolve git HEAD" >&2
   exit 1
 fi
-dirty="$(git -C "${REPO}" status --porcelain 2> /dev/null || true)"
+dirty="$(git -C "${KERNEL}" status --porcelain 2> /dev/null || true)"
 if [[ -n "${dirty}" && "${CERT_ALLOW_DIRTY:-0}" != "1" ]]; then
   echo "certificate aborted: worktree is dirty — commit or isolate changes before certifying" >&2
   echo "(local refresh: CERT_ALLOW_DIRTY=1 bash bench/certificate/mint/mint.sh — B–E only)" >&2
-  git -C "${REPO}" status --porcelain >&2
+  git -C "${KERNEL}" status --porcelain >&2
   exit 1
 fi
 
@@ -58,7 +71,7 @@ echo "measuring microscopic Layer A (ReleaseFast)…"
   exit 1
 }
 # PMU re-run BEFORE the macroscopic race — `gist-bench certify` rewrites the
-# whole CERTIFICATE.md, so it must happen before macro/B/C/D splices. Uses
+# whole CERTIFICATE.md, so it must happen before any later lane splices. Uses
 # passwordless sudo when available (CERT_SUDO=1 to prompt; CERT_SUDO=0 to skip).
 BENCH_BIN="${KERNEL}/zig-out/bin/gist-bench"
 if [[ -x "${BENCH_BIN}" ]] && ! grep -q 'cycles/byte provenance: \*\*measured on this machine\*\*' "${CERT}" 2> /dev/null; then
@@ -66,7 +79,7 @@ if [[ -x "${BENCH_BIN}" ]] && ! grep -q 'cycles/byte provenance: \*\*measured on
     0) echo "  CERT_SUDO=0 — Layer A micro stays wall-clock (no PMU)" ;;
     1)
       echo "  CERT_SUDO=1 — re-running microscopic Layer A under sudo for cycles…"
-      (cd "${REPO}" && sudo "${BENCH_BIN}" certify) || {
+      (cd "${KERNEL}" && sudo "${BENCH_BIN}" certify) || {
         echo "certificate aborted: sudo microscopic certify failed" >&2
         exit 1
       }
@@ -74,7 +87,7 @@ if [[ -x "${BENCH_BIN}" ]] && ! grep -q 'cycles/byte provenance: \*\*measured on
     *)
       if sudo -n true 2> /dev/null; then
         echo "  passwordless sudo — re-running microscopic Layer A under root for cycles…"
-        (cd "${REPO}" && sudo -n "${BENCH_BIN}" certify) || {
+        (cd "${KERNEL}" && sudo -n "${BENCH_BIN}" certify) || {
           echo "certificate aborted: sudo -n microscopic certify failed" >&2
           exit 1
         }
@@ -142,7 +155,7 @@ bench_one() { # <class> <tool> <cmd> [rg-oracle] → 0 timed, 1 rejected
   return 1
 }
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 : > "${WORK}/order.tsv"
 for row in "${PROBES[@]}"; do
   read -r class kind pat <<< "${row}"
@@ -200,228 +213,30 @@ raw_files=("${WORK}"/*__*.json)
 }
 cp -f "${raw_files[@]}" "${OUT}/raw/"
 
-# A rival's identity is BOTH what it calls itself and the bytes that ran. A bare
-# digest read as sufficient until a version-manager shim disproved it: `command
-# -v csearch` can resolve to the multiplexer itself (a mise shim is a symlink to
-# `mise`), so every shimmed tool hashes to the SAME launcher — csearch, zoekt and
-# mise measured one identical digest here — and the record pins nothing while
-# still looking like a pin. Two defenses, because either alone still degrades
-# quietly: the version is asked OF the tool, so it travels correctly through a
-# shim, and `guard/artifacts.py` fail-closes when two tools report one digest.
-tool_identity() { # <certificate tool id> <executable>
-  local name="$1" executable="$2"
-  [[ -x "${executable}" ]] || {
-    echo "certificate aborted: no executable identity for ${name}" >&2
-    return 1
-  }
-  python3 - "${name}" "${executable}" << 'PY'
-import hashlib
-import os
-import re
-import shutil
-import subprocess
-import sys
+# Machine, tool, and corpus provenance — the three artifacts that make a number
+# re-derivable by a stranger. The emitter is vendored apparatus, so all four
+# packages write the identical bundle shape the vendored gate then judges; a
+# rival's exact identity (version AND executable digest, resolved past any
+# version-manager shim) is its problem to solve, not this script's.
+pins=(--tool "gist=${GIST_BIN}")
+for t in zig hyperfine "${tools[@]}"; do
+  executable="${t}"
+  [[ "${t}" = gitgrep ]] && executable=git
+  tool_bin="$(command -v "${executable}")" || exit 1
+  pins+=(--tool "${t}=${tool_bin}")
+done
+[[ "${CERT_ALLOW_DIRTY:-0}" = "1" ]] && pins+=(--allow-dirty)
 
-name, first = sys.argv[1], sys.argv[2]
-tool = os.path.basename(first)
-# Two components is a real shape, not a truncation — GNU grep ships `3.12`.
-SEMVER = re.compile(r"v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?")
-
-
-def resolve(tool: str, first: str) -> str:
-    """The real binary rather than a version-manager multiplexer.
-
-    A shim resolves to the manager (`mise`, `asdf`); a real install still
-    carries the tool's own name after symlinks. That name is the whole signal
-    needed to tell them apart, so no manager is special-cased here.
-    """
-    for directory in os.get_exec_path():
-        candidate = os.path.join(directory, tool)
-        real = os.path.realpath(candidate)
-        if os.access(real, os.X_OK) and os.path.basename(real) == tool:
-            return real
-    return os.path.realpath(first)
-
-
-def run(argv: list[str], limit: int) -> str:
-    try:
-        done = subprocess.run(
-            argv, capture_output=True, text=True, timeout=limit, stdin=subprocess.DEVNULL
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return done.stdout or done.stderr
-
-
-def version(path: str) -> str:
-    # Embedded module metadata comes first because it is authoritative and cannot
-    # have side effects. Neither csearch nor zoekt carries a version flag, and
-    # asking a SEARCH tool for one is actively unsafe: `csearch version` treats
-    # `version` as the regexp and prints a matching corpus line, which scraped a
-    # bogus `26.3.0` out of this package's own source before this order was fixed.
-    if go := shutil.which("go"):
-        for line in run([go, "version", "-m", path], 20).splitlines():
-            field = line.split()
-            if len(field) >= 3 and field[0] == "mod":
-                return field[2]
-    if head := run([path, "--version"], 10).strip().splitlines():
-        if found := SEMVER.search(head[0]):
-            return found.group(0)
-    # `zig version` needs the bare form, so it stays reachable — but only when the
-    # whole reply IS a version. A search tool handed `version` answers with file
-    # content, which can never fullmatch.
-    lone = run([path, "version"], 10).strip().splitlines()
-    if len(lone) == 1 and SEMVER.fullmatch(lone[0]):
-        return lone[0]
-    return ""
-
-
-real = resolve(tool, first)
-digest = hashlib.sha256()
-with open(real, "rb") as executable:
-    for chunk in iter(lambda: executable.read(1 << 20), b""):
-        digest.update(chunk)
-identity = [found] if (found := version(real)) else []
-identity.append(f"sha256:{digest.hexdigest()}")
-print(name, *identity)
-PY
-}
-
-zig_bin="$(command -v zig)" || exit 1
-hyperfine_bin="$(command -v hyperfine)" || exit 1
-{
-  tool_identity gist "${GIST_BIN}" || exit 1
-  tool_identity zig "${zig_bin}" || exit 1
-  tool_identity hyperfine "${hyperfine_bin}" || exit 1
-  for t in "${tools[@]}"; do
-    executable="${t}"
-    [[ "${t}" = gitgrep ]] && executable=git
-    tool_bin="$(command -v "${executable}")" || exit 1
-    tool_identity "${t}" "${tool_bin}" || exit 1
-  done
-} > "${OUT}/tool-versions.txt.tmp"
-mv "${OUT}/tool-versions.txt.tmp" "${OUT}/tool-versions.txt"
-
-python3 - "${PATHS_LIST}" "${REPO}" "${OUT}/corpus-manifest.tsv" "${OUT}/machine.json" "${RUNS}" "${WARMUP}" "${roots_str}" "${CERT_ALLOW_DIRTY:-0}" << 'PY' || exit 1
-import hashlib
-import json
-import os
-import platform
-import subprocess
-import sys
-
-paths_list, repo, manifest, machine_json, runs, warmup, roots, allow_dirty = sys.argv[1:9]
-
-# A manifest row is a promise: these exact bytes produced the timings above. On a
-# clean tree any file that vanishes or moves under us breaks that promise and is
-# fatal. On a coworking tree (CERT_ALLOW_DIRTY=1) ~10 agents edit continuously, so
-# a churned file is expected — losing a half-hour of valid measurement to someone
-# else's `rm` is not integrity, it is brittleness. Such a file is DROPPED from the
-# manifest rather than hashed loosely, and counted in machine.json, so the
-# certificate states exactly which bytes it can and cannot vouch for. Still
-# fail-closed: past CHURN_CEILING the corpus moved too much to certify at all.
-CHURN_CEILING = 0.01
-churn_tolerated = allow_dirty == "1"
-unstable: list[str] = []
-
-
-def churned(pb: bytes, why: str) -> None:
-    if not churn_tolerated:
-        raise SystemExit(f"corpus file {why} while hashing: {os.fsdecode(pb)}")
-    unstable.append(os.fsdecode(pb))
-
-
-n = tot = 0
-raw = open(paths_list, "rb").read()
-manifest_tmp = manifest + ".tmp"
-with open(manifest_tmp, "wb") as mf:
-    mf.write(b"path\tsize_bytes\tsha256\n")
-    for pb in raw.split(b"\0"):
-        if not pb:
-            continue
-        if any(c in pb for c in (b"\t", b"\n", b"\r")):
-            raise SystemExit(f"manifest cannot encode control characters in path: {pb!r}")
-        path = os.path.join(os.fsencode(repo), pb)
-        digest = hashlib.sha256()
-        try:
-            with open(path, "rb") as source:
-                before = os.fstat(source.fileno())
-                for chunk in iter(lambda: source.read(1 << 20), b""):
-                    digest.update(chunk)
-                after = os.fstat(source.fileno())
-        except (FileNotFoundError, NotADirectoryError):
-            churned(pb, "vanished")
-            continue
-        if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
-            churned(pb, "changed")
-            continue
-        mf.write(pb + f"\t{before.st_size}\t{digest.hexdigest()}\n".encode())
-        n += 1
-        tot += before.st_size
-if unstable and len(unstable) > CHURN_CEILING * (n + len(unstable)):
-    raise SystemExit(
-        f"corpus churned past the ceiling while hashing: {len(unstable)} of "
-        f"{n + len(unstable)} files (> {CHURN_CEILING:.0%}) — re-mint on a quieter tree"
-    )
-os.replace(manifest_tmp, manifest)
-
-def sysctl(k):
-    try:
-        return subprocess.check_output(["sysctl", "-n", k], text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return ""
-
-def head():
-    try:
-        return subprocess.check_output(["git", "-C", repo, "rev-parse", "HEAD"], text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        return "unknown"
-
-fs = "unknown"
-try:
-    if platform.system() == "Darwin":
-        for ln in subprocess.check_output(["diskutil", "info", "/"], text=True).splitlines():
-            if "File System Personality" in ln:
-                fs = ln.split(":", 1)[1].strip()
-                break
-    else:
-        fs = subprocess.check_output(["stat", "-f", "-c", "%T", "/"], text=True).strip()
-except (OSError, subprocess.CalledProcessError):
-    pass
-ram_bytes = int(sysctl("hw.memsize") or 0)
-if not ram_bytes:
-    try:
-        ram_bytes = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
-    except (OSError, ValueError):
-        pass
-machine = {
-    "cpu_model": sysctl("machdep.cpu.brand_string") or platform.processor() or "unknown",
-    "cpu_count": int(sysctl("hw.ncpu") or os.cpu_count() or 0),
-    "ram_bytes": ram_bytes,
-    "os": f"{platform.system()} {platform.release()}",
-    "kernel": platform.release(),
-    "filesystem": fs,
-    "git_commit": head(),
-    "corpus_file_count": n,
-    "corpus_total_bytes": tot,
-    # Count is exact; the path list is capped so one pathological run cannot bloat
-    # the artifact. Both are absent on a clean-tree mint.
-    "corpus_unstable_files": len(unstable),
-    "corpus_unstable": sorted(unstable)[:64],
-    "runs": int(runs),
-    "warmup": int(warmup),
-    "roots": roots,
-}
-if not unstable:
-    del machine["corpus_unstable_files"], machine["corpus_unstable"]
-with open(machine_json, "w") as output:
-    output.write(json.dumps(machine, indent=2) + "\n")
-print(f"  machine.json: {machine['cpu_model']} · {machine['cpu_count']} cores · corpus {n} files / {tot} B")
-if unstable:
-    print(f"  corpus churn: {len(unstable)} file(s) changed under the mint, excluded from the manifest")
-    for p in sorted(unstable)[:5]:
-        print(f"    - {p}")
-PY
+# --root is the CORPUS (paths.list is relative to it), --source-root the
+# checkout whose HEAD built the binaries. They differ whenever the race runs
+# against an immutable corpus snapshot, and hashing the manifest against the
+# wrong one silently produces rows for files that were never searched.
+python3 "${HERE}/../../apparatus/provenance.py" \
+  --out "${OUT}" --root "${CORPUS}" --source-root "${KERNEL}" \
+  --corpus-id "${CERT_CORPUS_ID}" \
+  --roots "${roots_str}" --paths-list "${PATHS_LIST}" \
+  --runs "${RUNS}" --warmup "${WARMUP}" \
+  "${pins[@]}" || exit 1
 
 python3 - "${OUT}/raw" "${OUT}/command-log.txt" << 'PY' || exit 1
 import json
@@ -446,14 +261,10 @@ PY
 python3 "${HERE}/../../conformance/gates/oracle/index_size_accounting.py" \
   --index-dir "${OUT}" --csearch "${CSEARCH_IDX}" --zoekt "${ZOEKT_DIR}" || exit 1
 
-# Layers B / B′ / C / D — automatic; never leave a header-only certificate.
-echo "splicing Layers B/B′/C/D…"
-CERT_OUT="${OUT}" bash "${HERE}/splice.sh" || exit 1
-
 # Warm tier — the resident-daemon regime an agent actually drives.
 # Additive: splices a marked section into CERTIFICATE.md + emits
 # certify_warm.csv. Never blocks the mint (a missing daemon/rival is honestly
-# reported), so the cold Layers A–E stay the reproducibility-gated headline.
+# reported), so the cold Layer A lanes stay the reproducibility-gated headline.
 echo "racing the warm tier (resident daemon)…"
 RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/warm.sh" \
   || echo "  warm tier skipped (daemon/rival unavailable) — cold cert unaffected" >&2
@@ -465,11 +276,28 @@ RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/warm.sh" \
 echo "certifying the --rank lane (fail-closed)…"
 RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/rank.sh" || exit 1
 
-# Layer G — the relate face (retrieval by description length). Fail-closed on a
-# retrieval-quality contract + boundary proof; not a dominance claim. Needs only
-# the staged relate binary + a deterministic synthetic corpus it mints itself.
-echo "certifying the relate face (Layer G, fail-closed)…"
-bash "${HERE}/relate.sh" || exit 1
+# Layer H — the portability matrix, graded by what this machine actually
+# executed rather than by what the target list hoped for.
+echo "certifying portability (Layer H)…"
+python3 "${HERE}/../../conformance/targets/portable.py" run \
+  --out "${WORK}/portable.json" || exit 1
+python3 "${HERE}/../report/portable.py" \
+  --certificate "${CERT}" \
+  --json "${WORK}/portable.json" \
+  --receipt "${OUT}/portable.json" || exit 1
+
+# Layer I — scanner mode: gist with its index taken away, on ripgrep's home
+# turf, cross-checked against the rg conformance suite so a speed number can
+# never come from answering a different question.
+echo "certifying scanner mode + rg conformance (Layer I)…"
+RUNS="${RUNS}" WARMUP="${WARMUP}" bash "${HERE}/../../dominance/races/scanner.sh" || exit 1
+python3 "${HERE}/../../conformance/rgsuite/surface.py" --json "${WORK}/rgsurface.json" || exit 1
+python3 "${HERE}/../../conformance/rgsuite/fuzz.py" --json "${WORK}/rgfuzz.json" || exit 1
+python3 "${HERE}/../report/scanner.py" "${COMPETE_DIR}/scanner" \
+  --certificate "${CERT}" \
+  --csv "${OUT}/scanner.csv" \
+  --fuzz "${WORK}/rgfuzz.json" \
+  --conformance "${WORK}/rgsurface.json" || exit 1
 
 # Structural completeness only — a bundle is judged on its bytes, never on the
 # tree that produced it. Clean-START is the top gate's job; the recorded
@@ -484,19 +312,24 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   cp -f "${CERT}" "${OUT}/certify.csv" "${MACRO_CSV}" "${OUT}/machine.json" \
     "${OUT}/tool-versions.txt" "${OUT}/corpus-manifest.tsv" \
     "${OUT}/command-log.txt" "${OUT}/index-sizes.json" "${pub}/"
-  # Every layer side-car the shared roster names, plus the warm CSV and the two
-  # port-bound files no layer row owns. Driving the list from `layers.py` means a
-  # new layer publishes its receipt without a second list to keep in step.
-  layer_sidecars="$(python3 "${HERE}/../guard/layers.py" sidecars)" || exit 1
+  # Every layer side-car this package's charter names, plus the warm CSV.
+  # Driving the list from `profile.py` means a new layer publishes its receipt
+  # without a second list to keep in step.
+  layer_sidecars="$(python3 "${HERE}/../guard/profile.py" sidecars)" || exit 1
   mapfile -t sidecars <<< "${layer_sidecars}"
-  for side in certify_warm.csv portcert.csv portbound.json "${sidecars[@]}"; do
+  for side in certify_warm.csv "${sidecars[@]}"; do
     [[ -f "${OUT}/${side}" ]] && cp -f "${OUT}/${side}" "${pub}/"
   done
   cp -f "${OUT}/raw/"*.json "${pub}/raw/" || exit 1
   echo "formatting published certificate…"
-  (cd "${REPO}" && NODE_NO_WARNINGS=1 PRETTIER_EXPERIMENTAL_CLI=1 \
+  (cd "${KERNEL}" && NODE_NO_WARNINGS=1 PRETTIER_EXPERIMENTAL_CLI=1 \
     pnpm -w exec prettier --write "${pub}/CERTIFICATE.md") || exit 1
-  python3 "${HERE}/../guard/artifacts.py" --artifacts-dir "${pub}" --artifacts || exit 1
+  # --public-safe is the difference between a mint and a PUBLISH: entering git
+  # means a stranger must be able to fetch this corpus and re-derive the number,
+  # and it means no private path rides along in a manifest row or an invocation.
+  # A bundle that cannot clear it is why the receipts left the tree last time.
+  python3 "${HERE}/../guard/artifacts.py" --artifacts-dir "${pub}" --artifacts --public-safe \
+    || exit 1
   echo "published reproducible certificate → ${pub}"
   # Log the mint. The certificate is a whole-file rewrite, so without this the
   # tree keeps no memory of what the previous one claimed or which layers it

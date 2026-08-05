@@ -1,0 +1,120 @@
+// gist — import topology.
+//
+// The product chassis of the irregex ecosystem: the resident daemon
+// transport, the C-ABI plane, the `--generate` primer, and the `gist` face.
+// The exact engine beneath is the sibling `irregex` module (reached only
+// through `@import("irregex")`; a file import cannot cross a package
+// boundary). The `relate` face and its CLI vocabulary moved into the
+// `relate` package; they import this chassis for the daemon and the answer
+// keep. Judged by `zoning verify`.
+
+package gist {
+    // root.zig is the chassis module's public face: it re-exports the cli,
+    // session, ffi, and face tiers (what the thin exe main and dependents
+    // consume) and aggregates the test step, so it alone may reach anywhere.
+    root   src
+    facade root.zig
+}
+
+// Tiers, low to high. An import may only point back up the page.
+zones {
+    // The `--generate` primer — man page and shell completions rendered from
+    // the face's flag table. Shared face vocabulary (flags, manifest, grade,
+    // reprise) moved with the relate face into the `relate` package; what
+    // remains is the one generator only this product's man/completions need.
+    cli         surface/cli/**
+
+    // The resident session's transport primitives: the wire grammar, the
+    // versioned protocol, the daemon image/spawn/vigil lifecycle.
+    conduit     exec/session/conduit/**
+
+    // The daemon's self-government: memory rationing and stand-down.
+    warden      exec/session/warden/**
+
+    // The daemon proper — dial-or-spawn client and the serve loop over the
+    // resident core (which lives in `irregex`, reached as a module). The
+    // answer keep's frame types live here too; the relate face reaches them
+    // through `@import("gist").session.keep`, not a file import.
+    daemon      exec/session/daemon/**
+
+    // C-ABI session + rank producer — the `libgist` surface the Python /
+    // Go / Rust bindings link. Kinship/sweep live in relate's ffi; compose
+    // lives in blast's. This tier keeps the warm engine, the exact-plane
+    // cursors, and `gist_run` for `rank` alone.
+    ffi         surface/ffi/**
+
+    // The thin product face. A face imports the chassis; the chassis never
+    // imports a face except through root's re-export shelf.
+    face        surface/face/**
+}
+
+// Reach outside the package: the modules the build graph hands us.
+//
+// Everything above orders what this package owns. These are the only names it
+// says that it does not, and each is a dependency `build.zig` has to satisfy.
+// `std`, `builtin` and `root` are the language's, granted without asking.
+
+// The engine, everywhere. This package IS the product chassis over it, so a
+// scoped grant would only be a list of every zone: the whole tree compiles
+// against `@import("irregex")` because a file import cannot cross a package
+// boundary.
+use irregex
+
+// The version string, injected by `b.addOptions` — one fact about the build
+// that no byte in this tree can know.
+use build_options
+
+// A face dispatches through this package's own module rather than by path: a
+// binary's root file is its own module root, so relative imports beneath it
+// would not resolve, and every driver is analyzed inside the chassis instead.
+// It reads as a self-import because it is one; see root.zig's `faces` shelf.
+use gist by face
+
+// Guest lists: regions only the named importers may reach at all.
+
+// The face is this package's one product surface. Nothing else in the tree
+// reaches into it; a sibling face that wants the same helper takes it from
+// below (cli / session), not from beside.
+keep surface/face/gist/** to root.zig
+
+// The C-ABI plane is the package's other public face — for callers outside
+// Zig. Nothing inside the package consumes its own FFI shims; a Zig caller
+// that wants the session takes irregex's `api.zig`, which is what ffi does.
+keep surface/ffi/** to root.zig
+
+// Tests are consumers of the architecture, never load-bearing in it.
+keep **/*_test.zig to root.zig
+
+// Seals: directories that are deep modules — enter by the entry file.
+
+// The resident session's wire grammar is a cross-language contract — the Zig
+// CLI, the Rust binding and the Python binding all speak it — and every frame
+// it defines is gated on one negotiated `protocol_version`. Split into the
+// opcode spine plus a codec chapter per opcode family (query · result · keep ·
+// annals), it is entered as one so a caller binds to the whole versioned
+// contract rather than to half of it.
+seal exec/session/conduit/protocol through protocol.zig
+
+// Daemon dial + spawn is one decision; a caller that reaches spawn directly
+// bypasses the fail-open deadline.
+seal exec/session/daemon/client through client.zig
+
+// The resident session's serve loop — split into route/answer/crew/loop,
+// entered as one.
+seal exec/session/daemon/serve through serve.zig
+
+// Structural laws.
+limit  reach to 5 hops
+forbid cycles across directories
+
+// Ratified exceptions.
+//
+// Every one carries the fix that would retire it. An exception that stops
+// matching is a hard failure, so paying the debt forces deleting the entry —
+// they shrink instead of accreting as folklore.
+
+// The answer-keep CLI passenger (`reprise.zig`) moved into the `relate`
+// package with the face that owns it. Its reach into `keep.zig` / `serve.zig`
+// is now a module import (`@import("gist").session.*`), so the three
+// file-import exceptions that used to live here are gone — the debt was
+// retired by the move, not waived.

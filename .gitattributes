@@ -49,6 +49,29 @@ schema.gen.*   linguist-generated
 # flag catalog argv is parsed with. That is why a flag cannot exist in the
 # parser and be missing from a menu.
 
+# ── Apparatus ───────────────────────────────────────────────────────────────
+# Code that measures or ships this project, rather than being it. `linguist-
+# detectable=false` drops it from the language breakdown only - it stays in the
+# tree, in review, in diffs, and in the tarball.
+#
+# The bar was lying, and not by a little: it read Python 41% / Zig 35% for a
+# program written in Zig. The Python is the benchmark and conformance harness -
+# every ratio measured against ripgrep, every parity gate, the certificate
+# minting - and the shell beside it drives those runs. Somebody landing here
+# from a search result deserves to be told what language the thing they are
+# reading is written in. With these three excluded it reads Zig 62%.
+#
+# The line drawn is authorship, not usefulness: bench/ proves the program, and
+# tools/ and .github/ operate the repository. Excluded.
+bench/**    linguist-detectable=false
+tools/**    linguist-detectable=false
+.github/**  linguist-detectable=false
+
+# NOT excluded, deliberately. bindings/ is the C ABI's Python, Rust, and Go
+# surface - shipped code a consumer imports, so Python 18% is now a true
+# statement about what this repository offers. editor/ is the Vim plugin and
+# shell/ installs the completions; both are features, both stay counted.
+
 # ── Diff drivers ────────────────────────────────────────────────────────────
 # Git ships hunk-header patterns for these; naming them here is what makes
 # `@@ ... fn whatever` appear above a hunk instead of a bare line number.

@@ -38,7 +38,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const portal = @import("irregex").portal;
-const rendezvous = @import("rendezvous.zig");
 
 const windows = builtin.os.tag == .windows;
 const w = std.os.windows;
@@ -406,11 +405,6 @@ pub const Pair = struct {
     /// Conventionally the end that is written to.
     clapper: Handle,
 
-    /// Names the Windows rendezvous uniquely within a process, so two pairs
-    /// opened concurrently cannot collide on it. Pointer-width like the other
-    /// counters here — an atomic may not exceed the target's widest.
-    var seq: std.atomic.Value(usize) = .init(0);
-
     pub fn open(io: std.Io) WaitError!Pair {
         if (comptime !windows) return openPosix();
         return openWindows(io);
@@ -428,31 +422,23 @@ pub const Pair = struct {
 
     /// A socketpair, the long way round: Windows has no `socketpair(2)` (std's
     /// `createPair` is `posix.system.socketpair` and declines there), so the pair
-    /// is made by listening on a private name, dialing it, and accepting once. The
-    /// name is deleted as soon as both ends exist — it was only ever a rendezvous,
-    /// and leaving it on disk would let anything that could guess it write into
-    /// this process's private channel.
+    /// is made by listening on an ephemeral IPv4 loopback port, dialing it, and
+    /// accepting once. Loopback keeps the channel local, port zero lets the
+    /// kernel choose a collision-free rendezvous, and TCP uses the same AFD
+    /// readiness path as every socket the daemon already watches.
     fn openWindows(io: std.Io) WaitError!Pair {
-        var dir_buf: [portal.max_path]u8 = undefined;
-        var path_buf: [portal.max_path]u8 = undefined;
-        const path = std.fmt.bufPrint(&path_buf, "{s}/gist-pair.{x}.{x}", .{
-            portal.scratchDir(&dir_buf),
-            portal.processId(),
-            seq.fetchAdd(1, .monotonic),
-        }) catch return error.Unexpected;
-        const ua = rendezvous.address(path) catch return error.Unexpected;
-        var listener = ua.listen(io, .{}) catch return error.Unexpected;
+        const loopback: net.IpAddress = .{ .ip4 = .loopback(0) };
+        var listener = loopback.listen(io, .{}) catch return error.Unexpected;
         defer listener.deinit(io);
-        defer std.Io.Dir.cwd().deleteFile(io, path) catch {};
-        const clapper = ua.connect(io) catch return error.Unexpected;
+        const clapper = listener.socket.address.connect(io, .{ .mode = .stream }) catch return error.Unexpected;
         errdefer clapper.close(io);
         const ear = listener.accept(io) catch return error.Unexpected;
         return .{ .ear = ear.socket.handle, .clapper = clapper.socket.handle };
     }
 
-    /// By handle rather than through `net.Socket.close`: a `Socket` also carries
-    /// the address it was bound to, and a rendezvous that has already been
-    /// unlinked has nothing truthful to put there.
+    /// By handle rather than through `net.Socket.close`: `Pair` deliberately
+    /// retains only the common currency both platform arms produce, so rebuilding
+    /// two address-bearing `Socket` values here would invent state just to close.
     pub fn close(self: *const Pair, io: std.Io) void {
         io.vtable.netClose(io.userdata, &.{ self.ear, self.clapper });
     }

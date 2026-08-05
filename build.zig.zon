@@ -14,8 +14,8 @@
         // this one is the point, while the runner is a published package whose
         // version this repository should choose deliberately.
         .brigade = .{
-            .url = "https://github.com/The-Billy-Company/brigade/archive/505a57a9febf21757268bd8ac651c53d27896c79.tar.gz",
-            .hash = "brigade-0.1.0-1n1fSewLAQBenqvI3An0VUw24_TsuaT3mt1_4TfqWZwG",
+            .url = "https://github.com/The-Billy-Company/brigade/archive/refs/tags/v0.1.0.tar.gz",
+            .hash = "brigade-0.1.0-1n1fSXIlAQC4kvSlWxrMgJPZe61yl2IDWzes5LNPLvo4",
         },
     },
     .paths = .{

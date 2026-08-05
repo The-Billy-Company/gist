@@ -56,7 +56,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       MATRIX_ARCH: ${{ matrix.arch }}
-      ZIG_ARCH: ${{ matrix.zig_arch }}
+      ZIG_TARGET: ${{ matrix.zig_arch }}-windows
     # `-Dtest-shards` defaults to 2x the core count, and a standard Windows
     # runner has 4 cores where the dev boxes have 10+. The daemon block on top
     # of that polls for a real process to come up. Budget for both rather than
@@ -103,12 +103,15 @@ jobs:
       - name: Provision Zig
         shell: pwsh
         run: |
-          $ver = '$env:ZIG_VERSION'
+          $ver = $env:ZIG_VERSION
           $floor = Select-String -Path build.zig.zon -Pattern '\.minimum_zig_version = "([^"]+)"'
           if (-not $floor) { throw 'no minimum_zig_version in build.zig.zon' }
           $declared = $floor.Matches[0].Groups[1].Value
           if ($declared -ne $ver) { throw "workflow pins zig $ver, build.zig.zon declares $declared" }
-          $target = "$env:ZIG_ARCH-windows"
+          # The native arm64 compiler in Zig 0.16 emits malformed LLVM records
+          # for bundled C sources. Run the x64 compiler under Windows emulation;
+          # it still emits the matrix's native target below.
+          $target = 'x86_64-windows'
 
           $index = Invoke-RestMethod -Uri 'https://ziglang.org/download/index.json'
           $release = $index.$ver
@@ -125,7 +128,9 @@ jobs:
           # root rather than reconstructing its name — the convention has
           # already changed once (0.16 reordered it to arch-os-version).
           $into = Join-Path $env:RUNNER_TEMP 'zig'
-          Expand-Archive -LiteralPath $zip -DestinationPath $into -Force
+          New-Item -ItemType Directory -Force -Path $into | Out-Null
+          tar.exe -xf $zip -C $into
+          if ($LASTEXITCODE -ne 0) { throw "tar could not extract the Zig archive" }
           $root = (Get-ChildItem -Directory -LiteralPath $into | Select-Object -First 1).FullName
           if (-not $root) { throw "the archive extracted no directory into $into" }
           Add-Content -LiteralPath $env:GITHUB_PATH -Value $root
@@ -143,7 +148,7 @@ jobs:
       # step exists to exercise is not even compiled anywhere else; here they
       # are the arms that run.
       - name: zig build test
-        run: zig build test
+        run: zig build test "-Dtarget=$($env:ZIG_TARGET)" -j1
 
       # The artifacts an install ships — the CLI plus the staticlib and dynlib
       # the C ABI and the Python/Rust faces link against. The installed CLI is
@@ -152,7 +157,7 @@ jobs:
       # is a real and recurring shape (safety-checked arithmetic, reads of
       # `undefined`), so it gets built as it ships.
       - name: zig build (ReleaseFast)
-        run: zig build -Doptimize=ReleaseFast
+        run: zig build "-Dtarget=$($env:ZIG_TARGET)" -Doptimize=ReleaseFast -j1
 
       # The conformance gate that ports. It is self-oracling — the
       # index-accelerated answer is diffed against gist's own `--no-index` full
@@ -307,6 +312,17 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $gist = Join-Path (Get-Location) 'zig-out\bin\gist.exe'
           if (-not (Test-Path -LiteralPath $gist)) { throw "no gist.exe at $gist" }
+          # The runner hosts pwsh with stdin attached to a regular file/pipe.
+          # That is correctly a stream search to gist, but this step needs the
+          # rootless TREE shape to reach the resident tier. A tiny cmd shim gives
+          # each warm probe Windows' NUL character device while preserving argv,
+          # stdout, stderr, and the native exit code.
+          $treeQuery = Join-Path $env:RUNNER_TEMP 'gist-tree-query.cmd'
+          @"
+          @echo off
+          "$gist" %* <NUL
+          exit /b %ERRORLEVEL%
+          "@ | Set-Content -LiteralPath $treeQuery -Encoding ascii
 
           $tree = Join-Path $env:RUNNER_TEMP 'warm-tier'
           Remove-Item -Recurse -Force -LiteralPath $tree -ErrorAction SilentlyContinue
@@ -322,7 +338,9 @@ jobs:
             & $gist index
             if ($LASTEXITCODE -ne 0) { throw "index exited $LASTEXITCODE" }
 
-            $cold = (& $gist 'NEEDLE_HERE' . -l --no-heading --no-index) -join "`n"
+            # Keep the oracle rootless too: `--no-index` forces cold while the
+            # shared stdin shape keeps path rendering byte-identical to warm.
+            $cold = (& $treeQuery 'NEEDLE_HERE' -l --no-index) -join "`n"
             if ($LASTEXITCODE -ne 0) { throw "cold reference walk exited $LASTEXITCODE" }
 
             $daemon = Start-Process -FilePath $gist -ArgumentList 'serve' -PassThru -WindowStyle Hidden
@@ -342,7 +360,7 @@ jobs:
               # bytes to compare.
               $env:GIST_TRACE = 'warm'
               $trace = Join-Path $env:RUNNER_TEMP 'warm-trace.txt'
-              $warm = (& $gist 'NEEDLE_HERE' . -l --no-heading 2> $trace) -join "`n"
+              $warm = (& $treeQuery 'NEEDLE_HERE' -l 2> $trace) -join "`n"
               if ($LASTEXITCODE -ne 0) { throw "warm query exited $LASTEXITCODE" }
               $lens = (Get-Content -Raw -LiteralPath $trace)
               if ($lens -notmatch '\[warm\]') { throw "the daemon was resident but the query ran cold:`n$lens" }
@@ -357,20 +375,20 @@ jobs:
               # flushSync barrier the daemon crosses before dispatch, or this
               # answers the tree as it was.
               'NEEDLE_HERE' | Set-Content -LiteralPath (Join-Path $tree 'sub\c.txt')
-              $after = (& $gist 'NEEDLE_HERE' . -l --no-heading) -join "`n"
+              $after = (& $treeQuery 'NEEDLE_HERE' -l) -join "`n"
               if ($LASTEXITCODE -ne 0) { throw "post-write query exited $LASTEXITCODE" }
               if ($after -notmatch 'sub/c\.txt') { throw "a file written before the query is missing from it:`n$after" }
 
               # The reverse direction, which a create-only watcher would pass by
               # accident: the match must LEAVE when the bytes do.
               Remove-Item -LiteralPath (Join-Path $tree 'sub\c.txt') -Force
-              $gone = (& $gist 'NEEDLE_HERE' . -l --no-heading) -join "`n"
+              $gone = (& $treeQuery 'NEEDLE_HERE' -l) -join "`n"
               if ($gone -match 'sub/c\.txt') { throw "a deleted file survived in the warm answer:`n$gone" }
 
               # An in-place content edit changes no directory membership at all,
               # so it is the case a coarse watcher misses entirely.
               'nothing to find' | Set-Content -LiteralPath (Join-Path $tree 'sub\b.txt')
-              $edited = (& $gist 'NEEDLE_HERE' . -l --no-heading) -join "`n"
+              $edited = (& $treeQuery 'NEEDLE_HERE' -l) -join "`n"
               if ($edited -match 'sub/b\.txt') { throw "an in-place edit was not seen:`n$edited" }
               if ($edited -notmatch 'a\.txt') { throw "the edit answer lost an untouched match:`n$edited" }
             } finally {

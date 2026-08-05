@@ -126,17 +126,34 @@ nothing it returns was decided by anything other than the file's current bytes.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) is the entry point for a change, and
  [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) governs the conversation around it.
 
-## Quickstart
+## Install
 
-One command builds the binaries, links them onto `PATH`, and writes the trigram
-index:
+The CLI is the product, and it is built from source — one command produces the
+binaries, links them onto `PATH`, and writes the trigram index:
 
 ```bash
 zig build                    # ReleaseFast binaries, PATH link, trigram index
 ```
 
-From there the canonical form is the one you already type, with no verb and no
-setup:
+The language bindings are published, and each drives that same binary rather
+than reimplementing it, so the CLI is a prerequisite for all three:
+
+| | Install | You write |
+|---|---|---|
+| Python | `pip install gist-search` | `import gist` |
+| Rust | `cargo add gist-search` | `use gist::…` |
+| Go | `go get github.com/The-Billy-Company/gist/bindings/go` | `import ".../bindings/go/exact"` |
+
+The bare name `gist` was taken on both PyPI and crates.io and names there are
+permanent, so the distribution carries the `-search` suffix while the identifier
+you type stays `gist` — the bs4 / PIL split. Per-language detail is in
+[`bindings/python`](bindings/python/README.md),
+[`bindings/rust`](bindings/rust/README.md), and
+[`bindings/go`](bindings/go/README.md).
+
+## Quickstart
+
+The canonical form is the one you already type, with no verb and no setup:
 
 ```bash
 gist 'SearchRequest'                 # search from the current directory
@@ -1079,7 +1096,7 @@ product vocabulary, distribution, and the certificate, lives here; what the
 `grep-*` crates own, meaning engines, walker, index, and argv, lives in the
 library.
 
-Architecture is machine-checked by [`contract/gist.ward`](contract/gist.ward).
+Architecture is machine-checked by [`contract/gist.zone`](contract/gist.zone).
 Apache-2.0; nothing third-party is bundled here, and the certificate measures
 competitors by invoking installed binaries.
 

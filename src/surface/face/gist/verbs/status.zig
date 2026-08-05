@@ -23,11 +23,11 @@
 //! machine consumers never need to scrape prose and the two views cannot drift.
 
 const std = @import("std");
-const persist = @import("irregex").persist;
+const persist = @import("irregex").index.persist;
 const fresh = @import("irregex").fresh;
 const frame = @import("irregex").inner.corpus.frame;
 const corpus_mod = @import("irregex").corpus;
-const charter_mod = @import("irregex").commands.scope.charter;
+const charter_mod = @import("irregex").scope.charter;
 const preference = @import("irregex").preference;
 const client = @import("../../../../exec/session/daemon/client/client.zig");
 const Dir = std.Io.Dir;

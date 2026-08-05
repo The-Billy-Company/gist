@@ -35,20 +35,20 @@
 const std = @import("std");
 const corpus_mod = @import("irregex").corpus;
 const fresh = @import("irregex").fresh;
-const persist = @import("irregex").persist;
-const codicil = @import("irregex").codicil;
+const persist = @import("irregex").index.persist;
+const codicil = @import("irregex").index.codicil;
 const journal = @import("irregex").inner.corpus.journal;
 const client = @import("../../../../exec/session/daemon/client/client.zig");
 const session_spawn = @import("../../../../exec/session/conduit/spawn.zig");
-const crest_sidecar = @import("irregex").crest_sidecar;
+const crest_sidecar = @import("irregex").index.crest;
 const frame = @import("irregex").inner.corpus.frame;
 const treemap = @import("irregex").inner.corpus.treemap;
 const shard = @import("irregex").inner.corpus.shard;
-const Index = @import("irregex").trigram.Index;
+const Index = @import("irregex").index.trigram.Index;
 const assay = @import("irregex").assay;
 const fault = @import("irregex").fault;
 const portal = @import("irregex").portal;
-const home = @import("irregex").home;
+const home = @import("irregex").index.home;
 
 /// This process's peak resident set so far, in MiB — the running ceiling every
 /// `GIST_TRACE=index` phase line carries. Peak is monotonic, so the phase that
@@ -100,7 +100,7 @@ fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // Crest sidecar (the class-run sieve, research/crest/): one parallel pass
     // over the already-loaded docs. Best-effort — an OOM here costs only the
     // sieve, never the index build.
-    const crest_vectors: ?[]const @import("irregex").crest.Vector =
+    const crest_vectors: ?[]const @import("irregex").math.crest.Vector =
         crest_sidecar.build(gpa, corpus.docs) catch null;
     defer if (crest_vectors) |cv| gpa.free(cv);
     assay.trace(.index, "index phase: crest sieve {d:.1} ms · peak {d:.0} MiB · {s}\n", .{

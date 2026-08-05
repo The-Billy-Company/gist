@@ -8,8 +8,10 @@ that any Rust automation can call instead of hand-rolling `std::process::Command
 argv and `--json` parsing per site.
 
 The shared substrate — contracts, row protocol, transports, typed failures —
-lives in the sibling [`irregex`](../../../irregex/bindings/rust/) crate. Kinship
-and composed verbs are their own crates (`relate`, `blast`); depending on `gist`
+lives in the [`irgx`](https://crates.io/crates/irgx) crate. Kinship and composed
+verbs are their own crates
+([`relate-search`](https://crates.io/crates/relate-search),
+[`blast-search`](https://crates.io/crates/blast-search)); depending on `gist`
 does not make them reachable.
 
 ```rust
@@ -60,13 +62,22 @@ for m in engine.search(&gist::SearchRequest::new("TODO"))? {
 
 ## Cross-crate wiring
 
-```toml
-# In this checkout:
-irregex = { version = "0.1.0", path = "../../../irregex/bindings/rust" }
+```bash
+cargo add gist-search   # pulls irgx, the substrate, as a normal dependency
+```
 
-# Once published:
-# cargo add irregex
-# cargo add gist   # pulls irregex as a normal crates.io dependency
+The package on crates.io is
+[`gist-search`](https://crates.io/crates/gist-search) and the library is `gist`,
+so you still write `use gist::…`. The bare name belongs to an unrelated crate
+with twenty thousand downloads and names there are permanent, which is the same
+reason the PyPI distribution is `gist-search` too.
+
+This checkout builds against the sibling substrate by path; a published build
+ignores that and resolves the same version range of
+[`irgx`](https://crates.io/crates/irgx) from the registry.
+
+```toml
+irgx = { version = "1.0.0", path = "../../../irregex/bindings/rust" }
 ```
 
 ## Layout

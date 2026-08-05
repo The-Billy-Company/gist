@@ -59,7 +59,9 @@ echo "building gist (ReleaseFast) + copying binary…"
 # `cli -- 'zzqqxxv' -l` form RAN the fresh binary against a non-matching needle,
 # whose exit 1 is indistinguishable from a compile error's exit 1 — the trailing
 # `true` papered over both, letting compete_install_gist_bin copy a stale binary.)
-(cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) \
+  # shellcheck disable=SC2154 # KERNEL: exported by gist_resolve_roots (roots.sh),
+  # called from field.sh two `source` hops up — outside what shellcheck traces.
+  (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) \
   || {
     echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
     exit 1
@@ -68,7 +70,7 @@ compete_install_gist_bin || exit 1
 
 fsize() { stat -f%z "$1" 2> /dev/null || stat -c%s "$1" 2> /dev/null || echo 0; }
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 echo
 echo "### SOUNDNESS — gist ≡ rg over the live tree, no-prefilter patterns (the gate) ###"
 fails=0

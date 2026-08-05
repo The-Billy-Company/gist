@@ -1,0 +1,55 @@
+# How GitHub groups the notes it writes itself.
+#
+# This file is NOT the changelog. towncrier owns CHANGELOG.md, assembled from the
+# fragments under changelog.d/, and release-please is configured `skip-changelog`
+# for exactly that reason — the notes a human reads are hand-written, one fragment
+# per change, and no generated list replaces them.
+#
+# What this governs is the other surface: the "what's changed" list GitHub
+# generates on a release, on a compare view, and in the notification mail nobody
+# configured. Left alone that list is one flat run of pull request titles in merge
+# order, which is the least useful ordering available. Since every pull request
+# now earns a `type/` label from its own title, the same taxonomy that sorts the
+# pull request list can section this, and the two cannot disagree — a type only
+# appears here because `labels.json` declares it.
+#
+# The sections deliberately read in the order a reader cares about rather than
+# alphabetically: what is new, what broke and got fixed, what got faster, then the
+# housekeeping. `type/deps` sits last because Dependabot volume would otherwise
+# bury a feature under fourteen version bumps.
+changelog:
+  exclude:
+    # Size is a review aid, not news, and a label that says how big a change was
+    # tells a reader of release notes nothing at all. `type/` is the axis with
+    # something to say here, so the rest of the taxonomy stays out of the way.
+    labels:
+      - size/XS
+      - size/S
+      - size/M
+      - size/L
+      - size/XL
+
+  categories:
+    - title: Added
+      labels: [type/feat]
+    - title: Fixed
+      labels: [type/fix]
+    - title: Performance
+      labels: [type/perf]
+    - title: Changed
+      labels: [type/refactor, type/style]
+    - title: Reverted
+      labels: [type/revert]
+    - title: Documentation
+      labels: [type/docs]
+    - title: Build and tooling
+      labels: [type/build, type/ci, type/test, type/chore]
+    - title: Dependencies
+      labels: [type/deps]
+
+    # The catch-all has to be last and has to exist. A pull request whose title
+    # did not parse earns no `type/` at all, and without this it would be dropped
+    # from the notes silently rather than showing up somewhere a maintainer can
+    # see that it needs a label.
+    - title: Uncategorized
+      labels: ["*"]

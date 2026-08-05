@@ -19,16 +19,16 @@ const std = @import("std");
 const builtin = @import("builtin");
 const gist = @import("irregex");
 const corpus_mod = gist.corpus;
-const simd = gist.simd;
+const simd = gist.scan.simd;
 const Span = gist.assay.Span; // package instrumentation floor: monotonic Span
 const pmu = @import("pmu");
 const stats = @import("stats");
 
-const Index = gist.trigram.Index;
+const Index = gist.index.trigram.Index;
 const Regex = gist.regex.Regex;
 const Dir = std.Io.Dir;
 const load = corpus_mod.load;
-const out_dir = gist.home.default_out_dir;
+const out_dir = gist.index.home.default_out_dir;
 
 const reps = 200;
 const warmup = 20;

@@ -225,7 +225,7 @@ else
 fi
 rm -f "${OUTDIR}"/*.json "${OUTDIR}/order.tsv"
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 : > "${OUTDIR}/order.tsv"
 
 echo

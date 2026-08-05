@@ -1,7 +1,7 @@
 name: Parity gap with ripgrep
 description: ripgrep does one thing here and gist does another.
 title: "parity: "
-labels: ["parity"]
+labels: ["topic/parity"]
 body:
   - type: markdown
     attributes:

@@ -58,7 +58,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # rgsuite → conformance → bench → repo
-REPO = KERNEL
 FIX = Path()  # temp fixture root, set in main()
 
 RG = os.environ.get("RG_BIN", "rg")

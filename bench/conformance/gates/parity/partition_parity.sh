@@ -91,7 +91,7 @@ count() { wc -l < "$1" | tr -d ' '; }
 setof() {
   local dst="$1"
   shift
-  (cd "${REPO}" && "${GIST}" -l "$@" < /dev/null 2> /dev/null) | LC_ALL=C sort -u > "${dst}"
+  (cd "${CORPUS}" && "${GIST}" -l "$@" < /dev/null 2> /dev/null) | LC_ALL=C sort -u > "${dst}"
 }
 
 # ── the corpus, per needle ───────────────────────────────────────────────────
@@ -192,7 +192,7 @@ done
 echo
 echo "the index may accelerate a genus query, never decide it"
 setof "${WORK}/armed" --docs gist
-(cd "${REPO}" && GIST_DIR="${EMPTY_DIR}" "${GIST}" -l --docs gist < /dev/null 2> /dev/null) \
+(cd "${CORPUS}" && GIST_DIR="${EMPTY_DIR}" "${GIST}" -l --docs gist < /dev/null 2> /dev/null) \
   | LC_ALL=C sort -u > "${WORK}/stripped"
 if cmp -s "${WORK}/armed" "${WORK}/stripped"; then
   n_armed="$(count "${WORK}/armed")"
@@ -209,7 +209,7 @@ fi
 # worst available outcome: fast and wrong, with no error.
 echo
 echo "a resident session answers the same question"
-(cd "${REPO}" && GIST_DIR="${PRIVATE_DIR}" "${GIST}" index > /dev/null 2>&1) || {
+(cd "${CORPUS}" && GIST_DIR="${PRIVATE_DIR}" "${GIST}" index > /dev/null 2>&1) || {
   note FAIL "warm" "could not build a private index"
   fails=$((fails + 1))
 }
@@ -232,7 +232,7 @@ serve() {
   # `exec` so the recorded pid IS the daemon: a plain `( … ) &` records the
   # subshell, and killing that leaves the real `gist serve` holding the
   # single-instance lock while every successor declines.
-  (cd "${REPO}" && GIST_DIR="${PRIVATE_DIR}" exec "${GIST}" serve > "${WORK}/serve.log" 2>&1) &
+  (cd "${CORPUS}" && GIST_DIR="${PRIVATE_DIR}" exec "${GIST}" serve > "${WORK}/serve.log" 2>&1) &
   DAEMON_PID=$!
   for _ in $(seq 1 100); do
     [[ -S "${PRIVATE_DIR}/gistd.sock" ]] && return 0
@@ -264,11 +264,11 @@ for spec in "--docs" "--code" "--no-docs" "--docs --data"; do
   # The answer keep is off for the same reason the timing lane turns it off: a
   # recalled answer is rendered bytes replayed by key, so it would prove the KEY
   # carries the genus and leave the searching side unexamined.
-  (cd "${REPO}" && GIST_DIR="${PRIVATE_DIR}" GIST_NO_KEEP=1 GIST_TRACE=warm GIST_TRACE_FORMAT=text \
+  (cd "${CORPUS}" && GIST_DIR="${PRIVATE_DIR}" GIST_NO_KEEP=1 GIST_TRACE=warm GIST_TRACE_FORMAT=text \
     "${GIST}" -l ${spec} gist < /dev/null 2> "${WORK}/warm.err") \
     | LC_ALL=C sort -u > "${WORK}/warm.out"
   # shellcheck disable=SC2086
-  (cd "${REPO}" && GIST_DIR="${PRIVATE_DIR}" GIST_NO_AUTOSERVE=1 \
+  (cd "${CORPUS}" && GIST_DIR="${PRIVATE_DIR}" GIST_NO_AUTOSERVE=1 \
     "${GIST}" -l --no-index ${spec} gist < /dev/null 2> /dev/null) \
     | LC_ALL=C sort -u > "${WORK}/cold.out"
   if ! cmp -s "${WORK}/warm.out" "${WORK}/cold.out"; then
@@ -315,7 +315,7 @@ fi
 # and every check above still passes.
 echo
 echo "extensionless documents are still promoted by location or name"
-(cd "${REPO}" && "${GIST}" --files --docs < /dev/null 2> /dev/null) \
+(cd "${CORPUS}" && "${GIST}" --files --docs < /dev/null 2> /dev/null) \
   | grep -Ev '\.[A-Za-z0-9]+$' > "${WORK}/extensionless" || true
 n_ext="$(count "${WORK}/extensionless")"
 if [[ "${n_ext}" -eq 0 ]]; then

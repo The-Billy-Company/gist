@@ -34,7 +34,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../roots.sh
 source "${HERE}/../roots.sh"
 gist_resolve_roots "${HERE}" || exit 1
-DEST="${GIST_CORPORA_DIR:-${REPO}/.local/gist-corpora}"
+DEST="${GIST_CORPORA_DIR:-${KERNEL}/.local/gist-corpora}"
 mkdir -p "${DEST}"
 
 # name → repo-url tag  (shallow, single-branch: the tree, not the history)

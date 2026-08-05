@@ -22,12 +22,12 @@
 
 const std = @import("std");
 const assay = @import("irregex").assay;
-const charter = @import("irregex").commands.scope.charter;
+const charter = @import("irregex").scope.charter;
 const corpus = @import("irregex").corpus;
-const misread = @import("irregex").commands.scope.misread;
+const misread = @import("irregex").math.misread;
 const preference = @import("irregex").preference;
 const jsonstr = @import("irregex").inner.cli.jsonstr;
-const home = @import("irregex").home;
+const home = @import("irregex").index.home;
 
 const Dir = std.Io.Dir;
 

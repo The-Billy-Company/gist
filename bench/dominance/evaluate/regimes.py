@@ -44,7 +44,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 KERNEL = HERE.parents[2]  # evaluate → dominance → bench → package root
-REPO = KERNEL
 COMPETE = KERNEL / "bench" / "dominance" / "races" / "field.sh"
 CERTIFY = KERNEL / "bench" / "certificate" / "report" / "stats.py"
 
@@ -54,7 +53,7 @@ def _corpus_root() -> Path:
     froze one (GIST_CORPUS_ROOT), else the live repo. Mirrors `_compete.sh`'s
     ``CORPUS`` so the Python-side cwd and the shell-side roots always agree."""
     root = os.environ.get("GIST_CORPUS_ROOT", "").strip()
-    return Path(root) if root else REPO
+    return Path(root) if root else KERNEL
 
 
 def _load_certify_stats():
@@ -110,7 +109,7 @@ class Bridge:
         self.env["GIST_HINTS"] = "0"
         if gist_dir:
             self.env["GIST_DIR"] = str(gist_dir)
-        self.gist_bin = REPO / ".local" / "gist-bin"
+        self.gist_bin = KERNEL / ".local" / "gist-bin"
 
     def _source(self, snippet: str) -> subprocess.CompletedProcess:
         script = f'set -euo pipefail\nsource "{COMPETE}"\n{snippet}\n'
@@ -221,7 +220,7 @@ def lifecycle_lane(bridge: Bridge, gist_dir: Path) -> dict:
     first_query_ms = _timed([gist, "pgxpool", "-l", "--", *roots])
 
     incremental: list[dict] = []
-    scratch = REPO / ".local" / "gist-evaluation" / "scratch"
+    scratch = KERNEL / ".local" / "gist-evaluation" / "scratch"
     scratch.mkdir(parents=True, exist_ok=True)
     probe = scratch / "EVAL_PROBE.txt"
     events = {

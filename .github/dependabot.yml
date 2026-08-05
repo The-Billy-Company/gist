@@ -17,7 +17,7 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "ci"
-    labels: ["dependencies", "ci"]
+    labels: ["type/deps", "area/ci"]
     cooldown:
       default-days: 7
 
@@ -31,7 +31,7 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "build"
-    labels: ["dependencies", "rust"]
+    labels: ["type/deps", "area/bindings", "lang/rust"]
     cooldown:
       default-days: 7
 
@@ -42,7 +42,7 @@ updates:
       interval: monthly
     commit-message:
       prefix: "build"
-    labels: ["dependencies", "rust"]
+    labels: ["type/deps", "area/bindings", "lang/rust"]
     cooldown:
       default-days: 7
 
@@ -56,7 +56,7 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "build"
-    labels: ["dependencies", "go"]
+    labels: ["type/deps", "area/bindings", "lang/go"]
     cooldown:
       default-days: 7
 
@@ -70,6 +70,6 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "build"
-    labels: ["dependencies", "python"]
+    labels: ["type/deps", "area/bindings", "lang/python"]
     cooldown:
       default-days: 7

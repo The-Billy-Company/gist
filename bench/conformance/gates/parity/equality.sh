@@ -28,7 +28,7 @@ echo "building gist index + emitting verified match sets (battery=${BATTERY} see
   || (cd "${KERNEL}" && zig build -Doptimize=ReleaseFast verify -- "${BATTERY}" "${SEED}") \
   || exit 1
 
-cd "${REPO}" || exit 1
+cd "${CORPUS}" || exit 1
 command -v rg > /dev/null || {
   echo "ripgrep (rg) not found on PATH"
   exit 1
