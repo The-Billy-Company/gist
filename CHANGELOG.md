@@ -7,6 +7,135 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.1.0] - 2026-08-05
+
+### Added
+
+- `pip install gist-search` used to buy a Python face with nothing behind it: the
+  published wheel was `py3-none-any`, every verb shells out to a `gist` binary,
+  and nothing in the distribution put one anywhere the resolver could find. The
+  README's own quickstart — `import gist; gist.search(...)` — raised
+  `GistNotFoundError` on the first call unless whoever ran it had separately
+  built the Zig sources and put the result on `PATH` or `$GIST_BIN`. Import
+  succeeding proved nothing about the product working.
+
+  The wheel now bundles a native `gist` CLI per platform. `hatch_build.py`
+  force-includes it at `gist/bin/gist[.exe]` and stamps the platform tag that
+  promise requires (`py3-none-<platform>`, never `any`, once a native binary is
+  inside); `scripts/build_wheels.py` cross-compiles the same six-target matrix
+  `irregex`'s own wheel already ships (macOS arm64/x86_64, Linux
+  x86_64/aarch64, Windows amd64/arm64), stripped, so the CLI wheel costs 4 MB
+  instead of 22. None of it is reachable without `irregex>=1.1.0`'s matching
+  `_resolve` rung, which is why that floor moved in the same release.
+
+  `release.yml` proves it rather than asserting it: `wheels` builds the matrix
+  and runs a real search — not an import — against the build host's own wheel,
+  then `smoke` repeats that on the real GitHub-hosted runner for every other
+  target, installing only the one wheel `pip`'s own tag matching picks out of
+  the six, with no source checkout and no `PATH`/`GIST_BIN` override to fall
+  back on. `publish` now waits on both.
+
+### Changed
+
+- Every package index this project publishes to now shows the repository's own
+  `README.md` as the project's page, rather than the short one kept beside each
+  binding. PyPI and crates.io are where most people meet this project first, and
+  they were being shown a page about the Python binding's verbs - not the indexed code-search kernel underneath them.
+
+  The README could not simply be pointed at, because a relative link resolves
+  against whatever page displays it. `src/surface/face/gist/README.md` is correct on GitHub and a 404
+  under `pypi.org/project/gist-search/`. crates.io is the worse of the two: it rewrites
+  relative links against the crate's own subdirectory, so the same path becomes a
+  well-formed URL into `bindings/rust/` pointing at a file that was never there,
+  and nothing looks broken.
+
+  So `tools/registry_readme.py` is now the one rewriter both ends share. It
+  absolutizes every relative target against the `repository` URL the manifest
+  already declares, in the form that serves what the target is - `raw` for an
+  image, `tree` or `blob` chosen by what the path is on disk - and a target the
+  repository does not contain fails the build instead of publishing a dead link.
+  GitHub's `> [!NOTE]` alert, which renders as literal text anywhere else, is
+  lowered to a bold lead line. Headings need no help: both renderers rewrite
+  in-document anchors to match the ids they mint, so the table of contents arrives
+  intact.
+
+  Python gets it through a Hatchling metadata hook, so the corrected page exists
+  only inside the artifact. Cargo has no metadata hook, so `readme` now points at
+  a gitignored `bindings/rust/PROJECT_README.md` that the same tool mints at
+  package time - `cargo package` fails loudly if it was never generated, and
+  `cargo build` never reads it. Both indexes end up with a byte-identical page.
+
+  An sdist is the one artifact with no repository above it, so it carries the
+  corrected README beside the sources and a source build reads that, rather than
+  being asked for a file the archive does not contain.
+
+  Go needed no rewriting - pkg.go.dev renders the README at the module root and
+  resolves its links against the repository - but a dead one there is still a dead
+  link on the module's landing page, and a Go module has no build step to catch
+  it. `--check` now proves those targets resolve too, on every commit.
+
+  The README stays written for the repository it lives in.
+
+### Fixed
+
+- The changelog's own header claimed gist ships the `relate` binary. It hasn't
+  since relate moved to its own package - `build.zig` only declares the `gist`
+  executable, and says so in its module doc. The header now describes what gist
+  actually is: indexed code search, plus the chassis module relate and blast ride.
+- The root README had a Quickstart but no Install section, so the three published
+  bindings appeared nowhere a reader looks first, and the Rust README's wiring
+  block still said `cargo add irregex` / `cargo add gist` under an "Once
+  published" comment - two names that resolve to unrelated crates now that the
+  real ones are [`irgx`](https://crates.io/crates/irgx) and
+  [`gist-search`](https://crates.io/crates/gist-search).
+
+  The Go README was wrong in a way that only bites after you follow it. It gave
+  `go get github.com/The-Billy-Company/gist/bindings/go`, which is correct, and
+  then never said that the module root holds no package: the importable paths are
+  `bindings/go/exact` and `bindings/go/index`. Fetch succeeded, import failed.
+
+  All three now name the registry, the distribution, and the identifier you
+  actually type, and the Python README says at the install - not forty lines below
+  it - that the package is the bindings and the `gist` binary still has to be on
+  `PATH`.
+- Towncrier ran with `wrap = true`, which is right for one-line release notes and
+  wrong for the multi-paragraph Markdown the fragments here actually are. It
+  reflows each entry as one flat block, which loses a fenced code sample's fence,
+  turns a hanging `-` at the end of a wrapped line into a setext heading, and can
+  split an inline code span across a paragraph break. Off, the fragment's own
+  layout survives and towncrier only indents it.
+
+  `changelog.d` also had no README, so folding a release emptied the directory and
+  git stopped tracking it - the next `towncrier create` would have been writing
+  into a path that no longer existed in a fresh clone. It has one now, saying what
+  a fragment is and that its layout is preserved.
+
+  `version_parity.py` gained the skip its sibling in `irregex` needed: release
+  notes name versions and the `x-release-please-version` marker as their subject
+  matter, so a line-level "marker plus a number" heuristic reads them as stale
+  mirrors. They are also the one file the release bot must never rewrite, since a
+  past release's number is history rather than a copy of the current one.
+- Windows now compiles and runs the shipped product without pulling POSIX-only daemon fixtures or measurement instruments into the native lane.
+- `CLAIM.md` said ranking "reorders the complete verified hit set," full stop —
+  read next to `--rank`'s documented default of a top-20 view, that is two
+  different contracts for the same verb, and a reader had to guess which one a
+  program should rely on. It now says both halves in one place: ranking scores
+  every file in the complete set (nothing is excluded from the fusion, so
+  membership never shrinks) and *presents* the bounded top-K by default; the
+  same complete, unranked set stays one flag away through `-l` or full output,
+  which ranking never gates.
+
+  Separately, three documents restating the mined ripgrep replay's scoreable
+  total had drifted from each other without anything noticing — two said 411,
+  one still said 409, and `check_results.py` only ever watched the one README
+  shaped like `results.json`'s own bucket table, not the sentences elsewhere
+  that restate the same number in prose. Every restatement (`README.md`,
+  `TESTING.md`, `CLAIM.md`) now carries an `x-rgsuite-total` marker, and
+  `tools/evidence_parity.py` — wired into CI beside `check_results.py` — fails
+  the build the day any marked line disagrees with `results.json` again,
+  discovered by the marker rather than kept as a list.
+
+
 ## [1.0.0] - 2026-08-02
 
 ### Added
