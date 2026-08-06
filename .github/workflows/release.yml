@@ -127,10 +127,22 @@ jobs:
     runs-on: macos-latest
     defaults:
       run:
-        working-directory: bindings/python
+        working-directory: gist/bindings/python
     steps:
+      # `build.zig.zon` resolves `irregex` as a sibling path dependency
+      # (`../irregex`), and `Cargo.toml`/`pyproject.toml` do the same for their
+      # own bindings — so both repositories are checked out into subdirectories
+      # of the workspace, making them siblings of each other exactly as they are
+      # in a real clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          path: gist
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: The-Billy-Company/irregex
+          path: irregex
+          token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}
           persist-credentials: false
       # Both setups cache by default, and a cache is writable by any workflow on
       # any branch. That is a fine trade for CI, where a poisoned entry costs a
@@ -232,7 +244,7 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: wheels
-          path: bindings/python/dist/*.whl
+          path: gist/bindings/python/dist/*.whl
           if-no-files-found: error
 
   # Import success is not product success. Each of these runs on the real
@@ -374,10 +386,21 @@ jobs:
       id-token: write # crates.io exchanges this OIDC token for a short-lived registry token.
     defaults:
       run:
-        working-directory: bindings/rust
+        working-directory: gist/bindings/rust
     steps:
+      # `Cargo.toml` resolves `irgx` as a sibling path dependency
+      # (`../../irregex/bindings/rust`), so both repositories are checked out
+      # into subdirectories of the workspace, making them siblings of each
+      # other exactly as they are in a real clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          path: gist
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: The-Billy-Company/irregex
+          path: irregex
+          token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}
           persist-credentials: false
 
       # `preflight` already re-verified this against every mirror; reading it
@@ -394,7 +417,7 @@ jobs:
       # one beside these sources. It is gitignored and minted here, immediately
       # before publishing: absent fails loudly, stale would ship quietly.
       - name: Mint the registry landing page
-        working-directory: .
+        working-directory: gist
         run: python3 tools/registry_readme.py
 
       # Idempotent, for the same reason the Go tag step is, and probed before
