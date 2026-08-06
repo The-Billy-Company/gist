@@ -160,12 +160,16 @@ jobs:
       # `preflight` already re-verified this against every mirror; the shared
       # action reads it the same way here so this job's own artifact never
       # disagrees with what preflight just approved.
+      # `--root` is resolved against $GITHUB_WORKSPACE, not this job's
+      # `working-directory` default (that key only reaches `run:` steps, never
+      # a `uses:` composite action) — so it has to name `gist` explicitly now
+      # that the workspace root holds both checkouts as siblings.
       - name: The tag must name the version being published
         if: startsWith(github.ref, 'refs/tags/v')
         uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
         with:
           command: version
-          args: --root . --tag ${{ github.ref_name }}
+          args: --root gist --tag ${{ github.ref_name }}
 
       - name: Build every target
         run: uv run --no-project --python 3.12 python scripts/build_wheels.py
@@ -405,12 +409,16 @@ jobs:
 
       # `preflight` already re-verified this against every mirror; reading it
       # the same way here means this job's own artifact never disagrees with
-      # what preflight just approved.
+      # what preflight just approved. `--root` is resolved against
+      # $GITHUB_WORKSPACE, not this job's `working-directory` default (that key
+      # only reaches `run:` steps, never a `uses:` composite action), so it has
+      # to name `gist` explicitly now that the workspace root holds both
+      # checkouts as siblings.
       - name: The tag must name the version being published
         uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
         with:
           command: version
-          args: --root . --tag ${{ github.ref_name }}
+          args: --root gist --tag ${{ github.ref_name }}
 
       # crates.io renders a README as the entire project page, so the one it gets
       # is a link-corrected copy of the repository README rather than the short
