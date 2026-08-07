@@ -44,7 +44,9 @@ const crest_sidecar = @import("irregex").index.crest;
 const frame = @import("irregex").inner.corpus.frame;
 const treemap = @import("irregex").inner.corpus.treemap;
 const shard = @import("irregex").inner.corpus.shard;
-const Index = @import("irregex").index.trigram.Index;
+const trigram = @import("irregex").index.trigram;
+const Index = trigram.Index;
+const crest_math = @import("irregex").math.crest;
 const assay = @import("irregex").assay;
 const fault = @import("irregex").fault;
 const portal = @import("irregex").portal;
@@ -68,7 +70,174 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void 
     try full(gpa, io, roots);
 }
 
+/// A full build, streamed if it can be and held if it cannot.
+///
+/// The two produce the same artifacts; they differ only in whether the corpus
+/// is resident while they do it. Streaming is tried first and falls open to the
+/// held build on ANY failure before publication — a census that cannot be taken
+/// or a block builder that runs out of memory costs a cheaper build, never the
+/// index. Past publication there is nothing to fall back to and both paths fail
+/// the same way.
 fn full(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
+    if (streaming(io)) {
+        if (streamed(gpa, io, roots)) return else |err| {
+            assay.trace(.index, "index: streamed build declined ({s}) — falling open to the held build\n", .{@errorName(err)});
+        }
+    }
+    return held(gpa, io, roots);
+}
+
+/// The share of physical memory a full build may hold before it streams
+/// instead.
+///
+/// A held build is FASTER — its second pass over the corpus is a memcpy where a
+/// streamed build's is a file read (measured on llvm-project: 8.3 s held against
+/// 17.5 s streamed, on a warm page cache) — so holding is the right default
+/// whenever the corpus is small enough that nobody notices. What makes it wrong
+/// is scale, not principle: the same build holds 2.4 GiB on that corpus and
+/// would hold four times that on a corpus four times bigger, and a search index
+/// has no business taking a large fraction of someone's machine while they are
+/// working in it. An eighth is the line — generous enough that ordinary trees
+/// never pay the streamed build's second read, tight enough that a corpus large
+/// enough to be felt is never held.
+const hold_share: u64 = 8;
+
+/// Which build shape this machine should run — decided from the machine and the
+/// corpus, not from a preference.
+///
+/// `GIST_STREAM` / `GIST_NO_STREAM` pin it either way, which is what a benchmark
+/// comparing peak RSS against `csearch` or `zoekt` needs: the honest number for
+/// a shape is the one measured with that shape forced, not whichever one this
+/// host happened to choose.
+fn streaming(io: std.Io) bool {
+    if (assay.knobSet("NO_STREAM")) return false;
+    if (assay.knobSet("STREAM")) return true;
+    const ram = std.process.totalSystemMemory() catch return true;
+    // A held build's peak is the corpus plus the index it is producing and the
+    // block window producing it — 1.28x the corpus at llvm scale, and dominated
+    // by fixed overheads well below it, so half again is a fair upper estimate.
+    const corpus = lastCorpusBytes(io) orelse return true;
+    return corpus + corpus / 2 > ram / hold_share;
+}
+
+/// What the last full build's corpus weighed, read off the content shard it
+/// published — the shard IS that corpus concatenated, so its size is the
+/// corpus's plus a catalog, and erring high biases toward streaming.
+///
+/// Null when there is no shard to ask, which is the first build in a fresh
+/// artifact directory. That answers "stream": a build that cannot know how big
+/// the tree is should not be the one to discover it by holding all of it.
+fn lastCorpusBytes(io: std.Io) ?u64 {
+    const st = std.Io.Dir.cwd().statFile(io, shard.shardFile(), .{}) catch return null;
+    return st.size;
+}
+
+/// What the trigram pass learns while it has each doc's bytes in hand.
+///
+/// A streamed build pays a file read per pass over the corpus, so a second
+/// consumer of the same bytes must ride along with the first rather than open
+/// the file again. Two do: the crest sieve, which is a pure per-doc function,
+/// and the record of how long each doc ACTUALLY was — the only honest input to
+/// the content shard's offset catalog, since the census's stated sizes came
+/// from an earlier walk and the shard's readers trust its catalog absolutely.
+///
+/// Written from worker threads, which own disjoint doc ranges, so indexing by
+/// doc id needs no synchronization.
+const Ledger = struct {
+    vectors: []crest_math.Vector,
+    lens: []u32,
+
+    fn saw(ctx: *anyopaque, doc: u32, bytes: []const u8) void {
+        const l: *Ledger = @ptrCast(@alignCast(ctx));
+        l.vectors[doc] = crest_math.crest(bytes);
+        l.lens[doc] = @intCast(bytes.len);
+    }
+};
+
+fn recallDoc(ctx: *anyopaque, doc: u32, buf: []u8) []const u8 {
+    const census: *corpus_mod.Census = @ptrCast(@alignCast(ctx));
+    return census.recall(doc, buf);
+}
+
+/// The build that never holds the corpus. It takes a census — every member's
+/// path and stated size, in the doc order the held loader would have numbered
+/// them — and re-reads each body when the pass that needs it reaches it.
+///
+/// Two corpus reads, the same count the held build already paid (extraction and
+/// the shard write); the difference is that the second one comes from the page
+/// cache instead of from a copy this process is holding. What that buys is the
+/// corpus-sized allocation itself, which on a large tree is the single largest
+/// line item in the build's peak.
+fn streamed(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
+    const span = assay.Span.open(io);
+    const jtok = journal.capture(io);
+    const built = assay.anchor(io);
+    var phase = assay.Span.open(io);
+
+    var census = try corpus_mod.census(gpa, io, roots);
+    defer census.deinit();
+    const ndocs = census.paths.len;
+    assay.trace(.index, "index phase: census {d:.1} ms · peak {d:.0} MiB · {d} docs · {d:.1} MiB\n", .{
+        phase.lap(io).ms(), peakMib(), ndocs, @as(f64, @floatFromInt(census.bytes)) / (1 << 20),
+    });
+    if (ndocs == 0) return error.EmptyCorpus; // nothing to stream; the held path reports it
+
+    var ledger: Ledger = .{
+        .vectors = try gpa.alloc(crest_math.Vector, ndocs),
+        .lens = try gpa.alloc(u32, ndocs),
+    };
+    defer gpa.free(ledger.vectors);
+    defer gpa.free(ledger.lens);
+
+    var idx = try Index.buildStreamed(gpa, .{
+        .sizes = census.sizes,
+        .ctx = &census,
+        .read = recallDoc,
+        .witness = .{ .ctx = &ledger, .saw = Ledger.saw },
+    });
+    defer idx.deinit();
+    assay.trace(.index, "index phase: trigram build + crest {d:.1} ms · peak {d:.0} MiB\n", .{ phase.lap(io).ms(), peakMib() });
+
+    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, census.paths, roots, ledger.vectors, built.ns());
+    assay.trace(.index, "index phase: publish {d:.1} ms · peak {d:.0} MiB · {d:.1} MiB\n", .{
+        phase.lap(io).ms(), peakMib(), @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
+    });
+    try fresh.writeAnchor(io, built);
+    if (jtok) |t| fresh.writeJournalToken(io, t);
+    fault.spare("phantom tree.map (costs the phantom walk tier)", treemap.build(gpa, io, roots));
+    // The shard's catalog is prefix sums of `ledger.lens` — what the trigram
+    // pass read, not what the census stated — and `buildRecalled` declines the
+    // whole tier rather than publish a catalog the bodies disagree with.
+    fault.spare("content shard (costs the shard read tier)", shard.buildRecalled(
+        gpa,
+        io,
+        .{ .ctx = &census, .read = recallDoc },
+        census.paths,
+        ledger.lens,
+        built.ns(),
+    ));
+    frame.publishBinding(io, frame.treeRootFile());
+    assay.trace(.index, "index phase: sidecars {d:.1} ms · peak {d:.0} MiB · anchor+journal+treemap+shard+binding\n", .{ phase.lap(io).ms(), peakMib() });
+
+    const dur = span.read(io).ms();
+    assay.summary(gpa, false, "indexed {d} files · {d:.1} MiB corpus · {d:.1} MiB index · {d:.0} ms → {s}\n", .{
+        ndocs,
+        @as(f64, @floatFromInt(census.bytes)) / (1 << 20),
+        @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
+        dur,
+        home.outDir(),
+    }, .{
+        .{ "artifact", "s", "index" },
+        .{ "mode", "s", "full" },
+        .{ "files", "d", ndocs },
+        .{ "corpus_mib", "d:.1", @as(f64, @floatFromInt(census.bytes)) / (1 << 20) },
+        .{ "index_mib", "d:.1", @as(f64, @floatFromInt(index_bytes)) / (1 << 20) },
+        .{ "ms", "d:.0", dur },
+        .{ "path", "s", home.outDir() },
+    });
+}
+
+fn held(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     const span = assay.Span.open(io);
     // Filesystem-journal since-token, minted BEFORE the anchor so a replay
     // from it strictly over-covers (built_ns, now) — the token is what lets
