@@ -240,6 +240,16 @@ Prefixes in use: `feat` `fix` `perf` `refactor` `docs` `test` `build` `ci`
 `chore`. Keep the subject under about 72 characters and put the reasoning in the
 body, where reviewers and `git log` both find it.
 
+The subject line becomes the squash commit message, and that is what
+release-please reads to pick the next version: a `!` or a `BREAKING CHANGE:`
+footer takes the major, `feat` takes the minor, everything else takes the
+patch. An unconventional title is not a style nit. Nothing in this repo's
+config overrides that, so a release is a minor only because someone shipped a
+feature in it; if you need an exact number the rules would not pick, the
+`Release-As: X.Y.Z` footer is documented with the full table in the org
+standard, [What Picks the
+Number](https://github.com/The-Billy-Company/.github/blob/main/RELEASING.md#what-picks-the-number).
+
 For the pull request: one concern per PR, describe what would have caught the
 bug if it had existed, and fill in the template. Reviews here ask three
 questions more than any others - *what proves this?*, *what does it cost?*, and
