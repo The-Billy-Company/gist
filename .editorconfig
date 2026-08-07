@@ -27,7 +27,7 @@ indent_size              = 4
 indent_style = space
 indent_size  = 4
 
-# The zoning contract language (contract/gist.zone) - a small DSL with no
+# The zoning contract language (charter.zone) - a small DSL with no
 # formatter, so this file IS its layout contract.
 [*.zone]
 indent_style = space

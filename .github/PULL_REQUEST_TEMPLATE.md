@@ -59,5 +59,5 @@ of the same bug.
 - [ ] No gate was made to skip, soften, or self-satisfy in order to go green
 - [ ] A new or changed flag went into `contract/surface.toml`, so `--schema`,
       `man gist`, and every completion moved with it
-- [ ] `contract/gist.ward` is updated in this PR if a new import edge was needed
+- [ ] `charter.zone` is updated in this PR if a new import edge was needed
 - [ ] No certificate minted over a private corpus is included

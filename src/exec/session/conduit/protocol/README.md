@@ -4,7 +4,7 @@ One contract, five chapters. Everything the resident daemon and its clients say
 to each other is gated on a single negotiated `protocol_version`, so the pieces
 below are internals of one agreement rather than five independent modules — the
 directory is **sealed** in
-[`contract/gist.zone`](../../../../../contract/gist.zone), and
+[`charter.zone`](../../../../../charter.zone), and
 `protocol.zig` is the only door.
 
 | Module                         | Chapter                                                                                                                                                                                                                                                            |

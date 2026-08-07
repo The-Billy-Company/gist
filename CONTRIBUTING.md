@@ -252,7 +252,7 @@ grows two spellings of the same bug.
 ## Architecture is machine-checked
 
 Zig has no visibility rules between files in a package, so every boundary the
-READMEs describe would be convention. [`contract/gist.zone`](contract/gist.zone)
+READMEs describe would be convention. [`charter.zone`](charter.zone)
 is the machine-checkable half. If your change needs a new import edge, edit the
 contract in the same commit and say why in the variance. Do not route around
 it.

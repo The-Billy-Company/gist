@@ -43,15 +43,15 @@ golangci-lint = "2.12.2"
 # rather than exactness: a shell gate a contributor cannot run locally is a
 # gate they meet for the first time in review.
 shellcheck = "0.11.0"
-# zoning - the import-topology gate the `topology` job runs. `contract/
-# gist.zone` is the only file in this repo that a compiler never reads, so the
-# whole point of pinning it here is that you can ask it what it thinks WHILE
-# you edit the contract - `zoning map`, `zoning status`, `--suggest` - instead
-# of meeting its verdict in review. The workflow installs the same version
-# with `uv run --with`; bump the two in the same commit. Like the npm row, a
-# `pipx:` pin locks a version and nothing else: the PyPI wheel already carries
-# the static binary, and a file for an exact version is immutable.
-"pipx:zoning" = "1.2.0"
+# zoning - the import-topology gate the `topology` job runs. `charter.zone` is
+# the only file in this repo that a compiler never reads, so the whole point of
+# pinning it here is that you can ask it what it thinks WHILE you edit the
+# contract - `zoning map`, `zoning status`, `--suggest` - instead of meeting its
+# verdict in review. The workflow installs the same version with `uv run
+# --with`; bump the two in the same commit. Like the npm row, a `pipx:` pin
+# locks a version and nothing else: the PyPI wheel already carries the static
+# binary, and a file for an exact version is immutable.
+"pipx:zoning" = "1.3.1"
 
 # Deliberately absent: ruff, yamllint, taplo, editorconfig-checker, zizmor, towncrier.
 # CI installs each with `uv run --no-project --with <pkg>==<version>`, and

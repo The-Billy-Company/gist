@@ -9,9 +9,10 @@
 # The face itself - argv, the daemon, the ranked view, the generators.
 /src/                   @GriffinCanCode
 
-# The two contracts. `gist.ward` is the import topology; `surface.toml` is the
+# The two contracts. `charter.zone` is the import topology; `surface.toml` is the
 # flag catalog that `--schema`, the manual, and every shell completion are
 # rendered from, so a change here is a change to five surfaces at once.
+/charter.zone           @GriffinCanCode
 /contract/              @GriffinCanCode
 
 # Parity, conformance, and the certificate. A weakened gate is worse than an

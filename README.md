@@ -1096,7 +1096,7 @@ product vocabulary, distribution, and the certificate, lives here; what the
 `grep-*` crates own, meaning engines, walker, index, and argv, lives in the
 library.
 
-Architecture is machine-checked by [`contract/gist.zone`](contract/gist.zone).
+Architecture is machine-checked by [`charter.zone`](charter.zone).
 Apache-2.0; nothing third-party is bundled here, and the certificate measures
 competitors by invoking installed binaries.
 

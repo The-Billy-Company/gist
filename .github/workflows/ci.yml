@@ -519,7 +519,7 @@ jobs:
           PY
 
   topology:
-    # `contract/gist.zone` declares this package's import topology - the zone
+    # `charter.zone` declares this package's import topology - the zone
     # stack, the sealed deep modules, the guest lists, the reach ceiling, the
     # cycle ban - and until this job existed, nothing read it. Zig has no
     # visibility rules between files inside a package and its analysis is lazy
@@ -545,7 +545,7 @@ jobs:
       # contract. A green run over the packages that opted in says nothing about
       # the one somebody adds next week, and coverage nobody checks decays.
       - name: Import topology
-        run: uv run --no-project --with zoning==1.2.0 zoning verify --complete
+        run: uv run --no-project --with zoning==1.3.1 zoning verify --complete
 
   version:
     name: version

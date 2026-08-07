@@ -119,7 +119,7 @@ kind of report we want:
 - a shell conformance script that makes bash, zsh, fish, PowerShell, and mandoc
   each parse the generated menus, including a check that no completion can fork
   a subprocess at tab time;
-- an architecture contract ([`contract/gist.zone`](contract/gist.zone)) that
+- an architecture contract ([`charter.zone`](charter.zone)) that
   machine-checks the import topology.
 
 ## Provenance

@@ -1,0 +1,83 @@
+// gist-search — import topology of the Python binding.
+//
+// The wheel is not the engine, but it is not only a subprocess wrapper either:
+// `gist` is the one binding of the family with a warm path, so it carries an
+// in-process CFFI handle beside the cold `gist --json` runner and decides per
+// request which one can answer. That split is the whole shape of this package,
+// and it is also the reason for the one cycle declared at the bottom.
+//
+// Judged by `zoning verify` under the `python` dialect, from the repository
+// root, alongside `charter.zone` (the Zig side).
+
+package gist-search {
+    root     .
+    language python
+}
+
+// Tiers, low to high. An import may only point back up the page.
+zones {
+    // The wheel's build hooks — `hatch_build.py` stages the binary into the
+    // wheel, `hatch_readme.py` rewrites the PyPI long description. Both run
+    // under hatchling and never under the package, so they import nothing of
+    // ours and sit at the bottom.
+    packaging  *.py
+
+    // Index lifecycle: build, refresh, and report the trigram index. Depends
+    // on the runtime and on nothing else here, so the facade can reach it
+    // without reaching through anything.
+    index      gist/index/**
+
+    // The core, and one zone on purpose. The facade re-exports from its own
+    // `exact/` subpackage, and `exact/` reaches back to the private engine
+    // modules that live beside the facade — so the two directories are a
+    // single unit of change, not two tiers. Splitting them here would only
+    // record an ordering neither side obeys. See the cycle variance below.
+    core       gist/*.py gist/exact/**
+
+    // Wheel-building scripts. Operational, run by hand or by CI, above the
+    // package because they drive it rather than the other way round.
+    scripts    scripts/**
+
+    // Behavioral tests, including the FFI/CLI parity suites that exist to
+    // prove the warm path and the cold path answer identically.
+    tests      tests/**
+}
+
+// Reach outside the package: the distributions the wheel declares.
+
+// The C-ABI floor's Python side — the request model, the shell runner, the
+// loader the warm handle goes through, and the error taxonomy every one of
+// these bindings shares.
+use irgx by index core tests
+
+// The in-process bridge to `libgist`. Held only by the core, and only on the
+// warm path; a machine without it still answers cold.
+use cffi by core
+
+// Build- and test-time only, carried by the tier that runs under them.
+use hatchling by packaging
+use pytest by tests
+
+// Structural laws.
+limit  reach to 1 hop
+forbid cycles across directories
+
+// The one cycle, and why it stays.
+//
+// `_native` serves a request in-process only when the request is FFI-eligible,
+// and the predicate that decides eligibility lives in `_daemon` because it is
+// the same predicate the daemon protocol enforces. `_daemon` imports `_native`
+// at module load; `_native` imports that one function back, inside the
+// function that needs it, precisely so the load-time graph stays acyclic.
+//
+// The alternative is a third module holding a single predicate that neither
+// side owns, which buys an import edge and loses the invariant that the strict
+// eligibility rule has exactly one definition. `exact/cursor` joins the cycle
+// for the same reason from the other direction: it is the warm cursor, so it
+// reaches the same private engine module the facade sits beside.
+variance cycle {
+    gist/__init__.py
+    gist/_daemon.py
+    gist/_native.py
+    gist/exact/cursor.py
+} because "the warm path's eligibility predicate has one definition, in the module whose protocol enforces it, and the back-edge is a deferred in-function import that keeps the load-time graph acyclic"
