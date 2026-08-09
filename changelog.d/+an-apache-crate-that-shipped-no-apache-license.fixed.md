@@ -1,7 +1,7 @@
-Both published packages declared Apache-2.0 and carried none of it. The licence
+Both published packages declared Apache-2.0 and carried none of it. The license
 text and the NOTICE live at the repository root, and neither a `.crate` tarball nor
 a wheel can reach above its own project directory - so the crate shipped an SPDX
-string and no licence, and the wheel shipped the same. Section 4 of that licence
+string and no license, and the wheel shipped the same. Section 4 of that license
 asks a redistributor for exactly those two files, which made this the one packaging
 defect that was not cosmetic. It mattered a little more here than elsewhere: this
 NOTICE is where the ripgrep interface conventions the package is a drop-in for are

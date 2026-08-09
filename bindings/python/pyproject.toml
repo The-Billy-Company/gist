@@ -34,7 +34,7 @@ requires-python = ">=3.12"
 license = "Apache-2.0"
 # Copies of the repository's pair, kept beside this manifest because a build backend
 # packages nothing from above the project directory. Without them the wheel carried an
-# SPDX expression and no licence text - and no NOTICE, which section 4 of Apache-2.0
+# SPDX expression and no license text - and no NOTICE, which section 4 of Apache-2.0
 # requires a redistributor to hand on. Named here rather than left to the sdist so
 # they land in the wheel's `.dist-info/licenses/` too. Keep byte-identical to the root.
 license-files = [ "LICENSE", "NOTICE" ]
