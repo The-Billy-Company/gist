@@ -32,6 +32,12 @@ description = "Indexed code search for Python - ripgrep-parity regex search over
 dynamic = [ "readme" ]
 requires-python = ">=3.12"
 license = "Apache-2.0"
+# Copies of the repository's pair, kept beside this manifest because a build backend
+# packages nothing from above the project directory. Without them the wheel carried an
+# SPDX expression and no licence text - and no NOTICE, which section 4 of Apache-2.0
+# requires a redistributor to hand on. Named here rather than left to the sdist so
+# they land in the wheel's `.dist-info/licenses/` too. Keep byte-identical to the root.
+license-files = [ "LICENSE", "NOTICE" ]
 authors = [ { name = "The Billy Company" } ]
 # The distribution name is `gist-search` because the bare one was taken, which
 # means the name alone does no discovery work - nobody types "gist" looking for

@@ -35,6 +35,18 @@ authors = [ "The Billy Company" ]
 keywords = [ "code-search", "grep", "ripgrep", "regex", "search" ]
 categories = [ "text-processing", "development-tools", "api-bindings", "algorithms" ]
 
+# `LICENSE` and `NOTICE` are copies of the repository's, kept beside this manifest
+# rather than referenced upward: Cargo cannot package a file outside the crate
+# directory, so without the copies an Apache-2.0 crate shipped no licence text and
+# no attribution notice at all - the two things section 4 of that licence requires a
+# redistributor to hand on. Keep them byte-identical to the root pair.
+#
+# `rust-toolchain.toml` is deliberately not shipped. It pins 1.97.1 so this
+# repository's contributors lint identically, which is no business of someone
+# building the extracted crate - and it would silently override the 1.85
+# `rust-version` above, which is the floor the sources actually ask for.
+exclude = [ "/target", "/.cargo", "/rust-toolchain.toml" ]
+
 # Load-bearing, not decorative: the package is `gist-search` on the index, so
 # without this the library would be `gist_search` and every caller would have
 # to type it. `use gist::…` is the API.

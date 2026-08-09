@@ -1,0 +1,15 @@
+gist — the product chassis (the gist and relate binaries)
+Copyright 2026 The Billy Company
+
+This product includes software developed at The Billy Company
+(https://billylives.com/).
+
+No third-party source or data is bundled here. The dominance certificate under
+bench/ measures competing tools — ripgrep, csearch, zoekt — by invoking
+binaries the operator installed; nothing from them ships in this package.
+
+Interface conventions implemented from published behavior rather than from
+borrowed source — chiefly ripgrep's CLI grammar, its .gitignore/hidden
+precedence, and its exit codes, which this package is a drop-in for — carry no
+obligation here. They are credited where they are used, in the module headers
+and in research/gist/PRIOR_ART.md.
