@@ -22,7 +22,7 @@ function! gist#health#report() abort
 
   call add(l:out, s:index())
 
-  for l:name in ['relate', 'irregex']
+  for l:name in ['relate', 'blast']
     let l:sibling = get(g:, 'gist_' . l:name . '_binary', l:name)
     if executable(l:sibling)
       call s:add(l:out, 'ok', printf('%s — :Gist%s available', l:sibling,

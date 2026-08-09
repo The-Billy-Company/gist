@@ -60,7 +60,7 @@ or point a plugin manager at that directory. The plugin generates its own
 |:helptags| on first load, so `:help gist` works immediately.
 
 The binary itself comes from `zig build`, which puts `gist`, `relate`
-and `irregex` on your $PATH. Run |:GistHealth| to confirm all of it.
+and `blast` on your $PATH. Run |:GistHealth| to confirm all of it.
 
 Requirements: Vim 8.0+ or Neovim for streaming results; anything older still
 works, one blocking search at a time.
@@ -136,7 +136,7 @@ works, one blocking search at a time.
 			lands in the quickfix list, so |:cnext| walks a
 			change's consequences the way it walks matches.
 			Without [symbol], the word under the cursor.
-			Needs the `irregex` binary. >
+			Needs the `blast` binary. >
 				:GistBlast
 				:GistBlast SearchRequest --budget 60
 <
@@ -259,7 +259,7 @@ g:gist_default_mappings	Suggest the default keys. Default: 1.
 g:gist_map_prefix	Prefix for them. Default: "<Leader>g".
 
 					                *g:gist_relate_binary*
-					               *g:gist_irregex_binary*
+					                 *g:gist_blast_binary*
 g:gist_relate_binary	The sibling binaries |:GistSimilar| and |:GistBlast|
 g:gist_blast_binary	call. Defaults: "relate" and "blast".
 
@@ -405,8 +405,9 @@ Nothing here is required for correctness: with no index, no jobs and no
 ==============================================================================
 ABOUT                                                            *gist-about*
 
-Part of the irregex package (Apache-2.0). The engine, its flag surface, and
-the evidence behind the performance claims live in the package README; the
-sibling faces `relate` and `irregex` are documented there too.
+Part of the irregex ecosystem (Apache-2.0). The engine lives in the sibling
+`irregex` package; gist's own flag surface and the evidence behind the
+performance claims live in this package's README, and the sibling faces
+`relate` and `blast` are documented in theirs.
 
  vim:tw=78:ts=8:noet:ft=help:norl:

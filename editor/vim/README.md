@@ -2,7 +2,7 @@
 
 The Vim and Neovim end of [`gist`](../../src/surface/face/gist/README.md).
 Indexed search, streamed into the quickfix list, with the two questions a
-pattern cannot ask (`relate similar`, `irregex blast`) on the same keys.
+pattern cannot ask (`relate similar`, `blast blast`) on the same keys.
 
 ## Getting it
 
@@ -39,7 +39,7 @@ Then `:help gist` for the full guide, or `:GistHealth`
 | `:GistRank`                 | the definition first, call sites after, generated files demoted                                                   |
 | `<Leader>gg`                | the word under the cursor, as a literal word                                                                      |
 | `<Leader>go{motion}`        | the text a motion covers — across line breaks, via gist's `-U`                                                    |
-| `<Leader>gb` / `<Leader>gs` | `irregex blast` / `relate similar` into the quickfix list                                                         |
+| `<Leader>gb` / `<Leader>gs` | `blast blast` / `relate similar` into the quickfix list                                                           |
 | `<Tab>`                     | completes the installed binary's real flags and `-t` types, read from `--schema`                                  |
 
 Searches never block: results stream in and the window opens on the first

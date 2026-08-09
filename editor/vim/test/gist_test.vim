@@ -309,7 +309,7 @@ if executable('relate')
   call s:ok('similar: answered without error', v:errmsg ==# '')
 endif
 
-if executable('irregex')
+if executable('blast')
   call setqflist([])
   GistBlast needle
   call s:settle()
