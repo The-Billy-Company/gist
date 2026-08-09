@@ -780,8 +780,9 @@ and answer without opening source files.
 
 `gist codex count` is a proof of absence only when the shelf's freshness report
 is clean, and the command reports files changed since the shelf was built rather
-than hiding that qualification. See `relate/src/kernel/codex` (math) and
-`relate/src/corpus/index/shelf` (persisted SHLF).
+than hiding that qualification. See `irregex/src/kernel/codex` (FM-index math)
+and `irregex/src/corpus/index/shelf` (persisted SHLF); the quotation parse over
+that index is `relate/src/kernel/codex` (`cento`).
 
 ## Ranked Search
 
@@ -968,8 +969,9 @@ semantic-retrieval engine.
 (`count` / `find` / shelf status).
 
 The Shannon–Manzini / FM-index bibliography and novelty framing live with
-`relate`, in `relate/research/relate/PRIOR_ART.md` § Corpus quotation, and in
-`relate/src/kernel/codex` / `relate/src/corpus/index/shelf`.
+`relate`, in `relate/research/relate/PRIOR_ART.md` § Corpus quotation. The index
+itself is `irregex/src/kernel/codex` + `irregex/src/corpus/index/shelf`; the
+quotation parse over it is `relate/src/kernel/codex`.
 
 ### Outside the Claim
 
@@ -1006,12 +1008,13 @@ What is here is everything with an opinion about the product:
  serves lives in the library's warm core.
 - [`src/exec/session/warden/`](src/exec/session/warden/) – rationing and
  standdown, so the daemon never taxes the machine it serves.
-- [`src/surface/cli/`](src/surface/cli/) – the product vocabulary: flag
- surfaces, grades, the `--schema`/`--generate` manifest driver, the primer, and
- reprise.
+- [`src/surface/cli/`](src/surface/cli/) – the `--generate` primer (man page +
+ shell completions). The shared face vocabulary — flags, manifest, grade,
+ reprise — lives in `relate`.
 - [`src/surface/face/gist/`](src/surface/face/gist/) – the binary face itself.
-- [`src/surface/ffi/`](src/surface/ffi/) + [`include/`](include/) – the session
- C ABI (`libirgx.{a,dylib,so}`, `irgx.h`).
+- [`src/surface/ffi/`](src/surface/ffi/) + [`include/gist.h`](include/gist.h) –
+ the session C ABI (`libgist.{a,dylib,so}`), which links `libirgx` for the
+ substrate symbols.
 - [`bindings/`](bindings/) – Go (cgo), Python (cffi), and Rust consumers of
  that ABI.
 - [`editor/vim/`](editor/vim/) – the Vim/Neovim plugin (`:grep`-as-gist,
@@ -1026,7 +1029,8 @@ What is here is everything with an opinion about the product:
 Four steps cover everything the package builds:
 
 ```bash
-zig build             # gist binary + libirgx → zig-out/
+zig build             # gist binary + libgist → zig-out/ (libirgx installed
+                      # beside it, from the irregex dependency)
 zig build test        # the unit suite
 zig build check       # compile-only
 zig build coverage    # per-function coverage

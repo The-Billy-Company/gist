@@ -6,7 +6,7 @@ They are conveniences over the certified engine — not a second matcher.
 
 | Package             | Import / crate                     | Role                                                              |
 | ------------------- | ---------------------------------- | ----------------------------------------------------------------- |
-| [`python/`](python) | `gist` → `import gist` | Gist search + Relate kinship through one package                  |
+| [`python/`](python) | `gist` → `import gist` | Gist search + trigram-index lifecycle only; kinship is `relate`   |
 | [`rust/`](rust)     | crate `gist`                       | Same surface for Rust hosts + contract parity tests               |
 | [`go/`](go)         | `github.com/The-Billy-Company/gist/bindings/go` | Pull-cursor cgo binding: warm `Engine`, `context`-driven `Cursor` |
 

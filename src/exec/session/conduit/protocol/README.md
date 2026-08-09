@@ -31,6 +31,6 @@ cheapest defense there is, so `query.zig` carrying both directions is deliberate
 rather than incidental.
 
 `protocol.zig` re-exports rather than re-implements. Zig has no visibility rules
-between files in a package, so the gathered surface plus the ward seal are what
+between files in a package, so the gathered surface plus the zoning seal are what
 make these chapters internals; a name that is not in that list is not part of
 the contract.

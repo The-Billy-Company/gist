@@ -136,7 +136,7 @@ ffi = { status = "operational-accelerator", detail = "one coherent open/search/c
 # Parallelism
 #   EVERY warm face — the positive and invert `-c`/`-l` folds, the bare/`-n`
 #   emit, and the FFI record stream — shards its scan over cores above a byte
-#   floor through ONE shared primitive (src/kernel/math/parallel.zig),
+#   floor through ONE shared primitive (irregex/src/kernel/math/parallel.zig),
 #   byte-identical to the serial core below it, so a large positive result no
 #   longer loses to cold's fused 16-core scan on core count. FFI additionally
 #   opens explicit paths as C root arrays and carries explicit Unicode/ASCII

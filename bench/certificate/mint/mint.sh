@@ -333,6 +333,6 @@ if [[ -n "${CERT_PUBLISH_DIR:-}" ]]; then
   echo "published reproducible certificate → ${pub}"
   # Log the mint. The certificate is a whole-file rewrite, so without this the
   # tree keeps no memory of what the previous one claimed or which layers it
-  # carried — see bench/certify/LEDGER.md.
+  # carried — see bench/certificate/ledger/.
   python3 "${HERE}/../ledger/ledger.py" record --bundle "${pub}" || exit 1
 fi

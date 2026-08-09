@@ -34,7 +34,7 @@ architecture, in both the live-scan and the indexed pass).
 Each of those exits non-zero and writes nothing, so the presence of the section is
 itself a claim that every gate above passed.
 
-On success it also publishes a side-car receipt at `bench/certify/artifact/portable.json`
+On success it also publishes a side-car receipt at `bench/certificate/artifact/portable.json`
 — the same claim as data (per-target tier, ripgrep coverage, the pinned `rg` version,
 the frozen-tree digest, and the sha256 of the sweep it was lifted from) so a re-mint
 can re-verify the spliced table without re-running a two-hour sweep.

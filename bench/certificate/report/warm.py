@@ -194,7 +194,7 @@ def render(
                 "win rests on quiescence: an armed watcher lets the daemon skip the freshness "
                 "walk csearch/zoekt discard entirely — yet warm gist re-derives the authoritative "
                 "set on any edit (equivalence-gated vs `gist --no-index` here, proven in "
-                "`bench/gates/index_elision_parity.sh`), staying byte-identical where those "
+                "`bench/conformance/gates/parity/index_elision_parity.sh`), staying byte-identical where those "
                 "indexed rivals go silently stale. On a live tree the scoped reconcile keeps warm "
                 "correct at a modest cost above these skip-path figures; the cold macroscopic tier "
                 "above is the freshness-paying floor."

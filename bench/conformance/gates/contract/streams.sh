@@ -11,7 +11,7 @@
 # (`ranked.zig`) keeps its `gist: N ranked matches …` cold-load/rank timing
 # line on stderr because an agent choosing between the ranked view and a
 # plain query benefits from knowing the cost; and a NO-MATCH run gets the
-# structured guidance channel (`emit/hints.zig`) — every line `gist:`-prefixed,
+# structured guidance channel (`irregex/src/exec/cold/emit/hints.zig`) — every line `gist:`-prefixed,
 # muted wholesale by `GIST_HINTS=0`. All three shapes are asserted below.
 #
 # Why this is a gate, not a nicety: gist brands itself an *agent-friendly*
@@ -20,7 +20,7 @@
 # path would silently corrupt either capture. This script reproduces that
 # failure mode as a falsifiable assertion so it can never regress.
 #
-# Usage: bench/gates/streams.sh
+# Usage: bench/conformance/gates/contract/streams.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../../../dominance/races/field.sh
@@ -94,7 +94,7 @@ fi
 
 # Guaranteed-miss: stdout empty, exit 1 (ripgrep's "no match" code), and stderr
 # carries ONLY the structured guidance channel — every line `gist:`-prefixed
-# (the no-match summary + `gist: try`/`gist: note:` lines, emit/hints.zig). Under
+# (the no-match summary + `gist: try`/`gist: note:` lines, irregex emit/hints.zig). Under
 # `GIST_HINTS=0` both streams must be byte-empty, so a parity harness or
 # byte-counting capture can still buy the old total silence. The token is
 # built from $RANDOM at runtime so the literal can never appear in any file —

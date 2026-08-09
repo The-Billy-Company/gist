@@ -6,7 +6,7 @@
 //!     for the same roots, derive the changed set since the LAST ANCHOR
 //!     (daemon annals → journal replay → the T3 stat walk), union in the
 //!     prior codicil's covered paths, and publish a CODICIL over just those
-//!     docs — `corpus/index/trigrams/codicil.zig`. The base blobs are
+//!     docs — `irregex/src/corpus/index/trigrams/codicil.zig`. The base blobs are
 //!     hardlinked forward, so the whole amend is milliseconds instead of a
 //!     whole-corpus read. Zero changed files ⇒ a pure anchor advance. Falls
 //!     back to the full build on ANY doubt: no base, different roots, a
@@ -18,7 +18,7 @@
 //!   • FULL: scan the corpus (every non-binary file under the resolved roots),
 //!     build the trigram `Index`, and generation-publish it plus the doc→path
 //!     table, the build roots (`roots.list`), the base instant (`base.ns`),
-//!     and the freshness anchor (`corpus/fresh.zig`) that later queries map
+//!     and the freshness anchor (`irregex/src/corpus/fresh/`) that later queries map
 //!     back zero-copy. The persisted index is what the unified engine's
 //!     read-elision path (`run.zig` `IndexSkip`) and the ranked view
 //!     (`rank.zig`) consume.
@@ -28,7 +28,7 @@
 //! a live list/read, never a wrong answer), so an amend soundly leaves them.
 //!
 //! A full build closes by publishing `tree.root` — the absolute directory the
-//! whole artifact set describes (`corpus/index/frame/frame.zig`). Anchors date
+//! whole artifact set describes (`irregex/src/corpus/index/frame/frame.zig`). Anchors date
 //! files; only this says WHICH files, and every reader that trusts an anchor
 //! re-proves it first.
 

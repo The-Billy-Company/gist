@@ -24,11 +24,11 @@ stand in for novelty and benchmark speed does not stand in for correctness.
 | where                                                    | what                                                                           |
 | -------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | `src/surface/face/gist/`                                 | the product CLI face (search, index, status, serve, codex)                     |
-| `src/exec/cold/`                                 | authoritative cold path: argv → walk → index elision → verify → emit           |
-| `src/corpus/index/trigrams/` + `src/corpus/index/crest/` | candidate filters (trigrams + crest sidecar)                                   |
-| `src/kernel/rank/`                                       | definition-biased `--rank` view                                                |
-| `src/exec/session/`                              | fail-open resident UDS session                                                 |
-| `bench/gates/` + `bench/rgsuite/` + `bench/certify/`     | correctness-before-speed gates, mined rg parity, Dominance-and-Fit Certificate |
+| `irregex/src/exec/cold/`                                 | authoritative cold path: argv → walk → index elision → verify → emit           |
+| `irregex/src/corpus/index/trigrams/` + `…/index/crest/`  | candidate filters (trigrams + crest sidecar)                                   |
+| `irregex/src/kernel/rank/`                               | definition-biased `--rank` view                                                |
+| `src/exec/session/`                                      | fail-open resident UDS session (the daemon transport is gist's)                |
+| `bench/conformance/gates/` + `…/rgsuite/` + `bench/certificate/` | correctness-before-speed gates, mined rg parity, Dominance-and-Fit Certificate |
 
 Novel math that rides inside gist (forced-class-run pruning) is documented
 separately in `irregex/research/crest/` — not duplicated here.
@@ -71,9 +71,9 @@ cheap-literal classes (gist wins 5, ties 2, loses 5) and peak RSS, not time, is
 the binding ceiling.
 
 All of these are measurements from
-[`bench/certify/artifact/CERTIFICATE.md`](../../bench/certificate/artifact/CERTIFICATE.md),
+[`bench/certificate/artifact/CERTIFICATE.md`](../../bench/certificate/artifact/CERTIFICATE.md),
 not universal constants. Correctness gates always run before performance gates
-(`bench/gates/ci_order.sh`).
+(`bench/conformance/gates/contract/ci_order.sh`).
 
 ## Status
 

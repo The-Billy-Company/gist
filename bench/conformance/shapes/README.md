@@ -51,7 +51,7 @@ declaration:
   O(1)/byte, so even the _common_ lazy-dotstar (`[\s\S]*?`) row wins.
 - **`pcre-backref-files`** once scanned the whole corpus with raw PCRE2 like
   rg does (no extractable required literal). The PCRE2 shadow gate
-  (`src/kernel/regex/pcre2/shadow.zig`) rewrites the pattern into a
+  (`irregex/src/kernel/regex/pcre2/shadow.zig`) rewrites the pattern into a
   linear over-approximation whose DFA rejects what backtracking would have
   choked on — and whose required literal feeds the trigram index.
 

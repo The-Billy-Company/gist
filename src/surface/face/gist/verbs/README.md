@@ -2,12 +2,12 @@
 
 Lifecycle and introspection verbs for the gist face, consolidated flat after
 the restructure (was `lifecycle/` + nested `status/` / schema dirs). One file
-per verb — nothing to seal; the ward dropped the old directory seals.
+per verb — nothing to seal; zoning dropped the old directory seals.
 
 | File | Verb | Job |
 | ---- | ---- | --- |
 | `index.zig` | `gist index` | Walk roots, build trigram `Index`, generation-publish blobs + freshness anchor |
-| `codex.zig` | `gist codex` | Verb group over the shared shelf (`corpus/index/shelf/`) — build / count / tally / status |
+| `codex.zig` | `gist codex` | Verb group over the shared shelf (`irregex/src/corpus/index/shelf/`) — build / count / tally / status |
 | `status.zig` | `gist status` | Read-only report of index / atlas / shelf / daemon readiness |
 | `schema.zig` | `gist --schema` | JSON capability manifest from the flag catalog |
 | `config.zig` | `gist config` | Interrogate / check / init charter + preferences |
@@ -22,5 +22,5 @@ under `gens/<id>/` then `pair.gen`. Consumers: cold read-elision
 ## `gist codex`
 
 Owns the verb group, not the artifact. The shelf's path / persist / open /
-staleness live in `relate/src/corpus/index/shelf/`
+staleness live in `irregex/src/corpus/index/shelf/`
 so three faces share one writer.

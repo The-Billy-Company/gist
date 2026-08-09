@@ -41,7 +41,7 @@ zig build test
 
 ---
 
-## 2. Ripgrep differential oracle — `bench/rgsuite/`
+## 2. Ripgrep differential oracle — `bench/conformance/rgsuite/`
 
 The mined suite compares Gist with a live `rg` oracle rather than copying
 ripgrep's expected output. Parallel and serial walk engines are scored
@@ -122,7 +122,7 @@ no second explanation. See
 
 ---
 
-## 4. Permanent gate order — `bench/gates/`
+## 4. Permanent gate order — `bench/conformance/gates/`
 
 `ci_order.sh` is the load-bearing schedule: correctness gates before
 performance gates. Its correctness phase runs Zig tests, the mined rgsuite,
@@ -136,14 +136,14 @@ all-green correctness verdict without `--allow-known`.
 The performance phase validates the committed artifact bundle and cold ratio
 floors, resident-session floors, matrix floors, compressed-input speed floor,
 the macro certificate, index-size accounting, and fresh artifact integrity.
-Some standalone gates documented in `bench/gates/README.md` are useful
+Some standalone gates documented in `bench/conformance/gates/README.md` are useful
 focused proofs but are not all scheduled by `ci_order.sh`.
 
 ```bash
 # from 
-./bench/gates/ci_order.sh
+./bench/conformance/gates/contract/ci_order.sh
 # escape hatch (no tracked rgsuite gaps remain, so this is now a no-op):
-./bench/gates/ci_order.sh --allow-known
+./bench/conformance/gates/contract/ci_order.sh --allow-known
 ```
 
 ---
@@ -174,14 +174,14 @@ GIST_BENCH=1 python3 bench/session/gate_session.py --live
 
 ---
 
-## 6. Certificate layers — `bench/certify/`
+## 6. Certificate layers — `bench/certificate/`
 
 The certificate is a measured, machine- and corpus-specific evidence bundle.
 Its layers answer narrower questions than the phrase "optimality" can imply:
 
 | layer | evidence actually produced                                                                                                             | harness                                          |
 | ----- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| A     | empirical cold-process comparison on 12 query classes; a win requires a lower median **and** Mann–Whitney p < 0.05                     | `zig build certify` + `bench/certify/certify.sh` |
+| A     | empirical cold-process comparison on 12 query classes; a win requires a lower median **and** Mann–Whitney p < 0.05                     | `zig build certify` + `bench/certificate/mint/mint.sh` |
 | B/B′  | static port-pressure bounds on modeled reference CPUs plus native PMU measurements of drift-guarded hot-loop probes                    | `bench/portcert/`                                |
 | C     | measured scan throughput placed against this machine's STREAM-style cache/DRAM ceilings                                                | `bench/roofline/`                                |
 | D     | structural audit that the verifier touches admitted candidate bytes once (DFA) or fewer (SIMD), with verdict parity against production | `bench/lowerbound/`                              |
@@ -202,7 +202,7 @@ Important limits:
   can do less work on non-adversarial inputs.
 
 Committed artifact:
-[`bench/certify/artifact/CERTIFICATE.md`](../../bench/certificate/artifact/CERTIFICATE.md).
+[`bench/certificate/artifact/CERTIFICATE.md`](../../bench/certificate/artifact/CERTIFICATE.md).
 Do not hand-edit — re-run to refresh. Repo-level entry:
 
 ```bash
@@ -238,7 +238,7 @@ missing/invalid crest sidecar as sieve-off, never as authority to prune.
 | warm returns stale / empty success                         | decline path must fire — never invent answers                                                                                   |
 | certificate numbers exist while default correctness is red | the artifact is historical/measured evidence, not proof that today's full correctness slate passes                              |
 | matrix reports a declared loss                             | correctness passed; that shape's performance remains explicitly below expectation                                               |
-| crest false negative                                       | fix `src/kernel/math/crest.zig` calculus — see crest TESTING                                                              |
+| crest false negative                                       | fix `irregex/src/kernel/math/crest.zig` calculus — see crest TESTING                                                       |
 
 Authority is split deliberately: `gist --schema` defines the public CLI
 surface; differential harness outputs define current compatibility; Zig

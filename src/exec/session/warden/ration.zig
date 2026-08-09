@@ -59,7 +59,7 @@ const commons_fraction: u64 = 4;
 ///   * transient LOAD CREST — **2793 MB**
 ///
 /// The crest is ~5× the steady state because the warm trigram build is
-/// out-of-place: `corpus/index/trigrams/trigram.zig` extracts ~138 M postings at
+/// out-of-place: `irregex/src/corpus/index/trigrams/trigram.zig` extracts ~138 M postings at
 /// 8 bytes each into per-shard buffers and counting-sorts them into a second
 /// buffer of the same size, so the build transiently costs two ~1.1 GB posting
 /// arrays on top of the mirror. (Shrinking each shard's unused tail before the

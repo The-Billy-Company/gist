@@ -24,6 +24,6 @@ python3 bench/diag/golden.py show <name>  # print one verb's normalized template
 ```
 
 Read-only verbs only — nothing here mutates the shared machine-local index or
-atlas. The sibling [`bench/gates/streams.sh`](../gates/contract/streams.sh) proves the
+atlas. The sibling [`bench/conformance/gates/contract/streams.sh`](../gates/contract/streams.sh) proves the
 _stream_ contract (results→stdout, stderr silent except the sanctioned
 channels); this proves the _content_ templates of that stderr channel.

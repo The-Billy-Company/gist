@@ -256,7 +256,7 @@ The line to add to `../certify/certify_layers.sh`:
 python3 "$HERE/certify_portable_report.py" --certificate "$CERT" --json "$ROOT/bench/targets/artifact/portable.json"
 ```
 
-(`$HERE` = `bench/certify`, `$CERT` = `bench/certify/artifact/CERTIFICATE.md`,
+(`$HERE` = `bench/certificate`, `$CERT` = `bench/certificate/artifact/CERTIFICATE.md`,
 `$ROOT` = the package root — match whatever those scripts already call them.)
 
 ## Files

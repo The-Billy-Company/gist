@@ -22,20 +22,23 @@ annotation in [§ References](#references).
 
 | citation                                                                                      | role in gist                                             | code / docs                                                                  |
 | --------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [Cox 2012](#r-cox-trigram) / [codesearch](#r-codesearch)                                      | required-trigram candidate filter                        | `src/corpus/index/trigrams/`, `src/kernel/regex/analysis/`, CLI README |
-| [ripgrep](#r-ripgrep)                                                                         | CLI face, ignore dialect, rgsuite oracle                 | `src/exec/cold/`, `bench/rgsuite/`, `src/surface/face/gist/`         |
-| [Thompson](#r-thompson) / [Cox re1](#r-cox-re1) / [RE2](#r-re2) / [rust-regex](#r-rust-regex) | linear NFA → DFA / Pike lane + UTF-8 ranges              | `src/kernel/regex/`                                                    |
-| [PCRE2](#r-pcre2)                                                                             | opt-in backtracking (`-P` / `--engine auto`)             | `src/kernel/regex/pcre2/`                                              |
-| [memchr](#r-memchr)                                                                           | first+last-byte SIMD presence for `-F`                   | `src/kernel/scan/simd.zig`                                             |
-| [Cormack et al. 2009](#r-rrf)                                                                 | weighted RRF for `--rank`                                | `src/kernel/rank/rank.zig`                                                   |
+| [Cox 2012](#r-cox-trigram) / [codesearch](#r-codesearch)                                      | required-trigram candidate filter                        | `irregex/src/corpus/index/trigrams/`, `irregex/src/kernel/regex/analysis/`, CLI README |
+| [ripgrep](#r-ripgrep)                                                                         | CLI face, ignore dialect, rgsuite oracle                 | `irregex/src/exec/cold/`, `bench/conformance/rgsuite/`, `src/surface/face/gist/`         |
+| [Thompson](#r-thompson) / [Cox re1](#r-cox-re1) / [RE2](#r-re2) / [rust-regex](#r-rust-regex) | linear NFA → DFA / Pike lane + UTF-8 ranges              | `irregex/src/kernel/regex/`                                                    |
+| [PCRE2](#r-pcre2)                                                                             | opt-in backtracking (`-P` / `--engine auto`)             | `irregex/src/kernel/regex/pcre2/`                                              |
+| [memchr](#r-memchr)                                                                           | first+last-byte SIMD presence for `-F`                   | `irregex/src/kernel/scan/simd.zig`                                             |
+| [Cormack et al. 2009](#r-rrf)                                                                 | weighted RRF for `--rank`                                | `irregex/src/kernel/rank/rank.zig`                                                   |
 | [tgrep](#r-tgrep) / [Zoekt](#r-zoekt) / [Blackbird](#r-blackbird)                             | closest indexed / agent shapes we measured against       | CLI README § Prior art, Certificate                                          |
 | [ugrep](#r-ugrep) / [ag](#r-ag) / [GNU grep](#r-gnu-grep) / [git grep](#r-git-grep)           | PCRE-capable _scan_ peers (no index)                     | package README evidence §1                                                   |
 | [pg_trgm](#r-pg-trgm) / RE2 `FilteredRE2`                                                     | trigram-family siblings that share the literal-free hole | package README + crest dossier                                               |
 | [qgrep](#r-qgrep) / [Hound](#r-hound) / [livegrep](#r-livegrep)                               | neighboring indexed designs                              | this file §3                                                                 |
 
-Codex FM-index math, Hyperscan-vs-`patterns`, and compression kinship are
-**relate** (and the shared `src/kernel/codex/` module) — see
-`relate/research/relate/PRIOR_ART.md`, not this file.
+Hyperscan-vs-`patterns` and compression kinship are **relate** — see
+`relate/research/relate/PRIOR_ART.md`, not this file. The FM-index itself is the
+engine's (`irregex/src/kernel/codex/` + `irregex/src/corpus/index/shelf/`); what
+relate adds over it is the `cento` quotation parse. Matcher and index ancestry
+for that engine floor belongs with `irregex`; this file keeps the agent-search,
+rg-parity, and ranking-product ancestry.
 
 ---
 

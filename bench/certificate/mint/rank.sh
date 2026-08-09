@@ -30,7 +30,7 @@
 #      strictly more work than a raw scan, so rg legitimately wins there — its certified claim
 #      is #4 (bounded vs `gist -l`), and beats-rg is reported but not gated.
 #
-# Usage:  bench/certify/certify_rank.sh   (RUNS=20 WARMUP=3 by default)
+# Usage:  bench/certificate/mint/rank.sh   (RUNS=20 WARMUP=3 by default)
 # Assumes certify.sh already built the gist index this run (it calls this after warm).
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

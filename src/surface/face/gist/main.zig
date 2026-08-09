@@ -6,7 +6,7 @@
 //!   gist status [--json]              read-only: is an index ready, how fresh, how big
 //!   gist config [check|init]          read-only: what is steering this run, from which file
 //!   gist codex <build|count|tally|status>  the exact existence/count tier over the
-//!                                     compressed self-index shelf (src/corpus/index/codex/)
+//!                                     compressed self-index shelf (irregex/src/corpus/index/shelf/)
 //!
 //! Everything else is the search itself — no verb at all, the shape an agent's
 //! `rg <pattern>` reflex already takes:
@@ -33,7 +33,7 @@
 //!
 //! This is the thin dispatch shell only: every verb's real work lives in the
 //! engine + command modules — the search engine and scope policy through the
-//! `irregex` library module (`commands.search`, `commands.scope`), the product
+//! `irregex` library module (`engine.search`, the corpus scope), the product
 //! verbs and the daemon from this package's own tree. The bench/verify/certify
 //! harness is a separate executable (`bench/harness/bench.zig`).
 
@@ -387,7 +387,7 @@ fn run(init: std.process.Init) !void {
         return indexer.run(gpa, io, resolved);
     }
     // `gist codex <build|count|tally|status>` — the exact existence/count tier
-    // over the compressed self-index (`src/corpus/index/codex/`): corpus-wide occurrence
+    // over the compressed self-index (`irregex/src/corpus/index/shelf/`): corpus-wide occurrence
     // counts in O(|pattern|) with zero corpus I/O and zero false positives,
     // freshness-reported against the shelf's own build anchor.
     if (std.mem.eql(u8, mode, "codex")) {

@@ -1,7 +1,7 @@
 //! gist `codex` — the exact existence/count tier over the compressed self-index.
 //!
 //! Four verbs over one persisted artifact (`codex.shelf`: the FM-index shelf
-//! from `src/corpus/index/shelf/shelf.zig`, built over the SAME corpus policy as `gist
+//! from `irregex/src/corpus/index/shelf/shelf.zig`, built over the SAME corpus policy as `gist
 //! index`):
 //!
 //!   gist codex build                    build + persist the shelf (`codex.shelf`)
@@ -81,7 +81,7 @@ fn runBuild(gpa: std.mem.Allocator, io: std.Io) !void {
 }
 
 /// The shelf, or exit 2 naming this face's build command. `relate quote` and
-/// `irregex provenance` read the same artifact and each name their own.
+/// `blast provenance` read the same artifact and each name their own.
 fn openShelf(gpa: std.mem.Allocator, io: std.Io) shelf_mod.Shelf {
     return shelf_mod.open(gpa, io) catch |e|
         outcome.needArtifact(e, "codex shelf", shelfFile(), "`gist codex build`");

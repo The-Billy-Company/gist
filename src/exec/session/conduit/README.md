@@ -78,7 +78,7 @@ each other's daemons, where a strict order converges after exactly one cold
 query, and the loser stays cold precisely as it does today.
 
 Two peers are deliberately exempt. The **answer keep** never checks the stamp,
-because `relate` and `irregex` dial this same socket and three binaries from one
+because `relate` and `blast` dial this same socket and three binaries from one
 build are three different files — and it is safe there, since the daemon renders
 no kept answer and `cli/reprise.zig` already folds the caller's own build into
 the key. The **non-Zig bindings** never check it either: a Python or Rust caller
