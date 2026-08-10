@@ -502,8 +502,15 @@ The implemented surface includes:
  compressed-file search.
 
 Normal results go to stdout. Diagnostics, timing, output-budget notices, and
-no-match suggestions go to stderr, and `GIST_HINTS=0` disables suggestions
-without touching results.
+search guidance go to stderr, and `GIST_HINTS=0` disables guidance without
+touching results. Guidance is evidence-backed wherever evidence is affordable
+rather than derived from the pattern's spelling: when the searched bytes are
+still in hand a suggestion is withheld unless a probe over them backs it, an
+empty scoped run asks the index for the file that does hold the string and
+confirms it before naming it, and the one line a *matching* run can emit is a
+note that some branch of an `A|B|C` appears nowhere in the results. A scope too
+broad to re-read declines the byte probes and falls back to the syntactic guess,
+so guidance never becomes a cost the search pays for.
 
 Search exit codes follow ripgrep:
 

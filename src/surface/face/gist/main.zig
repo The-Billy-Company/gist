@@ -127,16 +127,32 @@ fn tryWarm(gpa: std.mem.Allocator, io: std.Io, env: *const std.process.Environ.M
             // cold engines emit. The classifier already parsed this argv to
             // route it warm, so re-classifying recovers pattern + -F and the
             // RESOLVED case state (smart-case folds through the session's one
-            // resolution site) without a second full flag parse; eligible
-            // requests are always rootless.
+            // resolution site) without a second full flag parse — and the PATH
+            // roots, which `query_ext` carries and this hint used to discard,
+            // leaving a warm miss unable to say the one thing most likely to be
+            // its fix (you scoped too narrowly). `hint_sa` must outlive the
+            // request it backs, since `req.filter.roots` aliases into it.
             var hint_sa: gist.session.request.ScopeArgs = .{};
             // An unclassifiable argv simply earns no hint — `classify` declining
             // is the routine answer here, not a failure to report.
             if (code == 1) if (gist.session.request.classify(argv, &hint_sa) catch null) |req| {
                 // `-q` and `-m0` are SILENT on a miss (cold exits 1 with no
                 // stderr guidance — `serial.zig`), so suppress the hint for them.
-                if (!req.quiet and !req.matchNothing())
-                    search.hints.noMatches(search.hints.shapeBare(req.pattern, req.fixed, req.effectiveIgnoreCase()), null);
+                // The resident session holds the bytes and this client does not,
+                // but the corpus half of the evidence never needed them: the same
+                // witness the cold engines use reads the scope's own files and asks
+                // the index where else the literal lives, so a warm miss is no
+                // longer the least informed answer gist gives.
+                if (!req.quiet and !req.matchNothing()) {
+                    const sh = search.hints.shapeWarm(
+                        req.pattern,
+                        req.fixed,
+                        req.effectiveIgnoreCase(),
+                        req.invert,
+                        req.filter.roots,
+                    );
+                    search.hints.noMatches(sh, null, search.witness.afterStreaming(gpa, io, false, sh));
+                }
             };
             std.process.exit(code);
         },
