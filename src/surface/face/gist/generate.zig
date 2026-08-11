@@ -386,7 +386,7 @@ pub fn surface(gpa: std.mem.Allocator) primer.Surface {
         },
         .sections = &sections,
         .env = &.{
-            .{ .word = "GIST_DIR", .doc = "artifact home for the index and the atlas (default .gist)" },
+            .{ .word = "GIST_DIR", .doc = "artifact home for the index and the atlas (default: .gist at the tree root)" },
             .{ .word = "GIST_ROOTS", .doc = "the roots to index when none are given" },
             .{ .word = "GIST_SKIP", .doc = "extra directories to prune from the index and freshness walks" },
             .{ .word = "GIST_HINTS", .doc = "0 mutes the stderr guidance channel; results are untouched either way" },

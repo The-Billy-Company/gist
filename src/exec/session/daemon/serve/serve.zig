@@ -160,16 +160,19 @@ fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     var listener = try ua.listen(io, .{});
     defer listener.deinit(io);
     defer fault.spare("unlink the socket on shutdown", Dir.cwd().deleteFile(io, socket_path));
-    // Say which tree went resident here, beside the socket. The socket lives in
-    // the artifact directory, so a `GIST_DIR` shared by two checkouts aims both
-    // at THIS rendezvous — and resident bytes carry no path prefix to give the
-    // mix-up away. The client re-proves the binding before it dials
-    // (`frame_mod.socketBindingPath`) and answers cold when it names another
-    // tree; publishing after `listen` means the file exists for as long as
-    // anyone can connect.
+    // Say where this session went resident, beside the socket. The socket lives
+    // in the artifact directory, so a `GIST_DIR` shared by two checkouts aims
+    // both at THIS rendezvous — and resident bytes carry no path prefix to give
+    // the mix-up away. The artifact directory is also one per CHECKOUT rather
+    // than one per directory, so the same rendezvous is dialed from every
+    // subdirectory of one tree; the mirror is a walk from where the daemon
+    // started, so what gets published is that standing, not the tree
+    // (`frame_mod.standingHolds`). The client re-proves it before it dials and
+    // answers cold when it stands elsewhere; publishing after `listen` means
+    // the file exists for as long as anyone can connect.
     var bind_buf: [std.fs.max_path_bytes]u8 = undefined;
     if (frame_mod.socketBindingPath(&bind_buf, socket_path)) |bind_path| {
-        frame_mod.publishBinding(io, bind_path);
+        frame_mod.publishStanding(io, bind_path);
     }
     defer if (frame_mod.socketBindingPath(&bind_buf, socket_path)) |bind_path| {
         fault.spare("unlink the socket binding on shutdown", Dir.cwd().deleteFile(io, bind_path));

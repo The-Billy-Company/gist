@@ -14,7 +14,7 @@ per verb — nothing to seal; zoning dropped the old directory seals.
 
 ## `gist index`
 
-Publishes into `.gist/` (or `$GIST_DIR`): the mmap index, path table, roots
+Publishes into the tree's `.gist/` (or `$GIST_DIR`): the mmap index, path table, roots
 list, and the T3 freshness anchor (`corpus/fresh/`). Pair-atomic
 under `gens/<id>/` then `pair.gen`. Consumers: cold read-elision
 (`exec/cold/engine/serial.zig`) and `--rank` (`exec/cold/view/ranked.zig`).

@@ -55,7 +55,9 @@ fn dieUsage() noreturn {
 fn runBuild(gpa: std.mem.Allocator, io: std.Io) !void {
     const build_run = assay.Run.open(gpa, io, false);
     const built_ns: i64 = @intCast(assay.anchor(io).ns());
-    const roots = try corpus_mod.resolveRoots(gpa);
+    // A build verb: stand at the checkout root so the shelf's document names
+    // are the tree-relative ones every query will look them up by.
+    const roots = try corpus_mod.enterTree(gpa, io, &.{});
     defer corpus_mod.freeRoots(gpa, roots);
     var corpus = try corpus_mod.load(gpa, io, roots, .contiguous);
     defer corpus.deinit();

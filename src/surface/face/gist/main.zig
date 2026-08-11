@@ -254,7 +254,7 @@ fn usage() void {
         \\  GIST_HINTS=0            mute stderr hints (results are untouched either way)
         \\  GIST_UNCAP=1            lift the ~25k-token soft output cap (also: --uncap)
         \\  GIST_MAX_OUTPUT_TOKENS / GIST_MAX_OUTPUT_BYTES   resize the output budget
-        \\  GIST_DIR                artifact home (default .gist)
+        \\  GIST_DIR                artifact home (default: .gist at the tree root)
         \\  GIST_SKIP / <GIST_DIR>/skips.list   extra skip dirs for the corpus walks
         \\                          (index/freshness/relate only — search keeps rg parity)
         \\
@@ -391,14 +391,16 @@ fn run(init: std.process.Init) !void {
     gist.corpus.initOutputBudget(false);
 
     // `gist index [ROOT...]` — explicit roots scope the index to those
-    // subtrees; with none, `corpus.resolveRoots` picks the corpus for THIS
-    // working directory (GIST_ROOTS → `.`, the whole tree).
+    // subtrees; with none, the corpus for THIS TREE (GIST_ROOTS → charter →
+    // the whole tree). `enterTree` also moves the process to the checkout root
+    // and re-expresses the roots from there, because the artifacts this writes
+    // are addressed from the tree and a build run in a subdirectory would
+    // otherwise name every file one it doesn't hold.
     if (std.mem.eql(u8, mode, "index")) {
         var roots: std.ArrayList([]const u8) = .empty;
         defer roots.deinit(gpa);
         if (!try collectRoots(gpa, &it, "index", &roots, true)) return;
-        if (roots.items.len > 0) return indexer.run(gpa, io, roots.items);
-        const resolved = try gist.corpus.resolveRoots(gpa);
+        const resolved = try gist.corpus.enterTree(gpa, io, roots.items);
         defer gist.corpus.freeRoots(gpa, resolved);
         return indexer.run(gpa, io, resolved);
     }

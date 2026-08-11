@@ -118,17 +118,21 @@ fn rootsExist(io: std.Io, roots: []const []const u8) bool {
     return true;
 }
 
-/// Is the daemon on the other end resident over the tree we are standing in?
+/// Is the daemon on the other end resident over the corpus we are standing in?
 /// The socket lives in the artifact directory, so an absolute `GIST_DIR` shared
-/// by two checkouts points both at one rendezvous — and a warm answer names
-/// files by paths that resolve in either, so the mix-up is invisible in the
-/// output. Every daemon records its tree beside its socket at bind time
-/// (`serve.run`), which makes this the same proof `frame.boundHere` runs for
-/// the persisted artifacts. Fails CLOSED: an unwritten or unreadable binding
-/// answers cold, which is always correct.
+/// by two checkouts points both at one rendezvous — and one artifact directory
+/// per checkout points every subdirectory of one tree at it as well. A warm
+/// answer names files by paths that resolve in any of them, so the mix-up is
+/// invisible in the output: a session resident in `services/ai` would answer a
+/// tree-root query with the subtree's rows and nothing would look wrong.
+///
+/// Every daemon records the directory it walked beside its socket at bind time
+/// (`serve.run`), and this is the matching proof — the standing, not the tree,
+/// because the mirror is a walk rather than a persisted artifact. Fails CLOSED:
+/// an unwritten or unreadable binding answers cold, which is always correct.
 fn rendezvousIsOurs(socket_path: []const u8) bool {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    return frame.bindingHolds(frame.socketBindingPath(&buf, socket_path) orelse return false);
+    return frame.standingHolds(frame.socketBindingPath(&buf, socket_path) orelse return false);
 }
 
 /// Try to answer `argv` warm. Never errors: any failure is `.cold`.

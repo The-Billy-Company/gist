@@ -135,12 +135,14 @@ fn shakeHands(gpa: std.mem.Allocator, io: std.Io, fd: std.posix.fd_t) !bool {
     return r.proto == protocol.protocol_version;
 }
 
-/// Is the daemon at this rendezvous resident over the tree we are standing in?
-/// An absolute `GIST_DIR` shared by two checkouts points both at one socket,
-/// and a held answer names files by paths that resolve in either — so without
-/// this proof the keep is the one warm tier that could serve a *different
-/// repository's* answer. Fails closed.
+/// Is the daemon at this rendezvous resident over the corpus we are standing
+/// in? An absolute `GIST_DIR` shared by two checkouts points both at one
+/// socket, and one artifact home per checkout points every subdirectory of one
+/// tree at it too — while a held answer names files by paths that resolve in
+/// any of them. So without this proof the keep is the one warm tier that could
+/// serve a *different repository's* answer, or this repository's answer for a
+/// different subtree. Fails closed.
 fn rendezvousIsOurs(socket_path: []const u8) bool {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    return frame.bindingHolds(frame.socketBindingPath(&buf, socket_path) orelse return false);
+    return frame.standingHolds(frame.socketBindingPath(&buf, socket_path) orelse return false);
 }
