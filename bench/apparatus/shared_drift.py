@@ -3,15 +3,15 @@
 
 VENDORED, BYTE-IDENTICAL (this file is in its own manifest).
 
-`irregex`, `gist`, `relate`, and `blast` are four independently releasable
-packages. Each mints its own certificate over its own claims, but they must all
-mean the same thing by "median", "significant", "reproducible bundle", and
-"where are my siblings" — a `win` computed by a drifted copy of the verdict math
-is not comparable to a `win` computed by the real one, and a bundle blessed by a
-drifted reproducibility gate is not evidence of the same thing the other
-packages published. Python and shell cannot be imported across a repository
-boundary, so the instruments are vendored rather than shared, and this gate is
-what keeps "vendored" from decaying into "forked".
+The four packages of this ecosystem are independently releasable. Each mints its
+own certificate over its own claims, but they must all mean the same thing by
+"median", "significant", "reproducible bundle", and "where are my siblings" — a
+`win` computed by a drifted copy of the verdict math is not comparable to a
+`win` computed by the real one, and a bundle blessed by a drifted
+reproducibility gate is not evidence of the same thing the other packages
+published. Python and shell cannot be imported across a repository boundary, so
+the instruments are vendored rather than shared, and this gate is what keeps
+"vendored" from decaying into "forked".
 
 WHAT IS SHARED IS THE METHOD, NEVER THE CLAIM. Every file below is generic: it
 knows how to judge a certificate, not what this package certifies. The roster of
@@ -70,11 +70,12 @@ SHARED: tuple[str, ...] = (
     "bench/certificate/guard/artifacts.py",
     "bench/certificate/guard/publish.py",
     # `ratio.py` is deliberately NOT here. It gates the Layer A speedup floors
-    # against `certify_macro.csv` over gist's twelve probe classes, invoked
-    # through the roster helpers in `dominance/races/field.sh` — every one of
-    # those is a fact about what gist claims, not about how a claim is judged.
-    # Vendored, it was a gate no sibling could ever pass: no baseline, no macro
-    # CSV, no roster. A gate that cannot run is not a gate.
+    # against `certify_macro.csv` over the exact-search package's twelve probe
+    # classes, invoked through the roster helpers in
+    # `dominance/races/field.sh` — every one of those is a fact about what that
+    # package claims, not about how a claim is judged. Vendored, it was a gate
+    # no sibling could ever pass: no baseline, no macro CSV, no roster. A gate
+    # that cannot run is not a gate.
     "bench/certificate/guard/release.py",
     "bench/certificate/guard/test_release.py",
     "bench/certificate/ledger/ledger.py",
@@ -106,9 +107,9 @@ def carried(name: str) -> bool:
     """Is this checkout supposed to hold ``name`` at all?
 
     The manifest is byte-identical everywhere, so it necessarily pins the union:
-    a package that mints a certificate pins the gates, and `blast`, which mints
-    nothing, inherits those lines with nowhere to put them. The enclosing
-    directory settles it — a package states that it mints by having a
+    a package that mints a certificate pins the gates, and the composed face,
+    which mints nothing, inherits those lines with nowhere to put them. The
+    enclosing directory settles it — a package states that it mints by having a
     `bench/certificate/guard/` to keep the gates in. That is the same rule
     `propagate` delivers by, so the two can never disagree about who carries
     what, and it stays a structural fact rather than a per-package exception
@@ -144,7 +145,7 @@ def write_manifest(digests: dict[str, str]) -> None:
     digests = {n: sha for n, sha in pinned().items() if not carried(n)} | digests
     body = "".join(f"{digests[name]}  {name}\n" for name in sorted(digests))
     MANIFEST.write_text(
-        "# Vendored shared apparatus — byte-identical across irregex/gist/relate/blast.\n"
+        "# Vendored shared apparatus — byte-identical across all four ecosystem packages.\n"
         "# Paths are package-root-relative. Regenerate with\n"
         "# `python3 bench/apparatus/shared_drift.py --update`, then land the refreshed\n"
         "# manifest in EVERY package in the same change.\n" + body
@@ -218,8 +219,9 @@ def propagate() -> int:
     The test is the group, not the immediate parent, because a shared file in a
     subdirectory no sibling happens to have yet would otherwise propagate
     nowhere at all — silently, since each package verifies only its own copies.
-    That is how `corpora/ecosystem.sh` reached `gist`, which had the directory,
-    and not `relate`, which mints the same corpus and did not.
+    That is how `corpora/ecosystem.sh` reached the exact-search package, which
+    had the directory, and not the kinship package, which mints the same corpus
+    and did not.
     """
     manifest_rel = str(MANIFEST.relative_to(PKG))
     pushed = 0

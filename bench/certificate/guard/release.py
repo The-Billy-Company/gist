@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Release readiness gate — the Dominance-and-Fit Certificate on *every* machine.
 
-A single-machine certificate proves gist is dominant on the box that minted it,
-and nothing more (cold-CLI dominance is machine-specific — an M2 mint once
-showed 0 wins where an M4 Max shows 11). So a release is only allowed to claim
-optimality once the certificate has been *freshly re-minted on each supported
-architecture* and attached. This gate is what Town Crier (``changelog build``)
-runs before it will cut an irregex release: it refuses unless a valid,
-current-to-this-history certificate bundle exists for **both** the Mac and the
-Linux machine.
+A single-machine certificate proves this package is dominant on the box that
+minted it, and nothing more (cold-CLI dominance is machine-specific — an M2 mint
+once showed 0 wins where an M4 Max shows 11). So a release is only allowed to
+claim optimality once the certificate has been *freshly re-minted on each
+supported architecture* and attached. This gate is what Town Crier
+(``changelog build``) runs before it will cut an irregex release: it refuses
+unless a valid, current-to-this-history certificate bundle exists for **both**
+the Mac and the Linux machine.
 
 It composes the single-bundle reproducibility gate rather than re-implementing
 it: each platform bundle must pass ``check_artifacts.check_artifacts`` (every

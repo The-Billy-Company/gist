@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Hermetic tests for the vendored provenance emitter (provenance.py).
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 
 Four contracts, each of which fails by looking like success if it breaks:

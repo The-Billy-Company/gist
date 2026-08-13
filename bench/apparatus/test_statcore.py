@@ -4,8 +4,8 @@
 Every expectation here is derived from the *definition* — the Type-7 quantile
 formula, and what a fail-closed dominance verdict has to mean — not from a run
 of the code underneath. That is the point: this module is a twin of the one the
-certificate uses in `gist`, and a twin that is only ever checked against itself
-can drift while both halves agree.
+certificate uses in the exact-search package, and a twin that is only ever
+checked against itself can drift while both halves agree.
 
     python3 bench/apparatus/test_statcore.py
 """

@@ -2,7 +2,7 @@
 # field.sh — the measurement floor every package's races and mints stand on.
 # SOURCED, never executed.
 #
-# VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+# VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 # (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 #
 # WHAT IS SHARED IS THE APPARATUS, NEVER THE CLAIM. Three questions have the
@@ -14,19 +14,19 @@
 #      racing a different question.
 #   2. HOW DOES A RIVAL GET AN INDEX — csearch and zoekt are indexed tools, so
 #      timing them without one is a strawman. Both are built here, over the
-#      corpus gist itself indexed.
+#      corpus the exact-search face itself indexed.
 #   3. WHEN IS A TIMING HONEST — a cell is timed only after its output has been
 #      proven equivalent to ripgrep's, and only through one hyperfine invocation
 #      whose failure semantics are pinned.
 #
 # What each package RACES is its own: the per-tool command builders and the
-# field roster live next to the races that use them (gist's are in
-# `bench/dominance/races/field.sh`, which sources this file).
+# field roster live next to the races that use them (the exact-search package's
+# are in `bench/dominance/races/field.sh`, which sources this file).
 #
 # Vocabulary — one meaning per name, ecosystem-wide (see `roots.sh`):
 #   KERNEL   this package's checkout        CORPUS   the tree being measured
-#   ENGINE   the irregex checkout           PRODUCT  the gist checkout
-#   KINSHIP  the relate checkout            OUT      the artifact home (.gist)
+#   ENGINE   the irregex checkout           PRODUCT  the exact-search checkout
+#   KINSHIP  the kinship checkout           OUT      the artifact home (.gist)
 #
 # Source it from a bench script after setting HERE to that script's directory:
 #   # shellcheck source=../apparatus/field.sh
@@ -38,10 +38,11 @@
 #   csearch: go install github.com/google/codesearch/cmd/{cindex,csearch}@latest
 #   zoekt:   go install github.com/sourcegraph/zoekt/cmd/{zoekt-index,zoekt}@latest
 
-# gist's default output budget (the ~25k-token agent-context guard) would clip a
-# repo-wide result and perturb the ripgrep oracle; every race/gate here diffs or
-# times gist against rg's uncapped output, so lift the soft cap process-wide. The
-# hard OOM ceiling stays on. (corpus.zig::initOutputBudget honors this env.)
+# The exact-search face's default output budget (the ~25k-token agent-context
+# guard) would clip a repo-wide result and perturb the ripgrep oracle; every
+# race/gate here diffs or times that face against rg's uncapped output, so lift
+# the soft cap process-wide. The hard OOM ceiling stays on.
+# (corpus.zig::initOutputBudget honors this env.)
 export GIST_UNCAP=1
 
 # ── locations ────────────────────────────────────────────────────────────────
@@ -60,14 +61,15 @@ gist_resolve_roots "${FIELD_HERE}" || return 1
 #
 # WHETHER A CORPUS NEEDS MATERIALIZING IS SOMETHING ITS RECIPE ALREADY SAYS. A
 # recipe naming an output directory (`… <dir>`) PRODUCES a tree, so it is run
-# into `.local/corpus/<id>`; one that does not (`git clone …/gist`) is telling a
+# into `.local/corpus/<id>`; one that does not (`git clone …/<pkg>`) is telling a
 # stranger how to obtain this package, which is what a self corpus is — measured
 # in place, scoped to its declared roots.
 #
 # Not "are the declared roots present": `gist-synthetic-go-v1` declares
 # `roots = ["."]`, and `.` is present in every directory on earth. That test
-# would have quietly measured the gist checkout and stamped 16,000 synthetic Go
-# files on the bundle — the exact confusion this block exists to end.
+# would have quietly measured the exact-search checkout and stamped 16,000
+# synthetic Go files on the bundle — the exact confusion this block exists
+# to end.
 if [[ -n "${CERT_CORPUS_ID:-}" ]]; then
   _field_publish="${KERNEL}/bench/certificate/guard/publish.py"
   if _field_roots="$(python3 "${_field_publish}" roots "${CERT_CORPUS_ID}")"; then
@@ -94,7 +96,7 @@ if [[ -n "${CERT_CORPUS_ID:-}" ]]; then
   fi
 fi
 
-OUT="${GIST_VERIFY}"                        # gist's index + paths.list live here
+OUT="${GIST_VERIFY}"                        # the index + paths.list live here
 # Pin the artifact home the Zig lanes resolve (`home.outDir()`) to the one this
 # floor just decided, so a lane invoked from the package root and a splicer
 # reading the bundle name the same directory. Unexported, GIST_VERIFY would
@@ -146,25 +148,27 @@ if [[ -n "${CERT_CORPUS_ID:-}" ]]; then
 fi
 
 # Heavy build/cache dirs that have no per-file gitignore equivalent for ugrep /
-# GNU grep / zoekt. Mirrors gist's own ignored-subtree set + the rule-of-five
-# ignored dirs, so every tool is scoped to roughly the same logical corpus.
+# GNU grep / zoekt. Mirrors the exact-search face's own ignored-subtree set +
+# the rule-of-five ignored dirs, so every tool is scoped to roughly the same
+# logical corpus.
 XDIRS=(node_modules target .venv venv __pycache__ .zig-cache zig-out dist
   dist-types build .build out .next coverage .turbo .mypy_cache .ruff_cache
   .pytest_cache Pods DerivedData .swiftpm vendor .local .cache .parcel-cache
   storybook-static xcuserdata graphify-out .pnpm-store .git .hg .svn)
 
-# gist/rg run under `--no-ignore-vcs` for a deterministic multi-root oracle set,
-# but that also discards every NESTED `.gitignore` — which silently re-admits
-# build artifacts the root `.gitignore` never names: Elixir `_build`/`deps`/
-# `cover` beam output and Electron `out/`. gist's own indexer prunes those, so
-# they are absent from `paths.list` and therefore from csearch's corpus — racing
-# gist/rg over a strict SUPERSET of the indexed rivals' corpus is not the
-# like-for-like this file claims (measured: +2,488 files, all build output, 1.47x
-# on gist's `literal-rare` cell). Re-apply them as the glob equivalent of what
-# XDIRS already gives the other no-gitignore tools. NOT the whole of XDIRS: a
-# tracked `vendor/` tree can hold source the index admits, so a bare exclude
-# would push gist BELOW the indexed corpus. Mix output is anchored per `mix.exs`
-# root for the same reason — `deps`/`doc` are too generic to exclude by name.
+# The exact-search face and rg run under `--no-ignore-vcs` for a deterministic
+# multi-root oracle set, but that also discards every NESTED `.gitignore` —
+# which silently re-admits build artifacts the root `.gitignore` never names:
+# Elixir `_build`/`deps`/`cover` beam output and Electron `out/`. That face's
+# own indexer prunes those, so they are absent from `paths.list` and therefore
+# from csearch's corpus — racing the pair over a strict SUPERSET of the indexed
+# rivals' corpus is not the like-for-like this file claims (measured: +2,488
+# files, all build output, 1.47x on that face's `literal-rare` cell). Re-apply
+# them as the glob equivalent of what XDIRS already gives the other no-gitignore
+# tools. NOT the whole of XDIRS: a tracked `vendor/` tree can hold source the
+# index admits, so a bare exclude would push that face BELOW the indexed corpus.
+# Mix output is anchored per `mix.exs` root for the same reason — `deps`/`doc`
+# are too generic to exclude by name.
 _scope_globs() {
   local g="--glob=!out/" m
   while IFS= read -r m; do
@@ -175,8 +179,9 @@ _scope_globs() {
   )
   echo "${g}"
 }
-# The ignore scope gist and rg SHARE, resolved once: identical flags on both
-# sides keep the rg-oracle gate honest (verified byte-identical `--files` sets).
+# The ignore scope the exact-search face and rg SHARE, resolved once: identical
+# flags on both sides keep the rg-oracle gate honest (verified byte-identical
+# `--files` sets).
 SCOPE="--no-ignore-vcs --ignore-file '${CORPUS}/.gitignore' $(_scope_globs)"
 
 # ── availability ──────────────────────────────────────────────────────────────
@@ -209,7 +214,8 @@ have zoekt && have zoekt-index && HAVE_ZOEKT=1
 # exec(s) of the copy while it re-evaluates — which silently breaks a gate that
 # runs the binary once (a later re-exec in the same script appears to "work",
 # masking it). `codesign --sign -` re-stamps the copy so it runs on first exec.
-# No-op where codesign is absent (Linux). Returns 1 if no gist binary was found.
+# No-op where codesign is absent (Linux). Returns 1 if no exact-search binary
+# was found.
 compete_install_gist_bin() {
   local exe_src="${PRODUCT}/zig-out/bin/gist"
   [[ -x "${exe_src}" ]] || {
@@ -219,7 +225,7 @@ compete_install_gist_bin() {
   mkdir -p "$(dirname "${GIST_BIN}")"
   cp "${exe_src}" "${GIST_BIN}"
   command -v codesign > /dev/null 2>&1 && codesign --force --sign - "${GIST_BIN}" > /dev/null 2>&1
-  # Stage the relate face beside it when built (same cp + re-sign rationale).
+  # Stage the kinship face beside it when built (same cp + re-sign rationale).
   local relate_src="${KINSHIP}/zig-out/bin/relate"
   if [[ -x "${relate_src}" ]]; then
     cp "${relate_src}" "${RELATE_BIN}"
@@ -228,9 +234,10 @@ compete_install_gist_bin() {
   return 0
 }
 
-# Build the gist CLI in ITS checkout, then persist an index over the corpus.
-# Upstream packages race against the shipped product, so the build has to happen
-# where the product lives rather than wherever the caller happens to be.
+# Build the exact-search CLI in ITS checkout, then persist an index over the
+# corpus. Upstream packages race against the shipped product, so the build has
+# to happen where the product lives rather than wherever the caller happens to
+# be.
 compete_build_gist_index() {
   (cd "${PRODUCT}" && zig build -Doptimize=ReleaseFast) || return 1
   compete_install_gist_bin || return 1
@@ -238,9 +245,10 @@ compete_build_gist_index() {
 }
 
 # ── rival index construction (once per run) ──────────────────────────────────
-# Build the csearch index over gist's EXACT corpus (the persisted paths.list),
-# so the two trigram indexes cover byte-identical files. Prints build seconds +
-# index size. Requires gist's index already persisted (paths.list present).
+# Build the csearch index over the exact-search face's EXACT corpus (the
+# persisted paths.list), so the two trigram indexes cover byte-identical files.
+# Prints build seconds + index size. Requires that face's index already
+# persisted (paths.list present).
 compete_build_csearch() {
   [[ "${HAVE_CSEARCH}" = 1 ]] || return 0
   [[ -f "${PATHS_LIST}" ]] || {
@@ -322,7 +330,8 @@ compete_precheck_status() { # <cmd> <label>
 }
 
 # The candidate and official-rg oracle must emit the same complete file set
-# before a gist cell may be timed. This is intentionally independent of order.
+# before an exact-search cell may be timed. This is intentionally independent of
+# order.
 compete_precheck_equivalent() { # <candidate-cmd> <rg-cmd> <label>
   local candidate="$1" oracle="$2" label="${3:-gist cell}" tmp
   tmp="$(mktemp -d)"

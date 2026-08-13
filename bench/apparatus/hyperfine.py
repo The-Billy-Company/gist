@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Reading a hyperfine `--export-json` file — the one wire format every race speaks.
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 
 `field.sh` times every cell through one `hyperfine --export-json` invocation, so
 its output is the seam between the shell that measures and the Python that
 judges. That makes the reader apparatus, not a claim: it lives here rather than
-in any one package's report module, because a Layer A splice in `gist` and a
-Layer K splice in `relate` reading the same file differently is a difference in
-the *numbers* that no verdict math downstream can catch.
+in any one package's report module, because a Layer A splice in the exact-search
+package and a Layer K splice in the kinship package reading the same file
+differently is a difference in the *numbers* that no verdict math downstream can
+catch.
 
 Deliberately not in `statcore.py`: that file is pure math with no ingestion, and
 the split is load-bearing — the verdict is a claim about samples, this is where

@@ -18,8 +18,8 @@
 #   KERNEL      — package root (build.zig.zon), climbed from HERE
 #   CORPUS      — the tree being MEASURED (GIST_CORPUS_ROOT, else KERNEL)
 #   ENGINE      — checkout that owns the irregex library (sibling, else KERNEL)
-#   PRODUCT     — checkout that owns the gist binary (sibling, else KERNEL)
-#   KINSHIP     — checkout that owns the relate binary (sibling, else PRODUCT)
+#   PRODUCT     — checkout that owns the product binary (sibling, else KERNEL)
+#   KINSHIP     — checkout that owns the kinship binary (sibling, else PRODUCT)
 #   GIST_VERIFY — GIST_DIR or ${CORPUS}/.gist (artifact home)
 #
 # There is deliberately no `REPO`. It used to name the corpus here and the
@@ -80,8 +80,9 @@ _gist_sibling() {
 # the monorepo the package was extracted from and then for a checkout of it beside
 # this one, which meant a gate's corpus silently became whatever private tree
 # happened to sit next door — unreproducible, and different on every machine. Set
-# GIST_CORPUS_ROOT to say what to measure over (`bench/apparatus/corpora/fetch.sh`
-# in the `gist` package pins public ones); absent that, a package measures itself.
+# GIST_CORPUS_ROOT to say what to measure over
+# (`bench/apparatus/corpora/fetch.sh` in the exact-search package pins public
+# ones); absent that, a package measures itself.
 _gist_corpus_root() {
   local pkg="$1"
   if [[ -n "${GIST_CORPUS_ROOT:-}" ]]; then
@@ -100,9 +101,9 @@ gist_resolve_roots() {
   CORPUS="$(_gist_corpus_root "${KERNEL}")"
   ENGINE="$(_gist_sibling "${KERNEL}" irregex)" || ENGINE="${KERNEL}"
   PRODUCT="$(_gist_sibling "${KERNEL}" gist)" || PRODUCT="${KERNEL}"
-  # `relate` ships its own binary from its own checkout, so a gate that oracles
-  # both products cannot assume one zig-out holds them. Falls back to PRODUCT,
-  # which is where `relate` lived before the split.
+  # The kinship face ships its own binary from its own checkout, so a gate that
+  # oracles both products cannot assume one zig-out holds them. Falls back to
+  # PRODUCT, which is where that face lived before the split.
   KINSHIP="$(_gist_sibling "${KERNEL}" relate)" || KINSHIP="${PRODUCT}"
   GIST_VERIFY="${GIST_DIR:-${CORPUS}/.gist}"
 

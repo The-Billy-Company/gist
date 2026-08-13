@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The publish gate — a bundle may only enter git if it describes a public corpus.
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 
 WHY THIS EXISTS

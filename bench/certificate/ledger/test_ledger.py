@@ -1,6 +1,6 @@
 """Hermetic tests for the certificate mint ledger (ledger.py).
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 
 Pins the four contracts the ledger exists to hold: a **dropped layer is loud**

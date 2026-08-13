@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """What a certificate IS — the vocabulary every package's gates are written in.
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 
 Four packages publish four different certificates. `irregex` certifies an engine
-against its own physical limits; `gist` certifies a product against ripgrep;
-`relate` certifies retrieval and multi-pattern attribution against Hyperscan.
-None of them measures the same thing, and pretending otherwise is how a shared
-gate ends up with `if package == "gist"` in it.
+against its own physical limits; the exact-search face certifies a product
+against ripgrep; the kinship face certifies retrieval and multi-pattern
+attribution against Hyperscan. None of them measures the same thing, and
+pretending otherwise is how a shared gate ends up with `if package == …` in it.
 
 So the split is not between packages, it is between **method and claim**. This
 module and its siblings in `guard/` hold the method: what makes a bundle
@@ -132,10 +132,10 @@ class Auditor(Protocol):
     files exist, the machine metadata is there, the tools are pinned to exact
     identities, the corpus manifest agrees with itself, and every rostered layer
     shipped its header and its sidecar. What it cannot know is whether the
-    numbers are *coherent* — that gist's macro cell matrix is exactly classes ×
-    timed tools, that irregex's Layer C verdict agrees with the measured fraction
-    of the memory roof it reports. Those are claims about a specific layer's
-    physics, so they live with the package that makes them.
+    numbers are *coherent* — that the exact-search face's macro cell matrix is
+    exactly classes × timed tools, that irregex's Layer C verdict agrees with the
+    measured fraction of the memory roof it reports. Those are claims about a
+    specific layer's physics, so they live with the package that makes them.
 
     Append to ``problems``; return nothing. Raising is a bug — a malformed bundle
     is a finding, not an exception.

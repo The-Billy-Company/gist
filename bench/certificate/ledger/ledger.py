@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mint ledger — the certificate's history, so a re-mint is never silent.
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`). What this
 package certifies and which numbers are worth watching come from its own
 ``guard/profile.py`` charter; nothing below names a layer or a metric.

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The provenance a certificate needs to be reproducible, minted the same way everywhere.
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 
 Three files decide whether a published number can be re-derived by a stranger:

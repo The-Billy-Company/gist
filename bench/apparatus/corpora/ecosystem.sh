@@ -2,22 +2,22 @@
 # Materialize `ecosystem-v1` — the Layer L / Layer J corpus.
 #
 # The corpus is the four packages of this project side by side: the engine
-# (`irregex`) and its three product faces (`gist`, `relate`, `blast`). Every one
-# is public and Apache-2.0, so a stranger can rebuild the exact tree a
-# certificate was measured over — which is the whole point, and the thing the
-# private monorepo could never offer.
+# (`irregex`) and its three product faces. Every one is public and Apache-2.0,
+# so a stranger can rebuild the exact tree a certificate was measured over —
+# which is the whole point, and the thing the private monorepo could never
+# offer.
 #
 # WHY THIS TREE AND NOT A FAMOUS ONE. Layer L compares two index planners by the
 # candidate bytes each admits, so its corpus has to make every probe class land
 # strictly between "matches nothing" and "matches everything"; at either endpoint
 # both planners admit the identical set and the row measures noise while feeding
-# a fail-closed verdict. gist's 16k-file synthetic Go corpus is right for Layers
-# A and D — race ripgrep on ground ripgrep wins — and wrong here, measurably:
-# `slate.py --audit` finds nine of the twelve shared classes saturating there and
-# seven of the eight stress classes vacuous. The engine checkout alone passes but
-# is monoglot and half the size. This tree is genuinely polyglot — Zig, Markdown,
-# Python, C, TOML, Rust, Go, shell, Vimscript — and all twenty classes
-# discriminate on it.
+# a fail-closed verdict. The exact-search package's 16k-file synthetic Go corpus
+# is right for Layers A and D — race ripgrep on ground ripgrep wins — and wrong
+# here, measurably: `slate.py --audit` finds nine of the twelve shared classes
+# saturating there and seven of the eight stress classes vacuous. The engine
+# checkout alone passes but is monoglot and half the size. This tree is genuinely
+# polyglot — Zig, Markdown, Python, C, TOML, Rust, Go, shell, Vimscript — and all
+# twenty classes discriminate on it.
 #
 #   ecosystem.sh <dir>            # from the sibling checkouts, else clone
 #   ECOSYSTEM_FROM=clone …        # force the clone path (what a stranger runs)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Certificate reproducibility gate.
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 
 A certificate is only a claim until a third party can regenerate it from the

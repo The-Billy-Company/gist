@@ -1,6 +1,6 @@
 """Hermetic tests for the cross-machine release gate (release.py).
 
-VENDORED, BYTE-IDENTICAL across irregex/gist/relate/blast
+VENDORED, BYTE-IDENTICAL across all four ecosystem packages
 (`bench/apparatus/SHARED.sha256`, checked by `shared_drift.py`).
 
 Pins the contracts the single-bundle reproducibility check cannot see:
@@ -13,9 +13,9 @@ certificate, no git, no benchmark tools.
 
 Because this file is vendored, it asserts on the **mechanism** and never on one
 package's numbers: the headline summary is checked by driving whatever
-``CHARTER.measure`` returns, not by expecting gist's win/parity/loss tally. A
-test that named a specific layer would be red in three of the four packages that
-carry it.
+``CHARTER.measure`` returns, not by expecting the exact-search face's
+win/parity/loss tally. A test that named a specific layer would be red in three
+of the four packages that carry it.
 """
 
 import dataclasses
