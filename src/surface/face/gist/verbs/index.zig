@@ -144,12 +144,16 @@ fn lastCorpusBytes(io: std.Io) ?u64 {
 /// Written from worker threads, which own disjoint doc ranges, so indexing by
 /// doc id needs no synchronization.
 const Ledger = struct {
-    vectors: []crest_math.Vector,
+    /// Summarized at the same rank the held build uses, because the sidecar
+    /// records ONE q for the whole file: a streamed index stamped q=4 over
+    /// rank-zero-only rows would answer a rank-1 demand with a 0 and prune a
+    /// document that matches.
+    spectra: []crest_math.Spectrum,
     lens: []u32,
 
     fn saw(ctx: *anyopaque, doc: u32, bytes: []const u8) void {
         const l: *Ledger = @ptrCast(@alignCast(ctx));
-        l.vectors[doc] = crest_math.crest(bytes);
+        l.spectra[doc] = crest_math.spectrum(bytes, crest_math.max_rank);
         l.lens[doc] = @intCast(bytes.len);
     }
 };
@@ -183,10 +187,10 @@ fn streamed(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void
     if (ndocs == 0) return error.EmptyCorpus; // nothing to stream; the held path reports it
 
     var ledger: Ledger = .{
-        .vectors = try gpa.alloc(crest_math.Vector, ndocs),
+        .spectra = try gpa.alloc(crest_math.Spectrum, ndocs),
         .lens = try gpa.alloc(u32, ndocs),
     };
-    defer gpa.free(ledger.vectors);
+    defer gpa.free(ledger.spectra);
     defer gpa.free(ledger.lens);
 
     var idx = try Index.buildStreamed(gpa, .{
@@ -198,7 +202,7 @@ fn streamed(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void
     defer idx.deinit();
     assay.trace(.index, "index phase: trigram build + crest {d:.1} ms · peak {d:.0} MiB\n", .{ phase.lap(io).ms(), peakMib() });
 
-    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, census.paths, roots, ledger.vectors, built.ns());
+    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, census.paths, roots, ledger.spectra, built.ns());
     assay.trace(.index, "index phase: publish {d:.1} ms · peak {d:.0} MiB · {d:.1} MiB\n", .{
         phase.lap(io).ms(), peakMib(), @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
     });
@@ -269,16 +273,16 @@ fn held(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // Crest sidecar (the class-run sieve, research/crest/): one parallel pass
     // over the already-loaded docs. Best-effort — an OOM here costs only the
     // sieve, never the index build.
-    const crest_vectors: ?[]const @import("irregex").math.crest.Vector =
-        crest_sidecar.build(gpa, corpus.docs) catch null;
-    defer if (crest_vectors) |cv| gpa.free(cv);
+    const crest_spectra: ?[]const crest_math.Spectrum =
+        crest_sidecar.buildSpectra(gpa, corpus.docs) catch null;
+    defer if (crest_spectra) |cs| gpa.free(cs);
     assay.trace(.index, "index phase: crest sieve {d:.1} ms · peak {d:.0} MiB · {s}\n", .{
-        phase.lap(io).ms(), peakMib(), if (crest_vectors == null) "declined" else "built",
+        phase.lap(io).ms(), peakMib(), if (crest_spectra == null) "declined" else "built",
     });
 
     // Generation-atomic publish: all blobs stage under gens/<id>/, then
     // pair.gen flips — concurrent loaders never see a mixed old/new set.
-    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths, roots, crest_vectors, built.ns());
+    const index_bytes = try persist.persistIndexAndPaths(gpa, io, &idx, corpus.paths, roots, crest_spectra, built.ns());
     assay.trace(.index, "index phase: publish {d:.1} ms · peak {d:.0} MiB · {d:.1} MiB\n", .{
         phase.lap(io).ms(), peakMib(), @as(f64, @floatFromInt(index_bytes)) / (1 << 20),
     });
