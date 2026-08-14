@@ -23,6 +23,15 @@ wrap = false
 ignore = [ ".gitkeep", "README.md" ]
 
 [[tool.towncrier.type]]
+# A release's lede, not a change: prose that frames the section rather than an
+# entry in it. Declared first because towncrier renders types in declaration
+# order, so this is what lands above `### Added` — no template fork, and the
+# fragment retires itself on fold like any other.
+directory = "note"
+name = "Note"
+showcontent = true
+
+[[tool.towncrier.type]]
 directory = "added"
 name = "Added"
 showcontent = true

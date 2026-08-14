@@ -61,24 +61,24 @@ jobs:
           persist-credentials: false
       - id: version
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: version
           args: --root . --tag ${{ github.ref_name }}
       - if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: changelog
           args: >-
             --root . --require-fragments-empty
             --version ${{ fromJSON(steps.version.outputs.result).version }}
       - if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: tag-ancestor
           args: ${{ github.repository }} ${{ github.sha }} --branch main
       - if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: ci-status
           args: ${{ github.repository }} ${{ github.sha }}
@@ -95,13 +95,13 @@ jobs:
           echo "irregex_floor=$floor" >> "$GITHUB_OUTPUT"
       - if: startsWith(github.ref, 'refs/tags/v')
         id: dep-pypi
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: registry-probe
           args: pypi irregex ${{ steps.dep.outputs.irregex_floor }}
       - if: startsWith(github.ref, 'refs/tags/v')
         id: dep-crates
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: registry-probe
           args: crates irgx ${{ steps.dep.outputs.irregex_floor }}
@@ -166,7 +166,7 @@ jobs:
       # that the workspace root holds both checkouts as siblings.
       - name: The tag must name the version being published
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: version
           args: --root gist --tag ${{ github.ref_name }}
@@ -349,7 +349,7 @@ jobs:
       # tag that already shipped, must land on "already there" rather than
       # spend a credential on an upload PyPI will reject anyway.
       - id: probe
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: registry-probe
           args: pypi gist-search ${{ steps.tag.outputs.version }}
@@ -415,7 +415,7 @@ jobs:
       # to name `gist` explicitly now that the workspace root holds both
       # checkouts as siblings.
       - name: The tag must name the version being published
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: version
           args: --root gist --tag ${{ github.ref_name }}
@@ -437,7 +437,7 @@ jobs:
       - id: tag
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - id: state
-        uses: The-Billy-Company/.github/actions/package-release@deb135f046122a10cabc861e96eb9941c2d09ddc # main
+        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: registry-probe
           args: crates gist ${{ steps.tag.outputs.version }}
@@ -563,4 +563,67 @@ jobs:
           done
           echo "::error::$MODULE@$VERSION never became resolvable through the" \
                "module proxy. The tag exists, so this is an ingestion problem." >&2
+          exit 1
+
+  # Give the GitHub Release the notes this repository actually wrote.
+  #
+  # release-please composes the release body itself, off conventional-commit
+  # subjects filtered through `changelog-sections` — a separate path from the
+  # `skip-changelog` that hands CHANGELOG.md to towncrier. So the page people
+  # land on is assembled from commit subjects while the notes someone wrote sit
+  # in the changelog, and nothing joined them: irregex v2.1.1 published two
+  # lines against a folded section of a hundred and ten, because eleven of its
+  # thirteen commits were `ci:` or `docs:` and both are `hidden`. This posts the
+  # folded `## [X.Y.Z]` section over that body.
+  #
+  # Deliberately not `needs: preflight`: preflight's last step waits up to an
+  # hour for `release-ready` on this commit, and the release page should read
+  # correctly within a minute of the tag rather than after the publish gate
+  # clears. Nothing here ships an artifact, so it does not need that gate — and
+  # if the section is missing this fails loudly, leaving the release with the
+  # thin body it was born with rather than a wrong one.
+  notes:
+    name: release notes
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The one write: `gh release edit` on a release this repository owns.
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        with:
+          command: notes
+          args: >-
+            --root . --version ${{ github.ref_name }}
+            --out /tmp/release-notes.md --repo ${{ github.repository }}
+
+      # The release usually exists before this workflow starts — release-please
+      # creates it through the API, and creating it is what puts the tag on the
+      # remote that triggered this run. Usually is not always: a tag pushed any
+      # other way arrives with no release behind it, and editing one that does
+      # not exist fails on a tag that is already immutable. So wait for it,
+      # bounded, rather than assuming the ordering holds.
+      - name: Post the folded section over the generated body
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if gh release view "$TAG" --json id >/dev/null 2>&1; then
+              gh release edit "$TAG" --notes-file /tmp/release-notes.md
+              echo "posted $(wc -c < /tmp/release-notes.md) bytes to the $TAG release"
+              exit 0
+            fi
+            echo "no release on $TAG yet (attempt $attempt/30) — waiting"
+            sleep 10
+          done
+          echo "::error::no GitHub Release on $TAG after five minutes — its body" \
+               "was left as generated. Post it by hand with \`gh release edit\`" \
+               "and the section from CHANGELOG.md." >&2
           exit 1
