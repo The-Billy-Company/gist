@@ -7,6 +7,223 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.2.0] - 2026-08-14
+
+### Added
+
+- A `note` fragment type, for the paragraph that frames a release rather than an
+  entry in it. Towncrier renders types in declaration order and `note` is
+  declared first, so it lands above `### Added` with no template fork and
+  retires itself on fold like any other fragment.
+- The Python binding has an import contract: `bindings/python/binding.zone`,
+  governing `gist-search` the way `charter.zone` governs the Zig side.
+
+  This is the one binding in the family with a warm path, so it is the one whose
+  layering was worth writing down: the index lifecycle below, the facade and its
+  `exact/` subpackage above as a single unit, tests on top. The cycle is declared
+  rather than tolerated - `_native` asks `_daemon` whether a request is
+  FFI-eligible, because that predicate is the daemon protocol's and should have
+  exactly one definition, and it asks through a deferred in-function import so the
+  load-time graph stays acyclic.
+
+  Needs `zoning` 1.3.1, which is where the `python` dialect and root-anchored
+  contracts both arrive.
+
+### Changed
+
+- The import contract moved to `charter.zone` at the repository root, out of the
+  `contract/` drawer and out from under the package's own name.
+
+  Two things were wrong with the old spelling. A contract governs the directory it
+  sits in, so a folder holding one page bought nothing - the manifest, the
+  formatter config, and the CI config all already live at the root, and this
+  belongs beside them. And naming it after the package spent the filename on a
+  third copy of a name that is already on the file's first line and already in the
+  path, which meant every repository in the ecosystem called the same kind of
+  document something different.
+
+  `charter.zone` is that one name. Nested packages take a role name instead -
+  `kernel.zone`, `service.zone` - because there the path already says which one it
+  is. Identity was never in the filename: the `package` block is what every
+  verdict, every `--package` filter, and every workspace lookup reads, so nothing
+  downstream can tell the two spellings apart. Needs `zoning` 1.3.1, which is
+  where a contract at a package root is first discovered; the pin moves with this.
+- `gist index` decides whether to hold the corpus or stream it, from the machine
+  rather than from a preference.
+
+  `irregex` now offers a build that never holds the corpus: a census of paths and
+  sizes, and each body read back when the pass that needs it reaches it. It costs
+  4.1x less memory on llvm-project and 1.7x more wall, and neither of those is the
+  interesting number on its own — which one matters depends entirely on how big
+  the tree is relative to the machine looking at it.
+
+  So the choice is made per build. `full` estimates the held peak from the corpus
+  the last build published — the content shard IS that corpus concatenated, so its
+  size is the answer, and erring high biases toward streaming — and holds only if
+  that estimate fits in an eighth of physical memory. Above the line it streams.
+  With no shard to ask, which is the first build in a fresh artifact directory, it
+  streams: a build that cannot know how big the tree is should not be the one to
+  discover it by holding all of it.
+
+  An eighth is deliberate. Holding is faster, and on ordinary trees nothing about
+  it is objectionable, so the line is not "is streaming cheaper" but "is this
+  build about to take a rude share of a machine someone is working in". On the
+  128 GiB host this was measured on, llvm-project's 1926 MiB corpus is held (8.2 s,
+  2464 MiB peak) and a corpus four times larger would not be.
+
+  `GIST_STREAM=1` and `GIST_NO_STREAM=1` pin it either way, which is what a
+  benchmark comparing peak RSS against `csearch` or `zoekt` needs: the honest
+  number for a shape is the one measured with that shape forced, not whichever one
+  the host happened to choose.
+
+  The streamed path falls open to the held one on any failure before publication —
+  a census that cannot be taken, or a block builder that runs out of memory, costs
+  a cheaper build and never the index. Past publication there is nothing to fall
+  back to and both paths fail the same way.
+
+  Two things that wanted the corpus now ride along with the pass that already has
+  it. The crest sieve stops being its own phase — `GIST_TRACE=index` reports
+  `trigram build + crest` as one lap on the streamed path — and the build records
+  each doc's real length for the content shard's offset catalog, which is the only
+  figure that catalog can honestly be built from once the sizes came from an
+  earlier walk.
+
+  PROVEN IDENTICAL: over llvm-project, a held and a streamed build publish the same
+  `index.gist` (161,773,006 bytes), `crest.bin` (8,405,376) and `paths.list`
+  (9,107,770), byte for byte. `content.shard` (2,030,371,064) and `tree.map` agree
+  on every byte of catalog, paths, and bodies, differing only in the 8-byte anchor
+  and the 32-byte seal over it — the same two fields that differ between two runs
+  of one binary.
+
+### Fixed
+
+- Both published packages declared Apache-2.0 and carried none of it. The license
+  text and the NOTICE live at the repository root, and neither a `.crate` tarball nor
+  a wheel can reach above its own project directory - so the crate shipped an SPDX
+  string and no license, and the wheel shipped the same. Section 4 of that license
+  asks a redistributor for exactly those two files, which made this the one packaging
+  defect that was not cosmetic. It mattered a little more here than elsewhere: this
+  NOTICE is where the ripgrep interface conventions the package is a drop-in for are
+  credited, so shipping without it dropped the attribution too.
+
+  `LICENSE` and `NOTICE` are now committed beside both manifests, byte-identical to
+  the root pair. The wheel names them in `license-files`, so they land in
+  `.dist-info/licenses/` rather than only inside the sdist, where nobody installing
+  the wheel would ever see them.
+
+  `rust-toolchain.toml` stops shipping in the crate on the same pass. It pins 1.97.1
+  so this repository's contributors lint identically - no business of anyone building
+  the extracted crate, and it would have quietly overridden the 1.85 `rust-version`
+  the sources actually ask for. The crate had no `exclude` list at all until now, so
+  this is also the first thing standing between the tarball and whatever lands beside
+  the manifest next.
+- The GitHub Release page now carries the changelog section it names. Two
+  changelogs were produced per release and only one of them was towncrier's:
+  `skip-changelog` hands `CHANGELOG.md` to the fragments, but that key governs
+  the *file*, and composing the release **body** is a separate path inside
+  release-please that kept running off conventional-commit subjects. So the page
+  people land on was assembled from commit subjects while the notes someone
+  wrote sat in the changelog - irregex v2.1.1 published two lines against a
+  folded section of a hundred and ten, because eleven of its thirteen commits
+  were `ci:` or `docs:` and both are hidden. A `notes` job now posts the folded
+  `## [X.Y.Z]` section over that body on tag, waiting for the release to exist
+  rather than assuming it already does, and truncating at a whole bullet under
+  GitHub's 125,000-character body ceiling rather than failing on a tag that is
+  already immutable.
+- The engine's CREST sidecar went to v6, and its rows widened from a 48-lane q=1
+  vector to a 192-lane q=4 spectrum. This package is what writes those rows - both
+  build paths do, the held one and the streamed one - so `gist` stopped compiling
+  against the sibling the moment that landed; `persistIndexAndPaths` takes
+  `?[]const crest.Spectrum` now.
+
+  The held path was reaching for the right function's neighbor: `sidecar.build` is
+  the q=1 table the resident session keeps for live documents, and
+  `sidecar.buildSpectra` is the parallel q=4 pass the persisted artifact wants. The
+  streamed path summarizes each doc inline while the trigram pass still has its
+  bytes, and it asks for `crest.spectrum(bytes, max_rank)` rather than
+  `crest.crest(bytes)`.
+
+  Both paths have to agree on the rank, and that is the part worth saying out loud:
+  the sidecar header records ONE q for the whole file, and `persist` stamps
+  `max_rank` unconditionally. A streamed index carrying rank-zero-only rows under a
+  q=4 header would meet a rank-1 demand with a zero, fall short of it, and prune a
+  document that matches. That is a wrong answer, not a slow one, which is why the
+  streamed path summarizes at the same rank the held path does rather than at the
+  cheaper default.
+
+  No new guard: this package's build jobs already check out `irregex` at its
+  default branch, so the sibling's main is what every push here compiles against.
+- The socket lives in the artifact home, and the artifact home is now one per
+  checkout rather than one per directory. That is what lets a search from
+  `services/ai` reach the tree's index - and it also means every subdirectory of
+  one tree dials the same rendezvous. A session that went resident in the subtree
+  was therefore handed queries from the tree root, and it answered them: real
+  rows, correctly rendered, from a walk that had only ever seen a fraction of the
+  tree. Nothing in the output looks wrong. You just get less of it.
+
+  What the two sides were proving to each other was the tree, which used to be the
+  same fact as the directory and no longer is. A persisted artifact and a resident
+  session are bound to different things: an index is written in checkout
+  coordinates so any directory under the checkout may ride it, while a mirror is a
+  corpus walked from wherever the daemon started, and its answers are that walk's
+  output. So the daemon publishes its STANDING beside its socket now - the working
+  directory, resolved - and the client and the answer keep both prove that instead.
+  A client standing elsewhere reads the rendezvous as not its own and answers cold,
+  which is correct and merely slower.
+
+  `station_parity.sh` is the permanent guard, and it earns the name by failing:
+  with the old binding restored it reports the tree-root query routing warm and
+  coming back empty over a tree holding two matches. It asserts the routing tier
+  by name rather than only diffing bytes, because a daemon that quietly declined
+  would make a warm-versus-cold comparison green without either arm ever being
+  warm. Its corpus is deliberately large for the same reason - the elide oracle
+  loads concurrently with the walk, and over a few dozen files the walk always
+  wins, so a small corpus proves only that the live read works and passes just as
+  happily with the rebase deleted.
+- Three bugs in the release machinery, each of which alone was enough to stop a
+  release, and together they are why main has said 1.2.0 since August with `v1.1.0`
+  still the newest tag.
+
+  `release-please-config.json` named the package. With `include-component-in-tag`
+  off, release-please writes a standalone release PR's body with no component in it,
+  and names the branch `release-please--branches--main` with no component either.
+  Then, on merge, before it will tag anything, it compares that empty component
+  against `component || package-name` - so a `package-name` here makes the two
+  halves of its own bookkeeping disagree permanently. Every merge logged
+  `PR component: undefined does not match configured component: gist-search` and
+  returned without creating the tag or the release. That is worse than a missed
+  release, because it wedges: an untagged merged release PR makes the *next* run
+  abort before it opens anything, so the queue stops until someone relabels the old
+  PR by hand.
+
+  The fold's guard read the wrong side of the index. towncrier stages its own
+  edits; it writes the newsfile and retires each fragment through `git add` and
+  `git rm`, so a working-tree-vs-index diff is quiet the instant it finishes, even
+  though it just rewrote CHANGELOG.md. The job compared against the index rather
+  than HEAD, printed `nothing new to fold`, and exited 0 having done nothing. Every
+  fragment this release was supposed to publish is still sitting in `changelog.d/`.
+
+  And the fold only ran on the push where release-please rewrote the PR. The
+  action sets its `pr` output only when it wrote something, so a `ci`/`docs` commit
+  carrying a new fragment, which changes no version and therefore no note, left
+  that output empty, and the job skipped with nothing saying so. The branch is now
+  resolved from the `autorelease: pending` label instead, which is release-please's
+  own marker for the PR it is holding open rather than a name guessed from a
+  convention.
+
+  `.release-please-manifest.json` claimed 1.2.0, a release that never happened -
+  no tag, nothing on crates.io or PyPI, no changelog section. Left alone it would
+  have made the next release bump *past* a number nobody can install, so it is back
+  to 1.1.0, the newest version that actually shipped. The next release therefore
+  re-cuts 1.2.0 with all of the fragments this one was supposed to publish, and the
+  version already written into `build.zig.zon` on main becomes true rather than
+  aspirational.
+
+  With `always-update` on, the branch is rebuilt on every push while the PR is
+  open, so the fold recomputes from main rather than appending to whatever the
+  branch already carries - towncrier treats a second write of the same version as a
+  hard error, not a no-op.
+
 ## [1.1.0] - 2026-08-05
 
 ### Added
