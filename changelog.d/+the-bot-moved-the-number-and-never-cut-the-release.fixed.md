@@ -29,6 +29,14 @@ resolved from the `autorelease: pending` label instead, which is release-please'
 own marker for the PR it is holding open rather than a name guessed from a
 convention.
 
+`.release-please-manifest.json` claimed 1.2.0, a release that never happened -
+no tag, nothing on crates.io or PyPI, no changelog section. Left alone it would
+have made the next release bump *past* a number nobody can install, so it is back
+to 1.1.0, the newest version that actually shipped. The next release therefore
+re-cuts 1.2.0 with all of the fragments this one was supposed to publish, and the
+version already written into `build.zig.zon` on main becomes true rather than
+aspirational.
+
 With `always-update` on, the branch is rebuilt on every push while the PR is
 open, so the fold recomputes from main rather than appending to whatever the
 branch already carries - towncrier treats a second write of the same version as a
