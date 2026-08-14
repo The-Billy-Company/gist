@@ -54,9 +54,13 @@ jobs:
       # the release path entirely rather than granting it rights it cannot use.
       contents: read
     outputs:
-      # The JSON object of the currently open release PR — set only while one
-      # is unmerged. The fold-changelog job below is what actually reads it.
-      pr: ${{ steps.release.outputs.pr }}
+      # The branch of the open release PR, whether or not THIS run touched it.
+      # The action's own `pr` output is set only when it wrote something, so a
+      # push that leaves an existing PR alone — a `ci:` commit, or a new
+      # changelog fragment, neither of which changes the version — reported no
+      # PR at all and skipped the fold. The PR then sits open with fragments
+      # unfolded, and nothing says so until preflight refuses to publish it.
+      head: ${{ steps.target.outputs.head }}
     steps:
       # Exchange the App's signing key for an installation token scoped to this
       # repo, valid one hour. Fails loudly if the App is not installed here.
@@ -84,6 +88,27 @@ jobs:
           target-branch: main
           token: ${{ steps.app-token.outputs.token }}
 
+      # Asked of the repository's state rather than of what this run happened to
+      # do. `autorelease: pending` is release-please's own marker for the PR it is
+      # holding open — the same label its next run reads to decide whether a
+      # release is outstanding — so this is its bookkeeping, not a branch name
+      # guessed from a naming convention.
+      - id: target
+        name: Which branch the open release PR is on
+        env:
+          PR: ${{ steps.release.outputs.pr }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          head=$(python3 -c 'import json, os; print(json.loads(os.environ["PR"] or "{}").get("headBranchName", ""))')
+          if [ -z "$head" ]; then
+            head=$(gh pr list --repo "$REPO" --state open --label 'autorelease: pending' \
+                     --json headRefName --jq '.[0].headRefName // ""')
+          fi
+          echo "head=${head}" >> "$GITHUB_OUTPUT"
+          echo "release PR branch: ${head:-<none open>}"
+
   # Folds changelog.d/ into CHANGELOG.md on the release PR's own branch, at the
   # exact version release-please just bumped `build.zig.zon` to on that
   # branch — read back through the shared `version` command rather than
@@ -92,7 +117,16 @@ jobs:
   fold-changelog:
     name: fold changelog
     needs: release-please
-    if: needs.release-please.outputs.pr != ''
+    if: needs.release-please.outputs.head != ''
+    # Keyed on the branch this job writes, not on the ref that triggered it. The
+    # workflow group above already serializes runs for one ref, but a
+    # `workflow_dispatch` from another ref is outside it and would still find this
+    # same open PR — two runs pushing one branch, where the loser is a red X on
+    # work the winner already did. Cancelled rather than queued: the survivor
+    # reads the branch as it is now.
+    concurrency:
+      group: fold-changelog-${{ needs.release-please.outputs.head }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -108,7 +142,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ steps.app-token.outputs.token }}
-          ref: ${{ fromJson(needs.release-please.outputs.pr).headBranchName }}
+          ref: ${{ needs.release-please.outputs.head }}
           persist-credentials: false
 
       - id: version
@@ -126,9 +160,36 @@ jobs:
           set -euo pipefail
           version=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' \
             <<<"${STEPS_VERSION_OUTPUTS_RESULT}")
+          # persist-credentials is false above, so every network git call here
+          # authenticates with a header scoped to that one invocation instead of a
+          # token left sitting in .git/config for any later step to read.
+          header=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
+          auth=(-c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${header}")
+          # Recompute the fold from main rather than appending to whatever this branch
+          # already carries. towncrier refuses outright to write a second section for a
+          # version it has already written, so an incremental fold is not merely
+          # wasteful — a second run over an already-folded branch is a hard error, and
+          # `always-update` now rebuilds this branch on every push, so there are many
+          # such runs. Taking both paths from main makes the fold a function of main at
+          # this version: idempotent when nothing moved, complete when something did.
+          # release-please sets `skip-changelog`, so nothing of its own is discarded.
+          git "${auth[@]}" fetch --depth=1 origin main
+          git checkout FETCH_HEAD -- CHANGELOG.md changelog.d
           uv run --no-project --python 3.12 --with towncrier==25.8.0 \
             towncrier build --yes --version "$version"
-          if git diff --quiet -- CHANGELOG.md changelog.d; then
+          # towncrier closes the new section with a blank line, and the blank line
+          # this file keeps under the marker rides down with the heading it used to
+          # precede — so the seam against the previous release lands with two of them,
+          # which MD012 rejects. Squeeze that one pair rather than vendoring a fork of
+          # towncrier's template: the rendering stays upstream's, and the rest of the
+          # file, fenced blocks included, is untouched.
+          python3 -c 'import pathlib, re; p = pathlib.Path("CHANGELOG.md"); p.write_text(re.sub(r"\n{3}(?=## \[)", "\n\n", p.read_text(), count=1))'
+          # Against HEAD, not the index. towncrier stages its own edits — it writes the
+          # newsfile and retires each fragment through `git add`/`git rm` — and the
+          # checkout above stages two more paths, so a bare `git diff` compares a tree
+          # that already matches the index and calls a real fold quiet. This guard read
+          # unstaged work, which is why the fold has been exiting 0 having done nothing.
+          if git diff --quiet HEAD -- CHANGELOG.md changelog.d; then
             echo "nothing new to fold at $version"
             exit 0
           fi
@@ -136,13 +197,8 @@ jobs:
           git config user.email 'billy-company-release[bot]@users.noreply.github.com'
           git add CHANGELOG.md changelog.d
           git commit -m "chore(changelog): fold fragments for v$version"
-          # persist-credentials is false above, so this one push authenticates
-          # with a header scoped to the single git invocation instead of a
-          # token left sitting in .git/config for any later step to read.
-          header=$(printf 'x-access-token:%s' "$APP_TOKEN" | base64 -w0)
-          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ${header}" \
-            push origin "HEAD:${TARGET_BRANCH}"
+          git "${auth[@]}" push origin "HEAD:${TARGET_BRANCH}"
         env:
           STEPS_VERSION_OUTPUTS_RESULT: ${{ steps.version.outputs.result }}
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
-          TARGET_BRANCH: ${{ fromJson(needs.release-please.outputs.pr).headBranchName }}
+          TARGET_BRANCH: ${{ needs.release-please.outputs.head }}
