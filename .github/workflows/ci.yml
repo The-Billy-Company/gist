@@ -33,10 +33,17 @@ on:
   pull_request:
   workflow_dispatch:
 
-# A force-push mid-run should cancel the run it obsoleted, not race it.
+# A force-push mid-run should cancel the run it obsoleted, not race it - but only
+# on a branch whose runs are drafts. On `main` every commit is a candidate to be
+# released, and `release.yml` refuses to publish a tag unless `release-ready`
+# concluded success on that exact commit. Cancelling here made the next push to
+# main revoke the previous commit's verdict: one job ends `cancelled`,
+# `release-ready` runs `if: always()` and reads that as a failure, and preflight
+# declines a release that nothing was actually wrong with. So main's runs never
+# cancel each other and each commit keeps its own answer.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
