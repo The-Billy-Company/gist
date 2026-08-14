@@ -15,6 +15,14 @@ user-visible / API / behavior / perf / security change. Skip only for
 comment-only, format-only, or pure-internal refactors with zero observable
 delta — when unsure, write the fragment.
 
+A fragment's `<type>` is one of `note`, `added`, `changed`, `deprecated`,
+`removed`, `fixed`, `security`. `note` is the odd one: it is the release's
+lede rather than an entry in it — prose that frames the section, rendered
+above every category because towncrier emits types in declaration order. Use
+it at most once per release, for the paragraph someone should read before the
+bullets. Everything under `changelog.d/` becomes the GitHub Release body
+verbatim on tag, so write for the person landing on the release page.
+
 Fragments are Markdown and keep their own layout: `wrap = false` in
 [`../towncrier.toml`](../towncrier.toml), so multiple paragraphs, fenced code,
 and lists survive the fold. Match the surrounding document — dash bullets,

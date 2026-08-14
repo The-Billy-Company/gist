@@ -12,7 +12,7 @@ version_kind = "zig-zon"
 directory = "changelog.d"
 file = "CHANGELOG.md"
 ignore = [ ".gitkeep", "README.md" ]
-types = [ "added", "changed", "deprecated", "removed", "fixed", "security" ]
+types = [ "note", "added", "changed", "deprecated", "removed", "fixed", "security" ]
 stem_pattern = '^\+[a-z0-9]+(-[a-z0-9]+)*$'
 min_body_chars = 40
 
