@@ -69,7 +69,7 @@ toolchains, and only the digest separates them.
 
 csearch and zoekt carry **no version flag at all**, so their pin is the
 embedded Go module version, read from build metadata rather than by running
-them — `csearch version` treats `version` as the *regexp* and prints a matching
+them — `csearch version` treats `version` as the _regexp_ and prints a matching
 corpus line, which scraped a bogus `26.3.0` into an identity before the probe
 order was fixed. Expect `github.com/google/codesearch v1.2.0` and a
 `github.com/sourcegraph/zoekt` commit pseudo-version.
@@ -84,11 +84,11 @@ tree's own roots — `field.sh` resolves them once, mirroring
   build artifacts). **ag** is handed `--path-to-ignore .gitignore` (the root
   ignore set `rg` reads for free). **ugrep / GNU grep** have no per-file
   gitignore, so they get the heavy dir-exclude set (`$XDIRS`) — they still scan
-  a slightly *larger* file set (gitignored individual files `rg` skips), which
+  a slightly _larger_ file set (gitignored individual files `rg` skips), which
   only makes them do **more** work, so gist's win over them is conservative.
 - **gist / rg** additionally run under `--no-ignore-vcs` plus the root
   `.gitignore`, so a multi-root race can't hit ripgrep's nondeterministic
-  parent-ignore re-anchoring. That also discards every *nested* `.gitignore`,
+  parent-ignore re-anchoring. That also discards every _nested_ `.gitignore`,
   which is why `field.sh` re-applies the build-output exclusions as globs
   (`$SCOPE`): without them these two alone walk build artifacts the root ignore
   never names — Elixir `_build`/`deps`/`cover`, Electron `out/` — that
@@ -107,6 +107,6 @@ tree's own roots — `field.sh` resolves them once, mirroring
 - Timing is `hyperfine` mean, warm page cache, fresh process. Every command's
   output is drained (`… | wc -l`) so ugrep's lazy multithreaded `-l` actually
   scans (it short-circuits when a harness discards its stdout) and a needle
-  *miss* (grep exits 1) doesn't abort the run. **Ratios** are the headline
+  _miss_ (grep exits 1) doesn't abort the run. **Ratios** are the headline
   number — robust to this shared dev box's load because each query's tools run
   back-to-back under the same conditions.
