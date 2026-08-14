@@ -458,6 +458,17 @@ jobs:
         if: steps.state.outputs.result == 'absent'
         id: auth
 
+      # The release bumps `Cargo.toml` through its `x-release-please-version`
+      # annotation, and a lockfile records the version of the package it locks -
+      # including this one. So a version bump leaves the committed lock naming the
+      # previous version, and `--locked` is specifically the flag that refuses to
+      # fix it: gist's v1.2.0 died here with "cannot update the lock file because
+      # --locked was passed". `--workspace` re-pins only the local packages against
+      # the manifests beside them and leaves every third-party pin exactly as
+      # committed, which is the whole point of `--locked` below.
+      - if: steps.state.outputs.result == 'absent'
+        run: cargo update --workspace
+
       # --locked: publish the dependency graph that was tested, not whatever the
       # index happens to offer at upload time.
       - if: steps.state.outputs.result == 'absent'
