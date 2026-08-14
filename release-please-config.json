@@ -72,7 +72,7 @@
     "is upstream's knob for \"pull requests must not be out-of-date with the base",
     "branch\", and it costs a rebuilt branch on every push while a PR is open —",
     "which is why the fold recomputes from main rather than appending, and",
-    "cancels a superseded run of itself rather than queueing behind one.",
+    "cancels a superseded run of itself rather than queuing behind one.",
     "",
     "── The tag cascades",
     "Merging the release PR tags `vX.Y.Z`, which is what `release.yml` waits",
