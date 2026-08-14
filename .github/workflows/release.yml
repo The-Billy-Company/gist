@@ -588,8 +588,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      # The one write: `gh release edit` on a release this repository owns.
-      contents: write
+      contents: write # `gh release edit`, on a release this repository owns
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
