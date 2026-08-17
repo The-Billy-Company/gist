@@ -1,6 +1,6 @@
 .{
     .name = .gist,
-    .version = "1.2.0", // x-release-please-version
+    .version = "1.2.1", // x-release-please-version
     .fingerprint = 0x93c97f19b94b6ad4,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{
