@@ -7,6 +7,54 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.2.1] - 2026-08-17
+
+### Fixed
+
+- A version bump moved `Cargo.toml` and left the lockfile behind, and `--locked`
+  is the flag whose whole job is to refuse to fix that. A lockfile records the
+  version of every package it locks, including the one it sits next to, so the
+  release bumping the manifest through its `x-release-please-version` annotation
+  put the two a version apart. `cargo publish --locked` then stopped with "cannot
+  update the lock file because --locked was passed", which is correct behavior and
+  a wedge: nothing about it improves on a retry, so the crate never reaches the
+  registry no matter how many times the release runs.
+
+  `gist` hit it on v1.2.0 with the wheel and the Go module already published, so
+  the tag existed and the crate did not. The committed lock was stale in the tree
+  too, which means `cargo build --locked` in `bindings/rust` was already failing
+  for anyone who tried it.
+
+  The publish now re-pins the lock's own version from the manifest beside it
+  first, hermetically - a `version = "..."` rewrite and nothing else, so no
+  third-party pin can move and the graph being published is still the one that was
+  tested, which is the reason `--locked` is there at all. `cargo update
+  --workspace` was the first attempt and the wrong one: it resolves the whole
+  graph, so it wants a sibling `irregex` checkout for the `irgx` path dependency
+  that this job has no reason to make, and relate's v1.1.0 failed exactly there
+  while `cargo publish --locked` had never needed it.
+- CI cancelled its own evidence on `main`. The concurrency group keyed on the ref
+  and cancelled unconditionally, which is right on a branch whose runs are drafts -
+  a force-push should kill the run it obsoleted rather than race it - and wrong on
+  `main`, where every commit is a candidate to be released and the run is the only
+  record of whether it may be.
+
+  `release.yml` will not publish a tag unless `release-ready` concluded success on
+  that exact commit, which is the check that makes a green release meaningful. But
+  `release-ready` gathers its dependencies under `if: always()`, so it reports on
+  jobs that never finished as readily as on jobs that failed. So the next push to
+  main revoked the previous commit's verdict: a still-running job ended
+  `cancelled`, `release-ready` read that as a failure, and preflight declined a
+  release with nothing wrong with it. On a tree several people push to, that is
+  not a rare race; it is most releases, and it looks exactly like a real test
+  failure until you notice the conclusion is `cancelled` rather than `failure`.
+
+  The v1.2.0 tag hit it on the first try: green on the pull request, then three
+  docs commits landed behind the merge and took the release commit's
+  `python (3.14)` job with them. Pushes to main no longer cancel each other, so
+  each commit keeps its own answer; pull request branches still supersede as
+  before.
+
 ## [1.2.0] - 2026-08-14
 
 ### Added
