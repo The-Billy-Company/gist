@@ -3,7 +3,7 @@ is the flag whose whole job is to refuse to fix that. A lockfile records the
 version of every package it locks, including the one it sits next to, so the
 release bumping the manifest through its `x-release-please-version` annotation
 put the two a version apart. `cargo publish --locked` then stopped with "cannot
-update the lock file because --locked was passed", which is correct behaviour and
+update the lock file because --locked was passed", which is correct behavior and
 a wedge: nothing about it improves on a retry, so the crate never reaches the
 registry no matter how many times the release runs.
 
