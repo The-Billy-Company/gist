@@ -128,15 +128,32 @@ nothing it returns was decided by anything other than the file's current bytes.
 
 ## Install
 
-The CLI is the product, and it is built from source — one command produces the
-binaries, links them onto `PATH`, and writes the trigram index:
+The CLI is the product. Three ways in, and none of them needs a Zig toolchain
+except the last:
+
+```bash
+pip install gist-search      # the binary, on PATH — no Python needed to use it
+```
+
+Every release also attaches a plain archive per platform (macOS, Linux, and
+Windows × x86_64 and arm64) with a `SHA256SUMS` beside them, for a machine with
+no Python at all:
+
+```bash
+curl -LO https://github.com/The-Billy-Company/gist/releases/latest/download/gist-<version>-<target>.tar.gz
+tar -xzf gist-<version>-<target>.tar.gz && ./gist index
+```
+
+From source, one command produces the binaries, links them onto `PATH`, and
+writes the trigram index — this is also what a contributor runs:
 
 ```bash
 zig build                    # ReleaseFast binaries, PATH link, trigram index
 ```
 
 The language bindings are published, and each drives that same binary rather
-than reimplementing it, so the CLI is a prerequisite for all three:
+than reimplementing it, so the CLI is a prerequisite for all three — the wheel
+above carries its own copy, and the other two find one on `PATH`:
 
 | | Install | You write |
 |---|---|---|

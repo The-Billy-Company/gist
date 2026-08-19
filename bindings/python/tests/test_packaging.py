@@ -40,6 +40,8 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -47,6 +49,18 @@ import pytest
 PRODUCT = "gist"
 SUBSTRATE = "irgx"
 SUFFIX = ".dylib" if sys.platform == "darwin" else ".so"
+
+
+def _installed_name() -> str:
+    """What the CLI is called inside the wheel — `hatch_build.py`'s `_LAYOUT`."""
+    return f"{PRODUCT}.exe" if sys.platform == "win32" else PRODUCT
+
+
+def _version() -> str:
+    """Read from the manifest rather than the installed distribution: the wheel
+    under test is built from this tree, and an editable install can be older."""
+    manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    return str(tomllib.loads(manifest.read_text())["project"]["version"])
 
 
 def _checkout(name: str) -> Path | None:
@@ -241,6 +255,76 @@ def test_the_export_table_can_tell_a_product_from_the_substrate(installed: Path)
         f"lib{SUBSTRATE} exports this product's verbs — the two vocabularies are not "
         f"separable, and the gate above cannot mean what it says"
     )
+
+
+def _built_wheel(tmp_path: Path) -> zipfile.ZipFile:
+    """A real wheel, built from the binary this checkout already has.
+
+    `GIST_PREBUILT_BIN` is the same door `scripts/build_wheels.py` uses, so the
+    hook copies rather than invoking Zig and this costs a file copy. Nothing is
+    asserted about a wheel built some other way, because no other way ships.
+    """
+    binary = _checkout(PRODUCT)
+    built = None if binary is None else binary / "zig-out" / "bin" / PRODUCT
+    if built is None or not built.is_file():
+        pytest.skip(f"no built {PRODUCT} to package; run `zig build`")
+    root = Path(__file__).resolve().parents[1]
+    done = subprocess.run(
+        [sys.executable, "-m", "hatchling", "build", "-t", "wheel", "-d", str(tmp_path)],
+        cwd=root,
+        env={**os.environ, "GIST_PREBUILT_BIN": str(built)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    wheels = sorted(tmp_path.glob("*.whl"))
+    assert done.returncode == 0 and wheels, f"the wheel would not build:\n{done.stderr}"
+    return zipfile.ZipFile(wheels[0])
+
+
+def test_the_wheel_puts_the_cli_on_path(tmp_path: Path):
+    """`pip install gist-search` must yield a runnable `gist`, not only an import.
+
+    The CLI is the product and this wheel is the only channel that ships it
+    prebuilt, so a wheel that carries the binary where only Python can reach it
+    leaves every non-Python user building from source. `.data/scripts/` is what
+    an installer copies into `bin`/`Scripts`.
+
+    The mode is asserted with it, because the failure it guards is silent at
+    install time and total at run time: a file that lands without its exec bit
+    is on PATH and still cannot be run.
+    """
+    with _built_wheel(tmp_path) as wheel:
+        scripts = [n for n in wheel.namelist() if ".data/scripts/" in n]
+        assert scripts == [f"gist_search-{_version()}.data/scripts/{_installed_name()}"], (
+            f"the wheel ships no CLI a shell can reach: {scripts}"
+        )
+        mode = wheel.getinfo(scripts[0]).external_attr >> 16
+        assert mode & 0o111, f"the shipped `{PRODUCT}` is not executable (mode {oct(mode)})"
+
+
+def test_the_wheels_two_copies_are_the_same_binary(tmp_path: Path):
+    """Both rungs must land, and land identically.
+
+    `gist/bin/` is where the shared `irgx` resolver looks and is the only rung
+    that answers for an unactivated environment; `.data/scripts/` is the one a
+    shell sees. Shipping both is deliberate — but two copies that could drift
+    would be a bug rather than a design, so this pins them to one file. It is
+    also the adverse half of the test above: it fails if a future change ships
+    a Python shim under `scripts/` while the real binary stays inside the
+    package.
+    """
+    with _built_wheel(tmp_path) as wheel:
+        packaged = wheel.read(f"{PRODUCT}/bin/{_installed_name()}")
+        shipped = wheel.read(f"gist_search-{_version()}.data/scripts/{_installed_name()}")
+        assert shipped == packaged, (
+            f"the CLI on PATH is not the binary the package resolves: "
+            f"{len(shipped):,} bytes vs {len(packaged):,}"
+        )
+        assert not shipped.startswith(b"#!"), (
+            "the shipped CLI is a script, not the native binary — an interpreter in "
+            "front of gist costs more startup than a warm query costs in total"
+        )
 
 
 def test_the_package_declares_its_annotations_to_consumers():

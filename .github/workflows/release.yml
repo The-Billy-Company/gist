@@ -171,8 +171,13 @@ jobs:
           command: version
           args: --root gist --tag ${{ github.ref_name }}
 
+      # `--archives` cuts the downloadable release assets from the same six
+      # binaries the wheels are built from, in the same pass. A subdirectory of
+      # the already-ignored `dist/`, so a local run leaves nothing untracked —
+      # and out of reach of PyPI regardless, since `publish` uploads whatever is
+      # in the `wheels` artifact and that artifact globs `dist/*.whl`.
       - name: Build every target
-        run: uv run --no-project --python 3.12 python scripts/build_wheels.py
+        run: uv run --no-project --python 3.12 python scripts/build_wheels.py --archives dist/archives
 
       # A local checkout resolves `irregex` through a `[tool.uv.sources]` path,
       # which is right for development — but that key is uv-specific and never
@@ -249,6 +254,12 @@ jobs:
         with:
           name: wheels
           path: gist/bindings/python/dist/*.whl
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: archives
+          path: gist/bindings/python/dist/archives/*
           if-no-files-found: error
 
   # Import success is not product success. Each of these runs on the real
@@ -605,6 +616,60 @@ jobs:
           done
           echo "::error::$MODULE@$VERSION never became resolvable through the" \
                "module proxy. The tag exists, so this is an ingestion problem." >&2
+          exit 1
+
+  # ── GitHub Release assets
+  #
+  # The CLI is the product, and every other job here ships it to someone who
+  # already has a language runtime: PyPI reaches Python, crates.io reaches
+  # Rust, the proxy reaches Go. Somebody who just wants the tool had to install
+  # Zig and build it. These are the archives that close that — one per target,
+  # plus the `SHA256SUMS` a Homebrew formula or an installer script checks a
+  # download against.
+  #
+  # `needs: smoke` is the point of the job, not ceremony: an asset here is the
+  # exact binary that just ran a real search on its own architecture's hardware
+  # a few minutes ago. Nothing is rebuilt, so an asset and its wheel cannot
+  # disagree about what this release's `gist` is.
+  binaries:
+    name: release binaries
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # `gh release upload`, on a release this repository owns
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: archives
+          path: assets
+
+      # `--clobber`, and the same bounded wait `notes` uses below for the same
+      # reason: release-please usually creates the release before this workflow
+      # starts, but a tag pushed any other way arrives with none behind it.
+      # Re-running a release must replace its assets rather than fail on
+      # "already exists" — the tag is immutable, the asset list is not.
+      - name: Attach every archive to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          shasum -a 256 -c assets/SHA256SUMS
+          files=(assets/*)
+          for attempt in $(seq 1 30); do
+            if gh release view "$TAG" --json id >/dev/null 2>&1; then
+              gh release upload "$TAG" "${files[@]}" --clobber
+              echo "attached ${#files[@]} files to the $TAG release"
+              exit 0
+            fi
+            echo "no release on $TAG yet (attempt $attempt/30) — waiting"
+            sleep 10
+          done
+          echo "::error::no GitHub Release on $TAG after five minutes — the tag" \
+               "shipped with no downloadable binaries. Attach them by hand with" \
+               "\`gh release upload\` from this run's \`archives\` artifact." >&2
           exit 1
 
   # Give the GitHub Release the notes this repository actually wrote.

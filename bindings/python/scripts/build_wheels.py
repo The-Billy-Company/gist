@@ -11,9 +11,18 @@ CLI binary instead of a shared library.
     python3 scripts/build_wheels.py                 # every target
     python3 scripts/build_wheels.py --only native   # the one matching this host
     python3 scripts/build_wheels.py --list          # what the matrix covers
+    python3 scripts/build_wheels.py --archives OUT  # …and the release archives
 
 Wheels land in ``dist/``. A target that fails is reported and does not stop the
 others, so one broken toolchain does not cost you the rest of the matrix.
+
+``--archives`` additionally writes one downloadable archive per target, plus a
+``SHA256SUMS`` over them. These are the GitHub Release assets, and they exist
+because a wheel is only reachable by someone who has Python: a Homebrew formula,
+a ``curl | sh`` installer, and ``cargo binstall`` all want a plain archive at a
+URL. They are cut from the very binary each wheel was built from, in the same
+pass — not a second build — so an asset and its wheel cannot disagree about what
+this release's CLI is.
 
 Every target names an explicit minimum platform version in its Zig triple, and
 its wheel tag says the same number. Letting Zig inherit the host's macOS SDK
@@ -24,12 +33,16 @@ that built it, under a tag promising it would.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
+import tomllib
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -165,6 +178,65 @@ def build_wheel(target: Target, binary: Path, outdir: Path) -> None:
     subprocess.run(command, cwd=PROJECT, check=True, env=env)
 
 
+def version() -> str:
+    """The release being cut, from the manifest release-please already bumps."""
+    manifest = tomllib.loads((PROJECT / "pyproject.toml").read_text())
+    return str(manifest["project"]["version"])
+
+
+def build_archive(target: Target, binary: Path, release: str, outdir: Path) -> Path:
+    """One downloadable archive holding just the CLI, named for its platform.
+
+    Archived rather than published as a bare file for one reason that matters
+    and one that follows from it: a raw binary downloaded over HTTP arrives
+    without its executable bit, and every installer that would consume this
+    (Homebrew, ``cargo binstall``, a shell one-liner) already knows how to
+    unpack. ``.zip`` on Windows and ``.tar.gz`` elsewhere is what each platform's
+    tooling opens with no extra dependency.
+
+    The mode is set explicitly on both paths. `tarfile` copies it from the file
+    on disk, which is correct here but only by inheritance from Zig; `zipfile`
+    stores nothing of the sort unless told, and a `gist.exe` does not need the
+    bit anyway — stating it in both keeps the two branches saying the same thing.
+    """
+    inner = Path(target.artifact).name
+    stem = f"gist-{release}-{target.name}"
+    if target.artifact == _EXE:
+        path = outdir / f"{stem}.zip"
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            entry = zipfile.ZipInfo(inner)
+            entry.external_attr = 0o755 << 16
+            entry.compress_type = zipfile.ZIP_DEFLATED
+            archive.writestr(entry, binary.read_bytes())
+        return path
+    path = outdir / f"{stem}.tar.gz"
+    with tarfile.open(path, "w:gz") as archive:
+        info = archive.gettarinfo(str(binary), arcname=inner)
+        info.mode = 0o755
+        # Zeroed so the same sources produce the same bytes: an archive whose
+        # checksum moves because it was built on a different afternoon cannot be
+        # used to prove two releases shipped the same CLI.
+        info.uid = info.gid = 0
+        info.uname = info.gname = ""
+        info.mtime = 0
+        with binary.open("rb") as handle:
+            archive.addfile(info, handle)
+    return path
+
+
+def write_checksums(archives: list[Path], outdir: Path) -> Path:
+    """A `SHA256SUMS` in the format `shasum -c` reads, over every asset.
+
+    Not decoration: this is the only thing a Homebrew formula or an installer
+    script can check a download against, and it has to be produced here, beside
+    the archives, rather than by whoever uploads them.
+    """
+    path = outdir / "SHA256SUMS"
+    lines = [f"{hashlib.sha256(a.read_bytes()).hexdigest()}  {a.name}\n" for a in sorted(archives)]
+    path.write_text("".join(lines))
+    return path
+
+
 def chosen_targets(only: list[str] | None) -> list[Target]:
     if not only:
         return list(MATRIX)
@@ -193,6 +265,11 @@ def main() -> int:
     )
     parser.add_argument("--list", action="store_true", help="print the matrix and exit")
     parser.add_argument("--outdir", default=str(PROJECT / "dist"), help="where wheels land")
+    parser.add_argument(
+        "--archives",
+        metavar="DIR",
+        help="also write one release archive per target there, plus SHA256SUMS",
+    )
     args = parser.parse_args()
 
     here = native_target()
@@ -206,7 +283,12 @@ def main() -> int:
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    assets = Path(args.archives) if args.archives else None
+    if assets is not None:
+        assets.mkdir(parents=True, exist_ok=True)
+    release = version()
     failures: list[tuple[str, str]] = []
+    archived: list[Path] = []
 
     for target in chosen_targets(args.only):
         print(f"\n=== {target.name} ({target.zig}) -> {target.tag} ===", flush=True)
@@ -214,6 +296,8 @@ def main() -> int:
             with tempfile.TemporaryDirectory(prefix=f"gist-{target.name}-") as staging:
                 binary = build_binary(target, Path(staging))
                 build_wheel(target, binary, outdir)
+                if assets is not None:
+                    archived.append(build_archive(target, binary, release, assets))
         except (subprocess.CalledProcessError, RuntimeError, OSError) as exc:
             print(f"FAILED {target.name}: {exc}", file=sys.stderr)
             failures.append((target.name, str(exc)))
@@ -221,6 +305,14 @@ def main() -> int:
     print("\n=== wheels ===")
     for wheel in sorted(outdir.glob("*.whl")):
         print(f"  {wheel.name}")
+    # Only over what this run actually produced: a stale archive left in the
+    # directory from an earlier version must not be vouched for by this
+    # release's checksums.
+    if archived:
+        print("\n=== archives ===")
+        for asset in sorted(archived):
+            print(f"  {asset.name}")
+        print(f"  {write_checksums(archived, assets).name}")
     if failures:
         print("\n=== failed targets ===")
         for name, why in failures:

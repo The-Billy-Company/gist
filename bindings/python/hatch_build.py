@@ -3,9 +3,26 @@
 A wheel that contains a native executable is not `py3-none-any`. Claiming
 otherwise produces a file pip will happily install on any platform and that
 will fail the moment a verb shells out, which is the worst possible place to
-discover the mistake — so this hook does three things: build (or accept) the
-CLI, force it into the wheel under ``gist/bin/``, and set the platform tag to
-match.
+discover the mistake — so this hook does four things: build (or accept) the
+CLI, force it into the wheel under ``gist/bin/``, install that same binary as a
+wheel *script* so `pip install gist-search` puts `gist` on PATH, and set the
+platform tag to match.
+
+The CLI is the product, and this is the only channel that ships it prebuilt, so
+the wheel has to hand it to a shell and not only to an import. The script is the
+binary itself rather than a ``[project.scripts]`` console entry point, because
+such an entry point is a Python program: it pays interpreter startup (~30 ms
+here) plus this package's own import before it can exec anything, on a binary
+that answers a warm query in under one. A shim would be the single slowest thing
+about gist. `.data/scripts/` is the wheel format's own answer for this — pip
+copies the file into the environment's `bin`/`Scripts` with its mode intact, so
+the thing on PATH is the certified binary with nothing in front of it.
+
+That does mean the binary is in the wheel twice, and both copies earn their
+place: `gist/bin/` is where the shared `irgx` resolver's bundled rung looks, and
+it must keep working for an interpreter whose environment was never activated
+(`python -m`, a tool runner, an embedded venv), which is exactly when the
+scripts directory is absent from PATH.
 
 Unlike `irregex`'s C-ABI library, the CLI links nothing external at runtime —
 `otool -L`/`ldd` on the product binary show only the platform's own libc, since
@@ -117,6 +134,13 @@ class GistBuildHook(BuildHookInterface):
         # way any non-executable `gist` would: loudly, at the caller's first
         # search, never silently.
         build_data.setdefault("force_include", {})[str(source)] = f"gist/bin/{installed_name}"
+        # The PATH copy, under `<dist>.data/scripts/`. Hatchling routes this
+        # through the same `add_file`, so it carries the same mode; it rewrites
+        # a `#!python` shebang on the way past, which a native binary does not
+        # have. Windows needs the `.exe` here too — the launcher pip writes for
+        # a console entry point is what supplies that suffix, and there is no
+        # console entry point.
+        build_data.setdefault("shared_scripts", {})[str(source)] = installed_name
 
     def _build_with_zig(self, zig_target: str | None, which_os: str) -> Path:
         if shutil.which("zig") is None:
