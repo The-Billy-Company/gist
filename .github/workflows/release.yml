@@ -469,47 +469,26 @@ jobs:
         if: steps.state.outputs.result == 'absent'
         id: auth
 
-      # A lockfile records the version of the package it locks, including this one,
-      # and the release bumps only the manifest - through its
-      # `x-release-please-version` annotation. So every release leaves the lock a
-      # version behind, and `--locked` below is precisely the flag that refuses to
-      # reconcile them: gist's v1.2.0 died on "cannot update the lock file because
-      # --locked was passed", with the wheel and the Go module already published.
+      # A lockfile records a version for every package in the resolved graph, and
+      # two of them are ours: this crate, whose manifest the release bumps through
+      # its `x-release-please-version` annotation, and the sibling `irgx`, which
+      # versions on irregex's schedule and moves without asking gist at all.
+      # Nothing rewrites either number in the lock, so it drifts from both
+      # directions, and `--locked` below is precisely the flag that refuses to
+      # reconcile the difference: v1.2.0 died on "cannot update the lock file
+      # because --locked was passed", and v1.2.2 died there again on the sibling
+      # pin after a fix that only knew about this crate's own block - both with
+      # the wheel and the Go module already published.
       #
-      # Re-pinned hermetically rather than with `cargo update --workspace`, which
-      # needs to resolve the `irgx` path dependency and so wants a sibling
-      # `irregex` checkout this job has no reason to make - relate's v1.1.0 failed
-      # exactly there while `cargo publish --locked` had never needed it. A
-      # `version = "..."` rewrite touches nothing else, so no third-party pin can
-      # move and what gets published is still the graph that was tested.
-      - name: Re-pin the lockfile's own version to the manifest beside it
+      # `tools/relock.py` discovers local packages by walking the manifest graph,
+      # so neither name is written down here and a third one added later is
+      # covered the day it exists. Re-pinned hermetically rather than with
+      # `cargo update --workspace`, which re-resolves: a `version = "..."` rewrite
+      # touches nothing else, so no third-party pin can move and what gets
+      # published is still the graph that was tested.
+      - name: Re-pin the lockfile's local packages to the manifests beside them
         if: steps.state.outputs.result == 'absent'
-        env:
-          PACKAGE: gist-search
-        run: |
-          python3 - <<'PY'
-          import os, pathlib, re, tomllib
-
-          name = os.environ["PACKAGE"]
-          manifest = tomllib.loads(pathlib.Path("Cargo.toml").read_text())
-          version = manifest.get("package", {}).get("version")
-          if not isinstance(version, str):  # `version.workspace = true`
-              version = manifest["workspace"]["package"]["version"]
-
-          lock = pathlib.Path("Cargo.lock")
-          text = lock.read_text()
-          block = re.compile(
-              rf'(\[\[package\]\]\nname = "{re.escape(name)}"\nversion = ")[^"]+(")'
-          )
-          new, hits = block.subn(rf"\g<1>{version}\g<2>", text, count=1)
-          if hits != 1:
-              raise SystemExit(f"Cargo.lock has no [[package]] block for {name}")
-          if new == text:
-              print(f"{name} is already locked at {version}")
-          else:
-              lock.write_text(new)
-              print(f"re-pinned {name} to {version} in Cargo.lock")
-          PY
+        run: python3 ../../tools/relock.py .
 
       # --locked: publish the dependency graph that was tested, not whatever the
       # index happens to offer at upload time.

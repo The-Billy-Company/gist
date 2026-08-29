@@ -8,6 +8,29 @@ them with `python3 tools/<name>.py`.
 | `sync_contract.py` | Verifies the foreign contracts are reachable as sibling checkouts (`../irregex`, `../relate`). |
 | `version_parity.py` | Proves every mirror of this package's version still equals `build.zig.zon`, and that the release bot was told about each one. |
 | `registry_readme.py` | Verifies every relative link in `README.md` still resolves, and mints the link-corrected copy PyPI and crates.io publish. |
+| `relock.py` | Re-pins a `Cargo.lock`'s own packages — this crate and the sibling `irgx` — to the manifests beside them, so `cargo publish --locked` has something current to publish. |
+
+## The lock nobody rewrites
+
+`version_parity.py` above covers the manifests, because a manifest carries a
+marker the release bot can find. A lockfile carries no marker: it is resolver
+output, and the resolver is the only thing that normally writes it. So the
+version it records for `gist-search` stays behind the moment release-please
+bumps `Cargo.toml`, and the one it records for `irgx` goes stale on irregex's
+schedule rather than on ours — a repository that has not changed can wake up
+with a stale lock because a sibling released overnight.
+
+Nothing in CI notices, because nothing in CI passes `--locked`. `cargo publish`
+does, on purpose: the point is to ship the graph that was tested rather than
+whatever the index offers at upload time. That is where it surfaces, at the one
+moment it is most expensive — v1.2.0 and v1.2.2 each died there with the wheel
+and the Go module already out.
+
+`relock.py` is the repair, and it is a rewrite rather than a resolve: it walks
+the manifest graph to find which packages are local, reads each one's declared
+version off disk, and writes that into the matching `[[package]]` block. No
+registry is contacted, so no third-party pin can move. The release workflow runs
+it just before `cargo publish --locked`; `--check` reports without writing.
 
 ## The README, on an index that is not GitHub
 
