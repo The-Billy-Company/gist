@@ -90,6 +90,18 @@ run "flags parity (flags.py, both engines)" \
 # `bench/conformance/rgsuite/transforms.py`.
 run "transforms parity -z/--pre/-E/--binary (transforms.py, both engines)" \
   python3 bench/conformance/rgsuite/transforms.py run --engine both
+# The two surfaces a MINED rg suite structurally cannot reach: the by-value escape
+# family (rg *rejects* `\N{NAME}` and every octal spelling, so its own suite has no
+# case for them) and the `--null-data` record model (rg's suite holds no record with
+# an interior newline, so it never asks what `^` means inside one). Ripgrep is the
+# oracle for every cell it can answer; where the two disagree Python `re` referees
+# over records split by hand, and each of the five declared boundaries re-proves its
+# own mechanism per run. Every family's population is pinned by EXACT count in
+# `records_baseline.json`, so a boundary that grows or shrinks fails here. Blocking
+# so an escape or record-model regression can't reach the perf phase. See
+# `bench/conformance/rgsuite/records.py`.
+run "escape + record-model parity (records.py)" \
+  python3 bench/conformance/rgsuite/records.py run
 # The CLI-shape admission matrix: one row per supported shape (mode × flags ×
 # walk-scope × emit × selectivity), each driven as REAL argv three ways and
 # asserted gist-idx == gist-noidx == rg at its bar (set/lines/count + exit class).

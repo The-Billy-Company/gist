@@ -378,6 +378,61 @@ unit test in `pipeline.zig`, not that wall-clock number. The `../races/searchzip
 race adds ugrep to the `-z` field (gist beats both rg and ugrep on the in-process
 formats; bzip2 and the external-codec tail have no in-process Zig decoder).
 
+## Records companion (`records.py`) — escapes and the `--null-data` record model
+
+A mined suite's denominator is the set of cases ripgrep chose to write, and there
+are two surfaces where rg had nothing to write down — for opposite reasons.
+
+The **by-value escape family** is missing because rg *refuses* most of it: it reads
+`\007` as a backreference, answers "backreferences are not supported", and points
+at `-P`, and it has no `\N{NAME}` at all. So a suite mined from rg contains no case
+for the majority of the family, and the absence looks exactly like coverage. The
+**`--null-data` record model** is missing because rg's tests hold no record with an
+interior newline — which is the only question the mode has. A record is
+NUL-delimited, so it may contain `\n`, and every anchor's meaning follows from
+whether you believe it may.
+
+```bash
+python3 records.py run                      # the grid (the gate)
+python3 records.py run --publish-baseline records_baseline.json
+python3 records.py bench                    # record-mode timing vs rg
+```
+
+Ripgrep is the oracle for every cell it can answer, byte-for-byte on stdout and
+exit code. Where the two tools disagree, a tool-to-tool diff can only report that
+they do — so **Python `re` referees**: split the file on NUL by hand, hand each
+record to `re` with `re.MULTILINE` (making `^`/`$` the `\n`-boundary assertions both
+line tools agree they are), and compare all three. `-c` and `-o` are the two frames
+audited that way, because they state a fact about the language; the rest encode a
+layout.
+
+Of 1533 cells (pattern × output frame × fixture), **1237 are byte-identical**, 21
+are refused by both, and 275 sit at one of five **declared boundaries** — each a
+predicate that re-proves its own mechanism on every run, rather than a family
+forgiven by name:
+
+| Residual | What it catches rg doing |
+| --- | --- |
+| `re_referee` | reading `^` as "after a `\n`", so a record's own start is not a line start to it; and printing a whole record as the `-o` row for a match it rejected |
+| `nul_in_slice` | keeping the NUL in the slice it searches, so `\z` matches **zero** records — including the bare nullable `\z`, which must hold at every haystack's end |
+| `text_notice` | counting its own "binary file matches" notice as a line. Proof: both agree under `--text`, which retires detection and changes nothing else |
+| `vimgrep_no_column` | emitting a `--vimgrep` row missing the column its own `path:line:column:text` format defines, for a record whose match its printer re-derived and discarded |
+| `rg_rejects` | nothing — rg cannot compile the spelling, so gist's answer is held to `re`'s instead, proving the superset is *right* and not merely accepted |
+
+Zero unjustified divergences. Every family's population is pinned by **exact
+count** in `records_baseline.json` — not a shrink-only floor, because the grid is
+deterministic, so a family that grows *or* shrinks is news. If ripgrep fixes one of
+these, this lane fails and the boundary should be **deleted** from `records.py`
+rather than refreshed. Wired into the correctness phase of
+`../gates/contract/ci_order.sh`, ahead of the perf phase.
+
+It earned its keep on its first run: it found `(?-u)\u00e9` truncating a character
+to one byte, so gist matched a raw 0xE9 that a UTF-8 file does not contain — finding
+nothing where rg found the character *and* matching where rg did not. It also
+surfaced an older divergence in the same place, `(?-u)é+` repeating only the
+character's last byte. Both are fixed; the fix is what the `escape.Width` parameter
+is for.
+
 ## Surface companion (`surface.py`) — conformance with ripgrep's own denominator
 
 Every lane above measures a set someone curated: the cases ripgrep chose to
@@ -476,6 +531,7 @@ a real run could mint the certificate was to leave this lane out of it.
 | `modes.py`      | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers)                                                                                                                                                                                                                                                                                                                                                 |
 | `flags.py`      | hand-authored differential proof for what the mined suite can't pin: the walk/order/ignore flags (`--sort`/`--sortr`/`--sort-files`, `-j`/`--threads`, `--one-file-system`, `--no-ignore-global`, negation last-wins — timestamp/device/thread/global-config dependent), the `--no-messages`/`--no-ignore-messages` **stderr** lane, and `\A`/`\z` haystack anchors under `-U` across three tail shapes × seven frames |
 | `transforms.py` | hand-authored `-z`/`--pre`/`-E`/`--binary` content-transform differential proof + the `-z` pipeline-vs-serial-vs-rg speed floor (the flags `run.py` can't mine from plain source)                                                                                                                                                                                                                                      |
+| `records.py`    | hand-authored differential proof for the two surfaces a MINED suite structurally cannot reach: the by-value escape family (rg *rejects* `\N{NAME}` and every octal spelling, so its own tests hold no case for them) and the `--null-data` record model (rg's tests hold no record with an interior newline, so they never ask what `^` means inside one). 1533 cells, rg the oracle where it can answer and Python `re` the referee where the two disagree; five declared boundaries, each re-proving its own mechanism per run; populations pinned by exact count in `records_baseline.json` |
 | `surface.py`    | conformance over ripgrep's **own** documented flag surface, read from `rg --generate` + its man page at run time; scores identical / declared-boundary / divergent / rejected, plus the adverse undo-pair lane. Feeds Layer I of the certificate                                                                                                                                                                       |
 | `fuzz.py`       | differential fuzzer — random (pattern × flags × hostile corpus) triples against live rg, with crash / hang / peak-RSS measured in the same pass                                                                                                                                                                                                                                                                        |
 | `dbg.py`        | single-test side-by-side inspector                                                                                                                                                                                                                                                                                                                                                                                     |
