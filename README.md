@@ -511,6 +511,9 @@ The implemented surface includes:
 - the linear RE2/Pike engine, vendored PCRE2 10.47 with JIT (`-P`), and
  `--engine auto` escalation;
 - native multiline search (`-U`, `--multiline-dotall`);
+- verbose mode (`(?x)`, and the scoped `(?x: … )`), so a long pattern can carry
+ the whitespace and `#` comments that make it readable without leaving the
+ linear-time engine, and a commented pattern still composes with `-e` and `-x`;
 - the by-value escapes in full - `\uHHHH`, `\u{H..H}`, `\UHHHHHHHH`, `\U{H..H}`,
  octal `\0oo`/`\ooo`, and `\N{NAME}` by Unicode name - in atom position and
  inside `[…]`, in byte and Unicode mode, either end of a range;
@@ -544,15 +547,16 @@ error, never a convincing empty result.
 
 ## Improvements
 
-Eight flag groups are not bit-identical to ripgrep, plus one pattern-syntax
-family, and every one of them is an **improvement**: identical-or-superset
+Eight flag groups are not bit-identical to ripgrep, plus two pattern-syntax
+families, and every one of them is an **improvement**: identical-or-superset
 results that are strictly better in behavior, performance, or robustness, never
 a regression.
 
 This is the *only* category of divergence. If gist ever disagrees with ripgrep
 outside this list it is a bug, not a design choice, and `gist --schema` reports
-the flag groups under the `improvements` bucket. The syntax family is not a flag
-and so has no row there; it is [By-Value Escapes](#by-value-escapes) below.
+the flag groups under the `improvements` bucket. The two syntax families are not
+flags and so have no row there; they are [By-Value
+Escapes](#by-value-escapes) and [Verbose Mode](#verbose-mode) below.
 
 For an exact, versioned answer about a flag, inspect `gist --schema` rather than
 relying on a prose list.
@@ -838,6 +842,88 @@ judgment too.
 A short counted run stays an error, because `\u00` is a typo and reading it as
 U+0000 would match something nobody wrote; surrogates and values past U+10FFFF
 are refused, since this engine emits well-formed UTF-8 or nothing.
+
+### Verbose Mode
+
+`(?x)` lets a long pattern be written the way a long pattern wants to be
+written - whitespace to group it, `#` comments to say what a clause is for -
+without leaving the linear-time engine. The scoped `(?x: … )` works too, so one
+branch of an alternation can be commented while the rest stays compact.
+
+ripgrep accepts `(?x)` as well, so unlike the escapes above this is not a family
+rg refuses. It is a family where rg's own suite never crosses the mode with the
+two places verbose is *not* supposed to reach, and rg is wrong in both:
+
+**A pattern may end inside a comment.** rg wraps every pattern in `(?:…)` -
+including a lone one, so there is no spelling that dodges it - and a comment runs
+to the next newline, so the `)` it appends is swallowed:
+
+```console
+$ rg -c '(?x) alpha \s+ \d+  # the count' vrb.txt
+rg: regex parse error:
+    (?:(?x) alpha \s+ \d+  # the count)
+    ^
+error: unclosed group
+
+$ gist -c '(?x) alpha \s+ \d+  # the count' vrb.txt
+1
+```
+
+gist closes each wrap with a newline instead. Under verbose a newline is both
+insignificant whitespace and a comment terminator, so it cannot change a
+pattern's meaning; it only gives the wrapper somewhere to close. That is what
+makes a commented pattern compose with `-e` and `-x` the way an uncommented one
+already did.
+
+**A character class is not trivia.** `re` and PCRE2 both stop applying verbose
+inside `[…]`: a space there is a member and `#` is a literal. rg does not, so
+`[a b]` is `[ab]` to it, `[ ]` is an empty class it rejects, and `[#]` opens a
+comment that eats the rest of the class. gist follows `re`.
+
+Both halves, as `-c` tallies over the 208-line fixture the lane generates
+(`VERBOSE_LINES` in `records.py`, written out as `vrb.txt`), against a real `rg`
+process and Python `re` in the same script:
+
+| Pattern | gist | ripgrep | `re` |
+|---|---|---|---|
+| `(?x) alpha \s+ \d+ # the count` | 1 | rejects | 1 |
+| `(?x) beta # one word` | 101 | rejects | 101 |
+| `(?x)#only a comment` | 208 | rejects | 208 |
+| `(?x) [a b]` | 205 | 202 | 205 |
+| `(?x) [0-9 a-f]` | 205 | 204 | 205 |
+| `(?x) [ ]` | 205 | rejects | 205 |
+| `(?x) alpha [#] filler` | 0 | rejects | 0 |
+
+Both differences are pinned in `bench/conformance/rgsuite/records.py` as the
+`rg_wrapper` and `class_trivia` boundaries, and neither is a name someone decided
+to forgive - each re-proves its own mechanism on every run. `rg_wrapper` holds
+only if rg *answers* the same pattern with a newline appended and then answers
+what gist did, which is what separates a broken wrapper from a missing grammar.
+`class_trivia` holds only if rg answers identically for rg's own claimed reading
+of the pattern (trivia deleted through the class) *and* gist equals `re`. If rg
+fixes either, the lane fails and the boundary gets deleted rather than refreshed.
+
+Speed is the engine's, not the mode's: verbose changes which bytes are a token,
+never what a token means, so it is resolved entirely in the parse and the same
+pattern commented and uncommented scans within a fraction of a percent of itself.
+Over a frozen 11,902-file / 124 MiB tree, `-c`, median of 11 interleaved rounds,
+both tools walking the identical file set and agreeing byte-for-byte:
+
+| Pattern (wall / CPU) | gist | gist `--no-index` | ripgrep |
+|---|---|---|---|
+| `(?x) WalletService` | 29.7 ms / 147 ms | 262.6 ms / 1149 ms | 718.3 ms / 7651 ms |
+| `(?x) [0-9a-f]{8}` | 32.0 ms / 156 ms | 248.8 ms / 1452 ms | 577.5 ms / 5446 ms |
+| `(?x) ^ func \s+ \w+` | 37.6 ms / 139 ms | 283.0 ms / 1455 ms | 669.9 ms / 5478 ms |
+| `(?x) \b [A-Z] \w{9,} \b` | 163.9 ms / 692 ms | 167.5 ms / 944 ms | 249.7 ms / 2458 ms |
+
+That is 18-24x wall and 35-52x CPU on the three selective patterns with the
+index, and 2.3-2.7x wall / 3.8-6.7x CPU with `--no-index`, which is engine
+against engine with every byte read. The last row is the floor rather than the
+headline, and it is the one worth reading: `\b [A-Z] \w{9,} \b` matches almost
+everywhere, so there is nothing for an index to skip and both arms converge -
+1.5x wall, and 3.6x CPU because rg spends its cores where gist does not need to.
+The three patterns rg exits 2 on answer in
+22-27 ms.
 
 ### Adjacent Product Choices
 
