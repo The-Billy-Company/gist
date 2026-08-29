@@ -511,6 +511,9 @@ The implemented surface includes:
 - the linear RE2/Pike engine, vendored PCRE2 10.47 with JIT (`-P`), and
  `--engine auto` escalation;
 - native multiline search (`-U`, `--multiline-dotall`);
+- the by-value escapes in full - `\uHHHH`, `\u{H..H}`, `\UHHHHHHHH`, `\U{H..H}`,
+ octal `\0oo`/`\ooo`, and `\N{NAME}` by Unicode name - in atom position and
+ inside `[…]`, in byte and Unicode mode, either end of a range;
 - path, type, glob, hidden-file, symlink, depth, size, filesystem, and the full
  `.gitignore`/`.ignore`/`.rgignore` control family;
 - context, only-match, count, replacement, heading, column, byte-offset,
@@ -541,13 +544,15 @@ error, never a convincing empty result.
 
 ## Improvements
 
-Eight flag groups are not bit-identical to ripgrep, and every one of them is an
-**improvement**: identical-or-superset results that are strictly better in
-behavior, performance, or robustness, never a regression.
+Eight flag groups are not bit-identical to ripgrep, plus one pattern-syntax
+family, and every one of them is an **improvement**: identical-or-superset
+results that are strictly better in behavior, performance, or robustness, never
+a regression.
 
 This is the *only* category of divergence. If gist ever disagrees with ripgrep
 outside this list it is a bug, not a design choice, and `gist --schema` reports
-the whole set under the `improvements` bucket.
+the flag groups under the `improvements` bucket. The syntax family is not a flag
+and so has no row there; it is [By-Value Escapes](#by-value-escapes) below.
 
 For an exact, versioned answer about a flag, inspect `gist --schema` rather than
 relying on a prose list.
@@ -696,6 +701,143 @@ the first byte as long as the last, and gist makes 23, or 11 at
 
 This is gist's default posture into a pipe, and it reaches the reader sooner as
 well as less often: 5 ms to first byte against ripgrep's 9.
+
+### Record Anchors
+
+`--null-data` searches NUL-delimited **records**, and a record can hold
+newlines. So `^` and `$` are newline assertions inside one, `\z` is the record's
+real end, and a record's trailing newline is content rather than a terminator -
+it opens the empty line after it like any other.
+
+That is not a house opinion; Python's `re` refereed it. Split a file on NUL by
+hand, hand each record to `re` with `re.MULTILINE`, and compare: over 322 cells
+of record-mode `-c` and `-o` answers, gist agrees with `re` on every one and
+ripgrep disagrees on 13. rg misses a record's own start for `^`, because it
+reads `^` as "after a `\n`" and a record beginning after a NUL is not a line
+start to it - `^.` finds 7 of the 8 first characters in a three-record fixture.
+It prints whole records as `-o` rows for matches it rejected, so `^.` yields
+`ef`, two bytes, for a pattern that can match one. And it matches nothing at all
+for `\z`, whose NUL it keeps in the slice it searches. BSD `grep -z` agrees with
+gist about `^`.
+
+It is also the faster reading. A record is a *sequence of lines* whenever the
+pattern cannot see across one - no consuming class admits a `\n`, no `\A`/`\z`
+is present - so gist splits at the newlines and every piece goes down the
+ordinary per-line ladder with its DFA, prefilter, and SIMD kernels intact,
+instead of the whole-record Pike scan an assertion-bearing wide haystack would
+otherwise force.
+
+Measured on 50 MB of NUL-delimited records, `-c`, minimum of 15 rounds, all
+three tools run back to back inside each round so they meet the same machine.
+`before` is this same source with the one switch that decides whether a record
+is decomposed forced off. Counts are identical everywhere.
+
+| Pattern | before | current | ripgrep | vs rg |
+|---|---|---|---|---|
+| `^zzsentinel` | 7.3 ms / 11 ms | 7.4 ms / 8 ms | 36.7 ms / 38 ms | 5.0x w, 4.5x c |
+| `^étop` | 6.6 ms / 8 ms | 7.4 ms / 8 ms | 36.2 ms / 38 ms | 4.9x w, 5.0x c |
+| `^[a-z]+ [a-z]+ [a-z]+` | 16.8 ms / 104 ms | 8.2 ms / 18 ms | 43.6 ms / 44 ms | 5.3x w, 2.5x c |
+| `^\w+ mid` | 341.9 ms / 2885 ms | 16.2 ms / 50 ms | 67.7 ms / 67 ms | 4.2x w, 1.3x c |
+| `^(?:alpha\|beta\|gamma)` | 45.7 ms / 387 ms | 11.8 ms / 37 ms | 73.2 ms / 72 ms | 6.2x w, 1.9x c |
+| `mid\ntail` (`-U`) | 7.2 ms / 10 ms | 7.4 ms / 9 ms | 35.9 ms / 36 ms | 4.9x w, 3.9x c |
+
+Two things worth reading twice. `^\w+ mid` cost 2885 ms of CPU before and costs
+50 now, a 57x cut, because a `\w`-led program is exactly what gets no DFA and no
+accelerator tier when the haystack is wide - it was scanning every record with
+the Pike VM. And the decomposition is *neutral* where it should be: the three
+rows that barely move are the ones a required literal already carried, where
+splitting buys nothing and is asked to cost nothing.
+
+The alternation is the honest one. It was already 1.6x faster than ripgrep on
+wall clock before any of this - but on 387 ms of CPU against rg's 72, which is a
+loss on any laptop doing something else with its cores. Ahead on both axes is
+the only kind of ahead worth shipping.
+
+### By-Value Escapes
+
+You can write a character by its value, whichever spelling you already know:
+`\uHHHH`, `\u{H..H}`, `\UHHHHHHHH`, `\U{H..H}`, octal `\0oo` / `\ooo`, and
+`\N{NAME}` by Unicode name - in atom position and inside `[…]`, in byte mode and
+Unicode mode, and at either end of a range (`[\u00ab-\u00bb]`).
+
+The interesting part is that this is a superset of *both* incumbents, because the
+two disagree and each one's gap is the other's feature. ripgrep has the braced
+spellings Python's `re` rejects; `re` has octal and `\N{NAME}`, which rg refuses
+outright - it reads `\007` as a backreference, says "backreferences are not
+supported", and points you at `-P`. Since each engine *refuses* what the other
+accepts, accepting both reinterprets nothing: every pattern rg compiles keeps
+rg's meaning, and every pattern `re` compiles keeps `re`'s.
+
+Fifteen spellings over a fixture holding each target character, `-o`, against a
+real `rg` process and Python `re` in the same script:
+
+| Spelling | gist | ripgrep | `re` |
+|---|---|---|---|
+| `\u00e9`, `\U0001F4A9` | match | match | match |
+| `\u{1F4A9}`, `\U{2603}` | match | match | rejects |
+| `\N{SNOWMAN}`, `\N{PILE OF POO}` | match | rejects | match |
+| `\N{NO-BREAK SPACE}`, `\N{LATIN SMALL LETTER E WITH ACUTE}` | match | rejects | match |
+| `\N{NBSP}`, `\N{ALERT}` (NameAliases) | match | rejects | match |
+| `\N{CJK UNIFIED IDEOGRAPH-4E00}`, `\N{HANGUL SYLLABLE GA}` | match | rejects | match |
+| `\007`, `\01`, `\0` | match | rejects | match |
+
+gist agrees with `re` on 13 of 15 and the two exceptions are the braced forms
+`re` rejects and rg accepts, so gist is the union rather than a third opinion.
+rg cannot run 11 of the 15 at all. The names are the whole Unicode set, not a
+table of favorites: NameAliases resolve, and the algorithmic ranges are computed,
+so all 100k-plus CJK ideographs and every Hangul syllable have their names
+without shipping a name for each.
+
+Octal needed the one real decision, because `\1` is ambiguous and `re` resolves
+it *by position*: inside `[…]` every numeric escape is octal (`[\1]` is U+0001),
+while at atom position `\1` and `\12` are group references, so only a leading `0`
+or a full three digits commits to octal there. We adopt that rule exactly, and a
+bare `\1` at atom position stays an error - not because it is unparseable but
+because a group reference is the one construct a linear-time engine cannot honor,
+and answering it with a literal would be a confident wrong answer.
+
+Speed, on the eight of these that rg can run, over 50 MB, `-c`, minimum of 15
+interleaved rounds, counts identical throughout:
+
+| Pattern | gist | ripgrep | |
+|---|---|---|---|
+| `\u00e9` (dense) | 12.7 ms / 39 ms | 56.6 ms / 57 ms | 4.5x w, 1.4x c |
+| `\u{00e9}` | 17.5 ms / 40 ms | 62.2 ms / 58 ms | 3.6x w, 1.4x c |
+| `\U0001F4A9` (rare) | 8.7 ms / 10 ms | 37.3 ms / 38 ms | 4.3x w, 3.9x c |
+| `\U{2603}` | 7.5 ms / 9 ms | 31.7 ms / 32 ms | 4.2x w, 3.7x c |
+| `\u00e9top` | 8.8 ms / 19 ms | 36.4 ms / 37 ms | 4.1x w, 1.9x c |
+| `[\u00e9\u00fc]` | 9.9 ms / 27 ms | 58.3 ms / 59 ms | 5.9x w, 2.2x c |
+| `\u00e9\w+` | 13.0 ms / 41 ms | 44.9 ms / 45 ms | 3.5x w, 1.1x c |
+| `^\u00e9` | 10.2 ms / 33 ms | 38.1 ms / 39 ms | 3.7x w, 1.2x c |
+
+An escape is resolved at parse time into the codepoint it names, so it reaches
+the same DFA, prefilter, and SIMD kernels a literal does - `\u00e9` is `é`, and
+nothing downstream can tell which way it was typed. That is the reason there is
+no slow path to fall back to, and the reason the numbers look like the literal
+ones: they are the literal ones.
+
+Mechanically this was a *collapse* rather than an addition. The four positions
+the grammar can reach a character escape from each carried their own `\x`-shaped
+prong, which is exactly why `\u` was missing from all four at once - there was no
+single place to add it. They now share one decoder, on the principle that what a
+character's value is cannot depend on where it was written. Two things genuinely
+do differ, and they are the decoder's only two parameters. One is positional:
+whether a bare `\1` is octal, which is `re`'s rule and turns on `[…]`. The other
+is the spelling's own promise about its width, and it is the parameter I got
+wrong first: `\xNN` and octal are *byte* syntax, so `(?-u)\xe9` is the raw byte
+0xE9, while `\x{…}` `\u` `\U` `\N{…}` name a *character*, so `(?-u)\u00e9` is
+that character's UTF-8 sequence - the two bytes 0xC3 0xA9, exactly what `(?-u)é`
+is. Disabling Unicode changes what a class, a fold, and a boundary mean; it
+cannot change what a scalar value is. rg draws the line in the same place, and
+the first cut of this feature narrowed every spelling to one byte, which silently
+matched 0xE9 where rg matched the character. The record-mode lane found it
+(`bench/conformance/rgsuite/records.py`), and a byte-mode `[…]` now refuses a
+character it cannot hold rather than matching one byte of it, which is rg's
+judgment too.
+
+A short counted run stays an error, because `\u00` is a typo and reading it as
+U+0000 would match something nobody wrote; surrogates and values past U+10FFFF
+are refused, since this engine emits well-formed UTF-8 or nothing.
 
 ### Adjacent Product Choices
 
