@@ -645,8 +645,8 @@ jobs:
           # person who downloads them will - bare, beside the sums file. Checked
           # from the workspace root instead, shasum looks for six archives that
           # are one directory down and reports every one as unreadable, which is
-          # how v1.2.0 through v1.2.3 all shipped with an empty asset list under
-          # a README that tells you to download one.
+          # how both releases this job has run for - v1.2.2 and v1.2.3 - shipped
+          # an empty asset list under a README that tells you to download one.
           (cd assets && shasum -a 256 -c SHA256SUMS)
           files=(assets/*)
           for attempt in $(seq 1 30); do
