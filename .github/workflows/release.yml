@@ -641,7 +641,13 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          shasum -a 256 -c assets/SHA256SUMS
+          # From inside `assets`, because SHA256SUMS names its files the way the
+          # person who downloads them will - bare, beside the sums file. Checked
+          # from the workspace root instead, shasum looks for six archives that
+          # are one directory down and reports every one as unreadable, which is
+          # how v1.2.0 through v1.2.3 all shipped with an empty asset list under
+          # a README that tells you to download one.
+          (cd assets && shasum -a 256 -c SHA256SUMS)
           files=(assets/*)
           for attempt in $(seq 1 30); do
             if gh release view "$TAG" --json id >/dev/null 2>&1; then
