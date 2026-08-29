@@ -490,10 +490,16 @@ jobs:
         if: steps.state.outputs.result == 'absent'
         run: python3 ../../tools/relock.py .
 
-      # --locked: publish the dependency graph that was tested, not whatever the
-      # index happens to offer at upload time.
+      # Two flags that read like a contradiction and are not. `--locked` refuses
+      # to publish a graph the lockfile does not already describe: the release
+      # ships what was tested, not whatever the index offers at upload time.
+      # `--allow-dirty` waives the *separate* check that the tree is committed,
+      # because the step above just rewrote the one file that makes `--locked`
+      # true, and on a fresh checkout of a tag it is the only file that can
+      # differ - gist's v1.2.1 died right here on "1 files in the working
+      # directory contain changes", naming Cargo.lock and nothing else.
       - if: steps.state.outputs.result == 'absent'
-        run: cargo publish --locked
+        run: cargo publish --locked --allow-dirty
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
   # ── Go module
