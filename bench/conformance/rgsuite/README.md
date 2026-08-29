@@ -383,7 +383,7 @@ formats; bzip2 and the external-codec tail have no in-process Zig decoder).
 A mined suite's denominator is the set of cases ripgrep chose to write, and there
 are three surfaces where rg had nothing to write down — for three different reasons.
 
-The **by-value escape family** is missing because rg *refuses* most of it: it reads
+The **by-value escape family** is missing because rg _refuses_ most of it: it reads
 `\007` as a backreference, answers "backreferences are not supported", and points
 at `-P`, and it has no `\N{NAME}` at all. So a suite mined from rg contains no case
 for the majority of the family, and the absence looks exactly like coverage. The
@@ -392,7 +392,7 @@ interior newline — which is the only question the mode has. A record is
 NUL-delimited, so it may contain `\n`, and every anchor's meaning follows from
 whether you believe it may. **Verbose mode** is the third and the odd one: rg
 accepts `(?x)`, so nothing here is a spelling it refuses. What its suite never does
-is cross the mode with the two places verbose is *not* supposed to reach — a pattern
+is cross the mode with the two places verbose is _not_ supposed to reach — a pattern
 that ends inside a `#` comment, and a `#` or a space inside a character class — and
 rg gets both wrong.
 
@@ -419,22 +419,22 @@ forgiven by name:
 | --- | --- |
 | `re_referee` | reading `^` as "after a `\n`", so a record's own start is not a line start to it; and printing a whole record as the `-o` row for a match it rejected |
 | `nul_in_slice` | keeping the NUL in the slice it searches, so `\z` matches **zero** records — including the bare nullable `\z`, which must hold at every haystack's end |
-| `rg_wrapper` | losing the `)` of its own `(?:…)` pattern wrap to a trailing `#` comment. Proof that it is the wrapper and not the grammar: rg *answers* the same pattern with a newline appended — insignificant whitespace under verbose, and a comment terminator — and answers what gist did |
+| `rg_wrapper` | losing the `)` of its own `(?:…)` pattern wrap to a trailing `#` comment. Proof that it is the wrapper and not the grammar: rg _answers_ the same pattern with a newline appended — insignificant whitespace under verbose, and a comment terminator — and answers what gist did |
 | `class_trivia` | stripping verbose trivia through a `[…]`, where `re` and PCRE2 both stop: `[a b]` is `[ab]` to rg, `[ ]` an empty class it rejects, `[#]` a comment that eats the class. Two-sided proof: rg answers identically for rg's own claimed reading, and gist equals `re` |
 | `text_notice` | counting its own "binary file matches" notice as a line. Proof: both agree under `--text`, which retires detection and changes nothing else |
 | `vimgrep_no_column` | emitting a `--vimgrep` row missing the column its own `path:line:column:text` format defines, for a record whose match its printer re-derived and discarded |
-| `rg_rejects` | nothing — rg cannot compile the spelling, so gist's answer is held to `re`'s instead, proving the superset is *right* and not merely accepted |
+| `rg_rejects` | nothing — rg cannot compile the spelling, so gist's answer is held to `re`'s instead, proving the superset is _right_ and not merely accepted |
 
 Zero unjustified divergences. Every family's population is pinned by **exact
 count** in `records_baseline.json` — not a shrink-only floor, because the grid is
-deterministic, so a family that grows *or* shrinks is news. If ripgrep fixes one of
+deterministic, so a family that grows _or_ shrinks is news. If ripgrep fixes one of
 these, this lane fails and the boundary should be **deleted** from `records.py`
 rather than refreshed. Wired into the correctness phase of
 `../gates/contract/ci_order.sh`, ahead of the perf phase.
 
 It earned its keep on its first run: it found `(?-u)\u00e9` truncating a character
 to one byte, so gist matched a raw 0xE9 that a UTF-8 file does not contain — finding
-nothing where rg found the character *and* matching where rg did not. It also
+nothing where rg found the character _and_ matching where rg did not. It also
 surfaced an older divergence in the same place, `(?-u)é+` repeating only the
 character's last byte. Both are fixed; the fix is what the `escape.Width` parameter
 is for.
@@ -537,7 +537,7 @@ a real run could mint the certificate was to leave this lane out of it.
 | `modes.py`      | hand-authored `-U`/`-P` differential proof (the modes `run.py` defers)                                                                                                                                                                                                                                                                                                                                                 |
 | `flags.py`      | hand-authored differential proof for what the mined suite can't pin: the walk/order/ignore flags (`--sort`/`--sortr`/`--sort-files`, `-j`/`--threads`, `--one-file-system`, `--no-ignore-global`, negation last-wins — timestamp/device/thread/global-config dependent), the `--no-messages`/`--no-ignore-messages` **stderr** lane, and `\A`/`\z` haystack anchors under `-U` across three tail shapes × seven frames |
 | `transforms.py` | hand-authored `-z`/`--pre`/`-E`/`--binary` content-transform differential proof + the `-z` pipeline-vs-serial-vs-rg speed floor (the flags `run.py` can't mine from plain source)                                                                                                                                                                                                                                      |
-| `records.py`    | hand-authored differential proof for three surfaces a MINED suite structurally cannot reach: the by-value escape family (rg *rejects* `\N{NAME}` and every octal spelling, so its own tests hold no case for them), the `--null-data` record model (rg's tests hold no record with an interior newline, so they never ask what `^` means inside one), and verbose mode crossed with the two places verbose is not supposed to reach (rg's `(?:…)` pattern wrapper loses its `)` to a trailing `#` comment; rg strips trivia through a `[…]` where `re` and PCRE2 stop). 1687 cells, rg the oracle where it can answer and Python `re` the referee where the two disagree; six declared boundaries, each re-proving its own mechanism per run; populations pinned by exact count in `records_baseline.json` |
+| `records.py`    | hand-authored differential proof for three surfaces a MINED suite structurally cannot reach: the by-value escape family (rg _rejects_ `\N{NAME}` and every octal spelling, so its own tests hold no case for them), the `--null-data` record model (rg's tests hold no record with an interior newline, so they never ask what `^` means inside one), and verbose mode crossed with the two places verbose is not supposed to reach (rg's `(?:…)` pattern wrapper loses its `)` to a trailing `#` comment; rg strips trivia through a `[…]` where `re` and PCRE2 stop). 1687 cells, rg the oracle where it can answer and Python `re` the referee where the two disagree; six declared boundaries, each re-proving its own mechanism per run; populations pinned by exact count in `records_baseline.json` |
 | `surface.py`    | conformance over ripgrep's **own** documented flag surface, read from `rg --generate` + its man page at run time; scores identical / declared-boundary / divergent / rejected, plus the adverse undo-pair lane. Feeds Layer I of the certificate                                                                                                                                                                       |
 | `fuzz.py`       | differential fuzzer — random (pattern × flags × hostile corpus) triples against live rg, with crash / hang / peak-RSS measured in the same pass                                                                                                                                                                                                                                                                        |
 | `dbg.py`        | single-test side-by-side inspector                                                                                                                                                                                                                                                                                                                                                                                     |
