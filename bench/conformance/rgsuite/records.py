@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""gist ⇄ ripgrep differential proof for the two surfaces a mined rg suite cannot reach.
+"""gist ⇄ ripgrep differential proof for three surfaces a mined rg suite cannot reach.
 
 `run.py` replays ripgrep's *own* integration tests, which is a strong proof of the
-semantics rg chose to write down and no proof at all of two areas where rg has
+semantics rg chose to write down and no proof at all of three areas where rg has
 nothing to write down:
 
   * **by-value escapes.** rg *rejects* `\\N{NAME}` and every octal spelling — it
@@ -15,6 +15,12 @@ nothing to write down:
     interior newline, so it never asks what `^` means inside one. That is the only
     question in the mode: a record is NUL-delimited, so it may contain `\\n`, and
     every anchor's meaning follows from whether you believe it may.
+  * **verbose mode.** rg accepts `(?x)`, so this is not a spelling it refuses —
+    it is a spelling where rg's own suite never crosses the mode with the two
+    places verbose is *not* supposed to reach. It wraps every pattern in `(?:…)`,
+    including a lone one, so a pattern ending in a `#` comment loses the `)` it
+    just appended; and it strips trivia *through* a character class, where `re`
+    and PCRE2 both stop. Both are refereed by `re` below.
 
 GROUND TRUTH, AND A REFEREE WHEN GROUND TRUTH IS THE THING IN DISPUTE
 
@@ -28,11 +34,11 @@ hand each record to Python's `re` with `re.MULTILINE` (making `^`/`$` the
 
 DECLARED BOUNDARIES
 
-Three families of difference are declared rather than fixed, and each is a
+Six families of difference are declared rather than fixed, and each is a
 PREDICATE THAT RE-PROVES ITS OWN CASE on every run — re-running the tools under
 the condition that isolates the cause — rather than a name the author decided to
 forgive. A family that stops reproducing its mechanism stops being excused and is
-scored divergent. Nothing outside the three may differ:
+scored divergent. Nothing outside the six may differ:
 
   residual="re_referee"   the record model. Excused only when gist reproduces the
                           `re` answer exactly and rg does not. Catches rg missing
@@ -55,6 +61,19 @@ scored divergent. Nothing outside the three may differ:
   residual="rg_rejects"   rg has no grammar for the spelling (exit 2). gist's
                           answer must equal `re`'s over the same bytes, so the
                           superset is proven to be RIGHT and not merely accepted.
+  residual="rg_wrapper"    rg's own `(?:…)` pattern wrapper swallowing the `)` it
+                          appended, because under verbose the pattern ended inside
+                          a `#` comment. Not a missing grammar: proof is that rg
+                          ANSWERS the same pattern with a newline appended — which
+                          is insignificant whitespace under verbose and terminates
+                          a comment, so it cannot change the language — and then
+                          answers exactly what gist did.
+  residual="class_trivia" rg stripping verbose trivia through a `[…]`, where `re`
+                          and PCRE2 both stop: `[a b]` is `[ab]` to rg, `[ ]` an
+                          empty class it rejects, `[#]` a comment that eats the
+                          class. Two-sided proof — rg must answer identically for
+                          rg's OWN claimed reading of the pattern (trivia deleted
+                          through the class), and gist must equal `re`.
   residual="vimgrep_no_column"
                           rg emitting a `--vimgrep` row with fewer fields than its
                           own `path:line:column:text` format defines, for a record
@@ -144,6 +163,23 @@ ESCAPE_CHARS = {
 }
 
 
+# The verbose corpus. Every line exists to make ONE trivia question visible, which
+# the escape corpus structurally cannot: every line there holds a space, so a class
+# that keeps its space and a class that drops it match the same 43 lines and the
+# difference hides. Here a space, a tab, a `#`, and an `a`/`b` each appear on a line
+# that carries none of the others.
+VERBOSE_LINES = [
+    "alpha 42 beta",  # a, b, space, digits — the ordinary verbose target
+    "x y",  # a space and nothing else the classes name
+    "zzz",  # neither a space nor a/b: the negative line
+    "q#w",  # a `#` with no space, so a comment rule inside a class is visible
+    "u\tv",  # a tab: whitespace that is not a space
+    "ALPHA 7",  # the caseless target
+    "func main",  # for `^ func`
+    "one two three",
+]
+
+
 def gen_fixtures(root: Path) -> None:
     """Write the record bodies, the escape corpus, and the NUL-bearing file."""
     rec = root / "rec"
@@ -162,6 +198,10 @@ def gen_fixtures(root: Path) -> None:
     # A NUL in a newline-delimited file — binary detection, for the text_notice
     # boundary. Deliberately NOT record mode.
     (root / "bin.txt").write_bytes(b"alpha\nbe\x00ta\ngamma\n")
+
+    # The verbose corpus, plus bulk so a prefilter has something to skip.
+    vrb = VERBOSE_LINES + [f"{w} filler line {i}" for i, w in enumerate(("alpha", "beta") * 100)]
+    (root / "vrb.txt").write_text("\n".join(vrb) + "\n", encoding="utf-8")
 
 
 # ───────────────────────── grids ─────────────────────────
@@ -246,6 +286,46 @@ RECORD_PATTERNS = [
 
 RECORD_FILES = list(RECORD_BODIES)
 
+# Verbose spellings ripgrep accepts, where it is the oracle byte-for-byte. Chosen
+# for the places verbose is NOT supposed to reach as much as the places it is: a
+# brace bound, a lazy quantifier split by a space, an escaped space, and a `\#`.
+VERBOSE_SHARED = [
+    r"(?x) alpha \s+ \d+",
+    r"(?x)alpha\s+\d+",  # the same language with no trivia to skip
+    r"(?x) a\ b",  # an escaped space is a literal space, not trivia
+    r"(?x) \b [a-z] \w+ \b",
+    r"(?x) (?: alpha | beta )",
+    r"(?ix) ALPHA",  # reconciles beside `i`
+    r"(?x-u) \w+",  # and beside `u`
+    r"(?x) ^ func \s+ \w+",  # an anchor whose prefilter must agree with it
+    r"(?x) three $",
+    r"(?x) a{1,2}",  # a bound is not trivia-bearing
+    r"(?x) b *?",  # `b *?` is one lazy star, not a star and an optional
+    r"(?x) \# literal hash",  # an escaped `#` is not a comment
+    r"(?x: alpha \s+ \d+ )",  # scoped: never a leading directive, so never reconciled
+    r"(?-x) one two",  # the directive turning the mode OFF
+]
+
+# Patterns ripgrep's own `(?:…)` pattern wrapper destroys before its engine sees
+# them: the pattern ENDS inside a `#` comment, so the `)` rg appends is swallowed
+# and rg reports "unclosed group" for a pattern it would otherwise accept.
+VERBOSE_WRAPPED = [
+    r"(?x) alpha \s+ \d+  # the count",
+    r"(?x) beta # one word",
+    r"(?x) ^ func  # an anchored comment",
+    r"(?x)#only a comment",  # the degenerate case: the whole pattern is a comment
+]
+
+# Where ripgrep applies verbose trivia INSIDE a character class and `re`/PCRE2 do
+# not. Each shape isolates one half of that rule: deleted whitespace, and a `#`
+# read as a comment opener.
+VERBOSE_CLASS = [
+    r"(?x) [a b]",  # rg reads `[ab]`; re/PCRE2 read a, space, b
+    r"(?x) [0-9 a-f]",
+    r"(?x) [ ]",  # rg's rule empties the class outright
+    r"(?x) alpha [#] filler",  # rg opens a comment inside the class
+]
+
 
 @dataclass
 class Cell:
@@ -263,6 +343,14 @@ def _escape_cells() -> list[Cell]:
         for frame, flags in FRAMES:
             for pat in ESCAPE_SHARED + ESCAPE_ONLY:
                 out.append(Cell(f"esc:{frame}:{pat}:{f}", [*flags, pat], f, pat))
+    return out
+
+
+def _verbose_cells() -> list[Cell]:
+    out = []
+    for frame, flags in FRAMES:
+        for pat in VERBOSE_SHARED + VERBOSE_WRAPPED + VERBOSE_CLASS:
+            out.append(Cell(f"vrb:{frame}:{pat}", [*flags, pat], "vrb.txt", pat))
     return out
 
 
@@ -401,6 +489,19 @@ def _tool_rows(exe: str, cell: Cell) -> list[str] | None:
 # ───────────────────────── declared boundaries ─────────────────────────
 
 
+def _re_expect(cell: Cell) -> tuple[int, list[str]] | None:
+    """What `re` says the `-c` tally and `-o` rows are, or None if it cannot say."""
+    data = (FIX / cell.path).read_bytes()
+    record_mode = "--null-data" in cell.args
+    try:
+        return (
+            re_count(cell.pattern, data, record_mode=record_mode),
+            re_rows(cell.pattern, data, record_mode=record_mode),
+        )
+    except (re.error, UnicodeDecodeError, ValueError):
+        return None
+
+
 def _re_referees(cell: Cell, *, want_family: str) -> bool:
     """Does `re` back gist over rg on this cell's own question?
 
@@ -409,13 +510,9 @@ def _re_referees(cell: Cell, *, want_family: str) -> bool:
     same pattern and file are refereed in those, so a boundary can never be claimed
     for a frame nobody checked.
     """
-    record_mode = "--null-data" in cell.args
-    data = (FIX / cell.path).read_bytes()
-    try:
-        want_c = re_count(cell.pattern, data, record_mode=record_mode)
-        want_o = re_rows(cell.pattern, data, record_mode=record_mode)
-    except (re.error, UnicodeDecodeError, ValueError):
+    if (want := _re_expect(cell)) is None:
         return False
+    want_c, want_o = want
     g_c, r_c = _tool_count(GIST, cell), _tool_count(RG, cell)
     if g_c is None:
         return False
@@ -467,6 +564,89 @@ def _vimgrep_no_column(cell: Cell, g: Out, r: Out) -> bool:
     return True
 
 
+def _reargs(cell: Cell, pat: str) -> list[str]:
+    """The cell's own argv with a different pattern — the flags and frame unchanged."""
+    return [*cell.args[:-1], pat]
+
+
+def _rg_wrapper(cell: Cell, g: Out) -> bool:
+    """rg's own `(?:…)` pattern wrapper eating the `)` it just appended.
+
+    rg wraps EVERY pattern, including a lone one, and under verbose a pattern may
+    end inside a `#` comment — so the `)` lands after the `#` and is swallowed,
+    and rg reports "unclosed group" for a pattern its own engine accepts.
+
+    Proof, in the shape that separates a missing grammar from a broken wrapper:
+    hand rg the same pattern with a newline appended. A newline is insignificant
+    whitespace under verbose AND terminates a comment, so it cannot change the
+    language — it only gives the wrapper somewhere to close. The boundary holds
+    only if rg then answers, and answers exactly what gist did. If rg fixes its
+    wrapper this family stops reproducing and should be deleted, not refreshed.
+    """
+    if cell.pattern.find("#", cell.pattern.find(")")) < 0:
+        return False
+    r2 = run(RG, _reargs(cell, cell.pattern + "\n"), cell.path)
+    return r2.rc != 2 and (r2.rc, r2.data) == (g.rc, g.data)
+
+
+def _rg_class_reading(pat: str) -> str:
+    """rg's verbose rule, stated once: trivia deleted EVERYWHERE, classes included.
+
+    `re` and PCRE2 both stop applying verbose inside `[…]` — a space there is a
+    member and `#` is a literal. rg does not, so `[a b]` is `[ab]` to it, `[ ]` is
+    an empty class it rejects, and `[#]` opens a comment that eats the class.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(pat):
+        c = pat[i]
+        if c == "\\" and i + 1 < len(pat):
+            out.append(pat[i : i + 2])
+            i += 2
+        elif c == "#":
+            nl = pat.find("\n", i)
+            i = len(pat) if nl < 0 else nl + 1
+        elif c.isspace():
+            i += 1
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
+def _class_trivia(cell: Cell, g: Out, r: Out) -> bool:
+    """rg applying verbose trivia inside a character class, where `re` does not.
+
+    Two-sided proof, so neither half can carry a real disagreement:
+
+      * rg's answer for the pattern must equal rg's answer for rg's OWN claimed
+        reading of it (trivia deleted through the class), in this cell's exact
+        frame — which is what demonstrates the deletion is the cause rather than
+        a guess. It covers the rejecting shapes too: `[ ]` becomes `[]` and rg
+        refuses both, `[#]` becomes a truncated `[` and rg refuses both.
+      * gist's answer must equal `re`'s, so the side gist took is the reference
+        implementation's and not merely the other one.
+    """
+    if "[" not in cell.pattern:
+        return False
+    reading = _rg_class_reading(cell.pattern)
+    if reading == cell.pattern:
+        return False
+    r2 = run(RG, _reargs(cell, reading), cell.path)
+    if (r2.rc, r2.data) != (r.rc, r.data):
+        return False
+    if g.rc == 2:
+        return False
+    return _re_backs_gist(cell)
+
+
+def _re_backs_gist(cell: Cell) -> bool:
+    """gist's `-c` and `-o` equal `re`'s over the same bytes. Says nothing of rg."""
+    if (want := _re_expect(cell)) is None:
+        return False
+    return (_tool_count(GIST, cell), _tool_rows(GIST, cell)) == want
+
+
 def _text_notice(cell: Cell) -> bool:
     """rg counting its own binary NOTICE as a line.
 
@@ -490,8 +670,18 @@ def classify(cell: Cell, g: Out, r: Out) -> tuple[str, str]:
     if (g.rc, g.data) == (r.rc, r.data):
         return "identical", ""
     if r.rc == 2 and g.rc != 2:
+        # Three ways rg can refuse what gist answers, and they are different facts:
+        # its wrapper broke, its class rule differs, or it has no grammar at all.
+        # Checked most-specific first so a wrapper failure is never filed as a
+        # missing grammar.
+        if _rg_wrapper(cell, g):
+            return "boundary", "rg_wrapper"
+        if _class_trivia(cell, g, r):
+            return "boundary", "class_trivia"
         return ("boundary", "rg_rejects") if _re_referees(cell, want_family="rg_rejects") \
             else ("divergent", "")
+    if "[" in cell.pattern and _class_trivia(cell, g, r):
+        return "boundary", "class_trivia"
     if _text_notice(cell):
         return "boundary", "text_notice"
     if _vimgrep_no_column(cell, g, r):
@@ -525,7 +715,7 @@ def _rg_version() -> str:
 
 
 def do_run(publish: str | None) -> int:
-    cells = _escape_cells() + _record_cells()
+    cells = _escape_cells() + _verbose_cells() + _record_cells()
     tally = {"identical": 0, "both_refuse": 0, "divergent": 0}
     families: dict[str, int] = {}
     fails: list[str] = []

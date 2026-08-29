@@ -1,15 +1,17 @@
 {
  "_contract": "Exact-count contract for bench/conformance/rgsuite/records.py. This grid is deterministic, so every number here is exact rather than a shrink-only floor: a boundary family that grows or shrinks is news either way. If ripgrep fixes the behavior a family describes, this lane fails and the family should be DELETED from records.py rather than refreshed here. Refresh only in the same PR as the change that moved it: python3 bench/conformance/rgsuite/records.py run --publish-baseline bench/conformance/rgsuite/records_baseline.json",
  "rg_version": "15.2.0",
- "cases": 1533,
- "identical": 1237,
+ "cases": 1687,
+ "identical": 1337,
  "both_refuse": 21,
  "boundary": {
+  "class_trivia": 26,
   "nul_in_slice": 7,
   "re_referee": 20,
   "rg_rejects": 231,
+  "rg_wrapper": 28,
   "text_notice": 15,
   "vimgrep_no_column": 2
  },
- "boundary_total": 275
+ "boundary_total": 329
 }
