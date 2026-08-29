@@ -187,7 +187,7 @@ def gen_fixtures(root: Path) -> None:
     for name, body in RECORD_BODIES.items():
         (rec / name).write_bytes(body)
 
-    # The escape corpus: each target character on its own labelled line, then bulk
+    # The escape corpus: each target character on its own labeled line, then bulk
     # lines so a prefilter has a corpus to skip rather than a six-line file where
     # every strategy costs the same.
     lines = [f"{k} [{v}] end" for k, v in ESCAPE_CHARS.items()]
