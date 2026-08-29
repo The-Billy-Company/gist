@@ -435,9 +435,7 @@ def re_rows(pat: str, data: bytes, *, record_mode: bool) -> list[str]:
         last_end = None
         for m in rx.finditer(text):
             empty = m.end() == m.start()
-            if empty and (
-                m.start() == last_end or (not terminated and m.start() == len(text))
-            ):
+            if empty and (m.start() == last_end or (not terminated and m.start() == len(text))):
                 continue
             out.append(text[m.start() : m.end()])
             last_end = m.end()
@@ -455,9 +453,7 @@ class Out:
 
 
 def run(exe: str, args: list[str], path: str) -> Out:
-    p = subprocess.run(
-        [exe, *args, path], cwd=str(FIX), env=ENV, capture_output=True, timeout=90
-    )
+    p = subprocess.run([exe, *args, path], cwd=str(FIX), env=ENV, capture_output=True, timeout=90)
     return Out(p.returncode, p.stdout, p.stderr)
 
 
@@ -552,7 +548,7 @@ def _vimgrep_no_column(cell: Cell, g: Out, r: Out) -> bool:
     gr, rr = g.data.split(term), r.data.split(term)
     if len(gr) != len(rr):
         return False
-    for a, b in zip(gr, rr):
+    for a, b in zip(gr, rr, strict=True):
         if a == b:
             continue
         # `path:line:col:text` vs `path:line:text` — drop gist's third field.
@@ -678,17 +674,23 @@ def classify(cell: Cell, g: Out, r: Out) -> tuple[str, str]:
             return "boundary", "rg_wrapper"
         if _class_trivia(cell, g, r):
             return "boundary", "class_trivia"
-        return ("boundary", "rg_rejects") if _re_referees(cell, want_family="rg_rejects") \
+        return (
+            ("boundary", "rg_rejects")
+            if _re_referees(cell, want_family="rg_rejects")
             else ("divergent", "")
+        )
     if "[" in cell.pattern and _class_trivia(cell, g, r):
         return "boundary", "class_trivia"
     if _text_notice(cell):
         return "boundary", "text_notice"
     if _vimgrep_no_column(cell, g, r):
         return "boundary", "vimgrep_no_column"
-    if r"\z" in cell.pattern and "--null-data" in cell.args:
-        if _re_referees(cell, want_family="nul_in_slice"):
-            return "boundary", "nul_in_slice"
+    if (
+        r"\z" in cell.pattern
+        and "--null-data" in cell.args
+        and _re_referees(cell, want_family="nul_in_slice")
+    ):
+        return "boundary", "nul_in_slice"
     if _re_referees(cell, want_family="re_referee"):
         return "boundary", "re_referee"
     return "divergent", ""
@@ -699,12 +701,14 @@ def classify(cell: Cell, g: Out, r: Out) -> tuple[str, str]:
 
 def _mini_diff(a: bytes, b: bytes, ctx: int = 2) -> str:
     ga, gb = a.split(b"\n"), b.split(b"\n")
-    for i, (x, y) in enumerate(zip(ga, gb)):
+    for i, (x, y) in enumerate(zip(ga, gb, strict=False)):
         if x != y:
             lo, hi = max(0, i - ctx), i + ctx + 1
             return (
-                "    gist: " + b"\\n".join(ga[lo:hi]).decode("utf-8", "replace")[:200]
-                + "\n    rg  : " + b"\\n".join(gb[lo:hi]).decode("utf-8", "replace")[:200]
+                "    gist: "
+                + b"\\n".join(ga[lo:hi]).decode("utf-8", "replace")[:200]
+                + "\n    rg  : "
+                + b"\\n".join(gb[lo:hi]).decode("utf-8", "replace")[:200]
             )
     return f"    length differs: gist={len(a)} rg={len(b)}"
 
@@ -729,9 +733,7 @@ def do_run(publish: str | None) -> int:
             continue
         tally[verdict] += 1
         if verdict == "divergent":
-            fails.append(
-                f"{c.name}: gist rc={g.rc} rg rc={r.rc}\n" + _mini_diff(g.data, r.data)
-            )
+            fails.append(f"{c.name}: gist rc={g.rc} rg rc={r.rc}\n" + _mini_diff(g.data, r.data))
 
     boundary_total = sum(families.values())
     report = {
