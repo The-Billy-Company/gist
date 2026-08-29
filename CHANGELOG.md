@@ -7,6 +7,159 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.2.2] - 2026-08-29
+
+### Added
+
+- - New conformance lane, `bench/conformance/rgsuite/records.py`, over the two
+    surfaces a mined ripgrep suite structurally cannot reach: the by-value escape
+    family (rg *rejects* `\N{NAME}` and every octal spelling, so its own tests hold
+    no case for them) and the `--null-data` record model (rg's tests hold no record
+    with an interior newline, so they never ask what `^` means inside one). 1533
+    cells of pattern × output-frame × fixture, with ripgrep the oracle for every
+    cell it can answer and Python `re` the referee — over records split by hand —
+    for the cells where the two tools disagree about the language rather than the
+    layout.
+
+    1237 cells are byte-identical, 21 are refused by both, and 275 sit at one of
+    five declared boundaries, each a predicate that RE-PROVES its own mechanism on
+    every run rather than a pattern forgiven by name: rg reading `^` as "after a
+    `\n`", so a record's own start is not a line start to it; rg keeping the NUL in
+    the slice it searches, so `\z` matches nothing; rg counting its own "binary file
+    matches" notice as a line; rg emitting a `--vimgrep` row missing the column its
+    own format defines; and the spellings rg cannot compile, where gist's answer is
+    held to `re`'s instead. A family that stops reproducing its mechanism stops
+    being excused.
+
+    Zero unjustified divergences, and every family's population is pinned by exact
+    count in `records_baseline.json` — so a boundary that grows OR shrinks fails the
+    lane, and if ripgrep fixes one the answer is to delete the family rather than
+    refresh the number. Wired into `ci_order.sh` ahead of the perf phase. It earned
+    its keep on the first run, by finding the byte-mode bug above.
+- - Write a character by its value in whichever spelling you already know:
+    `\uHHHH`, `\u{H..H}`, `\UHHHHHHHH`, `\U{H..H}`, octal `\0oo` / `\ooo`, and
+    `\N{NAME}` by Unicode name — in atom position, inside `[…]`, in byte or Unicode
+    mode, at either end of a range (`[\u00ab-\u00bb]`).
+
+    This is a superset of both incumbents, because the two disagree and each one's
+    gap is the other's feature: ripgrep has the braced spellings Python's `re`
+    rejects, and `re` has octal and `\N{NAME}`, which rg refuses outright (it reads
+    `\007` as a backreference, says "backreferences are not supported", and points
+    you at `-P`). Since each *refuses* what the other accepts, taking both
+    reinterprets nothing — every pattern rg compiles keeps rg's meaning, and every
+    pattern `re` compiles keeps `re`'s.
+
+    Names are the whole Unicode set rather than a table of favorites: NameAliases
+    resolve (`\N{NBSP}`, `\N{ALERT}`), and the algorithmic ranges are computed, so
+    every CJK ideograph and Hangul syllable has its name without shipping one each.
+    Over fifteen spellings on a fixture holding each target character, gist agrees
+    with `re` on thirteen — the two exceptions being the braced forms `re` rejects
+    and rg accepts — and rg cannot run eleven of the fifteen at all.
+
+    They cost nothing, because an escape is resolved at parse time into the
+    codepoint it names and then reaches the same DFA, prefilter, and SIMD kernels a
+    literal does; nothing downstream can tell how `é` was typed. Over 50 MB, `-c`,
+    minimum of 15 interleaved rounds with counts identical, the eight spellings rg
+    can run finish 3.5–5.9× faster on wall clock and 1.1–3.9× on CPU.
+- - `(?x)` verbose mode works, so a long pattern can be written the way a long
+    pattern wants to be written — whitespace to group it, `#` comments to explain
+    it — without leaving the linear-time engine. `gist '(?x) \b [A-Z] \w{9,} \b'`
+    and `gist '(?x) alpha \s+ \d+  # the count'` both answer.
+
+    Ripgrep accepts `(?x)` too, so this is not a spelling it refuses; it is a
+    spelling where gist is a strict superset in the two places verbose is *not*
+    supposed to reach:
+
+    - **A pattern may end inside a comment.** rg wraps every pattern in `(?:…)`,
+      including a lone one, so a trailing `#` comment eats the `)` and rg reports
+      "unclosed group" for a pattern its own engine accepts. gist closes each wrap
+      with a newline — insignificant whitespace under verbose, and a comment
+      terminator — so a commented pattern composes with `-e` and `-x`.
+    - **A class is not trivia.** `re` and PCRE2 both stop applying verbose inside
+      `[…]`: a space there is a member, `#` is a literal. rg does not, so `[a b]`
+      is `[ab]` to it, `[ ]` is an empty class it rejects, and `[#]` opens a
+      comment that eats the class. gist follows `re`.
+
+    Both are pinned in `bench/conformance/rgsuite/records.py` as the `rg_wrapper`
+    and `class_trivia` boundaries, each a predicate that re-proves its own
+    mechanism per run rather than a name someone decided to forgive: rg must ANSWER
+    the same pattern with a newline appended (which is what separates a broken
+    wrapper from a missing grammar), rg must answer identically for rg's own
+    claimed reading of the class, and gist must equal `re` either way. 154 new
+    cells, zero unjustified divergences. If rg fixes either, the lane fails and the
+    boundary gets deleted instead of refreshed.
+
+    The mode is free at match time — it changes which bytes are a token, never what
+    a token means — and the corpus-scale numbers are the engine's, not the mode's.
+    Over a frozen 11,902-file / 124 MiB tree, both tools walking the identical file
+    set: 18–24× wall and 35–52× CPU against rg on selective verbose patterns with
+    the index, 2.3–2.7× wall and 3.8–6.7× CPU with `--no-index` (engine against
+    engine, every byte read), and 1.5× wall / 3.6× CPU on `\b [A-Z] \w{9,} \b`,
+    which matches almost everywhere and so leaves nothing to skip. The three
+    patterns rg exits 2 on answer in 22–27 ms.
+- Every release now attaches a downloadable archive per platform, with a
+  `SHA256SUMS` beside them.
+
+  macOS, Linux, and Windows, each on x86_64 and arm64. Until now the only way to
+  get the CLI without already having a language runtime was to install Zig and
+  build from source; now there is a URL, and Homebrew, `cargo binstall`, and a
+  plain `curl | tar` all have something to point at.
+
+  Nothing is rebuilt to publish them. Each archive holds the exact binary that
+  ran a real search on that architecture's own hardware in the release's smoke
+  matrix, so an asset and its wheel cannot disagree about what this version's
+  `gist` is.
+- `pip install gist-search` now puts `gist` on your PATH.
+
+  The wheel already carried the binary for all six platforms; it just kept it
+  somewhere only Python could reach. Now the same file lands in the environment's
+  `bin/` (`Scripts/` on Windows) as well, so installing the package installs the
+  tool. What you get there is the native binary itself, not a console-script
+  shim - a Python entry point would pay interpreter startup, some 30ms, in front
+  of something that answers a warm query in under one.
+
+### Fixed
+
+- - `(?-u)` no longer truncates a character to one byte. Turning Unicode off changes
+    what a class, a fold, and a boundary mean; it cannot change what a character IS,
+    and rg draws the line in the same place. Two spellings were on the wrong side.
+
+    `(?-u)\x{e9}` looked for a raw 0xE9, which a UTF-8 file does not contain — so it
+    found nothing where rg found `é`, and found a match where rg found none. Above
+    0xFF it refused outright, making `(?-u)\x{2603}` a parse error against rg's three
+    bytes. Both now match the character's UTF-8 sequence. Bare `\xNN` and octal are
+    byte syntax and still name the raw byte (`(?-u)\xe9` is 0xE9), as they do in rg.
+
+    A quantifier bound a character's last byte instead of the character: `(?-u)é+`
+    over `éé` answered `é`, and `(?-u)é{2}` matched nothing. Both now answer what rg
+    answers. And a byte-mode `[…]` now refuses a character above ASCII rather than
+    matching one byte of it, which is rg's judgment too (`(?-u)[\x{e9}]` is a parse
+    error there).
+- - `--null-data` treats a record as what it is: NUL-delimited, and free to hold
+    newlines. So `^` and `$` are newline assertions inside one, `\z` is the record's
+    real end, and a record's trailing newline is content rather than a terminator —
+    it opens the empty line after it like any other. Previously `^zz` missed a `zz`
+    sitting after an interior newline.
+
+    Python's `re` refereed it rather than us: split a file on NUL by hand, hand each
+    record to `re` with `re.MULTILINE`, and compare. Over 322 cells of record-mode
+    `-c` and `-o` answers gist now agrees on every one, and ripgrep disagrees on 13
+    — it misses a record's own start for `^` (reading `^` as "after a `\n`", so a
+    record beginning after a NUL is not a line start to it), prints whole records as
+    `-o` rows for matches it rejected, and matches nothing at all for `\z`, whose
+    NUL it keeps in the slice it searches. BSD `grep -z` agrees with gist about `^`.
+
+    It is also the faster reading. A record is a *sequence of lines* whenever the
+    pattern cannot see across one, so gist splits at the newlines and every piece
+    goes down the ordinary per-line ladder with its DFA, prefilter, and SIMD kernels
+    intact, instead of the whole-record Pike scan an assertion-bearing wide haystack
+    otherwise forces. On 50 MB of records, against a build with that one switch
+    forced off, `^\w+ mid` went from 341.9 ms wall / 2885 ms CPU to 16.2 / 50 — 21×
+    wall and 57× CPU — while the rows a required literal already carried moved by
+    under 1%. Against ripgrep the record-mode slate is now 4.2–6.2× faster on wall
+    clock *and* 1.3–5.0× on CPU; the alternation used to win on wall clock only by
+    spending 5× rg's CPU to do it.
+
 ## [1.2.1] - 2026-08-17
 
 ### Fixed
