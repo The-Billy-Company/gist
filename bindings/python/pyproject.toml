@@ -24,7 +24,7 @@
 
 [project]
 name = "gist-search"
-version = "1.2.4"                                                                                                                                  # x-release-please-version
+version = "1.2.5"                                                                                                                                  # x-release-please-version
 description = "Indexed code search for Python - ripgrep-parity regex search over a persisted trigram index, with ranked definition-first results."
 # The long description is the repository's own README, lifted and link-corrected
 # at build time by `hatch_readme.py`. PyPI opens onto the project's front door,
