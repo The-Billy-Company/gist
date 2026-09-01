@@ -53,11 +53,52 @@ pub fn detach(gpa: std.mem.Allocator, io: std.Io, verb: [:0]const u8) !void {
     return detachPosix(gpa, io, verb);
 }
 
-/// `fork` → child fully detaches (new session, stdio → /dev/null) and `execv`s
-/// the daemon; the parent returns at once. All argv/path memory is built BEFORE
-/// the fork, so the child touches only async-signal-safe syscalls between fork
-/// and exec (no allocator, no std.Io) — safe even with a `std.Io.Threaded` pool
-/// present, since `execv` replaces the whole image.
+/// Collect the intermediate, retrying only the one failure that means "not yet".
+///
+/// This is a reap, not a wait on the daemon: the intermediate is already on its
+/// way out, so the call returns in microseconds. Its exit status is nothing we
+/// can act on — a failed second fork means no daemon, the same swallowed
+/// non-event every other spawn failure is — so the CLI runs cold either way and
+/// only the process-table entry matters.
+///
+/// `EINTR` is the one answer worth retrying: a signal delivered mid-wait leaves
+/// the child unreaped, which is the exact leak this function exists to prevent.
+/// Every other failure (`ECHILD` — already reaped by a `SIGCHLD` handler or a
+/// `SIG_IGN` disposition) means there is nothing left to collect, so retrying it
+/// would spin. The retry is bounded anyway, because a reaper that can loop
+/// forever is a worse bug than the zombie it was chasing.
+fn reap(pid: std.c.pid_t) void {
+    for (0..8) |_| {
+        if (std.c.waitpid(pid, null, 0) >= 0) return;
+        if (std.c._errno().* != @intFromEnum(std.c.E.INTR)) return;
+    }
+}
+
+/// Double `fork` → grandchild fully detaches (new session, stdio → /dev/null)
+/// and `execv`s the daemon; the parent reaps the intermediate and returns at
+/// once. All argv/path memory is built BEFORE the fork, so neither forked
+/// process touches anything but async-signal-safe syscalls between fork and exec
+/// (no allocator, no std.Io) — safe even with a `std.Io.Threaded` pool present,
+/// since `execv` replaces the whole image.
+///
+/// **Why two forks and a wait, when one fork already detaches.** `setsid` gives
+/// the daemon its own session, but it does not change who its PARENT is: with a
+/// single fork the daemon is this CLI's direct child, so the CLI owes it a
+/// `wait` it can never afford to make (the daemon outlives it by design) and the
+/// kernel holds a process-table entry until the CLI exits. That is invisible
+/// when the spawn succeeds and ugly when it does not, which is the common case
+/// here: ~10 coworker CLIs each fork a `serve`, the daemon's exclusive lock
+/// admits one, and the nine losers `_exit` within microseconds — nine zombies
+/// parked on nine CLIs that are still running their cold walk. A tool that leaks
+/// process slots in proportion to how many agents are searching is a tool that
+/// eventually cannot fork at all.
+///
+/// The second fork moves the daemon one generation away, so it is orphaned to
+/// init/launchd the instant the intermediate leaves, and the intermediate is a
+/// process whose whole life is `setsid` + `fork` + `_exit`. Waiting on THAT is
+/// microseconds and cannot block on the daemon's lifetime, so the CLI reaps
+/// everything it created and leaves nothing behind. One extra fork, paid only on
+/// the rare invocation that actually starts a daemon.
 fn detachPosix(gpa: std.mem.Allocator, io: std.Io, verb: [:0]const u8) !void {
     const exe_z = try std.process.executablePathAlloc(io, gpa); // NUL-terminated
     defer gpa.free(exe_z);
@@ -65,11 +106,19 @@ fn detachPosix(gpa: std.mem.Allocator, io: std.Io, verb: [:0]const u8) !void {
 
     const pid = fork();
     if (pid < 0) return fault.Resource.Exhausted;
-    if (pid > 0) return; // parent — the daemon warms while this query runs cold
+    if (pid > 0) {
+        reap(pid);
+        return;
+    }
 
-    // ── child ──: detach from the CLI's session + stdio, then become the daemon.
+    // ── intermediate ──: leave the CLI's session, then hand the daemon on so
+    // nobody is left owing it a wait.
     _ = std.c.setsid();
-    // No `/dev/null` → the child keeps the CLI's stdio rather than not starting.
+    const daemon = fork();
+    if (daemon != 0) _exit(if (daemon < 0) 127 else 0);
+
+    // ── grandchild ──: drop the CLI's stdio and become the daemon.
+    // No `/dev/null` → keep the CLI's stdio rather than not starting.
     if (std.posix.openat(std.posix.AT.FDCWD, "/dev/null", .{ .ACCMODE = .RDWR }, 0) catch null) |nul| {
         _ = std.c.dup2(nul, 0);
         _ = std.c.dup2(nul, 1);
