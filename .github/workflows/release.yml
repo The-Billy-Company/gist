@@ -638,6 +638,14 @@ jobs:
       - name: Attach every archive to the release
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job downloads one artifact and never checks the repository out,
+          # so `gh` had no git remote to infer a repository from and every
+          # `gh release view` below failed on configuration rather than on the
+          # release. v1.2.4's six archives verified OK here and were still
+          # attached by hand. Naming the repository is what lets a
+          # checkout-free job ask about its own release; the alternative is
+          # cloning the tree so that `gh` can read a remote it does not need.
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
@@ -645,16 +653,31 @@ jobs:
           # person who downloads them will - bare, beside the sums file. Checked
           # from the workspace root instead, shasum looks for six archives that
           # are one directory down and reports every one as unreadable, which is
-          # how both releases this job has run for - v1.2.2 and v1.2.3 - shipped
+          # how both releases this job had run for - v1.2.2 and v1.2.3 - shipped
           # an empty asset list under a README that tells you to download one.
           (cd assets && shasum -a 256 -c SHA256SUMS)
           files=(assets/*)
           for attempt in $(seq 1 30); do
-            if gh release view "$TAG" --json id >/dev/null 2>&1; then
+            if err=$(gh release view "$TAG" --json id 2>&1 >/dev/null); then
               gh release upload "$TAG" "${files[@]}" --clobber
               echo "attached ${#files[@]} files to the $TAG release"
               exit 0
             fi
+            # Exactly one answer means "keep waiting", and it is the only one
+            # this retry was ever for: release-please has not created the
+            # release yet. Every other answer - an unresolvable repository, a
+            # token that cannot read releases - is a fault that will still be
+            # true in five minutes, so spending the retries on it buries the
+            # real message under a timeout that names the wrong cause. That is
+            # what `2>/dev/null` here used to do.
+            case $err in
+              *"release not found"* | *"Not Found"* | *"HTTP 404"*) ;;
+              *)
+                echo "::error::cannot read the $TAG release, so its archives" \
+                     "were not attached: $err" >&2
+                exit 1
+                ;;
+            esac
             echo "no release on $TAG yet (attempt $attempt/30) — waiting"
             sleep 10
           done
