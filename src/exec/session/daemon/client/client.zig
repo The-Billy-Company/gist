@@ -173,7 +173,10 @@ fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const
 
     // A readable stdin makes this a STREAM search cold — the tree daemon must
     // decline. Checked after the dial so a daemonless query never pays the
-    // FIFO poll (`readableStdin` may wait up to its short poll window).
+    // FIFO poll, which is the one probe here that can take real time:
+    // `readableStdin` waits for a silent pipe to speak (`quarry/stream.zig`).
+    // The verdict is memoized process-wide, so asking here never makes the cold
+    // run that follows wait a second time.
     if (run.readableStdin()) return .cold;
 
     return exchange(gpa, io, fd, req, image.stamp(io), timeout_ms) catch .cold;
