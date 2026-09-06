@@ -1,0 +1,1 @@
+The native wheel builder can package another search product from its own manifest. Relate and Blast use the same platform matrix, binary layout, executable scripts, and release archives as Gist, so installing the family no longer needs a second packaging implementation.
