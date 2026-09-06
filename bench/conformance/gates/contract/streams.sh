@@ -42,6 +42,9 @@ echo "building gist (ReleaseFast) + copying binary…"
     exit 1
   }
 compete_install_gist_bin || exit 1
+# Input identity belongs to the same stream contract. Exercise the exact built
+# artifact on a tiny isolated tree, including delayed producers and cancellation.
+python3 "${HERE}/stdin.py" "${GIST_BIN}" || exit 1
 # The index must exist for the read-elision + --rank paths (the plain walk needs none).
 # shellcheck disable=SC2154 # OUT: assigned in field.sh itself, same hop as above.
 [[ -f "${OUT}/index.gist" ]] || (cd "${CORPUS}" && "${GIST_BIN}" index > /dev/null 2>&1)
