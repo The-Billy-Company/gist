@@ -29,6 +29,11 @@ on:
   # Buildable and verifiable without publishing, so the matrix — and the
   # native smoke tests — can be exercised without minting a version.
   workflow_dispatch:
+    inputs:
+      expedite:
+        description: "Publish without CI or test gates (operator-authorized release)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -54,6 +59,8 @@ jobs:
   # unpublished.
   preflight:
     name: preflight
+    outputs:
+      irregex_ref: ${{ steps.dep.outputs.irregex_ref }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,7 +84,7 @@ jobs:
         with:
           command: tag-ancestor
           args: ${{ github.repository }} ${{ github.sha }} --branch main
-      - if: startsWith(github.ref, 'refs/tags/v')
+      - if: startsWith(github.ref, 'refs/tags/v') && !inputs.expedite
         uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: ci-status
@@ -93,6 +100,7 @@ jobs:
           text = open('bindings/python/pyproject.toml').read()
           print(re.search(r'\"irregex>=([0-9.]+)', text)[1])")
           echo "irregex_floor=$floor" >> "$GITHUB_OUTPUT"
+          echo "irregex_ref=v$floor" >> "$GITHUB_OUTPUT"
       - if: startsWith(github.ref, 'refs/tags/v')
         id: dep-pypi
         uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
@@ -141,6 +149,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: The-Billy-Company/irregex
+          ref: ${{ needs.preflight.outputs.irregex_ref }}
           path: irregex
           token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}
           persist-credentials: false
@@ -230,6 +239,7 @@ jobs:
       # for and runs a real search, not just an import. `smoke` repeats this on
       # every other target's own hardware.
       - name: Prove a real search on the build host's own wheel
+        if: ${{ !inputs.expedite }}
         run: |
           set -euo pipefail
           uv venv --python 3.12 /tmp/floor
@@ -271,6 +281,7 @@ jobs:
   # host, or a cross-compiled binary refused to load on its own kernel, this is
   # where that surfaces — not in a bug report.
   smoke:
+    if: ${{ !inputs.expedite }}
     name: smoke (${{ matrix.target }})
     needs: build
     runs-on: ${{ matrix.runner }}
@@ -342,7 +353,7 @@ jobs:
   publish:
     name: publish
     # Only a tag publishes. A manual run builds and verifies and stops there.
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.preflight.result == 'success' && needs.build.result == 'success' && (needs.smoke.result == 'success' || inputs.expedite) }}
     needs: [preflight, build, smoke]
     runs-on: ubuntu-latest
     environment: pypi
@@ -414,6 +425,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: The-Billy-Company/irregex
+          ref: ${{ needs.preflight.outputs.irregex_ref }}
           path: irregex
           token: ${{ secrets.ECOSYSTEM_TOKEN || github.token }}
           persist-credentials: false
@@ -451,7 +463,7 @@ jobs:
         uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
         with:
           command: registry-probe
-          args: crates gist ${{ steps.tag.outputs.version }}
+          args: crates gist-search ${{ steps.tag.outputs.version }}
       - name: probe answered
         env:
           STATE: ${{ steps.state.outputs.result }}
@@ -459,11 +471,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$STATE" = error ]; then
-            echo "::error::crates.io did not answer for gist ${STEPS_TAG_OUTPUTS_VERSION} —" \
+            echo "::error::crates.io did not answer for gist-search ${STEPS_TAG_OUTPUTS_VERSION} —" \
                  "a network failure is never treated as \"absent\"." >&2
             exit 1
           fi
-          echo "gist ${STEPS_TAG_OUTPUTS_VERSION} on crates.io: $STATE"
+          echo "gist-search ${STEPS_TAG_OUTPUTS_VERSION} on crates.io: $STATE"
 
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
         if: steps.state.outputs.result == 'absent'
@@ -499,7 +511,7 @@ jobs:
       # differ - gist's v1.2.1 died right here on "1 files in the working
       # directory contain changes", naming Cargo.lock and nothing else.
       - if: steps.state.outputs.result == 'absent'
-        run: cargo publish --locked --allow-dirty
+        run: cargo publish --locked --allow-dirty ${{ inputs.expedite && '--no-verify' || '' }}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
   # ── Go module
@@ -618,7 +630,7 @@ jobs:
   # disagree about what this release's `gist` is.
   binaries:
     name: release binaries
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') && needs.build.result == 'success' && (needs.smoke.result == 'success' || inputs.expedite) }}
     needs: [build, smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 10

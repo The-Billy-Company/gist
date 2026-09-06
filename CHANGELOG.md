@@ -7,6 +7,22 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.2.6] - 2026-09-05
+
+We published this patch with the operator-authorized expedited release path. Native artifacts were rebuilt; CI and tests were skipped for this release.
+
+### Changed
+
+- We build against the released irregex 2.4.2 source and require that corrected substrate in Python and Rust. An explicit expedited dispatch can skip CI and test gates; ordinary releases keep them. The registry probe now names gist-search.
+
+- The native wheel builder can package another search product from its own manifest. Relate and Blast use the same platform matrix, binary layout, executable scripts, and release archives as Gist, so installing the family no longer needs a second packaging implementation.
+
+### Fixed
+
+- We skip stdin admission when a query names a path, including resident queries.
+  Our stream contract now checks delayed and empty pipes, socket EOF, cancellation,
+  and explicit timeouts against the actual CLI with and without a resident daemon.
+
 ## [1.2.5] - 2026-09-01
 
 ### Fixed
