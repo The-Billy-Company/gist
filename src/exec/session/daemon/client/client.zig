@@ -171,13 +171,10 @@ fn attemptWithDeadline(gpa: std.mem.Allocator, io: std.Io, argv: []const []const
     defer stream.close(io);
     const fd = stream.socket.handle;
 
-    // A readable stdin makes this a STREAM search cold — the tree daemon must
-    // decline. Checked after the dial so a daemonless query never pays the
-    // FIFO poll, which is the one probe here that can take real time:
-    // `readableStdin` waits for a silent pipe to speak (`quarry/stream.zig`).
-    // The verdict is memoized process-wide, so asking here never makes the cold
-    // run that follows wait a second time.
-    if (run.readableStdin()) return .cold;
+    // Only a rootless query can select stdin. Admission checks descriptor type
+    // without waiting; the cold reader owns bytes, EOF and any explicit timeout.
+    // Named paths keep their intended source even when stdin is a live pipe.
+    if (req.filter.roots.len == 0 and run.readableStdin()) return .cold;
 
     return exchange(gpa, io, fd, req, image.stamp(io), timeout_ms) catch .cold;
 }

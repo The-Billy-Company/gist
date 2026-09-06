@@ -45,14 +45,15 @@ pub fn maybeSpawn(
     // Only the shapes the daemon can actually accelerate are worth warming for.
     // A scoped query is eligible too — the rootless daemon spawned here serves
     // any subtree of the CWD tree — so warming for it is worthwhile; `sa` is a
-    // throwaway (roots are unread here, only `req.mode`/tty/stdin gate below).
+    // throwaway (the mode and root count suffice for the tty/stdin gate below).
     var sa: request.ScopeArgs = .{};
     const req = request.classify(argv, &sa) catch return;
     // The client declines these shapes up front (`client.attempt`), so a daemon
     // would never serve them: `-c` stays cold (per-file layout), a TTY stdout
     // gets cold's interactive presentation, and a readable stdin is a stream
     // search. Don't burn a resident corpus warming for a shape that can't land.
-    if (req.mode == .count or (std.Io.File.stdout().isTty(io) catch false) or run.readableStdin()) return;
+    if (req.mode == .count or (std.Io.File.stdout().isTty(io) catch false) or
+        (req.filter.roots.len == 0 and run.readableStdin())) return;
     // A daemon may have come up since the client's dial (a coworker's spawn, or
     // one still binding). Probe once; if it answers, leave it be.
     if (rendezvous.address(socket_path)) |ua| {

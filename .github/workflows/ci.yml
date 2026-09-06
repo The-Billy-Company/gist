@@ -102,7 +102,7 @@ jobs:
           command -v rg && exit 0
           if [ "$RUNNER_OS" = "macOS" ]; then brew install ripgrep;
           else sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep; fi
-      # The one conformance gate that runs per-push on both hosts. It earns that
+      # The type-algebra gate runs per-push on both hosts. It earns that
       # by being hermetic (it synthesizes its corpus, so it cannot go vacuous or
       # depend on what a checkout happens to contain) and by finishing in under
       # a second on a built tree. The claim it holds is one a unit test cannot:
@@ -118,6 +118,8 @@ jobs:
         working-directory: irregex
       - name: -t union parity (every type on the line reaches the answer)
         run: ./bench/conformance/gates/parity/type_union_parity.sh
+      - name: stdin source identity (reuse the built CLI)
+        run: python3 bench/conformance/gates/contract/stdin.py zig-out/bin/gist
 
   python:
     name: python (${{ matrix.python }})
