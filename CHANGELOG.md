@@ -7,6 +7,50 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.2.6] - 2026-09-05
+
+We published this patch with the operator-authorized expedited release path. Native artifacts were rebuilt; CI and tests were skipped for this release.
+
+### Changed
+
+- We build against the released irregex 2.4.2 source and require that corrected substrate in Python and Rust. An explicit expedited dispatch can skip CI and test gates; ordinary releases keep them. The registry probe now names gist-search.
+
+- The native wheel builder can package another search product from its own manifest. Relate and Blast use the same platform matrix, binary layout, executable scripts, and release archives as Gist, so installing the family no longer needs a second packaging implementation.
+
+### Fixed
+
+- We skip stdin admission when a query names a path, including resident queries.
+  Our stream contract now checks delayed and empty pipes, socket EOF, cancellation,
+  and explicit timeouts against the actual CLI with and without a resident daemon.
+
+## [1.2.5] - 2026-09-01
+
+### Fixed
+
+- - **The archives attach themselves now, without a human finishing the job.**
+    v1.2.4 fixed the reason this had never worked - the sums file was verified from
+    one directory up, so all six archives read as unreadable and `set -e` ended the
+    job - and then failed anyway, one step further along, on something the first
+    fix had been hiding.
+
+    All six verified `OK` this time. Then thirty attempts over five minutes each
+    reported "no release on v1.2.4 yet" about a release that had existed for half
+    an hour. `gh` resolves which repository it is talking about from a git remote,
+    and this job downloads one artifact and never checks the tree out, so there was
+    no remote and no repository - `gh release view` was failing on its own
+    configuration, not on the release. The sibling job that posts the release notes
+    makes the identical call and has always worked, because it happens to check the
+    repository out for a different reason.
+
+    Two things were wrong and both are fixed. The job now names its repository
+    (`GH_REPO`) rather than inferring one from a checkout it has no other use for.
+    And the wait can now tell the two answers apart: a release that does not exist
+    yet is worth retrying, and anything else - a bad token, an unresolvable
+    repository - is a fault that will still be true in five minutes, so it fails
+    immediately with what `gh` actually said. The `2>/dev/null` that turned every
+    such fault into "not yet" is gone. v1.2.4's binaries were attached by hand and
+    are on its release page.
+
 ## [1.2.4] - 2026-09-01
 
 ### Note

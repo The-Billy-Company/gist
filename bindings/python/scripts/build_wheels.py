@@ -148,6 +148,7 @@ def build_binary(target: Target, prefix: Path) -> Path:
     command = [
         "zig",
         "build",
+        "-j1",
         "-Doptimize=ReleaseFast",
         "-Dstrip=true",
         f"-Dtarget={target.zig}",

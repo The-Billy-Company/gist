@@ -12,7 +12,7 @@
 # permanent, so this takes the same `-search` name the PyPI distribution does.
 # The `[lib]` below keeps the identifier callers actually type as `gist`.
 name = "gist-search"
-version = "1.2.4"                                                                                                                                # x-release-please-version
+version = "1.2.6"                                                                                                                                # x-release-please-version
 edition = "2024"
 rust-version = "1.85"
 license = "Apache-2.0"
@@ -65,7 +65,7 @@ native = [  ]
 # Shared substrate: contracts, row protocol, transports, typed failures.
 # Path for in-tree development; a published build ignores it and resolves the
 # same version range of `irgx` from crates.io.
-irgx = { version = "2.0.0", path = "../../../irregex/bindings/rust" }
+irgx = { version = "2.4.2", path = "../../../irregex/bindings/rust" }
 # ripgrep's `--json` record stream is the wire format; serde is the idiomatic,
 # ubiquitous parser for it. No other runtime dependency — the engine is a process.
 serde = { version = "1", features = [ "derive" ] }

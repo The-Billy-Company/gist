@@ -24,7 +24,7 @@
 
 [project]
 name = "gist-search"
-version = "1.2.4"                                                                                                                                  # x-release-please-version
+version = "1.2.6"                                                                                                                                  # x-release-please-version
 description = "Indexed code search for Python - ripgrep-parity regex search over a persisted trigram index, with ranked definition-first results."
 # The long description is the repository's own README, lifted and link-corrected
 # at build time by `hatch_readme.py`. PyPI opens onto the project's front door,
@@ -73,23 +73,9 @@ keywords = [
   "pattern-matching",
 ]
 dependencies = [
-  # Bounded on both sides, and neither bound is boilerplate. `irgx` is the import
-  # this package opens with, and it only exists from 1.0.0 — the 0.1.0 already on
-  # the index is the pre-rename placeholder, so an unbounded requirement resolved
-  # to a distribution that cannot satisfy a single line of this one. The floor is
-  # 2.0.0, not 1.0.0, because that is the release where `_resolve` learned its
-  # fourth rung — a binary a product's own wheel bundled at `<name>/bin/<name>` —
-  # and this package's whole reason to bundle a `gist` binary at all depends on
-  # the shared resolver knowing to look for it there (the fourth-rung commit
-  # landed the same release cycle as an unrelated ABI-growing `feat!:`, so the
-  # tag that actually ships it is 2.0.0, not the 1.1.0 an isolated feature bump
-  # would have produced). Below that floor, a fresh `pip install gist-search`
-  # would carry the CLI and never find it. The ceiling holds the other half of
-  # the same shape: this package imports `irgx.contract`, `irgx.request`, and
-  # `irgx.runtime` directly, so a THIRD major (whatever next moves that surface)
-  # is not accepted sight-unseen — `bindings/python/tests/` running clean
-  # against 2.x is what earns 2.x its place here, not a guess about semver.
-  "irregex>=2.0.0,<3",
+  # Keep Python's shared substrate at the same corrected input contract as the
+  # bundled CLI. The next major may change the imported row/transport protocol.
+  "irregex>=2.4.2,<3",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
