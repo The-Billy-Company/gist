@@ -48,7 +48,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PROJECT = Path(os.environ.get("SEARCH_WHEEL_PROJECT", HERE.parent)).resolve()
-PRODUCT = tomllib.loads((PROJECT / "pyproject.toml").read_text())["project"]["name"].removesuffix("-search")
+PRODUCT = tomllib.loads((PROJECT / "pyproject.toml").read_text())["project"]["name"].removesuffix(
+    "-search"
+)
 ENGINE = PROJECT.parent.parent
 
 

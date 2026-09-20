@@ -137,7 +137,9 @@ class GistBuildHook(BuildHookInterface):
         # (e.g. re-uploaded through a step that resets perms) fails the same
         # way any non-executable `gist` would: loudly, at the caller's first
         # search, never silently.
-        build_data.setdefault("force_include", {})[str(source)] = f"{self.product}/bin/{installed_name}"
+        build_data.setdefault("force_include", {})[str(source)] = (
+            f"{self.product}/bin/{installed_name}"
+        )
         # The PATH copy, under `<dist>.data/scripts/`. Hatchling routes this
         # through the same `add_file`, so it carries the same mode; it rewrites
         # a `#!python` shebang on the way past, which a native binary does not
