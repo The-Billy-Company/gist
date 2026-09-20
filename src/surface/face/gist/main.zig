@@ -390,6 +390,13 @@ fn run(init: std.process.Init) !void {
     // cold (the resident classifier declines it), so the flag still takes effect.
     gist.corpus.initOutputBudget(false);
 
+    // Arm the index's own upkeep before anything can search. A query that
+    // discovers the index has stopped paying for itself starts the re-anchor
+    // in the background and still answers cold; without this the engine can
+    // only print the discovery, which is an instruction to nobody in the two
+    // places this binary now mostly runs (`indexer.armUpkeep`).
+    indexer.armUpkeep(gpa, io);
+
     // `gist index [ROOT...]` — explicit roots scope the index to those
     // subtrees; with none, the corpus for THIS TREE (GIST_ROOTS → charter →
     // the whole tree). `enterTree` also moves the process to the checkout root

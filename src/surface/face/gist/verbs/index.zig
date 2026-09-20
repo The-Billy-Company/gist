@@ -49,8 +49,10 @@ const Index = trigram.Index;
 const crest_math = @import("irregex").math.crest;
 const assay = @import("irregex").assay;
 const fault = @import("irregex").fault;
+const hints = @import("irregex").engine.search.hints;
 const portal = @import("irregex").portal;
 const home = @import("irregex").index.home;
+const allowance = @import("irregex").index.allowance;
 
 /// This process's peak resident set so far, in MiB — the running ceiling every
 /// `GIST_TRACE=index` phase line carries. Peak is monotonic, so the phase that
@@ -65,9 +67,67 @@ fn peakMib() f64 {
 
 /// Refresh the persisted index: amend incrementally when the base admits it,
 /// else build + persist the full pair.
+///
+/// Two gates stand in front of both speeds, and they are the difference between
+/// an index that serves a checkout and one that is a liability on somebody
+/// else's computer:
+///
+///   * **A corpus has to have an edge.** `home.hosted` is false at a home
+///     directory and at a filesystem root, which are the two places a rootless
+///     build would take the whole machine as its corpus. Refused, loudly, with
+///     the one-line fix — never silently downgraded, because a person who typed
+///     `index` is owed an answer about whether they now have one.
+///   * **One build at a time, per tree.** A full build reads the whole corpus,
+///     and ~10 coworker agents (or the background re-anchor below) can each
+///     reach this verb at once. The daemon has admitted exactly one racer since
+///     it existed; the build had no such rule and simply ran N times over the
+///     same files. The losers now say so and exit 0 — a maintenance action
+///     somebody else is already performing has been performed.
 pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
+    if (!home.hosted()) return refuseUnbounded();
+    const lock = singleton(io) orelse {
+        assay.summary(gpa, false, "another index build is already running for this tree\n", .{}, .{
+            .{ "artifact", "s", "index" },
+            .{ "mode", "s", "deferred" },
+        });
+        return;
+    };
+    defer lock.close(io); // closing releases the advisory lock
     if (!envDisabled("GIST_NO_AMEND") and (amend(gpa, io, roots) catch false)) return;
     try full(gpa, io, roots);
+}
+
+/// The refusal, and the sentence that makes it actionable.
+///
+/// It exits 2 rather than 0 because it is a refusal and not a declinature:
+/// every other tier in this family falls back to something that still answers,
+/// and there is no slower way to have an index. Search is unaffected and says
+/// so, so the reader knows the tool still works here.
+fn refuseUnbounded() !void {
+    var here: [portal.max_path]u8 = undefined;
+    const where = portal.realpath(".", &here) orelse "this directory";
+    assay.diag("gist: index — {s} is not a project, and a corpus rooted here has no edge (it would be the whole machine)\n", .{where});
+    assay.diag("gist: try   — cd into the directory you mean and run `gist index` there; searching works here either way\n", .{});
+    std.process.exit(2);
+}
+
+/// The per-tree build lock: an advisory exclusive hold on a file in the
+/// artifact home, released by closing it — or by the process dying, which is
+/// the property a stamp file cannot have. Null means somebody else holds it.
+///
+/// Deliberately the daemon's singleton with a different filename rather than a
+/// second mechanism (`serve.zig::acquireSingleton`): one tree, one home, one
+/// lock beside the artifacts it guards, and `truncate = false` for the same
+/// reason there — the file is a rendezvous, not a payload.
+fn singleton(io: std.Io) ?std.Io.File {
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = std.fmt.bufPrint(&buf, "{s}/index.lock", .{home.outDir()}) catch return null;
+    fault.spare("pre-create the artifact home", std.Io.Dir.cwd().createDirPath(io, home.outDir()));
+    return std.Io.Dir.cwd().createFile(io, path, .{
+        .truncate = false,
+        .lock = .exclusive,
+        .lock_nonblocking = true,
+    }) catch null; // WouldBlock = another build holds it → this one stands down
 }
 
 /// A full build, streamed if it can be and held if it cannot.
@@ -212,7 +272,7 @@ fn streamed(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void
     // The shard's catalog is prefix sums of `ledger.lens` — what the trigram
     // pass read, not what the census stated — and `buildRecalled` declines the
     // whole tier rather than publish a catalog the bodies disagree with.
-    fault.spare("content shard (costs the shard read tier)", shard.buildRecalled(
+    if (affordable(census.bytes, index_bytes)) fault.spare("content shard (costs the shard read tier)", shard.buildRecalled(
         gpa,
         io,
         .{ .ctx = &census, .read = recallDoc },
@@ -239,6 +299,28 @@ fn streamed(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void
         .{ "ms", "d:.0", dur },
         .{ "path", "s", home.outDir() },
     });
+}
+
+/// May this build write the content shard — the one tier whose size IS the
+/// corpus rather than a fraction of it (`irregex`'s `index.allowance`)?
+///
+/// The trigram pair is never asked this question: it is what an index IS, and
+/// a build that declines it has not spared the user disk, it has uninstalled
+/// the feature. The shard is the opposite trade — it removes an `open` per
+/// file and costs a byte per byte — so on a tree past the allowance the right
+/// answer is the syscalls, not a second copy of the corpus on someone's disk.
+///
+/// Declining out loud, because silence is the failure mode this whole family
+/// keeps having: a full-scan query simply gets slower forever and nothing ever
+/// said the accelerator was not written.
+fn affordable(corpus_bytes: u64, spent: u64) bool {
+    if (allowance.admits(corpus_bytes, spent)) return true;
+    assay.diag(
+        "gist: note: content shard declined — a {d} MiB copy of this corpus does not fit the tree's {d} MiB artifact allowance\n" ++
+            "gist: note: indexed search is unaffected; full-scan queries read files instead of the shard (GIST_DISK_MB raises the allowance)\n",
+        .{ corpus_bytes >> 20, allowance.ceiling() >> 20 },
+    );
+    return false;
 }
 
 fn held(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
@@ -294,7 +376,7 @@ fn held(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8) !void {
     // Content shard (self-anchored on the SAME `built_ns`, sharing this exact
     // corpus snapshot): best-effort — a failure costs the shard read tier, so a
     // full-scan query falls back to opening every file, never the index build.
-    fault.spare(
+    if (affordable(corpus.bytes, index_bytes)) fault.spare(
         "content shard (costs the shard read tier)",
         shard.build(io, corpus.docs, corpus.paths, built.ns()),
     );
@@ -515,6 +597,67 @@ fn annalsChanged(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, 
     // a daemon answer and a walk answer describe the same corpus surface
     // (the stat confirm also prunes the annals' sound-superset extras).
     return fresh.confirmChanged(gpa, io, roots, base_ns, ans.paths, a, out);
+}
+
+// ── upkeep: the index maintains itself, or it is a liability ────────────────
+
+/// Arm the reflex that re-anchors a lapsed index, and answer whether a lapse
+/// was acted on (`irregex`'s `hints.onLapse`).
+///
+/// The oracle that decides an index has stopped paying already existed and
+/// already said so, in one of the best-worded notes in the tool. What it could
+/// not do is anything about it, and "run `gist index`" is only an instruction
+/// if somebody is reading. Both places this engine now spends its life have
+/// nobody reading: an agent's tool call, where stderr is a line in a receipt,
+/// and a product on a user's machine, where there is no terminal and no reason
+/// the person would know the word. An index nobody re-anchors does not stay
+/// still — it ages past the point where it saves anything and keeps charging
+/// for the bookkeeping, which is the exact shape of "it got slow for no
+/// reason".
+///
+/// So the query that NOTICES is the one that starts the repair. It does not
+/// wait for it: the amend runs detached and this query answers cold, exactly
+/// like the daemon auto-spawn beside it, and for the same reason — the run in
+/// hand is already correct and must not get slower to make the next one
+/// faster.
+///
+/// Three things keep it from becoming a storm, and none of them is a timer:
+///
+///   * the spawned build takes the per-tree `singleton` lock, so however many
+///     queries notice at once, exactly one build happens and the rest exit;
+///   * a successful amend advances the anchor, which retires the condition —
+///     the reflex stops firing because the thing it fires on stopped being
+///     true, not because a cooldown said so;
+///   * `GIST_NO_REANCHOR` declines it outright, for a caller that wants its
+///     artifact directory to change only when it says so.
+pub fn armUpkeep(gpa: std.mem.Allocator, io: std.Io) void {
+    upkeep = .{ .gpa = gpa, .io = io };
+    hints.onLapse = reanchor;
+}
+
+/// The process's own allocator and I/O, parked for the reflex.
+///
+/// `hints.onLapse` is a bare `fn () bool` deliberately: the engine calls it
+/// from the one place the elision counts are final, deep inside a walk's exit,
+/// and threading a host's context down to there would make every frame between
+/// here and there know about spawning processes. A CLI has exactly one of each
+/// of these for its whole life, so parking them at install time is honest.
+var upkeep: ?struct { gpa: std.mem.Allocator, io: std.Io } = null;
+
+fn reanchor() bool {
+    if (comptime !session_spawn.can_spawn) return false;
+    const it = upkeep orelse return false;
+    // An unhosted tree has no index to re-anchor and no home to write one to,
+    // and the detached build would only reach `refuseUnbounded` — spending a
+    // fork to print a refusal nobody asked for.
+    if (!home.hosted()) return false;
+    if (envDisabled("GIST_NO_REANCHOR")) return false;
+    // `GIST_SESSION_SOCK` marks a caller managing its own rendezvous (the
+    // hermetic session tests), where an unexpected extra process is a test
+    // failure rather than an accelerator.
+    if (std.c.getenv("GIST_SESSION_SOCK") != null) return false;
+    session_spawn.detach(it.gpa, it.io, "index") catch return false;
+    return true;
 }
 
 /// After a tier-0 miss, fire a detached `gist serve` so the next amend finds a
