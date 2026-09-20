@@ -47,7 +47,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PROJECT = HERE.parent
+PROJECT = Path(os.environ.get("SEARCH_WHEEL_PROJECT", HERE.parent)).resolve()
+PRODUCT = tomllib.loads((PROJECT / "pyproject.toml").read_text())["project"]["name"].removesuffix("-search")
 ENGINE = PROJECT.parent.parent
 
 
@@ -69,8 +70,8 @@ class Target:
     host: tuple[str, str] | None = None
 
 
-_BIN = "bin/gist"
-_EXE = "bin/gist.exe"
+_BIN = f"bin/{PRODUCT}"
+_EXE = f"bin/{PRODUCT}.exe"
 
 # See `irregex/bindings/python/scripts/build_wheels.py` for the reasoning
 # behind every floor named here — glibc 2.17, macOS 11, Windows 10 RS4, and the
@@ -163,13 +164,13 @@ def build_binary(target: Target, prefix: Path) -> Path:
 
 def build_wheel(target: Target, binary: Path, outdir: Path) -> None:
     env = os.environ | {
-        "GIST_PREBUILT_BIN": str(binary),
-        "GIST_WHEEL_PLATFORM": target.tag,
-        "GIST_ZIG_TARGET": target.zig,
+        f"{PRODUCT.upper()}_PREBUILT_BIN": str(binary),
+        f"{PRODUCT.upper()}_WHEEL_PLATFORM": target.tag,
+        f"{PRODUCT.upper()}_ZIG_TARGET": target.zig,
         # Unused on this path, which hands over a binary already built above,
         # but it keeps this matrix the single table: a source build triggered
         # with the same environment resolves the same floor.
-        "GIST_ZIG_CPU": target.cpu,
+        f"{PRODUCT.upper()}_ZIG_CPU": target.cpu,
     }
     if shutil.which("uv"):
         command = ["uv", "build", "--wheel", "--out-dir", str(outdir)]
@@ -200,7 +201,7 @@ def build_archive(target: Target, binary: Path, release: str, outdir: Path) -> P
     bit anyway — stating it in both keeps the two branches saying the same thing.
     """
     inner = Path(target.artifact).name
-    stem = f"gist-{release}-{target.name}"
+    stem = f"{PRODUCT}-{release}-{target.name}"
     if target.artifact == _EXE:
         path = outdir / f"{stem}.zip"
         with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:

@@ -54,6 +54,7 @@ import subprocess
 import sys
 import sysconfig
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -62,9 +63,9 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 # Zig's install layout per OS: where the CLI lands under --prefix, and what it
 # must be called inside the package for a subprocess spawn to find it.
 _LAYOUT = {
-    "windows": ("bin/gist.exe", "gist.exe"),
-    "macos": ("bin/gist", "gist"),
-    "linux": ("bin/gist", "gist"),
+    "windows": ("bin/{name}.exe", "{name}.exe"),
+    "macos": ("bin/{name}", "{name}"),
+    "linux": ("bin/{name}", "{name}"),
 }
 
 
@@ -77,7 +78,7 @@ def _os_of(zig_target: str | None) -> str:
     return {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
 
 
-def _zig_cpu(zig_target: str) -> str:
+def _zig_cpu(zig_target: str, prefix: str = "GIST") -> str:
     """The instruction floor to build `zig_target` at.
 
     ``GIST_ZIG_CPU`` overrides, which is how ``scripts/build_wheels.py`` keeps
@@ -85,7 +86,7 @@ def _zig_cpu(zig_target: str) -> str:
     encodes: aarch64's baseline already carries NEON and needs no raising,
     while x86_64's baseline is SSE2 and the scan kernels want SSSE3.
     """
-    override = os.environ.get("GIST_ZIG_CPU")
+    override = os.environ.get(f"{prefix}_ZIG_CPU")
     if override:
         return override
     return "baseline" if zig_target.startswith("aarch64") else "x86_64_v2"
@@ -110,15 +111,18 @@ class GistBuildHook(BuildHookInterface):
         if self.target_name != "wheel":
             return
 
-        zig_target = os.environ.get("GIST_ZIG_TARGET")
+        project = tomllib.loads((Path(self.root) / "pyproject.toml").read_text())
+        self.product = project["project"]["name"].removesuffix("-search")
+        self.prefix = self.product.upper()
+        zig_target = os.environ.get(f"{self.prefix}_ZIG_TARGET")
         which_os = _os_of(zig_target)
-        _, installed_name = _LAYOUT[which_os]
+        installed_name = _LAYOUT[which_os][1].format(name=self.product)
 
-        prebuilt = os.environ.get("GIST_PREBUILT_BIN")
+        prebuilt = os.environ.get(f"{self.prefix}_PREBUILT_BIN")
         if prebuilt:
             source = Path(prebuilt).resolve()
             if not source.is_file():
-                raise RuntimeError(f"GIST_PREBUILT_BIN={prebuilt!r} is not a file")
+                raise RuntimeError(f"{self.prefix}_PREBUILT_BIN={prebuilt!r} is not a file")
         else:
             source = self._build_with_zig(zig_target, which_os)
 
@@ -133,7 +137,7 @@ class GistBuildHook(BuildHookInterface):
         # (e.g. re-uploaded through a step that resets perms) fails the same
         # way any non-executable `gist` would: loudly, at the caller's first
         # search, never silently.
-        build_data.setdefault("force_include", {})[str(source)] = f"gist/bin/{installed_name}"
+        build_data.setdefault("force_include", {})[str(source)] = f"{self.product}/bin/{installed_name}"
         # The PATH copy, under `<dist>.data/scripts/`. Hatchling routes this
         # through the same `add_file`, so it carries the same mode; it rewrites
         # a `#!python` shebang on the way past, which a native binary does not
@@ -151,7 +155,7 @@ class GistBuildHook(BuildHookInterface):
         root = _engine_root(Path(self.root).resolve())
         # Held on the instance so the directory outlives `initialize` and is
         # still there when hatchling reads the file it force-included.
-        self._staging = tempfile.TemporaryDirectory(prefix="gist-wheel-")
+        self._staging = tempfile.TemporaryDirectory(prefix=f"{self.product}-wheel-")
         prefix = Path(self._staging.name)
         command = [
             "zig",
@@ -167,17 +171,16 @@ class GistBuildHook(BuildHookInterface):
             # below the SSSE3 the scan kernels want. So a target implies a
             # floor. `scripts/build_wheels.py` sets both; a bare source build
             # names neither and keeps Zig's native detection, which is right.
-            command += [f"-Dtarget={zig_target}", f"-Dcpu={_zig_cpu(zig_target)}"]
+            command += [f"-Dtarget={zig_target}", f"-Dcpu={_zig_cpu(zig_target, self.prefix)}"]
         subprocess.run(command, cwd=root, check=True)
 
-        relative, _ = _LAYOUT[which_os]
+        relative = _LAYOUT[which_os][0].format(name=self.product)
         built = prefix / relative
         if not built.is_file():
             raise RuntimeError(f"zig build finished but produced no {relative} under {prefix}")
         return built
 
-    @staticmethod
-    def _platform_tag() -> str:
+    def _platform_tag(self) -> str:
         """The tag to stamp: the caller's, or this machine's corrected for macOS.
 
         ``sysconfig`` describes the *interpreter*, and on macOS it describes it
@@ -189,7 +192,7 @@ class GistBuildHook(BuildHookInterface):
         wheel that installs nowhere. This path is the local-development
         fallback; ``scripts/build_wheels.py`` always passes the tag explicitly.
         """
-        override = os.environ.get("GIST_WHEEL_PLATFORM")
+        override = os.environ.get(f"{self.prefix}_WHEEL_PLATFORM")
         if override:
             return override
         tag = sysconfig.get_platform().replace("-", "_").replace(".", "_")
