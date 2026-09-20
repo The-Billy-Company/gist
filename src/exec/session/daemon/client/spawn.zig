@@ -25,6 +25,7 @@ const rendezvous = @import("../../conduit/rendezvous.zig");
 const standdown = @import("../../warden/standdown.zig");
 const ration = @import("../../warden/ration.zig");
 const fault = @import("irregex").fault;
+const home = @import("irregex").index.home;
 const net = std.Io.net;
 
 /// Fire off a detached `gist serve` iff this query would benefit from a warm
@@ -42,6 +43,13 @@ pub fn maybeSpawn(
     // the raw engine, not a served answer), or a caller managing its own daemon.
     for ([_][]const u8{ "GIST_NO_AUTOSERVE", "GIST_NO_PARALLEL", "GIST_SESSION_SOCK" }) |k|
         if (env.get(k) != null) return;
+    // A tree with no edge is one a daemon must not be started for. The mirror
+    // is the whole corpus held in RAM and the rendezvous is a socket in the
+    // artifact home, so a rootless daemon spawned from a home directory would
+    // read the person's entire machine into memory and park its socket among
+    // their own files — for a query that is already answering, cold, correctly.
+    // `home.hosted` is the same boundary `index` refuses to build across.
+    if (!home.hosted()) return;
     // Only the shapes the daemon can actually accelerate are worth warming for.
     // A scoped query is eligible too — the rootless daemon spawned here serves
     // any subtree of the CWD tree — so warming for it is worthwhile; `sa` is a

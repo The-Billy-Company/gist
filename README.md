@@ -1036,6 +1036,34 @@ than hiding that qualification. See `irregex/src/kernel/codex` (FM-index math)
 and `irregex/src/corpus/index/shelf` (persisted SHLF); the quotation parse over
 that index is `relate/src/kernel/codex` (`cento`).
 
+### What The Index Costs, And Who Pays The Upkeep
+
+An index is a bet, and a bet has to be watched. Two things about it stopped
+being true when this binary started shipping inside a product rather than being
+installed into a checkout, and both are now the tool's own responsibility
+rather than a habit we relied on the reader having.
+
+**It keeps itself.** When the anchor falls behind the tree, the same files come
+back as changed and get re-read, and the run is doing bookkeeping for an
+accelerator that is no longer accelerating. gist has always been able to tell -
+`stale > elided`, arithmetic on this run, not a guess about the anchor's age -
+and it printed a note. A note is an instruction to whoever is reading, and
+increasingly nobody is. Now the query that notices starts the amend detached
+and answers cold itself, the same shape as the daemon auto-spawn. One build at
+a time per tree (an advisory lock beside the artifacts), and the reflex stops
+firing because a re-anchor retires the condition, not because a timer said so.
+`GIST_NO_REANCHOR` declines it.
+
+**It has an edge, and a weight.** `gist index` and `gist serve` refuse a
+working directory that is a home directory or a filesystem root: a corpus
+rooted there is the whole machine, and the artifact home would be a hidden
+directory among somebody's own files. Searching such a directory still works,
+live, unchanged - it is the *persisted copy* of it that was never a good idea.
+And the tiers whose size is the corpus rather than a fraction of it - the
+content shard here, the shelf and atlases in `relate` - are admitted only
+inside a disk allowance (`GIST_DISK_MB`, default 512 MiB), declining out loud
+so an unwritten accelerator is never mistaken for a slow tool.
+
 ## Ranked Search
 
 Sometimes we need the best hit, not every hit. `--rank[=N]` keeps the same

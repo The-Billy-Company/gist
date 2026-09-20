@@ -93,6 +93,17 @@ pub fn run(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket
 }
 
 fn serveResident(gpa: std.mem.Allocator, io: std.Io, roots: []const []const u8, socket_path: []const u8) !void {
+    // A tree with no edge is not one to go resident over. The rendezvous is a
+    // socket in the artifact home and the mirror is the corpus held in RAM, so
+    // a daemon started from a home directory parks a socket among the person's
+    // own files and then tries to read their whole machine into memory. The
+    // memory ration would eventually refuse the load, but only after paying for
+    // it; this refuses the premise. Same boundary `index` builds across.
+    if (!home.hosted()) {
+        var here: [portal.max_path]u8 = undefined;
+        crew.note("gist serve: {s} is not a project — a corpus rooted here has no edge, so queries answer cold\n", .{portal.realpath(".", &here) orelse "this directory"});
+        return;
+    }
     // Singleton FIRST — before any socket mutation — so a losing racer never
     // unlinks the winner's live socket during the stale-socket cleanup below.
     const lock = acquireSingleton(io, socket_path) orelse {
