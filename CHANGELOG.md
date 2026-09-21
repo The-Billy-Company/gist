@@ -7,6 +7,81 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.3.0] - 2026-09-21
+
+### Note
+
+- Neither entry here touches search. Both are the machinery around it, and both
+  hid the same way: by failing somewhere nobody reads.
+
+  One ended a release job with `FAILED open or read`, which looks like an
+  integrity stop and was a path bug, so two releases in a row told you to download
+  a binary they had not attached. The other leaked a process-table entry for every
+  daemon that lost the spawn race - invisible in any output, and worth exactly as
+  much as the number of agents searching at once.
+
+  This release also carries the engine's stdin fix: a search reading from a pipe
+  nobody is writing to now falls through to the tree in two seconds instead of
+  hanging forever. That one lands through `irregex`, and its notes are on that
+  release.
+
+### Added
+
+- - **A query that finds the index has stopped paying re-anchors it in the
+    background.** The engine has always been able to tell: `stale > elided` is
+    arithmetic on the reads this run elided against the ones it bought back, and
+    it printed a very good note saying so. A note is an instruction to whoever is
+    reading, and increasingly nobody is - an agent gets stderr as one line of a
+    receipt, and a user running the bundled binary has no terminal at all. An
+    index nobody re-anchors does not sit still. It ages past the point where it
+    saves anything and keeps charging for the bookkeeping, which is what "it got
+    slow for no reason" actually is.
+
+    So the query that notices starts the repair and does not wait for it: the
+    amend runs detached and this query answers cold, exactly like the daemon
+    auto-spawn beside it and for the same reason - the run in hand is already
+    correct and must not get slower to make the next one faster. The amend is
+    milliseconds when the annals or the journal can name the changed set.
+
+    Nothing here is a timer. The spawned build takes the new per-tree build lock,
+    so however many queries notice at once exactly one build happens; and a
+    successful amend advances the anchor, which retires the condition - the reflex
+    stops firing because the thing it fires on stopped being true.
+    `GIST_NO_REANCHOR` declines it.
+
+  - **`gist index` is a singleton per tree.** A full build reads the whole corpus,
+    and ten coworker agents reaching the verb at once simply ran it ten times over
+    the same files. The daemon has admitted exactly one racer since it existed;
+    the build now takes the same advisory lock, beside the artifacts it guards.
+    Losers say a build is already running and exit 0 - a maintenance action
+    somebody else is performing has been performed.
+
+### Fixed
+
+- - **`gist index` and `gist serve` refuse a corpus with no edge.** Standing in a
+    home directory, a rootless build took everything beneath it as the corpus and
+    a rootless daemon tried to hold that in RAM and park its socket among the
+    person's own files. Both now ask `home.hosted()` first - the boundary the
+    engine grew this release - and refuse with the one-line fix instead. `index`
+    exits 2, because there is no slower way to have an index and someone who
+    typed the verb is owed a straight answer about whether they now have one.
+    `serve` says it is standing down and queries answer cold.
+
+    Searching a home directory still works, unchanged, live. It is the persisted
+    copy of it that was never a good idea.
+
+  - **The content shard is rationed.** It is the one tier whose size *is* the
+    corpus - a concatenation of every body, which on a developer checkout is a
+    fine trade for removing an `open` per file and on someone's Documents folder
+    is a duplicate of their files in a blob they never made. It is now admitted
+    only inside the tree's disk allowance (`GIST_DISK_MB`, default 512 MiB) and
+    declines out loud, because a silently-unwritten accelerator is
+    indistinguishable from a slow tool. Indexed search is unaffected; full-scan
+    queries read files instead of the shard.
+- We skip stdin admission when a query names a path, including resident queries.
+  Our stream contract now checks delayed and empty pipes, socket EOF, cancellation,
+  and explicit timeouts against the actual CLI with and without a resident daemon.
+
 ## [1.2.6] - 2026-09-05
 
 We published this patch with the operator-authorized expedited release path. Native artifacts were rebuilt; CI and tests were skipped for this release.
