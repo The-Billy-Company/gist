@@ -75,7 +75,7 @@ keywords = [
 dependencies = [
   # Keep Python's shared substrate at the same corrected input contract as the
   # bundled CLI. The next major may change the imported row/transport protocol.
-  "irregex>=2.4.2,<3",
+  "irregex>=2.5.0,<3",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
