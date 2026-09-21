@@ -510,10 +510,17 @@ jobs:
       # true, and on a fresh checkout of a tag it is the only file that can
       # differ - gist's v1.2.1 died right here on "1 files in the working
       # directory contain changes", naming Cargo.lock and nothing else.
+      # `expedite` reaches the command through the environment rather than
+      # through a template expansion inside `run:`. Expanded inline, the value
+      # is pasted into the shell before the shell ever sees it, which is the
+      # shape zizmor's `template-injection` audit refuses on sight and the
+      # shape a workflow input should never take. As an env var it is a string
+      # the shell reads, and it can only ever be the flag or nothing.
       - if: steps.state.outputs.result == 'absent'
-        run: cargo publish --locked --allow-dirty ${{ inputs.expedite && '--no-verify' || '' }}
+        run: cargo publish --locked --allow-dirty ${NO_VERIFY:+--no-verify}
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          NO_VERIFY: ${{ inputs.expedite && '1' || '' }}
   # ── Go module
   #
   # There is no registry to upload to: the proxy reads tags straight from the
