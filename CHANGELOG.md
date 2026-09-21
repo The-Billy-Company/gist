@@ -7,6 +7,10 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.3.1] - 2026-09-21
+
+No significant changes.
+
 ## [1.3.0] - 2026-09-21
 
 ### Note
