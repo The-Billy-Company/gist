@@ -146,7 +146,7 @@ jobs:
           persist-credentials: false
 
       - id: version
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: version
           args: --root .

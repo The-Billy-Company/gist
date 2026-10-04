@@ -68,24 +68,24 @@ jobs:
           persist-credentials: false
       - id: version
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: version
           args: --root . --tag ${{ github.ref_name }}
       - if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: changelog
           args: >-
             --root . --require-fragments-empty
             --version ${{ fromJSON(steps.version.outputs.result).version }}
       - if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: tag-ancestor
           args: ${{ github.repository }} ${{ github.sha }} --branch main
       - if: startsWith(github.ref, 'refs/tags/v') && !inputs.expedite
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: ci-status
           args: ${{ github.repository }} ${{ github.sha }}
@@ -103,13 +103,13 @@ jobs:
           echo "irregex_ref=v$floor" >> "$GITHUB_OUTPUT"
       - if: startsWith(github.ref, 'refs/tags/v')
         id: dep-pypi
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: registry-probe
           args: pypi irregex ${{ steps.dep.outputs.irregex_floor }}
       - if: startsWith(github.ref, 'refs/tags/v')
         id: dep-crates
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: registry-probe
           args: crates irgx ${{ steps.dep.outputs.irregex_floor }}
@@ -175,7 +175,7 @@ jobs:
       # that the workspace root holds both checkouts as siblings.
       - name: The tag must name the version being published
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: version
           args: --root gist --tag ${{ github.ref_name }}
@@ -371,7 +371,7 @@ jobs:
       # tag that already shipped, must land on "already there" rather than
       # spend a credential on an upload PyPI will reject anyway.
       - id: probe
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: registry-probe
           args: pypi gist-search ${{ steps.tag.outputs.version }}
@@ -438,7 +438,7 @@ jobs:
       # to name `gist` explicitly now that the workspace root holds both
       # checkouts as siblings.
       - name: The tag must name the version being published
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: version
           args: --root gist --tag ${{ github.ref_name }}
@@ -460,7 +460,7 @@ jobs:
       - id: tag
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - id: state
-        uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+        uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: registry-probe
           args: crates gist-search ${{ steps.tag.outputs.version }}
@@ -734,7 +734,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: The-Billy-Company/.github/actions/package-release@18530e6f8b7ad634dcfe52e423e2a0a8e7bd521e # main
+      - uses: The-Billy-Company/.github/actions/package-release@d4b141519d837ca7dc1d91831984e37dafcf86a9 # main
         with:
           command: notes
           args: >-
