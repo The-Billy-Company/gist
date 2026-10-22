@@ -38,8 +38,13 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 source "${HERE}/../../../apparatus/roots.sh"
 gist_resolve_roots "${HERE}" || exit 1
 
+# The Windows ARM64 lane runs the x64 compiler under emulation. Preserve its
+# explicit matrix target so this rebuild cannot replace the ARM64 product with
+# an x64 executable before the native CLI checks.
+build_args=(-Doptimize=ReleaseFast)
+[[ -z "${ZIG_TARGET:-}" ]] || build_args+=("-Dtarget=${ZIG_TARGET}")
 echo "building gist (ReleaseFast)…"
-(cd "${PRODUCT}" && zig build -Doptimize=ReleaseFast > /dev/null 2>&1) || {
+(cd "${PRODUCT}" && zig build "${build_args[@]}" > /dev/null 2>&1) || {
   echo "  build failed (engine may be mid-refactor by a coworker) — aborting"
   exit 1
 }

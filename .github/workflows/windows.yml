@@ -189,6 +189,22 @@ jobs:
           New-Item -ItemType Directory -Force -Path $captureBin | Out-Null
           Copy-Item -LiteralPath $gist -Destination (Join-Path $captureBin 'gist.exe')
           $gist = Join-Path $captureBin 'gist.exe'
+          # The parity gate rebuilds the product. Assert the executable it left
+          # has this lane's architecture before calling its behavior native.
+          $image = [System.IO.File]::OpenRead($gist)
+          $reader = [System.IO.BinaryReader]::new($image)
+          try {
+            $image.Position = 0x3c
+            $peOffset = $reader.ReadUInt32()
+            $image.Position = $peOffset
+            if ($reader.ReadUInt32() -ne 0x00004550) { throw 'the product has no PE signature' }
+            $machine = $reader.ReadUInt16()
+            $expected = if ($env:MATRIX_ARCH -eq 'arm64') { 0xAA64 } else { 0x8664 }
+            if ($machine -ne $expected) {
+              throw ('expected PE machine 0x{0:X4}, got 0x{1:X4}' -f $expected, $machine)
+            }
+          } finally { $reader.Dispose() }
+          Write-Host ('CLI PE machine 0x{0:X4}' -f $machine)
           $env:GIST_DIR = Join-Path $env:RUNNER_TEMP 'capture-artifacts'
 
           # A detached daemon must not keep PowerShell capture pipes open until
@@ -444,6 +460,20 @@ jobs:
           # checkouts now, and this package's build produces exactly `gist.exe`.
           $exe = Join-Path $prefix 'gist.exe'
           if (-not (Test-Path -LiteralPath $exe)) { throw "gist.exe was not installed to $prefix" }
+          # The installer rebuild must preserve the matrix target too.
+          $image = [System.IO.File]::OpenRead($exe)
+          $reader = [System.IO.BinaryReader]::new($image)
+          try {
+            $image.Position = 0x3c
+            $peOffset = $reader.ReadUInt32()
+            $image.Position = $peOffset + 4
+            $machine = $reader.ReadUInt16()
+            $expected = if ($env:MATRIX_ARCH -eq 'arm64') { 0xAA64 } else { 0x8664 }
+            if ($machine -ne $expected) {
+              throw ('installed PE machine: expected 0x{0:X4}, got 0x{1:X4}' -f $expected, $machine)
+            }
+          } finally { $reader.Dispose() }
+          Write-Host ('installed PE machine 0x{0:X4}' -f $machine)
 
           # Reachable by name, not by path: the installer updates this session's
           # own $env:Path as well as the persisted user one, because the block a

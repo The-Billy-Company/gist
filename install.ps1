@@ -28,6 +28,7 @@ rather than a preference:
     and say nothing.
 
 Idempotent: re-run it to refresh after a rebuild. Nothing here needs elevation.
+Set ZIG_TARGET to preserve an explicit target when running an emulated compiler.
 
 .PARAMETER Prefix
 Where the binary is placed. Default `%LOCALAPPDATA%\Programs\gist` — the
@@ -148,7 +149,9 @@ Write-Host "building gist..."
 # change what gets built.
 Push-Location $root
 try {
-    & $zig.Source build
+    $buildArgs = @('build')
+    if ($env:ZIG_TARGET) { $buildArgs += "-Dtarget=$($env:ZIG_TARGET)" }
+    & $zig.Source @buildArgs
     if ($LASTEXITCODE -ne 0) { throw "zig build failed" }
 } finally { Pop-Location }
 
