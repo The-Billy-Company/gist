@@ -17,8 +17,8 @@
 //! leaves the CLI's session (`setsid`) and drops its stdio, then `execv`
 //! replaces the image. Windows has no `fork` at all — a process is created from
 //! an image, not cloned — so `CreateProcessW` *is* the launch, and there is no
-//! session to leave: the child does not die with its parent, and asking for no
-//! console window is the whole of what detaching means there. So this file has
+//! session to leave: the child does not die with its parent, but must be given
+//! its own stdio without inheriting the CLI's other handles. So this file has
 //! two implementations of one sentence, and neither is a translation of the
 //! other.
 //!
@@ -33,6 +33,7 @@ const fault = @import("irregex").fault;
 const portal = @import("irregex").portal;
 
 const windows = builtin.os.tag == .windows;
+const w = std.os.windows;
 
 /// Only these targets have a resident tier to spawn a daemon *for*; everywhere
 /// else the query just runs its fallback (no-op). Deliberately expressed as the
@@ -128,11 +129,24 @@ fn detachPosix(gpa: std.mem.Allocator, io: std.Io, verb: [:0]const u8) !void {
     _exit(127); // only reached if execv failed
 }
 
-/// `CreateProcessW` through std's spawner, with the three settings that make the
-/// launch a detachment: no console window (`CREATE_NO_WINDOW` — a daemon must
-/// not flash a window in front of whoever typed the query, and must not take
-/// the CLI's console handles with it), all three streams on `NUL`, and the
-/// inherited working directory the POSIX arm also relies on.
+// std's Windows spawner assigns redirected stdio but still inherits EVERY
+// inheritable handle. A captured CLI's original pipe writers then survive in
+// the daemon even though its stdio points at NUL, so the shell waits for EOF
+// until the daemon's idle TTL. This allowlist is the missing distinction.
+const AttributeList = opaque {};
+const StartupInfoEx = extern struct {
+    startup: w.STARTUPINFOW,
+    attributes: *AttributeList,
+};
+
+extern "kernel32" fn InitializeProcThreadAttributeList(list: ?*AttributeList, count: w.DWORD, flags: w.DWORD, size: *usize) callconv(.winapi) w.BOOL;
+extern "kernel32" fn UpdateProcThreadAttribute(list: *AttributeList, flags: w.DWORD, attribute: usize, value: *anyopaque, size: usize, previous: ?*anyopaque, returned: ?*usize) callconv(.winapi) w.BOOL;
+extern "kernel32" fn DeleteProcThreadAttributeList(list: *AttributeList) callconv(.winapi) void;
+
+/// Launch with no console window and exactly one inherited handle: `NUL`, used
+/// for all three standard streams. In particular, a shell's capture pipes must
+/// not survive in this long-lived daemon. The working directory and environment
+/// are inherited just as they are in the POSIX arm.
 ///
 /// The parent then drops the process and thread handles WITHOUT waiting. That is
 /// the detachment: a Windows child does not die with its parent and leaves no
@@ -143,14 +157,78 @@ fn detachPosix(gpa: std.mem.Allocator, io: std.Io, verb: [:0]const u8) !void {
 fn detachWindows(gpa: std.mem.Allocator, io: std.Io, verb: [:0]const u8) !void {
     const exe = try std.process.executablePathAlloc(io, gpa);
     defer gpa.free(exe);
-    var child = std.process.spawn(io, .{
-        .argv = &.{ exe, verb },
-        .stdin = .ignore,
-        .stdout = .ignore,
-        .stderr = .ignore,
-        .create_no_window = true,
-    }) catch return fault.Resource.Exhausted;
-    std.os.windows.CloseHandle(child.id.?);
-    std.os.windows.CloseHandle(child.thread_handle);
-    child.id = null;
+    const exe_w = try std.unicode.wtf8ToWtf16LeAllocZ(gpa, exe);
+    defer gpa.free(exe_w);
+    // An executable path cannot contain a quote, and the only verbs this seam
+    // launches are the fixed words "serve" and "index". Quote argv[0] so an
+    // installation under Program Files still starts the same executable.
+    const command = try std.fmt.allocPrint(gpa, "\"{s}\" {s}", .{ exe, verb });
+    defer gpa.free(command);
+    const command_w = try std.unicode.wtf8ToWtf16LeAllocZ(gpa, command);
+    defer gpa.free(command_w);
+
+    var nul: w.HANDLE = undefined;
+    var iosb: w.IO_STATUS_BLOCK = undefined;
+    switch (w.ntdll.NtOpenFile(
+        &nul,
+        .{
+            .STANDARD = .{ .SYNCHRONIZE = true },
+            .SPECIFIC = .{ .FILE = .{ .READ_DATA = true, .WRITE_DATA = true } },
+        },
+        &.{
+            .Attributes = .{ .INHERIT = true },
+            .ObjectName = @constCast(&w.UNICODE_STRING.init(
+                std.unicode.utf8ToUtf16LeStringLiteral("\\Device\\Null"),
+            )),
+        },
+        &iosb,
+        .VALID_FLAGS,
+        .{ .IO = .SYNCHRONOUS_NONALERT },
+    )) {
+        .SUCCESS => {},
+        else => return fault.Resource.Exhausted,
+    }
+    defer w.CloseHandle(nul);
+
+    // The sizing call deliberately fails with INSUFFICIENT_BUFFER while
+    // reporting the opaque list's required size.
+    var attribute_bytes: usize = 0;
+    _ = InitializeProcThreadAttributeList(null, 1, 0, &attribute_bytes);
+    if (attribute_bytes == 0) return fault.Resource.Exhausted;
+    const storage = try gpa.alignedAlloc(u8, .@"16", attribute_bytes);
+    defer gpa.free(storage);
+    const attributes: *AttributeList = @ptrCast(storage.ptr);
+    if (!InitializeProcThreadAttributeList(attributes, 1, 0, &attribute_bytes).toBool())
+        return fault.Resource.Exhausted;
+    defer DeleteProcThreadAttributeList(attributes);
+    // ProcThreadAttributeValue(HandleList=2, thread=false, input=true,
+    // additive=false), from the Windows SDK's winbase.h.
+    const handle_list: usize = 0x00020002;
+    if (!UpdateProcThreadAttribute(attributes, 0, handle_list, @ptrCast(&nul), @sizeOf(w.HANDLE), null, null).toBool())
+        return fault.Resource.Exhausted;
+
+    var startup: StartupInfoEx = .{
+        .startup = std.mem.zeroes(w.STARTUPINFOW),
+        .attributes = attributes,
+    };
+    startup.startup.cb = @sizeOf(StartupInfoEx);
+    startup.startup.dwFlags = w.STARTF_USESTDHANDLES;
+    startup.startup.hStdInput = nul;
+    startup.startup.hStdOutput = nul;
+    startup.startup.hStdError = nul;
+    var process: w.PROCESS.INFORMATION = undefined;
+    if (!w.kernel32.CreateProcessW(
+        exe_w.ptr,
+        command_w.ptr,
+        null,
+        null,
+        .TRUE, // HANDLE_LIST restricts inheritance to NUL.
+        .{ .create_no_window = true, .extended_startupinfo_present = true },
+        null,
+        null,
+        &startup.startup,
+        &process,
+    ).toBool()) return fault.Resource.Exhausted;
+    w.CloseHandle(process.hThread);
+    w.CloseHandle(process.hProcess);
 }
