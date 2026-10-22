@@ -60,8 +60,9 @@ jobs:
     # `-Dtest-shards` defaults to 2x the core count, and a standard Windows
     # runner has 4 cores where the dev boxes have 10+. The daemon block on top
     # of that polls for a real process to come up. Budget for both rather than
-    # for the local wall clock.
-    timeout-minutes: 60
+    # for the local wall clock. The arm64 lane reached the installer after
+    # 59 minutes on the October runner, so retain time for its two builds too.
+    timeout-minutes: 90
     strategy:
       # One architecture's failure must not cancel the other's — seeing the two
       # disagree is the entire reason both are here.

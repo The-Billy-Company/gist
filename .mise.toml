@@ -14,7 +14,7 @@ min_version = "2026.4.0"
 
 [tools]
 zig = "0.16.0"
-rust = "1.96.0"
+rust = "1.99.0"
 go = "1.24.13"
 python = "3.12.13"
 "ubi:astral-sh/uv" = "0.11.21"
@@ -37,7 +37,7 @@ python = "3.12.13"
 # locks a version and nothing else, because an npm package is not built per
 # platform and the registry tarball for an exact version is immutable.
 "npm:markdownlint-cli2" = "0.23.1"
-typos = "1.48.0"
+typos = "1.51.1"
 golangci-lint = "2.12.2"
 # CI uses the runner's preinstalled shellcheck, so this pin is about presence
 # rather than exactness: a shell gate a contributor cannot run locally is a
