@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
         .{ .os_version_min = .{ .semver = .{ .major = 13, .minor = 0, .patch = 0 } } }
     else
         .{};
-    const target = b.standardTargetOptions(.{ .default_target = default_target });
+    const target = windowsFloor(b, b.standardTargetOptions(.{ .default_target = default_target }));
     const optimize = b.standardOptimizeOption(.{});
 
     // Debug info is worth its size to a local `relate`/`blast` build and
@@ -338,6 +338,16 @@ pub fn build(b: *std.Build) void {
     bg.whole(run_cov);
     b.step("coverage", "Run unit tests under kcov → .local/coverage/ (Cobertura XML)")
         .dependOn(&run_cov.step);
+}
+
+/// AF_UNIX arrived in Windows 10 RS4. A versionless cross-target otherwise
+/// defaults to win10 and compiles the resident tier out of std.Io.net.
+/// Preserve a caller's explicit floor, including an older cold-only target.
+fn windowsFloor(b: *std.Build, target: std.Build.ResolvedTarget) std.Build.ResolvedTarget {
+    if (target.result.os.tag != .windows or target.query.os_version_min != null) return target;
+    var query = target.query;
+    query.os_version_min = .{ .windows = .win10_rs4 };
+    return b.resolveTargetQuery(query);
 }
 
 /// The engine module import at a given optimize.
