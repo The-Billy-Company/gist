@@ -4,4 +4,5 @@ streams, and the native capture check verifies that queries return while the
 daemon stays alive.
 
 This patch also updates Rust and the GitHub Actions dependencies used to build
-and validate the release.
+and validate the release. Its Python and Rust packages require the irregex 2.6.1
+substrate used to build the binaries.

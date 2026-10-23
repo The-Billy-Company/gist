@@ -98,7 +98,7 @@ wheels = [
 
 [[package]]
 name = "gist-search"
-version = "1.2.6"
+version = "1.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "irregex" },
@@ -149,7 +149,7 @@ wheels = [
 
 [[package]]
 name = "irregex"
-version = "2.4.2"
+version = "2.6.1"
 source = { editable = "../../../irregex/bindings/python" }
 
 [package.metadata]
@@ -157,7 +157,7 @@ source = { editable = "../../../irregex/bindings/python" }
 [package.metadata.requires-dev]
 dev = [
     { name = "cffi", specifier = ">=1.17" },
-    { name = "hatchling", specifier = ">=1.27" },
+    { name = "hatchling", specifier = ">=1.32.4" },
     { name = "pytest", specifier = ">=8.0" },
 ]
 
