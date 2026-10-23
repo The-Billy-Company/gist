@@ -7,6 +7,41 @@ All notable changes to `gist` (indexed code search; also the chassis module that
 
 <!-- towncrier release notes start -->
 
+## [1.3.2] - 2026-10-23
+
+### Note
+
+- 1.3.2 fixes Windows captures that could wait ten minutes after a search had
+  already finished. A detached resident daemon now inherits only its own NUL
+  streams, and the native capture check verifies that queries return while the
+  daemon stays alive.
+
+  This patch also updates Rust and the GitHub Actions dependencies used to build
+  and validate the release. Its Python and Rust packages require the irregex 2.6.1
+  substrate used to build the binaries.
+
+### Changed
+
+- Build release binaries against irregex 2.6.1 and require that substrate version
+  in the Python and Rust bindings. The existing Go v1 runtime remains compatible
+  and keeps its published module path.
+- Build with Rust 1.99.0 and updated GitHub Actions dependencies. Local tool pins
+  follow CI, and native Windows ARM64 validation has enough time to finish the
+  installer checks after the build and search suites.
+
+### Fixed
+
+- Captured Windows searches return as soon as the query finishes. Detached daemons
+  inherit only their NUL streams, so they cannot keep PowerShell capture pipes open
+  until the ten-minute idle timeout.
+- Keep the Windows matrix target when rebuilding for index parity or installation,
+  and verify the PE architecture before CLI and installed-binary checks. The ARM64
+  lane tests an ARM64 product throughout instead of replacing it with an emulated
+  x64 executable.
+- Versionless Windows builds target Windows 10 RS4, where AF_UNIX is available,
+  so packaged binaries retain the resident tier. An explicitly requested operating
+  system floor remains authoritative, including older cold-only builds.
+
 ## [1.3.1] - 2026-09-21
 
 No significant changes.
